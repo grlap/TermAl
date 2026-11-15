@@ -1,0 +1,28 @@
+{
+  "id": "01a12fe7-7ae0-73b0-936a-21bb5653dbb5",
+  "external_ref": null,
+  "title": "Receipted write-ahead commits inside a caller's open transaction when begun from start_next_queued_turn_locked",
+  "outcome": "Receipted write-ahead commits inside a caller's open transaction when begun from start_next_queued_turn_locked",
+  "acceptance": [
+    "A receipted head's write-ahead hand-off record begun by a drain inside another operation's transaction (for example the Stop path's dispatch_queued_prompts_on_success) is committed and its fence requested only after that operation's own durable commit, so the operation's rollback on a failed commit still covers it; a test shows the order",
+    "prompt_delivery_gate_locked reads the record without taking session_mut_by_index (no mutation stamp) when it only waits or refuses"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

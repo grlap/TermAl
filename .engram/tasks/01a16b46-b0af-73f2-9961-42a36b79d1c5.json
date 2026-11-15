@@ -1,0 +1,57 @@
+{
+  "id": "01a16b46-b0af-73f2-9961-42a36b79d1c5",
+  "external_ref": null,
+  "title": "Expired pending-begin repair: Resume precondition parity and remaining test gaps",
+  "outcome": "The Resume override for an expired, never-sent pending begin states or matches the preconditions of the other Releasable arms. Tests cover the gaps the review named.",
+  "acceptance": [
+    "Resume releases an expired, never-sent pending begin afresh only when the head's promotion disposition is known and Engram control is enabled for the session; with control disabled, Resume behaves as it did before the expiry change (the ordinary Resume, not a 409); tests cover a control-disabled head and an interrupted (parked) head whose pending grant expired.",
+    "engram_prepared_begin_grant_expired_at has a table test: an expiry equal to now is expired, a non-UTC offset is compared as the same instant, a nanosecond-precision RFC 3339 string parses, and an unparsable or absent expiry is never expired; and EngramIssuedTurnGrant reads expires_at from a full Engram TurnGrantBasis-shaped payload.",
+    "docs/features/engram-host-adapter.md describes issued_no_later_than as issuance evidence, states that expiry is judged only by grant_expires_at, and records that the expiry withdrawal reuses the begin_preparation_unacknowledged card code on purpose, because Resume's Releasable classification keys on it.",
+    "Focused tests covering the change and its new tests pass in the item's named worktree, and the full gate is green on the frozen input.",
+    "The review pair (Codex and Claude, read-only) has no outstanding Medium-or-higher finding on the frozen input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "review"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "admission",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

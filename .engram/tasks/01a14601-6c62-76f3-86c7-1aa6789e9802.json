@@ -1,0 +1,29 @@
+{
+  "id": "01a14601-6c62-76f3-86c7-1aa6789e9802",
+  "external_ref": null,
+  "title": "Cover remaining withheld-feedback phase and identity lifecycle branches",
+  "outcome": "Add discriminating tests for AfterEnd phase, pending source_changed downgrading a no-need snapshot, declared-check advice retention, bounded command-identity eviction/reset/abandon, and historical inspection rejection; remove unreachable historical no-need branch or pin its intended layering.",
+  "acceptance": [
+    "Cover remaining withheld-feedback phase and identity lifecycle branches is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "engram-host",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2f8-1e31-7b91-9aed-4f5100c27046",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

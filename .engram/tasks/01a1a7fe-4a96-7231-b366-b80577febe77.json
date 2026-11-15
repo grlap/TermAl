@@ -1,0 +1,29 @@
+{
+  "id": "01a1a7fe-4a96-7231-b366-b80577febe77",
+  "external_ref": null,
+  "title": "Align session-list browser badge fixture with production status button markup",
+  "outcome": "Browser badge fixture applies the real status-button ancestor styles while retaining its direct badge rendering observations.",
+  "acceptance": [
+    "The fixture uses session-row-status-button beside a representative session-row and includes a placeholder icon matching the production structure.",
+    "Rendered checks continue to cover nonzero badge dimensions and foreground/background/both/idle styles, with evidence distinguishing direct selector observations from integrated layout."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "UI",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

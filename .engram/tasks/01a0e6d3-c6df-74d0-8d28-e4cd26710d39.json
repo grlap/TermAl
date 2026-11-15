@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6df-74d0-8d28-e4cd26710d39",
+  "external_ref": "tm-u13z",
+  "title": "Lift animation for the trailing Agent is working line",
+  "outcome": "REQUESTED BY GREG (2026-09-12 ~00:35Z, screenshot of the trailing line, verbatim): lepsza animacje... ogolnie dziala dobrze, ale mysle, ze mogloby wygladac i animowac sie lepiej. Greg chose variant LIFT from three coordinator proposals (lift / fill / sweep). WHY IT LOOKS WEAK TODAY: ui/src/styles.css:5790-5828 - three 4px squares (min(0.25rem, ...)) in --signal-blue doing only an opacity pulse 0.25 -> 1 over a slow 2.4 s cycle with 0.3 s stagger, pushed 1.8rem to the right of a static muted label; reads as a faint flicker with a gap. SPEC (CSS only, scoped to .transcript-activity-slot so card/text-end squares keep their design; transform/opacity only, no layout change, the 1.5em box stays constant): squares 0.4em x 0.4em, border-radius 1px, background var(--signal-blue), base opacity 0.3, gap 0.28em, container bottom 0.3em; keyframes transcript-activity-lift over 1.1 s ease-in-out infinite: 0%/60%/100% translateY(0) opacity 0.3 no shadow, 25% translateY(-0.18em) opacity 1 box-shadow 0 0 6px color-mix(in srgb, var(--signal-blue) 60%, transparent); nth-child(2) delay 0.16 s, nth-child(3) delay 0.32 s; label (.message-activity-label inside the slot) breathes: keyframes transcript-activity-breathe 2.2 s ease-in-out infinite, opacity 0.75 -> 1 -> 0.75; squares closer to the text: padding-right of .message-activity-status inside the slot ~1.1rem instead of 1.8rem; will-change transform, opacity on the squares. Same motion for Agent is stopping (state running). prefers-reduced-motion: animation none, transform none, opacity 0.7 for squares and label. Verify the lifted square is not clipped by the slot overflow hidden (bottom 0.3em + 0.18em lift inside the 1.5em line). TESTS: extend transcript-activity-slot.test.tsx - stylesheet contains transcript-activity-lift and transcript-activity-breathe, reduced-motion block covers animation none and transform none, box dimensions unchanged across states. DOCS: docs/features/session-virtualized-transcript.md one paragraph on the motion design. Owner per Greg: Codex (follow-up batch); Codex runs /review-changes; commit only on Greg's word.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

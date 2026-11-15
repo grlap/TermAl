@@ -1,0 +1,29 @@
+{
+  "id": "01a1623f-2078-7721-ade5-f03f3fd5969e",
+  "external_ref": null,
+  "title": "Verify and repair native central–Mac mailbox send/read/ack after federation settlement integration",
+  "outcome": "After the Mac federation settlement branch is integrated, independently verify central↔Mac native mailbox delivery, complete body reads and receipt acknowledgement on the exact merged candidate. Diagnose any failed matrix row and implement only the bounded confirmed correction. This is independent of direct prompt dispatch; neither substitutes for the other.",
+  "acceptance": [
+    "Before operational verification, record an independently concurred central-to-Mac and Mac-to-central native-mailbox operation matrix, the exact source and target native principal creation identities and current binding/placement basis, the integrated candidate commit and actual running build identity on each host, and the authority for the selected principals and operations. The matrix uses agreed inert canary bodies and existing authorized principals; it does not create grants, rebind or recreate principals, change SSH or quarantine settings, or restart hosts. Candidate, running-build or authority uncertainty blocks the affected live row rather than being filled by inference.",
+    "On the recorded authorized candidate and principals, both directions demonstrate a canonical native mailbox send, a complete recipient body read equal to the sent canary, an issued receipt for the fully processed page, and an acknowledgement with that unchanged receipt whose recipient cursor covers the page boundary without skipping unread messages. An exact sender/key/intent retry resolves to the same canonical message identity and sequence with no additional append; repeating an already applied receipt acknowledgement is idempotent. Isolated regression evidence covers same-key changed-intent refusal, foreign or recreated principal and stale binding refusal, and wrong-owner or wrong-mailbox receipt refusal, with no unauthorized append, body disclosure or cursor advance. Negative live probes require separate exact-principal/operation authority; no identity recreation or binding mutation is inferred from this criterion. receiptPending, null receipt, transport loss and other UNKNOWN outcomes remain unresolved and are never credited as PASS.",
+    "Record the evidence and disposition for every matrix row, including the exact message identity and sequence, body comparison, issued receipt boundary and observed acknowledgement result where applicable. Diagnose each failed row before repair or rerun. Any confirmed in-scope source correction has a regression that reproduces the defect, an exact-input green maintained gate, the required independent vendor review pair and fresh independent acceptance; a changed candidate requires fresh evidence for affected live rows. Without a correction, existing relevant regression evidence and successful authorized live rows support independent acceptance, without claiming a new gate was run. A mailbox append, notification, body read or receipt acknowledgement is not credited as direct full-body runtime prompt delivery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "federation-mailbox"
+  ],
+  "assigned_to": "Termal::Coder",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

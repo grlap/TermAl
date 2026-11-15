@@ -1,0 +1,28 @@
+{
+  "id": "01a179a5-2bbe-7460-bd60-ad6c2f2aaeb6",
+  "external_ref": null,
+  "title": "Federation monitor loop lacks a test with a real MAC-signed 409/503 health refusal",
+  "outcome": "The federation monitor's refusal branches are covered by a deterministic test that drives an actual MAC-signed 409 and 503 health refusal through the monitor loop, with no product behavior change.",
+  "acceptance": [
+    "A deterministic test drives MAC-signed 409 and 503 health refusals through the federation monitor loop and asserts that the lease and diagnostic reason are retained while a local authority loss still fences, with one clean review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

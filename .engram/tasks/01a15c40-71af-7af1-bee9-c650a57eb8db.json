@@ -1,0 +1,28 @@
+{
+  "id": "01a15c40-71af-7af1-bee9-c650a57eb8db",
+  "external_ref": null,
+  "title": "Give uncertain evaluator brief delivery an explicit recovery path or accurate guidance",
+  "outcome": "Preserve exact-attempt and no-duplicate-brief fences while giving an actionable disposition for Uncertain brief delivery, or remove guidance that names a nonexistent reconciliation action. This is inventory, with no execution owner or trigger assigned.",
+  "acceptance": [
+    "Give uncertain evaluator brief delivery an explicit recovery path or accurate guidance is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "inventory",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0fc9d-e5c8-7721-8f6a-5eefda61c6d0",
+  "external_ref": null,
+  "title": "Bound retained named-root history and canonical proofs in persisted metadata",
+  "outcome": "Bound retained named-root history and canonical proofs in persisted metadata",
+  "acceptance": [
+    "Bound retained named-root history and canonical proofs in persisted metadata is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

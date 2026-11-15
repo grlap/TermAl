@@ -1,0 +1,28 @@
+{
+  "id": "01a1a608-e9c0-7b73-b2e6-45ce84ea5663",
+  "external_ref": null,
+  "title": "Cover registered-check endpoint precedence with compatible closing checkpoints",
+  "outcome": "Closing regression tests and docs state how every qualifying check endpoint interacts with a compatible checkpoint, preserving revert detection.",
+  "acceptance": [
+    "Add a closing test with a compatible checkpoint equal to the final content and differing X-to-Y-to-X registered-check endpoints, plus a checkpoint-differs-while-check-endpoints-equal case; assert the intended source-change result and document precedence without weakening conservative checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

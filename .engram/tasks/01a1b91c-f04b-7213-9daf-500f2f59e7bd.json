@@ -1,0 +1,28 @@
+{
+  "id": "01a1b91c-f04b-7213-9daf-500f2f59e7bd",
+  "external_ref": null,
+  "title": "Judge retained declared bindings when a present trace has no usable command owner",
+  "outcome": "A declared foreground row with an original binding does not retain an exit-only verdict merely because an unrelated, stale or unusable trace object is present.",
+  "acceptance": [
+    "A deterministic case covers a present trace rejected for generation/provenance or lacking the command's declared owner, while the original row still retains its binding.",
+    "The chosen behavior preserves original execution ownership, never reconstructs a binding from current files, and applies an artifact-aware verdict or an explicit UNKNOWN; no verification authority is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "artifact-verdict",
+    "declared-commands"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

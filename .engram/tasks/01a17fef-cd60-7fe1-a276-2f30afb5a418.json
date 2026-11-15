@@ -1,0 +1,34 @@
+{
+  "id": "01a17fef-cd60-7fe1-a276-2f30afb5a418",
+  "external_ref": null,
+  "title": "A remote runner's gate result is automatically available as a recognized check on the landing host, bound to the tested tree",
+  "outcome": "A gate that the standard launcher ran under a satellite root session is admitted automatically on the landing host as a recognized check bound to the tested Git tree, delivered by w-c3f102d77999, so no agent hand-carries evidence.",
+  "acceptance": [
+    "A full gate run under a satellite root session is admitted automatically on the landing host as a recognized check bound to the tested Git tree, with no evidence bundle, per-file hash, import operation or additional agent turn.",
+    "A run is shown with its named reason and gives no credit when:\n- it is not terminal;\n- its plan's required stages did not all pass;\n- its before/after fingerprints differ or disagree with a recorded expected fingerprint;\n- its tree differs from the landing input's;\n- the existing authenticated enrolled-host boundary refuses the source; or\n- the required protocol or producer capability is unsupported.",
+    "The admitted check gates only a landing whose master commit has the tested tree id and whose required plan, platform, toolchain and other applicable checks it satisfies. A focused or whole-bin run cannot satisfy a full-gate criterion. Linux evidence cannot satisfy Windows-specific requirements; a genuine Linux full gate remains eligible where the existing landing policy permits it.",
+    "docs/test.md and docs/features/remote-full-gates.md document the automatic path, and tests cover admission and each refusal case."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "landing-blocker",
+    "remote-gate",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a15bc9-c8a2-71f0-9ac8-48c4a207f226"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

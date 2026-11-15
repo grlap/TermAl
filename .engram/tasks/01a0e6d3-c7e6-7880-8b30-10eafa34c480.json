@@ -1,0 +1,66 @@
+{
+  "id": "01a0e6d3-c7e6-7880-8b30-10eafa34c480",
+  "external_ref": "tm-xtyb",
+  "title": "Preserve correlated Build terminal outcomes and distinguish validation rejection from missing exit",
+  "outcome": "Repair the bounded foreground Build terminal-outcome propagation/correlation boundary and retain the actual reason when its native outcome cannot earn credit. Plain Cargo and supported focused Node launcher paths use their own command key/attempt terminal event, never yield/detach confusion or a foreign outcome. Retain observed native exit separately from artifact/association eligibility, preserve existing source/claim/grant/provenance/overlap/capture/interval defenses, and fix a timing boundary only when deterministic regression establishes it. Historical 92e1f050 runtime/native0 versus hostUNKNOWN remains attributed and its original unproved ingress/guard cause is not retrospectively asserted. This is not a claim to solve every older unknown-cause family; their reports and existing history remain. After landing, report result and concrete next options, with no unrelated automatic work.",
+  "acceptance": [
+    "A recognized foreground Cargo Build, plain or through the supported focused Node launcher, consumes the terminal outcome of its own command key/attempt through the actual recorder-to-host path: valid correlated exit 0 records passed Build and valid correlated nonzero exit records failed Build. Yield or nested execution is not treated as launcher detach; a foreign, reused or stale command outcome cannot grant credit.",
+    "Missing terminal ingress is distinguished from a present native terminal rejected by artifact or association validation. Unknown verification summaries preserve the observed exit when present and a bounded specific rejection reason (owner/root/path/argv, terminal/interval/input or association), without granting PASS from exit alone or claiming missing exit when an exit was observed. Reasons survive existing summary bounds and appear through the existing diagnostic path; no new logging service.",
+    "A deterministic command-start/terminal regression exercises delayed host bookkeeping and the genuine focused-launcher validator. If it reproduces rejection solely because the check timestamp was assigned after target/capture resolution, fix the smallest correlated start boundary while rejecting pre-start replayed runs and preserving source/claim/grant/provenance/capture/overlap defenses. Node Test and carried full/live behavior remain intact.",
+    "Record the retained 92e1f050 foreground request/results and runtime/host witnesses, the source-backed None-to-Unknown loss and the fail-first regression diagnosis. Distinguish reproduced boundary defects from unproved historical ingress/guard cause; do not rerun the original observation, infer common cause or mark its unpassed criterion satisfied by this repair.",
+    "The maintained five-stage full gate passes on the exact final reviewed input compiled in this item's named source root.",
+    "The independent read-only different-vendor review pair has no outstanding in-scope Medium or higher on that exact gated input; earlier in-scope Medium findings are fixed and reviewed again, and unfixed Lows are filed separately under the applicable standing rule."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered correlated Build terminal attribution, bounded retained native-exit/rejection diagnostics and deterministic early command-start regression. Author5c796147 exact5060652d green fd gate/current630 host69c58367, independent actualCodexClaude pair with filedLows, recorded815c2caa C1–C6PASS. Opus2 landed train55 master/origin7dacc7de with exactmerged gate/pair/audit and installed binary; no restart. Original92e1f050 cause remains unproved; all earlier failures/refusals preserved. Other candidates parked, worktrees retained per Greg.",
+    "completed_at": "2026-10-08T16:30:09.059886900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

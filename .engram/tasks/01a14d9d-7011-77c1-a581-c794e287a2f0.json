@@ -1,0 +1,41 @@
+{
+  "id": "01a14d9d-7011-77c1-a581-c794e287a2f0",
+  "external_ref": null,
+  "title": "M4 prep: fail-first RED source package for satellite wake/command journals",
+  "outcome": "M4 prep: fail-first RED source package for satellite wake/command journals",
+  "acceptance": [
+    "A frozen RED source package on master 7f5580e7 (tree hash plus manifest under .evidence) covers the smallest independently landable first increment of M4, maps the tests to the M4 criteria they advance, and explicitly identifies the remaining parent-criterion tests deferred to later increments, with no production behaviour change.",
+    "Every concrete dependency on M2 or M3 interfaces is named by exact symbol and recorded on the parent, or the package states that none exists.",
+    "A focused run of the package records the intended failures (assertion failures, not compilation failures) and is noted with its run id."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "prep",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14bba-c160-77c3-b4e2-c50515867f37",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed M4 inert journal RED PREP ONLY. Frozen treeb0a41e758516f5acd7eaa2f5480a874dfb5034e0 on7f5580e7, two test-only paths and immutable manifest criterion/deferred matrix. Run test-7b1404f8 compiled and executed7 tests; all7 failed at intended missing-production-journal assertion, before/after fingerprint unchanged. No M2/M3 dependency in inert package. Independent_session evaluationb79194c062f64fe8b80f757acec6ec0a is fresh,3/3pass,revision2. Uses that recorded evaluation, no manual criterion links. Generic source-mutation obligations remain untested/failed-RED, not relabeled GREEN. No production implementation, full gate, commit, push or installation. Open parent M4 note5f1e5099dc1145fdaac5b644fab9e375 records concrete artifact retention through implementation; parent remains incomplete and blocked. Named source root retained through this completion.",
+    "completed_at": "2026-10-18T08:43:29.282186800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a14da1-ace7-74a3-8088-425be5cb6f4f",
+  "external_ref": null,
+  "title": "Avoid holding the global state mutex through standalone mailbox SQLite commits",
+  "outcome": "Standalone mailbox sends preserve the explicit native-creation/unbound namespace fence without holding the global state mutex across SQLite fsync on the disabled-by-default path.",
+  "acceptance": [
+    "A reviewed admission/fencing design preserves exact native identities, deletion/recreation and binding-versus-append serialization.",
+    "Standalone SQLite commit can proceed without blocking unrelated state-lock users; a deterministic regression covers the apply cut.",
+    "Exact-input checks and independent review cover the revised fence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "performance",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-9864-78b1-809a-1ceeda90644c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

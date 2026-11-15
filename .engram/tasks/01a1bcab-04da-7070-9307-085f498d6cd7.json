@@ -1,0 +1,36 @@
+{
+  "id": "01a1bcab-04da-7070-9307-085f498d6cd7",
+  "external_ref": null,
+  "title": "Audit the pre-existing mailbox guidance phrase loop against behavior-only test rules",
+  "outcome": "The existing mailbox coverage-guidance test retains useful product composition behavior while avoiding assertions that merely pin instruction phrases.",
+  "acceptance": [
+    "Review the pre-existing required-phrase loop in mailbox_coverage_guidance_is_shared_bounded_and_explicit_about_later_replies and remove or replace assertions that only mirror prose, preserving meaningful product-output composition coverage.",
+    "Honor the earlier cleanup boundary: no repository Markdown or instruction-file reads/pins; do not remove legitimate provider/CLI behavior checks merely because the output contains guidance."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "no-tautologies",
+    "review-followup",
+    "test-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Removed three prose-pin groups while preserving all ten provider/CLI composition and protocol tests; ACP fixture uses existing real root-cleanup receipt owner on success and unwind. Exact d5ab author check/reviews retained, identical test-file postimage landed in649d77d5 after both exact-tree integration FULLs passed.",
+    "completed_at": "2026-11-09T01:17:04.954468900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

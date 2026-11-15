@@ -1,0 +1,29 @@
+{
+  "id": "01a1a4fb-0ce8-71b3-9755-59353b93eea4",
+  "external_ref": null,
+  "title": "Test fixtures persist synchronously: every commit reopens and revalidates SQLite, costing seconds at default threads",
+  "outcome": "Fixtures that commit state don't reopen and revalidate the SQLite file on every commit, or the cost is shown not to matter, so slow tests at high thread counts reflect what the test does.",
+  "acceptance": [
+    "The share of the over-60 s notices caused by fixture persistence is measured on one host at default threads and at a fixed lower thread count, with the runs and their load recorded.",
+    "If that share is material, a change removes the per-commit reopen and schema revalidation from fixtures or moves them to the path production uses, with no change to production behaviour, no assertion weakened and no limit raised, and a before-and-after measurement on one host shows the effect; if it isn't, the measurement and the decision are recorded instead.",
+    "Any changed candidate has a clean required review pair and passes the applicable gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "performance",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

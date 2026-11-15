@@ -1,0 +1,30 @@
+{
+  "id": "01a1aebf-99fd-73b2-aa52-44ed0ef9cd9c",
+  "external_ref": null,
+  "title": "Correct NotClean contract comment for committed submodule admission",
+  "outcome": "The NotClean documentation matches the current Git-status predicate and its supported refusal causes.",
+  "acceptance": [
+    "The NotClean comment removes the stale claim that an index-skipped tracked path is independently refused and acknowledges the documented status visibility limitation.",
+    "The comment accurately describes current refusal causes, including child filters, off-pin/uninitialized children, mapping failures and unsupported root object format, without changing runtime behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

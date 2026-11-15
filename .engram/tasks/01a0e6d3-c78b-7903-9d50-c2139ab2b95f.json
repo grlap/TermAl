@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c78b-7903-9d50-c2139ab2b95f",
+  "external_ref": "tm-uwx.10.10",
+  "title": "Update delegation messaging docs for durable mailbox contracts",
+  "outcome": "The delegation feature document still shows the removed two-argument termal_send_to_session contract and old delivery receipt, omits mailbox read/ack tools, and does not describe the required idempotency key or child restrictions.",
+  "acceptance": [
+    "The delegation and mailbox feature documents describe the current durable mailbox contract, contain reciprocal links, list all root peer/mailbox tools and child restrictions, and contain no executable examples using the obsolete contract."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

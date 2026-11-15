@@ -1,0 +1,41 @@
+{
+  "id": "01a17609-83a6-7c50-80d2-caa3ec3a98c9",
+  "external_ref": null,
+  "title": "Preserve the original fixture observer assertion when a held StateInner mutex is poisoned",
+  "outcome": "A failed fixture observer control cleans up its writer and reports its original discriminating failure even when the held disposable StateInner guard unwinds.",
+  "acceptance": [
+    "A deterministic panic while the control owns its disposable StateInner guard is cleaned up without leaking the writer thread and without replacing the original panic with a shutdown poison panic.",
+    "Reuse existing fixture/StateMutex shutdown mechanisms in test-only scope and run focused cleanup plus the existing observer controls; do not alter production poison or shutdown policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cause-unresolved",
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "macos",
+    "operator-ui-works",
+    "persistence",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "review-followup",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17537-1ca6-7602-8267-779340bdd05d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

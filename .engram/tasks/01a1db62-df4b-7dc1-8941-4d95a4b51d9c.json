@@ -1,0 +1,49 @@
+{
+  "id": "01a1db62-df4b-7dc1-8941-4d95a4b51d9c",
+  "external_ref": null,
+  "title": "MailboxRelayAuthority::lock holds StateInner across the whole relay operation (13.8 s hold at mailbox_relay_rpc.rs:26)",
+  "outcome": "A native mailbox relay operation checks its authority under StateInner but does not keep StateInner held for the operation's own store work, so a slow relay commit cannot block the host's state lock for seconds.",
+  "acceptance": [
+    "A channel-gated real-store regression proves unrelated StateInner access during an admitted relay transaction, with durable exactly-once and retry assertions.",
+    "Native relay authorization and new-only participation are validated on one short StateInner cut; StateInner is released before the operation's own store commit; the existing link fence remains; pre-admission stale root, transport or config refuses; and the agreed in-flight admission semantics are tested.",
+    "Relevant relay, storage and authority focused checks, and an independent Codex+Claude pair with no in-scope Medium+, then exact integration FULL and landing evidence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "mailbox-relay",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a190e0-3a58-7740-bdf4-a668830d614e",
+  "external_ref": null,
+  "title": "Creating a session in a remote project with an explicit workdir fails because the workdir is resolved on the local host",
+  "outcome": "Creating a session in a remote project with an explicit workdir fails because the workdir is resolved on the local host",
+  "acceptance": [
+    "POST /api/sessions for a project whose remote_id is not the local remote forwards a requested workdir to the remote without resolving or validating it as a local path, and the remote validates it on its own host",
+    "A regression test covers creating a remote-project session with an explicit remote-only workdir (a path that does not exist on the local host) and shows it is accepted and passed through",
+    "Local-project session creation keeps its existing local workdir validation unchanged"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "remote-create"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

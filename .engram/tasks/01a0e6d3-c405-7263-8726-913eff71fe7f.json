@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c405-7263-8726-913eff71fe7f",
+  "external_ref": "tm-78r0",
+  "title": "Live termal.sqlite WAL stays at 1.4 GB across a clean restart: no truncating checkpoint or journal_size_limit",
+  "outcome": "Observed 2026-09-04 on the live store: termal.sqlite 2.08 GB with termal.sqlite-wal 1.43 GB before a clean stop, and the WAL file still 1,427,666,552 bytes after the server was stopped, rebuilt and restarted (15:12 local). SQLite reuses a WAL from offset 0 after a checkpoint but never shrinks the file unless PRAGMA journal_size_limit is set or a TRUNCATE checkpoint runs; a 1.4 GB WAL also means long stretches without a completed checkpoint while the server was running (external readers are already forbidden, so the likely holders are long-lived internal read transactions or the write cadence). Investigate: (1) whether the persist path or the boot path ever runs PRAGMA wal_checkpoint(TRUNCATE) or sets journal_size_limit; (2) which connections hold read transactions long enough to block checkpoints; (3) an idle-time or shutdown TRUNCATE checkpoint and a journal_size_limit (e.g. 64 MB) so the WAL returns to a bounded size. Acceptance: after a clean shutdown the WAL is bounded (<= journal_size_limit); during normal operation the WAL does not grow past the limit for more than one checkpoint interval; no change to the fail-closed startup validation; measured on a backup copy, never on the live file.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "performance",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

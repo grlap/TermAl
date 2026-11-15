@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3b6-7f03-9610-7e1c66a5c3c5",
+  "external_ref": "tm-1b5",
+  "title": "Support OpenCode reasoning variants",
+  "outcome": "Expose OpenCode's live ACP effort/variant config option in session settings. Persist auto or an explicit agent-advertised selection, show the current effective variant and dynamic model-specific choices in the UI, and apply/reconcile it through acknowledged session/set_config_option requests after session new/resume/load and live updates. Add backend, wire, persistence, optimistic UI, and interaction coverage without hardcoding provider-specific variant names.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

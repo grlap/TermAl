@@ -1,0 +1,30 @@
+{
+  "id": "01a150da-f971-7831-8011-31fee749ec69",
+  "external_ref": null,
+  "title": "O1 platform probe: the fixed 2 s bound on its rustc and cmd.exe children fails under concurrent compile load, and federation_probe_command erases which stage failed and why",
+  "outcome": "O1 platform probe: the fixed 2 s bound on its rustc and cmd.exe children fails under concurrent compile load, and federation_probe_command erases which stage failed and why",
+  "acceptance": [
+    "The probe's failure reports the stage (which fixed program) and the typed cause (timeout, spawn, read, reap, or non-zero exit) without changing the success contract; when a deadline timeout is followed by a failed child cleanup, on the Unix retained-owner return, the non-Unix test branch and the Windows production kill, the failure reports the cleanup failure as its outer cause with the timeout kept beneath it, and the caller is not told to retry; a focused test covers each cause, including timeout followed by cleanup failure through the Windows bounded-read transport",
+    "A discriminating diagnosis recorded on this item establishes whether the 2026-10-18 failure was a timeout under concurrent compile load; if it was, the bound is justified from measurements of rustup-proxied rustc startup under the project's documented concurrent-run cap and changed only on that evidence (no blind inflation), or the probe avoids the proxy cost",
+    "tests::federation_onboarding_external::federation_onboarding_local_probe_resolves_paths_and_reaps_fixed_child passes deterministically beside one concurrent cold compile, the full gate is green, and an independent review pair has no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "host-recording",
+    "test-reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

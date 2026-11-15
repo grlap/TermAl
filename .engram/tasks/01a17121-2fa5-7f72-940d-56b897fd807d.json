@@ -1,0 +1,28 @@
+{
+  "id": "01a17121-2fa5-7f72-940d-56b897fd807d",
+  "external_ref": null,
+  "title": "termal_send_to_session refuses a remote-root session (\"400 Bad Request: target must be a local root session\"), so there is no supported mailbox route from the Windows host to a MacBook Pro session",
+  "outcome": "A coordinator on one host can send a routine mailbox message to a known active remote-root session on a federated host, through a supported, documented route, or gets a refusal that names that route.",
+  "acceptance": [
+    "termal_send_to_session refuses a remote-root session (\"400 Bad Request: target must be a local root session\"), so there is no supported mailbox route from the Windows host to a MacBook Pro session is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-host",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

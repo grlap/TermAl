@@ -1,0 +1,37 @@
+{
+  "id": "01a0f320-5a05-7ac1-995c-e42a0b2d526d",
+  "external_ref": null,
+  "title": "A command that was abandoned and then completed is read as one whose start was never told, and fences other sessions' carried gates",
+  "outcome": "The end of a command whose start the host was told, but whose key it has since dropped (abandoned, as a declined Codex command is; evicted past the running-command limit; or cleared by a turn start), is not classified as a command whose start was never reported.",
+  "acceptance": [
+    "A command whose start was truly never reported still fences where its session writes; the existing test for it passes unchanged.",
+    "A test reports a command's start, abandons it, then reports its completion under the same key, in a session other than the holder of a carried gate: the carried check is not fenced by the completion.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

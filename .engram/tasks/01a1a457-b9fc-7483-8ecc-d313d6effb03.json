@@ -1,0 +1,31 @@
+{
+  "id": "01a1a457-b9fc-7483-8ecc-d313d6effb03",
+  "external_ref": null,
+  "title": "Review TermAl tests for aggressive wall-clock assertions; separate real product requirements from fragile timing assumptions and fix the fragile ones",
+  "outcome": "TermAl's tests don't fail because of scheduling or load: each wall-clock assertion left in place rests on a named real requirement, and the fragile ones are replaced by checks that still catch the regression they were written for.",
+  "acceptance": [
+    "A census lists the wall-clock, elapsed-time, deadline and budget assertions in TermAl's Rust and UI tests and in scripts, each classified as a real product requirement with its source, a fragile assumption, or a harmless guard such as a deadlock bound, and gives what regression each was meant to catch",
+    "Each fragile assertion that has failed or that the census ranks high is replaced by a check that doesn't depend on the host's scheduler or, where a limit only detects a hang, by waiting on the condition under a long hang-detecting limit, per Greg's ruling of 2026-11-04; no retry, quarantine or raised limit is used to hide a failure whose cause is unknown; each carries a recorded failing run against the regression it protects where such a regression can be produced, or a stated reason; and the 50 ms gate in state_lock_parallel.rs is left to Greg.",
+    "Any failures seen tonight on DL560 or Windows B that turn out to be timing are classified here, with their run ids",
+    "Greg gets the results and priorities; no stored evaluation is changed"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "reliability",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c55f-76b3-b05c-48984f844834",
+  "external_ref": "tm-m21",
+  "title": "Expose mailbox causality metadata for crossed-message detection",
+  "outcome": "Pairwise messages can cross in flight while both sessions are mid-turn. CreatedAt comparison is manual and wall-clock based, so a recipient cannot mechanically tell whether an inbound message was authored before the sender could have observed the recipient's last outbound message. Add monotonic per-session causal metadata to send receipts and inbound records, or an equivalent explicit last-seen reference, so stale/superseded assumptions can be detected without inferring from timestamps.",
+  "acceptance": [
+    "The protocol defines a restart-safe monotonic or explicit-reference causality signal; send receipts and reads expose it consistently; crossed sends, concurrent sends, retries, restart, and clock skew are deterministically tested; existing mailbox FIFO and idempotency semantics are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

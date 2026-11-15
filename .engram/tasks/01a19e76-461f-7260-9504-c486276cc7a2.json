@@ -1,0 +1,36 @@
+{
+  "id": "01a19e76-461f-7260-9504-c486276cc7a2",
+  "external_ref": null,
+  "title": "Other-root placement notice makes a synchronous held-claims CLI read on the runtime event path when a test starts",
+  "outcome": "A recognised test starting in a session that named roots for other held claims never blocks the runtime event handler on an Engram held-claims read: the optional placement notice is computed off that path or from a recent snapshot.",
+  "acceptance": [
+    "EngramOtherRootNoticeRead does not call read_held_claims synchronously on the command-start observation path; a test with a parked held-claims transport shows that runtime frame processing proceeds while the read is outstanding, and the notice is still applied when it is current."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Other-root placement reads run in owned background observers; deterministic parked-read tests show runtime progress and current-notice publication. Delivered on master, native registered check PASS3. Closed under restored evaluation-OFF policy with failed-window limit recorded.",
+    "completed_at": "2026-11-04T16:42:28.695510400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a0f0c6-b526-7c22-97ca-ae4b52018e7f",
+  "external_ref": null,
+  "title": "CI: launcher tests compare temp-alias paths with canonical paths and fail on GitHub's Windows and macOS runners",
+  "outcome": "Greg reported a GitHub CI failure, 2026-09-30 about 05:25Z: scripts/test-launcher.test.mjs test 21, \"clean pass retains logs and summarizes without passing-test lists\", assertion at :317.\nThe assertion computes relative(join(root, \".git\", \"review-runs\"), runDir), expecting /^test-[^\\\\/]+$/.\nThe two paths are spelled differently:\n- root comes from mkdtemp under testTempDirectory(), i.e. os.tmpdir(). On the runner that is the 8.3 short name C:\\Users\\RUNNER~1\\AppData\\Local\\Temp.\n- runDir comes from `git rev-parse --path-format=absolute --git-path review-runs`, which returns the long name C:\\Users\\runneradmin\\….\nSo relative() climbs nine levels (\"..\\\\\" ×9 then \"runneradmin\\\\…\").\nIt passes locally only because the local temp path has no short-name component.\nClassification: test defect. The product's run directory is correct; the test compares two spellings of the same directory.\nFix: compare canonical paths (fs.realpathSync.native on both sides), and check the other tests in the file for the same root-versus-Git path comparison.",
+  "acceptance": [
+    "Each of the three helper scripts (test-launcher.mjs, test-temp-root.mjs, review-freeze-fingerprint.mjs) runs its main when started through a linked directory; a test starts all three that way and fails against the previous scripts.",
+    "No test in scripts/test-launcher.test.mjs compares a temp-derived path with a Git-reported or child-reported path without canonicalizing both, including the stage-cwd test's child-side and result-side checks.",
+    "The GitHub CI run on master at 28e9ed5, the last landing for this item, passes these tests on windows-latest and macos-latest.",
+    "With TERMAL_TEST_USER_TEMP set to an 8.3 short-name path, the launcher test file passes; before the fix the same run reproduces the CI failure at :317."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "ci",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "GitHub's \"Review integrity helpers\" workflow is green on Windows, macOS and Ubuntu again (run 36733526465 on 28e9ed5), after failing since at least 2026-09-26. Two causes were fixed. (1) The launcher tests compared temp-alias paths (Windows 8.3 short names, macOS /var) with canonical paths from Git and child processes; they now compare canonical paths (commit 9367f56). (2) A product defect in three helper scripts: their entry guards compared argv with Node's link-resolved module path, so a script started through a linked path exited 0 silently; they now compare canonical paths, and a new test starts all three through a linked directory (commit 28e9ed5). Both were reproduced on Windows before the fix. Lows are filed as w-3cbd685261fa and w-fdf78dca0a5e; the fingerprint instability found on the way is filed as w-3a48a8c03da7. The acceptance evaluation passed all four criteria.",
+    "completed_at": "2026-09-30T15:08:38.064660500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

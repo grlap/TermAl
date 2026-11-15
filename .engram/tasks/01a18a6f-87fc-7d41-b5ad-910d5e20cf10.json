@@ -1,0 +1,29 @@
+{
+  "id": "01a18a6f-87fc-7d41-b5ad-910d5e20cf10",
+  "external_ref": null,
+  "title": "Test the named-root turn-pending refusal end to end and across authority-learning or publication failure",
+  "outcome": "The typed named_root_turn_pending refusal is covered by deterministic tests: end to end through the real dispatch and naming paths, and across failures of authority learning or publication followed by a same-turn kept-name retry.",
+  "acceptance": [
+    "A deterministic test injects a failure into learn_engram_authority_locked and, separately, into publish_engram_authority_until during source-root naming. It then retries the same naming in the same turn and shows that an acceptance evaluation gets AcceptanceEvaluationNamedRootTurnPending with zero named_root_sighting_read requests.",
+    "A deterministic end-to-end test, through the real dispatch and naming paths, names a root mid-turn and requests an evaluation (typed refusal, zero reads). It then finishes the turn, delivers the next gated turn so its capture opens in the named root, and requests again, showing that the preflight reaches the sighting read."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — End-to-end tests requested a real next gated-turn opening. That path no longer exists after physical gating removal; EO naming tests are a different contract. Source: src/tests/acceptance_evaluation_sighting.rs:651; docs/features/engram-host-adapter.md:3290. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

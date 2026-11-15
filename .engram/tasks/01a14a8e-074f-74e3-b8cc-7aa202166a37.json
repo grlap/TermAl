@@ -1,0 +1,27 @@
+{
+  "id": "01a14a8e-074f-74e3-b8cc-7aa202166a37",
+  "external_ref": null,
+  "title": "Measure and bound the per-delta session scan introduced by live session projection",
+  "outcome": "Measure the additional session lookup under the publish lock for TextDelta and OrchestratorsUpdated; if significant, remove redundant scans without changing live-membership semantics.",
+  "acceptance": [
+    "Measure and bound the per-delta session scan introduced by live session projection is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

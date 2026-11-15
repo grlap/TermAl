@@ -1,0 +1,28 @@
+{
+  "id": "01a1cb70-6604-77b2-9e24-53d879cf9358",
+  "external_ref": null,
+  "title": "Integrate combo60 on e6b8d2f7: a7bb 7c9fd256 (w-18a1 R14 preserve admitted Engram call windows), direct child of combo59",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 7c9fd256af22d4ba5f18833c8fd3231b6f036766 (tree e9c85ea8950881fcc9c24c0a6700df4abe42bbbf) is on origin/master, where master was moved to it by a fast-forward from e6b8d2f70609a85e815c4039d971ed2b963b6f4e.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is e9c85ea8 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the WHOLE-69 pair on tree e9c85ea8 (Codex session 17501, Claude session 17502) for the whole contribution of 69 paths.",
+    "The release binary built from tree e9c85ea8 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1cb96-369a-70d0-92e2-79dc63f9c02e",
+  "disposal_reason": "Candidate 7c9fd256 failed its DL560 FULL test-95df055c with a test defect: terminalDiagnosticFixture still mocked spawnSync after source capture moved to execFile. The diagnosis is recorded here. It is superseded by R15 1ccbd174 (fixture repaired, scoped pair clean), integrated as w-79dc63f9c02e. The test ref was deleted at 16:37:36Z.",
+  "completion": null
+}

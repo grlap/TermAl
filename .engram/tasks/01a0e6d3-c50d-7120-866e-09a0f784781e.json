@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c50d-7120-866e-09a0f784781e",
+  "external_ref": "tm-gglr",
+  "title": "Failed test runs leave marker-only directories that no agent can remove; the coordinator swept them about fifteen times in one day",
+  "outcome": "Observed friction, measured rather than estimated: over one working day the coordinator manually removed roughly fifteen leftover test run directories, in every case after an agent reported that its own removal was refused by host tool policy before execution. The pattern is identical each time - a focused test run fails, the wrapper deliberately does not clean up so the evidence survives, and what remains is an ORDINARY directory containing nothing but the 42-byte .termal-test-run marker. Nothing is preserved by keeping it, because the failing run wrote no artifacts; the marker is the only content. The agent then cannot remove it, reports the refusal correctly, and a human-authorised session does it instead. Every agent hit this - both TermAl implementers and, in its own words, the same class of refusal reported by the peer project agents. Why it matters beyond annoyance: it puts the coordinator in a manual sweeping loop for something the launcher already knows how to do, it trains agents to report cleanup as a blocked action rather than a completed one, and it quietly relies on someone noticing. Under the temp-usage rules this repository adopted, creators clean up after themselves; this is the one path where the creator provably cannot. Proposed fix, bounded to scripts/test-temp-root.mjs which already owns this: the existing stale sweep reclaims dead marked runs at 48 hours, which is right for runs that may hold evidence. Add a narrower case - a run directory whose ONLY entry is the marker file has nothing to preserve, so it can be swept on the next launcher start regardless of age, subject to the same liveness check that protects a run belonging to a live process. Keep the age rule for every directory with actual content. Assert both halves: an empty marked run from a dead process is reclaimed immediately, and a marked run containing any artifact is NOT reclaimed before the age threshold. Do this when no agent is mid-run through the launcher, since changing the shared test entry point underneath running work is exactly the kind of avoidable interference this project keeps designing against.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

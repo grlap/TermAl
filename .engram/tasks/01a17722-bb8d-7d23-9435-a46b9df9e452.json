@@ -1,0 +1,27 @@
+{
+  "id": "01a17722-bb8d-7d23-9435-a46b9df9e452",
+  "external_ref": null,
+  "title": "Sibling test-run persistence fences still use real-time deadlines (compaction, cards, registration)",
+  "outcome": "The test-run compaction, card and registration persistence fences measure their deadlines on the state's existing Engram budget clock, as the observation fences do after w-4f55, so a hand-driven fixture that polls them cannot be expired by elapsed host time. Production stays on real time with unchanged deadlines.",
+  "acceptance": [
+    "Sibling test-run persistence fences still use real-time deadlines (compaction, cards, registration) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "consistency",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

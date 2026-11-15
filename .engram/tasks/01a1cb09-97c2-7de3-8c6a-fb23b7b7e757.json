@@ -1,0 +1,28 @@
+{
+  "id": "01a1cb09-97c2-7de3-8c6a-fb23b7b7e757",
+  "external_ref": null,
+  "title": "Identify Git-only capture work correctly in slow-operation warnings",
+  "outcome": "Slow generic capture diagnostics identify the caller's work without attributing Git-only activity to Engram, using existing warning ownership.",
+  "acceptance": [
+    "Generic source capture warning labels distinguish Git-only work from Engram source observation while retaining existing operation/caller ownership, the non-aborting warning and the caller's bounded wait.",
+    "A behavioral diagnostic control covers the affected label and confirms warning emission does not cancel or resend the operation; no repository Markdown phrase tests or parallel warning mechanism is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "diagnostics",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

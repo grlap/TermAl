@@ -1,0 +1,29 @@
+{
+  "id": "01a17500-d81b-77d2-afc3-5e74fca28c0d",
+  "external_ref": null,
+  "title": "termal_read_mailbox given a session id returns a bare 404; the error should name the caller's pairwise mailbox ids with that session",
+  "outcome": "A root agent that passes a session id (its own or a peer's) where a mailboxId is expected gets an actionable answer naming the right mailbox, without broad mailbox enumeration",
+  "acceptance": [
+    "termal_read_mailbox (and the CLI mailbox read) called with a session-* value instead of a mailbox-* id returns an explicit error that says the argument is a session id and names the caller's pairwise mailbox id(s) with that session, or none; a mailbox-* id that does not exist still returns not found",
+    "The root coordination guidance states that the mailboxId comes from the mailbox notification or termal_send_to_session's result, and that TERMAL_SESSION_ID is an identity, not a mailbox id",
+    "Focused tests cover a session id argument with an existing pairwise mailbox, with none, and an unknown mailbox id; a review pair has no outstanding Medium or higher"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "usability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

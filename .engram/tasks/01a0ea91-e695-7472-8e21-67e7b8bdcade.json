@@ -1,0 +1,58 @@
+{
+  "id": "01a0ea91-e695-7472-8e21-67e7b8bdcade",
+  "external_ref": null,
+  "title": "Expose bounded acceptance-brief evidence omissions and unread continuation without treating not-shown proof as absent",
+  "outcome": "Shape (b), coordinator concurrence note28fe32794d6a495fac996fd17de405d3 / mailbox#287. Repeated bounded-brief field reports show older criterion proof disappearing between evaluations. Preserve bounded read/brief budgets and tracker verdict authority. Expose known omitted locators with explicit locator-list truncation; expose unread count, available continuation at the same read cut and why paging stopped; never invent unread ids. Instruct evaluator to distinguish 'not shown' from absence of evidence on the item, using the existing insufficient_evidence verdict with explicit rationale. Full older-evidence access and per-criterion indexing (former shapea criteria) are separate w-e57a7f7e8da0.",
+  "acceptance": [
+    "Evaluator instructions distinguish evidence not shown from proof absent on the item and require 'not shown' with known locator/continuation in the rationale, while preserving existing verdict schema and pass citation rules; test covers scattered notes.",
+    "Full five-stage gate passes on exact reviewed tree with run directory/fingerprint recorded.",
+    "When entry or byte limits omit evidence already read, evaluator brief and request response expose the omitted record locators and any locator-list truncation, tested with older-only criterion evidence.",
+    "When paging stops at page/entry/time bounds or transport failure, brief and response expose the unread count, continuation available at the same read cut and reason; unknown locators are explicitly unknown, tested through request path."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6d3-c668-7032-a387-eb4b41f2d431",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered bounded evidence omission inventories and captured unread boundaries in both acceptance modes; corrected same-session guidance, last-page window handling and metadata-driven prompt overflow. Committed 4a0c279; full exact-input gate and Codex/Claude feature reviews passed; independent acceptance beb4fe0c passes all four criteria. Integration owner has accepted the commit into train 7; remote landing is pending.",
+    "completed_at": "2026-10-01T01:41:22.976335400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

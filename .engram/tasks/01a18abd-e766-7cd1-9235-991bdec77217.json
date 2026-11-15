@@ -1,0 +1,27 @@
+{
+  "id": "01a18abd-e766-7cd1-9235-991bdec77217",
+  "external_ref": null,
+  "title": "Test the real checkpoint-cut validator on both sides of the mirror/ledger split",
+  "outcome": "validate_sqlite_checkpoint_write_cut is covered directly: only an owner-correct, canonical checkpoint mirror whose hash disagrees with its ledger index returns PersistCheckpointMirrorLedgerMismatch, and the wrong-owner and noncanonical mirrors stay untyped terminal errors.",
+  "acceptance": [
+    "A focused test runs validate_sqlite_checkpoint_write_cut inside a real SQLite transaction on three session rows: a mirror with the wrong local owner, a noncanonical mirror, and a canonical owner-correct mirror whose hash disagrees with the ledger index. It asserts the first two are not PersistCheckpointMirrorLedgerMismatch and keep \"existing checkpoint mirror lacks its exact metadata protection\", and the third is that type."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "persist",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

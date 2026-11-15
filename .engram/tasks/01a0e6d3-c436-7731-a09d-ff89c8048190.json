@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c436-7731-a09d-ff89c8048190",
+  "external_ref": "tm-9lkj",
+  "title": "Decide whether to mask secret-looking flag values in check command lines sent to Engram",
+  "outcome": "From tm-winf round-12 review (Claude, Note). The normalised command line goes to Engram verbatim in the verification summary's first line and the command: ref, so --token=... style values reach Engram's store unless its redactor refuses the report (then the fallback observation-only report is sent). Documented; logs already avoid the command line. Masking --*token*=, --*key*=, --password= values before sending would change the check fingerprint an author pins (--bind N=test:FINGERPRINT), so it is a contract decision (mask only in summary/refs and keep the fingerprint over the unmasked line?).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "source-type-decision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

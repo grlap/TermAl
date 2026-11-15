@@ -1,0 +1,28 @@
+{
+  "id": "01a1c4ad-4eed-74d3-bad8-514362de9c31",
+  "external_ref": null,
+  "title": "Cover the registration confirmation response size boundary",
+  "outcome": "Behavioral coverage distinguishes a complete registration confirmation exactly at 64 KiB from an oversized confirmation refused with HTTP 413, without truncation or timing/IO fixtures.",
+  "acceptance": [
+    "A direct behavioral test constructs registration confirmation metadata whose encoded JSON is exactly 65,536 bytes and observes acceptance, then exceeds the bound and observes ApiError StatusCode::PAYLOAD_TOO_LARGE; it verifies complete identity data is retained on acceptance and does not pin Markdown or instruction text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "registration",
+    "test-runs",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

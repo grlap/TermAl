@@ -1,0 +1,28 @@
+{
+  "id": "01a10151-8bc2-73c2-82c6-445b8c0e665a",
+  "external_ref": null,
+  "title": "Keep public Resume usable when only delivered observation finalization fails",
+  "outcome": "Keep public Resume usable when only delivered observation finalization fails",
+  "acceptance": [
+    "A purely local delivered-intent finalization failure is retained and reported without failing public Resume when no retired recovery obligation holds admission.",
+    "A deterministic public Resume control loses delivered finalization acknowledgement, verifies recovery remains pending, and verifies retired observation failures still withhold Resume."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

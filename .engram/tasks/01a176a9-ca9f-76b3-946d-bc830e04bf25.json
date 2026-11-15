@@ -1,0 +1,29 @@
+{
+  "id": "01a176a9-ca9f-76b3-946d-bc830e04bf25",
+  "external_ref": null,
+  "title": "Clarify standalone namespace and automatic-owner wording in mailbox documentation",
+  "outcome": "Clarify standalone namespace and automatic-owner wording in mailbox documentation",
+  "acceptance": [
+    "Central control plane documentation distinguishes the raw standalone binding fence from ordinary bare-id local sends that can reach bound native roots.",
+    "Mailbox-reference refusal wording accurately describes the currently accepted owner bindings without implying execution authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "federation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

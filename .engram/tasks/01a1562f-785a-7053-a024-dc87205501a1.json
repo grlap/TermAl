@@ -1,0 +1,30 @@
+{
+  "id": "01a1562f-785a-7053-a024-dc87205501a1",
+  "external_ref": null,
+  "title": "Mac cutover: run Mac TermAl as ordinary user greg (not root/sudo) — prove first, then coordinated restart",
+  "outcome": "Prepare a safe ordinary-user Mac cutover under Greg1308. Before the coordinated restart, prove the installed S3 binary can read the existing TermAl.Federation account as greg without exposing its value, verify the launch environment, and run isolated scratch sanity without enrolling another identity. The running root server remains untouched until Greg's coordinated boundary. Preserve the actual existing /Users/greg/.termal identity in place, with no copy or needless chown; launch S3 as greg with the recorded PATH instruction, then prove the native mailbox path and O1 at that boundary before activation. Record the earliest safe cutover point and exact instruction for Greg.",
+  "acceptance": [
+    "A note records proof on the S3 build that a TermAl process launched as user greg (not root), from the installed path and in the host's launch context, reads the existing TermAl.Federation pair credential by its explicit account key (metadata/success and OS status only, never the value), that greg's launch environment is complete (PATH with ~/.cargo/bin, federation ports free, forwards permitted), and that the S3 build starts and serves as greg on a scratch data directory and port that enrolls nowhere; with commands, process uid, build hash and times; no change to the running root server before the coordinated restart. The remote mailbox path and O1 are proven as greg at the cutover itself, on the identity preserved by relaunching the existing /Users/greg/.termal store as greg without copying it, and recorded on this item.",
+    "The note states the earliest safe cutover point and the exact ordinary-user launch instruction to send Greg with the 'restart now' message, including the launch PATH with ~/.cargo/bin, the store-path confirmation from the running server's owner record and any ownership step the recorded facts require (none when the directory, databases and lock at the confirmed path are already owned by greg)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "greg-directed",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

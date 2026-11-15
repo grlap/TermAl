@@ -1,0 +1,36 @@
+{
+  "id": "01a12d76-df92-74b3-be0a-bb3cfd0b4adc",
+  "external_ref": null,
+  "title": "Unknown-check closures are matched by runtime key only: a reused key can turn an unrelated end into a misleading late-end notice",
+  "outcome": "A check closed with outcome Unknown at a turn boundary is told a late end only for its own command invocation. An end from a later command that reuses the runtime key (Codex's command-text fallback, or another command) never consumes the closure or publishes a late-end line naming the old check. Both closing boundaries close consistently, and both have tests.",
+  "acceptance": [
+    "A command start that reuses the key of a retained unended-check closure retires that closure (or the closure carries a start identity that the end must match), so the reused command's completion publishes no late-end line. The real late end of the closed check is still told once when it arrives before any reuse.",
+    "The turn's Fresh close and its clear of the live checks agree. Either the close also closes unended checks of other grants before clearing all checks, or a comment with file:line records why no other grant's check can be present.",
+    "Tests cover: close A with no end, then a later command B reusing A's key (a non-check command, and a check that ends, including a duplicate completion), with no late-end line naming A; and the next-turn-start boundary closing an unended check that a Cached or Skipped close left, once."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a12205-f251-78a2-8f07-aec234e3f7d0",
+  "disposal_reason": "Superseded by the landed triple commit 23e77889, which delivers the unended-check closure and late-end behavior in w-aec234; the replacement item completed with its passing evaluation on that same commit.",
+  "completion": null
+}

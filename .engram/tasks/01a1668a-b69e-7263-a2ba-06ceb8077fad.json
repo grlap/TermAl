@@ -1,0 +1,27 @@
+{
+  "id": "01a1668a-b69e-7263-a2ba-06ceb8077fad",
+  "external_ref": null,
+  "title": "Pin the applied-begin budget exemption for a head with an active grant but no retained evaluate",
+  "outcome": "engram_head_begin_applied (src/engram_begin_preparation_retry.rs about :250) exempts a head from the admission budget only when the active grant equals the front prompt's retained engram_evaluate.begun_grant_id. That fixed round 1's Medium, where any active grant exempted a successor. A head with an active grant but no retained evaluate (for example after a Defer clears engram_evaluate, or a promoted head) would have its budget enforced although Engram applied its begin, and the tick could then hold an already-begun head at the deadline. No reachable sequence has been shown: a begun head's turn normally runs (session Active), which the tick skips. Either a test pins that such a head is never held, or the exemption falls back safely when the front has no evaluate, without re-opening round 1's Medium.",
+  "acceptance": [
+    "A test establishes whether a head with an active grant and no retained evaluate can reach the admission-budget hold. If it can, it is exempted without letting another turn's open grant exempt a successor's window; if it cannot, the test pins that."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

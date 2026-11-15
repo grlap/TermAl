@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c52e-7bb1-babf-45aaa3e29747",
+  "external_ref": "tm-i5mx",
+  "title": "Read-only reviewer children cannot call any MCP read tool, so the review dedupe step has never worked for Claude reviewers",
+  "outcome": "Reported by the peer project with transcript evidence, then confirmed here in source. A delegated Claude reviewer running under the read-only write policy reported in its own result packet that a read-only Engram listing was denied as a read-only violation. The peer checked their store transcript: their refusal text appears zero times, so the call never reached them - it was refused on our side. CONFIRMED IN SOURCE: claude_tool_permission_request_is_read_only in src/claude.rs around line 462 permits exactly Read, LS, Glob and Grep by name, plus a deliberately conservative Bash reader; every other tool name falls through to denial. MCP tools arrive namespaced as mcp__server__tool, so NO MCP tool of any kind is reachable from a read-only reviewer child, whether or not it reads. Consequences. The review command explicitly permits reviewers the read verbs of the tracker by name while forbidding the mutating ones, so its own contract cannot be honoured; its deduplicate-before-proposing step has therefore probably never worked in any Claude reviewer delegation on this host. It is not a regression from any recent change and would fail identically against a healthy store. There is also an asymmetry: Codex reviewer children reach the same tools and returned a populated proposals section in the same pair, so a reviewer capability currently depends on which agent implementation it happens to be. IMPORTANT CONSTRAINT ON ANY FIX, because the conservatism here is deliberate and hard-won: the comment above that function records real security defects found when an earlier revision tried to be clever about shell parsing, including arbitrary code execution from the reviewed tree. The tool name is mcp__server__tool where BOTH halves are supplied by the MCP server, so allowing anything whose suffix looks like a read verb would let a careless or hostile server expose a mutating tool named ls. A fix must therefore allow specific (server, tool) pairs that the host trusts, not a pattern, and should fail closed for anything unknown. SECOND DEFECT, same shape as the ones tracked today: the reviewer reported the denial correctly, in plain language, in the right section of its structured result - and it went unread, because the fan-in surfaces findings while a capability denial arrives as a note. A reviewer that could not perform part of its contract should say so where it cannot be missed, as a finding or a failed status, rather than as prose nobody is required to read.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

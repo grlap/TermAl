@@ -1,0 +1,30 @@
+{
+  "id": "01a16575-bf4d-7780-b2b1-3c44d958020e",
+  "external_ref": null,
+  "title": "A detached full gate is refused credit for a watcher-seen file change that happened minutes BEFORE its launch (a `git apply` at 21:04:35Z, gate registered 21:07:31Z) because the watcher reported it late",
+  "outcome": "A file change that the workspace watcher saw before a full gate's launch, and that no later write followed, does not refuse that gate's credit when the watcher's report reaches the host after the launch: the host compares the change's own time (watcher event time or file mtime) with the run's registration time instead of the report's arrival, or the refusal line says the change's time so the holder can tell a late report from a real write during the run. Occurrence: carrier root C:\\github\\Personal\\TermAl\\.tmp\\wt-gated-recovery-8982, `git apply --index` of resume-recovery-9550-v3.patch at 2026-10-22T21:04:35Z (mtimes of all patched files), credited focused run test-16b133d2 at 21:06Z, detached gate test-1f61bb32 registered 21:07:31.360Z, refusal delivered at the next turn: \"earned no credit: the host saw something that may have written in its worktree before it settled: a file in its worktree changed: …\\src\\engram_begin_preparation_retry.rs … Run the gate again.\" `git status` at 21:10:17Z showed the working tree identical to the staged input; no session ran commands or edits in that root after 21:04:35Z.",
+  "acceptance": [
+    "A note reproduces the sequence with host timestamps (watcher event, its report time, the run registration time) from the 2026-10-22 occurrence or a fixture, and states which clock the host used to call the change 'before it settled'.",
+    "With the fix, a watcher change older than the run's registration (by its event time) does not refuse a later gate, a change during the run still does, and the refusal line names the change's time; tests cover both; cargo test --bin termal is green and the full gate passes on the exact committed tree with an independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "host-recording",
+    "p0-profiling-2026-10-22"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

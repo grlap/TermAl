@@ -1,0 +1,31 @@
+{
+  "id": "01a175d6-55de-79e0-9f28-f685a1838a18",
+  "external_ref": null,
+  "title": "Document or harden the inaccessible-PID reuse residual in Windows cleanup probes",
+  "outcome": "The rare PID-reuse/access-denied case has an explicit conservative contract and does not silently weaken cleanup proof.",
+  "acceptance": [
+    "Document or deterministically model a departed PID reused by a process the owner cannot open; preserve unresolved for genuinely unobservable owned members.",
+    "Make any departed-PID test control accurately distinguish the expected departed/foreign classification from an inaccessible reused identity, without retries, swallowed errors or weakening held-descendant/unrelated-process checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gate-blocker",
+    "launcher",
+    "review-low",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173e6-4ea8-7281-911d-d712933fd9c0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

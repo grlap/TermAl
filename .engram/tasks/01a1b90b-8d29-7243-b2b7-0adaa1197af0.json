@@ -1,0 +1,28 @@
+{
+  "id": "01a1b90b-8d29-7243-b2b7-0adaa1197af0",
+  "external_ref": null,
+  "title": "Content-v1 owner capture failure at turn close silently drops source attribution (no bounded retry, no local notice); align execution-observability doc",
+  "outcome": "When the content-v1 owner capture at turn close fails for a deadline or a transient reason (spawn or version-probe failure, named root changed during capture, binary replaced), TermAl keeps a bounded retry, or at least publishes a fixed local notice, instead of silently sending EngramRuntimeClosingSource::Unavailable and dropping the turn's registered-check baselines. docs/features/execution-observability.md (around lines 66-78) matches the owner-backed capture behaviour. Source: Low from Claude review delegation-c261d60b of combined candidate 8e8a2785, at src/engram_unadmitted_closing.rs:234 and src/engram_observation_source.rs:90. Observability only; registered credit is unaffected.",
+  "acceptance": [
+    "Content-v1 owner capture failure at turn close silently drops source attribution (no bounded retry, no local notice); align execution-observability doc is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "content-v1",
+    "engram-host",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

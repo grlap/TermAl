@@ -1,0 +1,36 @@
+{
+  "id": "01a1d30b-cb75-7343-b920-e328556b6a60",
+  "external_ref": null,
+  "title": "Mail to an offline or authority-changed peer is durable but unwoken, and its relay redrive has no deadline or visible state",
+  "outcome": "Mail to an offline or authority-changed peer is durable but unwoken, and its relay redrive has no deadline or visible state",
+  "acceptance": [
+    "When native mail is sent to a peer host that is offline or whose authority changed, the sender's receipt and the message's current status show a typed pending-relay state, and once the peer returns or the authority is restored the relay redrive delivers and wakes exactly once; if redrive cannot complete, the message reaches a visible terminal undeliverable state with the remedy, rather than waiting indefinitely. Behavioural tests cover the offline-then-return and the authority-change cases without duplicate delivery.",
+    "The change has a clean review pair and passes the full gate."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "mailbox",
+    "recovery-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

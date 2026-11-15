@@ -1,0 +1,30 @@
+{
+  "id": "01a18060-bec8-7dd3-ac83-bb86395131dc",
+  "external_ref": null,
+  "title": "Relay mailbox read on a valid satellite mailbox returned a transient 503 that an identical retry recovered",
+  "outcome": "The cause of the transient 503 on a valid relay-mailbox read from the MacBookPro satellite is identified. Either it is fixed, or it is documented as an expected transient with bounded, observable retry guidance, and the read path's receipt and processedThrough semantics after such a 503 are confirmed correct.",
+  "acceptance": [
+    "A note on this item identifies, from source and the host's logs around 2026-10-28 02:38:49Z, which relay transport or response stage produced \"503 Service Unavailable: native mailbox relay transport/response unavailable\" for a read-only termal_read_mailbox on a valid relay mailbox, and whether it was load-related (a local full gate was running at the time).",
+    "Either the cause is fixed, with a regression test that injects the failing stage and shows the read either succeeds or fails with the documented retryable outcome; or the 503 is documented as an expected transient, with its retry contract stated in the relay docs.",
+    "It is shown, by a test or a source citation, that a read failing this way neither advances processedThrough nor issues a receipt, so the identical retry returns the same unread page."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "mailbox",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

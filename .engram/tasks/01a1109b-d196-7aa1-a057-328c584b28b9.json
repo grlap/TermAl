@@ -1,0 +1,28 @@
+{
+  "id": "01a1109b-d196-7aa1-a057-328c584b28b9",
+  "external_ref": null,
+  "title": "Reject legacy-labelled recovery captures carrying unvalidated modern fields",
+  "outcome": "Before recovery integration, legacy local cancellation rejects modern grant/key/authority/dispatch fields or validates each present field and applicable uncertain-grant coherence.",
+  "acceptance": [
+    "Reject legacy-labelled recovery captures carrying unvalidated modern fields is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "begin-recovery",
+    "review-residual"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

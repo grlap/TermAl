@@ -1,0 +1,30 @@
+{
+  "id": "01a10262-b103-7e93-aebb-787cdb151f25",
+  "external_ref": null,
+  "title": "Budget-clock B4a: root_fixture (src/tests/engram_root_dispatch.rs) selects the scripted clock, with an audit of its root_dispatch callers, so the 1 s real bind backoff no longer races queued admission under load",
+  "outcome": "root_fixture chooses the scripted budget clock through the slice-1 boundary before Engram is enabled. Every test that calls root_fixture is audited for its deadline, backoff, elapsed and wait sources: it either advances the scripted clock across its causal boundary, with a positive control, or declares Real with a reason. held_child_initial_and_followup_authorization_survive_polling_then_resume then passes even with an injected delay longer than 1 s between the child's eager bind and its admission, and its about-24 s unloaded runtime is explained or reduced. No production change, no weakened expectation.",
+  "acceptance": [
+    "Budget-clock B4a: root_fixture (src/tests/engram_root_dispatch.rs) selects the scripted clock, with an audit of its root_dispatch callers, so the 1 s real bind backoff no longer races queued admission under load is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a10091-7469-7a31-9d0c-7b894f681b7f",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a102f2-15c6-7132-96aa-f607a5f78af2",
+  "disposal_reason": "Its grandparent w-8f9988de4cb3 (budget-clock slice 1) completed after landing in 98ff008, which blocked B4 and this item; continues as independent work. Criteria concurred by the coordinator on Opus2's exact text (TermAl mailbox 4daa5b87 #1203, note 5d5af595 on w-787cdb151f25).",
+  "completion": null
+}

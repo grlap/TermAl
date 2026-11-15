@@ -1,0 +1,28 @@
+{
+  "id": "01a16e44-e3ad-71f2-bf19-f41359b61686",
+  "external_ref": null,
+  "title": "Turn-END source capture budget is wall-clock in tests too (same shape as w-e574): fixtures can deliver unmeasured under full-suite load",
+  "outcome": "Tests that depend on the turn-end capture completing control its clock the same way w-e574 does for turn-start. Production budget and semantics are unchanged.",
+  "acceptance": [
+    "Turn-END source capture budget is wall-clock in tests too (same shape as w-e574): fixtures can deliver unmeasured under full-suite load is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-control",
+    "nondeterminism"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

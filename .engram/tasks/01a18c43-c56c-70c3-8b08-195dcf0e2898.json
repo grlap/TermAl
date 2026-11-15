@@ -1,0 +1,29 @@
+{
+  "id": "01a18c43-c56c-70c3-8b08-195dcf0e2898",
+  "external_ref": null,
+  "title": "Attempt-only GET /result reads of the current review attempt mutate custody: move capture to an explicit POST or document the slot cost",
+  "outcome": "Attempt-only GET /result reads of the current review attempt mutate custody: move capture to an explicit POST or document the slot cost",
+  "acceptance": [
+    "Attempt-only GET /result reads of the current review attempt mutate custody: move capture to an explicit POST or document the slot cost is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "api",
+    "beads-migrated",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c643-73a1-b8c5-fb35d7e76d72",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

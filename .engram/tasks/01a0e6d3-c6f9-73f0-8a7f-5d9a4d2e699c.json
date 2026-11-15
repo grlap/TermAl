@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6f9-73f0-8a7f-5d9a4d2e699c",
+  "external_ref": "tm-ncc6.13.5",
+  "title": "Decide whether test-run cards appear in the pane's Commands view mode",
+  "outcome": "From /review-changes round 3 (Claude, delegation 46004bcb; gate test-171aa649) on the corrected UI/Test Runs changeset. Note. Test-run cards render in the command-card family, but ui/src/SessionPaneView.messages.ts:20 (commandMessagesForPaneViewMode) keeps only type === 'command', so testRun cards are missing from the Commands view mode. Decide: include 'testRun' there, or record in docs/features/test-runs.md 'Card rendering' that the Commands view deliberately leaves them out.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a1769a77975",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

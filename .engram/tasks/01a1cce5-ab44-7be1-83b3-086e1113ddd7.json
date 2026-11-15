@@ -1,0 +1,35 @@
+{
+  "id": "01a1cce5-ab44-7be1-83b3-086e1113ddd7",
+  "external_ref": null,
+  "title": "Integrate combo67 on 5a907f23: c593 9cba6226 (w-cf4b standalone Urgent view carry), direct child of combo66",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 9cba6226cf6e39e26734ff4f1e2a09a20cb4b144 (tree d13d2f212ff68f0269666fd3a63069d9ee666049) is on origin/master, where master was moved to it by a fast-forward from 5a907f23de23b6182de96fc1c12a883da9bd69cd.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is d13d2f21 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 5a907f23 is byte-identical (same 9 ui/src/panels paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 20041476's contribution against d27ef044, which the WHOLE9 pair Codex session 17561 and Claude session 17562 reviewed with no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree d13d2f21 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo67 (c593 9cba6226, w-cf4b standalone Urgent view carry) landed on master by fast-forward from 5a907f23, pushed at 23:58:21Z. The DL560 FULL test-965308a3 on test ref cc8c3c43 (tree d13d2f21) passed all 6 stages (vitest 5102/0) with an eligible clean input, and the WHOLE9 pair 17561/17562 was adopted under byte-identical contribution. Installed after Greg's restart on Central (9e2a730f, restart rebuild 5ea70fde kept aside) and DL560 (8abf2284), with no restart by the install; ui/dist rebuilt from 9cba6226 and served on :8787. Independent evaluation delegation-e166c2da (Codex 17580) passed 3/3.",
+    "completed_at": "2026-11-12T00:18:03.880409200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

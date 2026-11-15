@@ -1,0 +1,30 @@
+{
+  "id": "01a1c626-3ad8-7092-b692-eeca473d3a52",
+  "external_ref": null,
+  "title": "A review delegation cut by a host restart loses its unsubmitted review progress; no supported way to save and recover partial review bookkeeping",
+  "outcome": "A review delegation cut by a host restart loses its unsubmitted review progress; no supported way to save and recover partial review bookkeeping",
+  "acceptance": [
+    "A review delegation has a supported way to durably record partial review progress (commands run, files inspected, provisional findings) before its final submission, and after a host restart the recovered child (or its follow-up attempt) can read that recorded progress back; a test restarts the host mid-review and shows the progress survives.",
+    "Recorded partial progress is never counted as a submitted review, review credit or coverage by itself; only a final submission is, and a test shows an interrupted review with saved progress still reports no submitted result.",
+    "The interrupted child's result names the interruption and points to the saved progress, so the parent can follow up the same child instead of starting a new review; a test shows it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation-results",
+    "restart",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

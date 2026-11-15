@@ -1,0 +1,72 @@
+{
+  "id": "01a0e6d3-c6c8-77e3-b740-30eca590e985",
+  "external_ref": "tm-rxhl",
+  "title": "Re-inject the current Engram work context into the first continuation after a Claude compaction through a SessionStart compact hook",
+  "outcome": "Observed 2026-09-07 (Phoenix::Fable session-5505, relayed by Engram::Advisor): after a natural Claude compaction the first continuation carried only the runtime summary and the continue instruction; the refreshed Engram work context arrived one turn later. That matches the current host contract - TermAl watches the stream-json compact_boundary system message (src/claude_spawn.rs about line 998) and prepends the engram work next text only to the next runtime prompt it dispatches (src/turn_dispatch.rs about lines 63 and 424; docs/features/engram-host-adapter.md, Start and post-compaction context) - but it leaves the agent acting on summary-only context for one turn. Claude Code documents the intended lifecycle point: a SessionStart hook with matcher compact whose output is injected into that very continuation. TermAl already registers hooks in the Claude initialize request (src/claude_spawn.rs about line 1013, currently an empty object) and already handles hook events on the control channel (src/claude.rs about line 1535), so this is a wiring gap in the host, not a capability gap. Design: (1) register a SessionStart hook with matcher compact as a control-channel callback in initialize for sessions whose project has Engram enabled; (2) on the callback, run the existing bounded engram work next command with the identical actor/session/context flags and ENGRAM environment (reuse run_engram_context_nudge in src/engram_mcp_config.rs: 32 KiB cap, fence-terminator escaping, cold-start budget) off-lock and answer the hook with the text inside the engram-work-context fence as additional context; (3) mark that compaction generation as delivered so the existing next-prompt nudge does not inject a duplicate, keeping it as the fallback when the hook errors, times out or the runtime does not support the hook (verify the installed Claude runtime actually fires SessionStart compact through the initialize-registered hook; record the version evidence); (4) no stdout noise, no static copy in the system prompt, no change to the durable user message; (5) wire tests: a synthetic compact SessionStart hook callback receives the fenced context once, the next prompt after it carries no second block, a failed hook leaves the nudge pending, non-Engram sessions register no hook; docs: update the post-compaction section of the Engram host adapter brief. Coordination: src/state.rs is held by another in-progress changeset, so reuse the existing engram context-nudge generation fields without editing that file; owner Termal::Codex; starts on the operator word.",
+  "acceptance": [
+    "Fail-first: on unchanged code, wire tests show (a) a SessionStart/compact hook_callback control request gets no reply and (b) the first continuation carries no Engram context. The failed run is kept and cited.",
+    "Before any product edit, a live capture under .tmp records: the installed version; initialize with a registered hook and its ack; the callback (event, source, id); its order relative to compact_boundary; the exact success, empty, error and cancel response shapes; and a first-continuation context witness. If unsupported, stop and report; no version bridge.",
+    "Initialize is a snapshot. A session Engram-enabled at initialize registers exactly one SessionStart matcher-compact callback, with its runtime-scoped responder installed before initialize is written; others keep hooks {}. A later enable uses the next-prompt fallback until normal runtime recreation: no restart, no second initialize.",
+    "hook_callback is handled by subtype, matching this runtime's callback id, SessionStart and source compact. The existing bounded nudge preparation runs on a worker: not under the state lock, not on the stdout reader, not blocking the writer. It is correlated by runtime token, callback id, request id, compaction generation and settings identity. It answers once through the single writer with hookSpecificOutput.additionalContext, within existing budgets. Reader and permission traffic stay live. A pre-compaction pending page is never labelled the new generation.",
+    "Delivery is marked only after the writer sends the answer for a still-current, uncancelled request in time; then the next prompt has no second block. Otherwise, including no callback, the generation stays pending and the next prompt carries it. A late worker cannot answer twice, write into a replacement runtime, or consume a newer generation. A disable, reset or project change mid-callback yields an empty or cancelled answer. A valid but unregistered or non-compact callback gets an empty hook answer, never a permission payload. A malformed one gets a bounded protocol error. Other control subtypes are unchanged.",
+    "Replay: the host's compact hook_callback stays a replay barrier for the attempt it reaches, inherited if a prompt waits between turns. Empty, error or cancel clears no barrier. The SessionStart-name exemption is removed for mid-process or unidentified hook frames, both in an open attempt and between turns; startup keeps it only with positive runtime-start evidence. The callback opens or closes no turn, and permission and subagent routing are preserved. Tests cover a user compact hook with no preceding boundary, and waiting-prompt inheritance. No stdout noise, no system-prompt copy, no durable user-message change, no src/state.rs edit while it is held elsewhere.",
+    "docs/features/engram-host-adapter.md's post-compaction section describes the hook, the snapshot scope and the fallback. The outcome's claim that the host \"already handles hook control events\" is corrected.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 8,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Claude SessionStart compact hook: a Claude runtime whose session is Engram-configured at spawn registers one SessionStart matcher-compact callback at initialize. Its answer carries the fenced Engram work context as additionalContext, so the first continuation after a compaction carries the context. The answer is correlated by runtime token, callback id, request id, compaction generation and settings identity, and bounded by a deadline from the callback's arrival to the end of the write. The request lifecycle runs Reading, Queued{expired}, Writing, Settled, and a cancel or expiry during the write revokes delivery. The next-prompt fallback is kept, and replay barriers are preserved. Commit 9c6550c (freeze 6ed57ead, gate test-5216ef7e, review pair c3050e47/6d37d522, evaluation d07d45f2 8/8) landed on master in train 27 as d6ea73c0edd02c4c68b41b12b3ec89acf5cc17ec, pushed and verified by Opus2 (train gate test-a9b1bcad PASS, integration pair 8dabd3e2/54ff9032). Running Claude sessions need the installed build for the hook. Follow-ups: w-50157e64a285 (Low: the hook worker keeps its command Sender through the deadline sleep, also noted by train 27's integration Claude reviewer) and w-0a914e7e32e5 (live proof after restart).",
+    "completed_at": "2026-10-03T22:55:29.676678500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

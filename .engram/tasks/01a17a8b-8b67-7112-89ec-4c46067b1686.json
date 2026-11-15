@@ -1,0 +1,30 @@
+{
+  "id": "01a17a8b-8b67-7112-89ec-4c46067b1686",
+  "external_ref": null,
+  "title": "Make carried-check and watcher provenance tests honor long and nested scratch paths",
+  "outcome": "The three reported test assertions honor existing product contracts on long or nested .tmp paths: reported paths may be middle-elided while retaining the filename, and valid provenance explanations may include the ancestor-scratch routing detail. Preserve provenance, timing and source-refusal guards without product changes.",
+  "acceptance": [
+    "The carried-check assertion validates the existing middle-elision and filename contract instead of the full reported absolute path; the product display bound is unchanged.",
+    "The two watcher-provenance assertions accept the optional ancestor scratch-routing detail while still pinning provenance, modification time and source-refusal facts.",
+    "One exact-input focused run exercises the corrected fixtures with a long, nested .tmp ancestor placement, followed by the standard independent full-input review pair and the integration owner's gate and landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "macos",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

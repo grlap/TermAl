@@ -1,0 +1,28 @@
+{
+  "id": "01a16ebc-bb3e-7090-bbb3-043f03e02a76",
+  "external_ref": null,
+  "title": "Turn-start capture test seam: make the wall-delay test a direct budget-policy assertion, and unit-test the production budget arithmetic and zero-wait overrun",
+  "outcome": "Two test-quality follow-ups to the cfg(test) turn-start capture clock in src/engram_turn_observations.rs.\n(1) source_observation_audit_fixture_holds_when_real_time_passes_the_capture_deadline guards the test-mode budget policy, failing if that budget ever reads the deadline or the wall clock again. It does not simulate load. Rename it, or replace it with a direct assertion that engram_turn_start_capture_budget(stale deadline) == TEST_PHASE_DEADLOCK_GUARD, or drop WallDelayed.\n(2) No test exercises the production budget arithmetic (deadline.saturating_duration_since(now), shared by the cleanup flush and the capture), and the armed Expired path skips engram_source_basis_within entirely. Move the arithmetic into a pure remaining(deadline, now) helper with a unit test, and optionally add an Expired variant that goes through engram_source_basis_within with Duration::ZERO, so the zero-wait overrun is covered.",
+  "acceptance": [
+    "Turn-start capture test seam: make the wall-delay test a direct budget-policy assertion, and unit-test the production budget arithmetic and zero-wait overrun is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "review-follow-up",
+    "test-infrastructure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1787d-5696-7740-8171-4a22ec5dfa13",
+  "external_ref": null,
+  "title": "Recovered Codex thread asks for MCP tool approval although TermAl's Codex default is approval=never (Mac, session 6186)",
+  "outcome": "A Codex thread that TermAl recovers automatically, for example after a missing rollout, runs with the same effective approval policy as the session's configured settings (approval=never by default), through the existing settings owner, so no MCP tool-approval prompt appears where none would for a non-recovered thread.",
+  "acceptance": [
+    "DIAGNOSIS (under Greg's STOP, before any code): a note on master 0fb7b034 identifies, with file and line, (a) the existing owner of a Codex session's approval policy and settings inheritance, (b) the route that creates the recovered thread after a missing rollout, and (c) whether that route passes the session's approval policy through the existing owner or builds its own. It states, with evidence, whether recovered threads lose approval=never and why. It cites the Mac's effective settings for 6186's recovered thread 01a17877 and for a non-recovered Codex session, read-only through the host API.",
+    "No duplicate settings mechanism: any later fix reuses the existing settings owner. Fix criteria are proposed separately and concurred by the coordinator. Implementation starts only on an explicit exemption from Greg's STOP."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "approval-policy",
+    "codex",
+    "cross-machine",
+    "greg-reported"
+  ],
+  "assigned_to": "Termal::Sol-03d4",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

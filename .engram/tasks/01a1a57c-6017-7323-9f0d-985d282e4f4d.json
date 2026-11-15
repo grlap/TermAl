@@ -1,0 +1,32 @@
+{
+  "id": "01a1a57c-6017-7323-9f0d-985d282e4f4d",
+  "external_ref": null,
+  "title": "Log in, log out and switch the Codex account without restarting the machines or TermAl",
+  "outcome": "An operator can change which Codex account TermAl's Codex sessions use, wherever technically possible without restarting the machine or TermAl, with running sessions handled safely and no silent change of identity or lost work.",
+  "acceptance": [
+    "The current mechanism is documented from source: where TermAl's Codex homes get their credentials, why a machine or TermAl restart was needed on 2026-11-04, and which part of a switch Codex itself allows without a restart",
+    "An operator can log in, log out and switch the Codex account on a host from a supported TermAl surface, or the documented reason names what Codex doesn't allow; no secret is shown, logged or sent across hosts",
+    "Sessions running at the moment of a switch have defined behaviour: a turn in progress isn't silently continued under a different identity, and the session's history and queued work are kept; a test covers it deterministically",
+    "Each host's active account identity, without secrets, is visible after a switch, and a failed switch leaves the previous login usable and reports why"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "after-eo",
+    "auth",
+    "codex",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

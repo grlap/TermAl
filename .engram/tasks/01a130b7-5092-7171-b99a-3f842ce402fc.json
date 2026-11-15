@@ -1,0 +1,28 @@
+{
+  "id": "01a130b7-5092-7171-b99a-3f842ce402fc",
+  "external_ref": null,
+  "title": "Receipted delivery: compute recovered_admission after the restart settlement of receipted entries",
+  "outcome": "Receipted delivery: compute recovered_admission after the restart settlement of receipted entries",
+  "acceptance": [
+    "A loaded session whose only Engram-intent queue entry was removed by the restart settlement of an ambiguous receipt does not set recovered_admission and does not pause its queue for it",
+    "A load test covers that case and the case where another Engram-intent entry remains"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

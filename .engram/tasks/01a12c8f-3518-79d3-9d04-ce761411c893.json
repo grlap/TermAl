@@ -1,0 +1,61 @@
+{
+  "id": "01a12c8f-3518-79d3-9d04-ce761411c893",
+  "external_ref": null,
+  "title": "Retry-record acknowledgement fences run on the real clock even in scripted-clock fixtures",
+  "outcome": "Decide and implement whether a retry record's durable-acknowledgement fence (src/engram_retry_schedule.rs ~:295-300, requested through request_engram_abort_acknowledgement_locked) should use the state's budget clock, so that fixtures on a scripted clock depend on that one clock alone. Today the fence deliberately uses the real clock (\"nobody waits on it on the scripted one\"). A writer delayed beyond the fence's 20 real seconds lets it expire: the test's ticks then request a fresh acknowledgement instead of reaching dispatch, so a scripted-clock test's outcome can change with real elapsed time. This affects every admission and abort retry test, not only the prepared-begin ones. The fix either moves the fence to the budget clock (no production change, since that clock is real in production) or states, in docs/test.md, why the real clock is required there.",
+  "acceptance": [
+    "C1 (fail-first, unbound): At base (the stacked base, w-cfcf10b68c9b's frozen tree a156d01e988c214899a4ddc6aaa3c2fc32a15c63ee16f33028c023e97611671a), a scripted-clock test withholds the writer's acknowledgement of a parked retry record and advances ONLY the scripted budget clock past ENGRAM_ABORT_SETTLEMENT_FENCE: the retry step still reports Wait (the same fence kept, no re-request) because the fence is measured on the real clock. A holder note cites the host-recorded failed check, its log path and sha256.",
+    "C2: The retry-record acknowledgement fence's deadline and its poll use the state's EngramBudgetClock for abort, admission and bind retries; production is unchanged (the Real clock reads Instant::now()). Scripted-clock tests show the fence still pending just before its deadline and expiring exactly at it (a fresh acknowledgement request), with its outcome never depending on real elapsed time; a late acknowledgement resolved at or after the deadline is a Deadline, as for every scripted fence.",
+    "C3: Test fixtures that script a dispatch's own admission fences (AcknowledgingWriter and its barrier in src/tests/engram_begin_unknown_recovery.rs, and any other writer fixture that distinguishes fences by clock) tell a dispatch fence from a retry-record acknowledgement fence by something other than the fence's clock, and every existing abort, admission, bind, begin-unknown, begin-replay, begin-boot and begin-preparation retry test passes with its assertions unchanged.",
+    "C4: No sleep, polling, watchdog, new timer or enlarged timeout; ENGRAM_ABORT_SETTLEMENT_FENCE keeps its value.",
+    "C5: docs/test.md or the engram-host-adapter feature doc states that retry-record acknowledgement fences are measured on the budget clock.",
+    "C6: The full gate passes on the exact reviewed tree.",
+    "C7: The review pair has no outstanding Medium or higher, and an acceptance evaluation is made by an evaluator that never held the item."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a11ed8-fcf7-7bb3-9c2d-cfcf10b68c9b"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed and committed as 2c44e013ef8e7ebcb2c5040e08e1e0a300a6af72 on base eba8b2f22863c7c543918a6761a5daf6f8565efd. Exact staged 10-path input passed full gate test-58af6ca7-9cf1-48e2-a469-967ca3dbaa6e (5/5); typed verification e7b49d7c2e9342569736652ad2934a7d. Independent acceptance evaluation 3a4c4390b55549a4b32f3e1442bd7289 passed 7/7. Codex/Claude review pair reported no actionable findings. Commit, gate, review and evaluation evidence were handed to Opus2/session-8111 for integration; this worktree did not push.",
+    "completed_at": "2026-10-12T18:55:19.665398100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

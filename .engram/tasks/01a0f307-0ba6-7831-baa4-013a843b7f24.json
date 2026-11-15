@@ -1,0 +1,30 @@
+{
+  "id": "01a0f307-0ba6-7831-baa4-013a843b7f24",
+  "external_ref": null,
+  "title": "Containment test native_windows_launch_intermediate_exit_does_not_close_root_lease asserts the leaf survives its parent; it does not, so the test passes only by a race",
+  "outcome": "src/tests/windows_launch.rs::native_windows_launch_intermediate_exit_does_not_close_root_lease terminates the middle process of the root, middle, leaf fixture chain and then asserts, at line 328, that the leaf (members[2]) is still running (WaitForSingleObject … 0 == WAIT_TIMEOUT). The leaf does not survive its parent: in the fixture scripts/fixtures/windows-containment.cjs each child is forked with an IPC channel to its parent, and the leaf exits within about a millisecond of the middle's termination. The assertion therefore holds only when the test thread reaches it before the leaf has reacted, and fails otherwise. It failed in a full gate on a docs-only input (run test-d434dbd3-a5c9-4f3e-83f3-2f23382742cd, left 0, right 258) after passing in the previous gate on the same source (run test-b0489f74-3a92-4335-b64e-ede36edf4386).\nClassification: test defect (the test asserts a transient state of its own fixture), not a product defect and not an environment fault. What the test is for, that an intermediate exit does not close the host's lease on the root, is the assertion on members[0] at line 324, which held: the root was alive in every sample of the diagnostic.\nFix direction: either drop the leaf assertion and assert only that the root is still running and that the job closes everything at cleanup, or make the leaf independent of its parent's IPC channel in the fixture (for example a leaf mode that does not depend on the channel after readiness) and assert its survival with a readiness barrier, not at an instant. No timeout change and no retry.",
+  "acceptance": [
+    "A diagnostic or test shows the corrected test passing 50 consecutive times under the full Rust test suite's parallel load.",
+    "The full gate passes on the landed input.",
+    "The test no longer asserts a state of the fixture that the fixture does not hold: either the leaf assertion is removed, or the fixture's leaf provably survives the middle's termination and the test shows it without depending on timing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "containment",
+    "gate",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

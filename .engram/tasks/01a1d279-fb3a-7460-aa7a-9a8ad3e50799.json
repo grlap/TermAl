@@ -1,0 +1,30 @@
+{
+  "id": "01a1d279-fb3a-7460-aa7a-9a8ad3e50799",
+  "external_ref": null,
+  "title": "Exercise confirmed-claim movement during evaluator evidence recovery IO",
+  "outcome": "A recovery-enabled evaluator on an actual confirmed source claim fails closed when that claim becomes unconfirmed during evidence IO, retaining its original unfinished reason without exposing stale proof.",
+  "acceptance": [
+    "A behavioral control uses an actually confirmed source claim and demonstrates successful recovery when it stays unchanged, then changes claim confirmation during IO and verifies unfinished, recorded=false, no exposed proof, identical no-IO replay and retained reason.",
+    "The test passes in a registered committed-input run and adds no text-pinning or Markdown phrase tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "evaluation",
+    "evidence",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c9e8-f08e-7e33-9407-277b7077a6ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

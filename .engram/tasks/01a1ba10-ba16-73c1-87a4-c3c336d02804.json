@@ -1,0 +1,30 @@
+{
+  "id": "01a1ba10-ba16-73c1-87a4-c3c336d02804",
+  "external_ref": null,
+  "title": "Keep historical verification record format selection under host-owned provenance",
+  "outcome": "Historical Commit replay remains readable in its original form while an agent-written body file cannot select a legacy writer format for a newly registered SourceId run.",
+  "acceptance": [
+    "Keep historical verification record format selection under host-owned provenance is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "review-low",
+    "source-identity",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b9c2-867d-7371-88d4-7c5db7d2b5a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

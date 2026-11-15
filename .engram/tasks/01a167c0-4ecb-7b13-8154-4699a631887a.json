@@ -1,0 +1,33 @@
+{
+  "id": "01a167c0-4ecb-7b13-8154-4699a631887a",
+  "external_ref": null,
+  "title": "Make the Windows state-path relative-spelling cwd precondition explicit",
+  "outcome": "Relative-spelling path controls explicitly validate their cwd versus manifest-root assumption or derive spellings from the actual cwd, so unsupported direct binary invocation fails with a clear precondition rather than an unexplained missing file.",
+  "acceptance": [
+    "Relative spellings are derived from the actual cwd or preceded by a clear native/canonical cwd precondition; supported Cargo and launcher execution retains discriminating existing-entry checks.",
+    "No process-global cwd mutation, sleeps, retries or weaker guard assertions are introduced; relevant focused controls pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "gate-failure",
+    "pre-existing",
+    "review-follow-up",
+    "test-runner",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16534-0d24-7881-8ebe-11f5eab5c235",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

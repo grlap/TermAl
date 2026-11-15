@@ -1,0 +1,29 @@
+{
+  "id": "01a1b91d-1a57-7cb0-8d0b-aef5fd996c06",
+  "external_ref": null,
+  "title": "Exercise Claude no-trace declared foreground completion through the real parser",
+  "outcome": "Behavioral fixtures verify Claude Attempt provenance and real tool-result parsing for declared foreground observations without an Engram trace.",
+  "acceptance": [
+    "Use the real Claude tool-result parser without Engram or with execution observability disabled; cover ReportedSuccess with PASS and FAIL artifacts, plus is_error without a numeric exit.",
+    "Assert the original row and completion wait agree, turn-generation ownership is preserved, and no numeric exit or native verification credit is fabricated."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "declared-commands",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

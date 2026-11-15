@@ -1,0 +1,38 @@
+{
+  "id": "01a1b4b5-8850-7880-a698-37d945d4b7ca",
+  "external_ref": null,
+  "title": "Claude native declared run with large console output is registered but settles unknown/interrupted and sends no verification (Questly Linux C1)",
+  "outcome": "A Claude agent's exact declared native command, run as the first tool activity with a passing artifact, either earns native credit or is refused with a named reason that matches the actual cause (output cut, background start or task completion). The host's run rows don't show a misleading 'ended without a test verdict or exit code' when the original tool result reported success.",
+  "acceptance": [
+    "A host-observed run of the declared command as the turn's first tool action gets its verification from the frozen declared result artifact, which is the verdict (PASS or FAIL) under the unchanged schema, size, identity and binding checks. It also needs full source_id S0 == after and the existing identity, claim, root and store checks. Provider output truncation or persistence, a move to the background, or the absence of an exit code or verdict notice does not by itself make such a run interrupted, uncertain or ineligible, and no new condition (for example 'foreground') replaces them.",
+    "Real failures still earn no PASS credit: a missing or failing artifact, an unavailable or different source_id, a preceding tool activity, a wrong turn, identity, claim, root or store, or a process killed before the artifact's END was frozen.",
+    "A note on this item lists every condition in the native credit path that can withhold credit, each marked as part of the agreed EO (kept) or not agreed (removed).",
+    "For an already-run execution withheld only by a removed rule (Questly Linux test-d6a9e68d on DL560), the fixed host sends its verification_record from the retained request, results and artifact without a rerun. If the retained data cannot support that, the exact gap is recorded and one run on the fixed build replaces it.",
+    "Behaviour tests cover a cut-output success, a background-moved success with a valid artifact, a missing or failing artifact and source drift. The candidate lands under the standing rule (review pair, FULL) and runs after restart 2."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "eo"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Removed unagreed native-credit blockers; delivered in 30ddf016 and running after restart 2. Agreed identity/source/artifact safeguards retained. Questly Linux fixed-build proof credited 1820/0 without exit status.",
+    "completed_at": "2026-11-07T15:31:48.825274300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

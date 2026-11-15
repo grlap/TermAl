@@ -1,0 +1,27 @@
+{
+  "id": "01a16797-7660-7672-9d26-38772ebaa09a",
+  "external_ref": null,
+  "title": "The Claude gate-write guard is bypassed after an \"accept for session\" switches the CLI to acceptEdits",
+  "outcome": "A Claude session whose user accepted an edit \"for the session\" (SetPermissionMode acceptEdits) cannot write into a creditable, unsettled gate's worktree unseen: either the guard still sees those writes, or the doc names this path explicitly as uncovered.",
+  "acceptance": [
+    "The Claude gate-write guard is bypassed after an \"accept for session\" switches the CLI to acceptEdits is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

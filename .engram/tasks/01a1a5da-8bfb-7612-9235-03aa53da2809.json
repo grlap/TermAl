@@ -1,0 +1,37 @@
+{
+  "id": "01a1a5da-8bfb-7612-9235-03aa53da2809",
+  "external_ref": null,
+  "title": "Reclamation scheduler parity test reaches its completion boundary after the 60s deadlock guard on parent 91a3",
+  "outcome": "The scaled scheduler parity witness completes through its real scheduled-pass boundary with reliable phase ownership, or fails promptly with the actual scheduling/refusal cause. Diagnose and repair the confirmed product or fixture cause without increasing timeouts, discarding failures or weakening plan/flight/durability assertions.",
+  "acceptance": [
+    "A diagnosis distinguishes unscheduled return, worker failure, blocked persistence/locking and slow progress using the preserved original and parent phase evidence; it names the confirmed cause and remaining limits rather than inferring load or a deadlock.",
+    "A targeted regression or fixture correction preserves scaled snapshot/reference-plan parity, actual pass/flight ownership and existing durability/authority behavior; early scheduling refusals are asserted before waiting, and no timeout is increased or successful retry treated as diagnosis.",
+    "Focused affected scheduler/reclamation tests and the required exact-input full gate pass on the repaired input, with the original failures retained."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "reclamation",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Diagnosed unintended scaled fixture recovery against frozen logical time; corrected coherent authority fixture and strengthened scheduler/flight/refusal coverage without timeout or product changes. Landed130d38e6 after reviewed byte-equal carry, focused14 and exact-tree FULL PASS.",
+    "completed_at": "2026-11-04T21:52:48.423167200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

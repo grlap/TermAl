@@ -1,0 +1,49 @@
+{
+  "id": "01a16942-9c8a-7420-8493-f8d8098980f2",
+  "external_ref": null,
+  "title": "Test that the carried-binding 409 on the automatic evaluator refresh leaves no reservation, and word it for the evaluator child",
+  "outcome": "Test that the carried-binding 409 on the automatic evaluator refresh leaves no reservation, and word it for the evaluator child",
+  "acceptance": [
+    "When an evaluator's submission is refused with acceptance_evaluation_resubmit and the host's automatic refresh then meets the carried-binding refusal, the evaluator child receives a 409 that tells it to finish and report to its parent and that names the refusal and its rule. A test shows it and fails on the unchanged code.",
+    "After that 409 nothing is left behind: a new automatic reservation of the same evaluator succeeds, no prepared brief is installed, the evaluator's attempt key and evidence basis are unchanged, and no further evaluate is sent. Tests show it.",
+    "The full gate passes on the landed input.",
+    "The /review-changes pair has no outstanding in-scope Medium or higher finding on the reviewed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

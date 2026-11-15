@@ -1,0 +1,28 @@
+{
+  "id": "01a19890-6d43-7aa2-95aa-1d1c727fe971",
+  "external_ref": null,
+  "title": "Shared Codex app-server is not in a kill-on-close job, so its process tree (including Engram MCP children) is not guaranteed to end when TermAl exits",
+  "outcome": "The shared Codex app-server and its whole process tree are assigned to a kill-on-close job at spawn (suspended, attached, then resumed), as spawn_dedicated_runtime does, so they end whenever TermAl exits.",
+  "acceptance": [
+    "Shared Codex app-server is not in a kill-on-close job, so its process tree (including Engram MCP children) is not guaranteed to end when TermAl exits is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "cross-project",
+    "process-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

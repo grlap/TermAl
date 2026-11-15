@@ -1,0 +1,43 @@
+{
+  "id": "01a10f0d-5512-7dd2-a90c-64cb3c65d6fa",
+  "external_ref": null,
+  "title": "A reported file edit fences every carried gate of the session even when its tool-reported target is outside the gate's worktree (edits are not placed)",
+  "outcome": "A reported file edit fences every carried gate of the session even when its tool-reported target is outside the gate's worktree (edits are not placed)",
+  "acceptance": [
+    "A recorded design decision says whether a reported file edit whose tool-reported target is an absolute path may be placed, and under what conditions: the canonical path resolves outside every carried check's worktree root, links are resolved, and the path is not ambiguous. It also says which runtimes' edit reports are reliable enough for that, keeping fail-closed fencing for any edit TermAl cannot place",
+    "If placement is adopted, a fail-first test shows an edit with an absolute target outside the gate's worktree no longer fences that carried check, while an edit inside it, an edit with a relative or unplaceable target, and an edit through a link into the worktree still fence it",
+    "cargo test --bin termal passes"
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-gate",
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

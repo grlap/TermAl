@@ -1,0 +1,27 @@
+{
+  "id": "01a12bc4-fdae-7c23-8574-c1bd588b903a",
+  "external_ref": null,
+  "title": "Continue a known-applied Begin whose receipt came after the admission deadline without another Begin, and cancel it through the applied-grant settlement",
+  "outcome": "A head whose matching applied-Begin receipt was first observed at or after its 240-second admission deadline is held (w-cfcf10b68c9b, option A). Today its Resume replays that same Begin by idempotency key, and Cancel records it as possibly begun. Per Architect2's full ruling (note 96a0769a on w-cfcf10b68c9b), the host should instead keep the known-applied grant in an explicit held state. An accepted Resume should continue that same still-valid grant and the original prompt with no Begin RPC and no fresh evaluate, after revalidating the current owner and binding, the grant lifecycle and the persisted provider-delivery disposition. It should not resend if already delivered, and should reconcile if delivery is uncertain. If the grant is closed or invalid, the host reports that and uses the existing explicit close/settlement path before any new admission. Cancel uses the existing applied-grant settlement and never relabels the Begin not_started.",
+  "acceptance": [
+    "Continue a known-applied Begin whose receipt came after the admission deadline without another Begin, and cancel it through the applied-grant settlement is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

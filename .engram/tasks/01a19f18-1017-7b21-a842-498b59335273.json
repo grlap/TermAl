@@ -1,0 +1,40 @@
+{
+  "id": "01a19f18-1017-7b21-a842-498b59335273",
+  "external_ref": null,
+  "title": "Remove unused UI extraction artifacts and mock session data",
+  "outcome": "The unused AppControlSurface extraction text files and mockData module are removed, and current inventories no longer list the removed module as available.",
+  "acceptance": [
+    "Delete only ui/src/AppControlSurface.extracted.txt, ui/src/AppControlSurface.identifiers.txt and ui/src/mockData.ts; update only their relevant inventory references in docs/metadata-first-phase0-inventory.md and docs/metadata-first-state-plan.md, preserving incident/history content and current UI behavior.",
+    "Complete tracked-reference/import searches show no current producer/consumer depends on the removed files; TypeScript and full Vitest checks pass on the exact clean candidate and the independent Codex/Claude read-only review pair has no outstanding Medium or higher finding.",
+    "Hand the exact base/commit/tree, check and review evidence to integration for the coordinator's green-FULL queue; no landing is asserted without that gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "legacy-cleanup",
+    "legacy-scan",
+    "read-only",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a19ef2-54b4-7661-a602-1fd8f197b596",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only UI cleanup delivered: candidate d23c15eb/tree12e5dcb8/base87f49ed0 removes only three unused artifacts and updates two relevant historical inventories. No active consumers, six-lens independent Codex/Claude pair clean, TS PASS and fullVitest280files/4988tests PASS on clean exactinput. Exact handoff to integration/Fable; source root frozen. FULL/landing remains queued and is not asserted.",
+    "completed_at": "2026-11-03T02:14:10.847291400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

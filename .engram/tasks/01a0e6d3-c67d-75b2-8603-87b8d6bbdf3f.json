@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c67d-75b2-8603-87b8d6bbdf3f",
+  "external_ref": "tm-o5lc",
+  "title": "tm-97wp follow-ups: test header wording, begin-basis assertion, ignored-path sentence",
+  "outcome": "Deferred from the tm-97wp change (input 421eb529; gate test-c46b4eac passed; review pair: Codex none, Claude 1 Low and 1 Note; Termal::Fable 1 Low). None blocks the fix. Do them with the next change to src/tests/engram_turn_observations.rs; tm-5gi4 phase 2 touches it.\n1. Claude Low: the module header of src/tests/engram_turn_observations.rs (around line 5) still calls the file-change tracking 'only a lower bound'. Reword: the tracking decides only when the closing basis is missing.\n2. Termal::Fable Low: a_watcher_event_without_a_content_change_is_no_source_change should assert that the turn began with a basis, as a_turn_without_a_closing_basis_is_judged_by_its_watcher_event does, so a failed begin capture is named as such.\n3. Claude Note: docs/features/engram-host-adapter.md should say outright that, when both bases exist, a turn that writes only paths content-v1 does not cover (gitignored files) reports no source change.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

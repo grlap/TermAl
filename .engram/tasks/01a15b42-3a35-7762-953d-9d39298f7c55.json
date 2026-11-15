@@ -1,0 +1,29 @@
+{
+  "id": "01a15b42-3a35-7762-953d-9d39298f7c55",
+  "external_ref": null,
+  "title": "Add identity and terminal-status controls for background test-observation completion",
+  "outcome": "Background test-observation completion has discriminating coverage for stale runtimes, unrelated or ambiguous keys, original-turn attribution and non-completed terminal statuses, while preserving genuinely live runs and exact evidence.",
+  "acceptance": [
+    "Tests exercise replaced-runtime or stale terminal notices, unrelated/non-test or ambiguous keys, original-turn or Unattributed origins, and failed/killed completion without altering unrelated observations or inventing artifact/verification associations.",
+    "The additional controls use production frame/settlement paths and preserve the existing genuine-live and no-guessed-artifact assertions; focused checks pass on their exact input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

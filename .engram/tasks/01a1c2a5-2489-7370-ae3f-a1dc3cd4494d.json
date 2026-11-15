@@ -1,0 +1,29 @@
+{
+  "id": "01a1c2a5-2489-7370-ae3f-a1dc3cd4494d",
+  "external_ref": null,
+  "title": "Block alternate-ref command execution in existing read-only Git revision listings",
+  "outcome": "Existing read-only Git listing commands cannot reach core.alternateRefsCommand through argv or stdin pseudo-options.",
+  "acceptance": [
+    "Read-only Git listing requests that can dispatch configured alternate-ref commands are refused, including options supplied through stdin.",
+    "Behavioral tests cover the affected existing command families while ordinary listing commands remain admitted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "git",
+    "read-only-gate",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

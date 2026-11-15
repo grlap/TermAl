@@ -1,0 +1,28 @@
+{
+  "id": "01a10084-1ea6-7cb1-a3ee-02a94e63cb04",
+  "external_ref": null,
+  "title": "An acceptance-evaluation submission is refused with a 500 \"Deadline\" when the state writer does not acknowledge its pending record within 5 s, so the evaluator must resubmit",
+  "outcome": "An acceptance-evaluation submission is refused with a 500 \"Deadline\" when the state writer does not acknowledge its pending record within 5 s, so the evaluator must resubmit",
+  "acceptance": [
+    "An acceptance-evaluation submission is refused with a 500 \"Deadline\" when the state writer does not acknowledge its pending record within 5 s, so the evaluator must resubmit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "load-sensitive"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a132ba-3165-7383-848e-01e5d84a1303",
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: duplicate — Same slow-writer pending-submission 500 as the fuller retry-safe outcome item. Source: src/acceptance_evaluation_api.rs:2556. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

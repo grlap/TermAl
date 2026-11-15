@@ -1,0 +1,24 @@
+{
+  "id": "01a1c0ff-bda8-7ca1-bdab-3dcdf9495957",
+  "external_ref": null,
+  "title": "Read-only reviewer gate refuses harmless Git reads: combined commands, git cat-file -t, git rev-parse with ^^{tree}",
+  "outcome": "Read-only children can run these read-only Git forms, or each refusal names what to use instead, so reviewers and evaluators don't spend commands recovering. Reported by session-12329 for evaluator session-17048, delegation-fdb484f0-fbe6-42d5-be69-544409a622a4 (combined status/log/diff, rev-parse HEAD^^{tree}, cat-file -t); Claude reviewers 17016, 17027 and 17047 report similar policy refusals of cat-file. All recovered with no coverage gap, so this costs time, not correctness. Exact refusal text isn't in the results. Dedup: searched for 'read-only gate refuses', w-81435dcf92ef is a different defect (delegation id form), and a broad 'read-only' search matched 1306 items that I didn't exhaust.",
+  "acceptance": [
+    "Read-only reviewer gate refuses harmless Git reads: combined commands, git cat-file -t, git rev-parse with ^^{tree} is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

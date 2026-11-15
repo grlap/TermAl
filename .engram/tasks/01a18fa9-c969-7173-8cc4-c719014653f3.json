@@ -1,0 +1,31 @@
+{
+  "id": "01a18fa9-c969-7173-8cc4-c719014653f3",
+  "external_ref": null,
+  "title": "Adopt Greg's post-run debris rule in TermAl's standing commit rule (CLAUDE.md, AGENTS.md, /review-changes)",
+  "outcome": "TermAl's standing commit rule accepts a full gate whose only post-run difference is newly created untracked, non-ignored debris, recorded by the integration owner and excluded from the committed tree. The wording is identical to Engram's counterpart w-e68590888978, and it lands only after the instruction-change conditions (a), (b) and (c).",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md carry, in identical hunks, the candidate-commits bullet and the concurred clarifications T1 (landing defined as committing on master or fast-forwarding master to a candidate commit, the three conditions holding for the exact commit being landed), T2 ('before every landing') and T3 (the relayed-word sentence naming the candidate-commits bullet), exactly as in the frozen final4 input concurred on this item.",
+    ".claude/commands/review-changes.md and .claude/commands/fix-bug.md carry the concurred candidate-commit paragraphs and authority clarifications exactly as in the frozen final4 input, without the removed integration-commit sentence and without any review-reuse rule.",
+    "CLAUDE.md, AGENTS.md and .claude/commands/review-changes.md carry the concurred post-run debris gate clause (newly created untracked, non-ignored paths recorded by the integration owner as non-input debris and excluded from the committed tree), landing together with or after TermAl's launcher support for it.",
+    "Each landing step lands under the instruction-change conditions (a), (b) and (c), with a clean review pair on its exact input and a green full gate on the exact landed commit or tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "authority",
+    "cross-project",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

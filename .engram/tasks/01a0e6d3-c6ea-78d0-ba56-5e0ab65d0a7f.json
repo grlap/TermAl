@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c6ea-78d0-ba56-5e0ab65d0a7f",
+  "external_ref": "tm-uex8",
+  "title": "Adopt the shared Engram test launcher for TermAl gates",
+  "outcome": "Authorized by Greg via Engram::Advisor mailbox #136 on 2026-09-22: adopt the same runner implemented by Engram::Codex/session-5132 (Engram w-534213778b0a, scripts/test-launcher.mjs), not another per-run script system. Supervisor Termal::Codex/session-4982 coordinates reuse; sole TermAl implementer/test owner remains Termal::Coder/session-7223. Integration boundary: first finish the separately user-authorized commit/push/Beads sync of the reviewed Final16 product snapshot with tm-wh6h.1/.2/.3 open; adopt runner in a separate subsequent changeset. Do not invalidate existing gate/review evidence or start overlapping gates. Reuse execution/log-filtering/terminal-result/notification-only retry behavior and adapt repository gate plan for cargo check, TypeScript, fingerprint self-tests, native Git Bash Rust wrapper, Vitest, focused checks and pinned disposable Engram live suite. No production UI build, ui/dist mutation, install, restart or live-store changes.",
+  "acceptance": [
+    "Small launcher fixtures pass; actual worker-to-coordinator detached completion wakes a yielded turn exactly once in the ordinary path. Full logs stay on disk, diagnostics are bounded failures/warnings, actual exits are independent of extraction, fail-fast unrun stages are explicit, missing terminal report is UNKNOWN, and notification retry never reruns tests. Validate required final repository gates and dual read-only review for the runner changes. No polling/watcher agent or selfsend/identity spoofing. Reuse upstream implementation and state the repository adaptation boundary."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

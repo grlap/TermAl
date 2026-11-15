@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6de-7cd0-a988-4a005792ec10",
+  "external_ref": "tm-tqir",
+  "title": "Wait registration returns 201 before a background-queued commit is durable (delegation and run waits)",
+  "outcome": "Found by Termal::Fable in the contract read of the run waits (mailbox #33, SHOULD 5), a pre-existing parity gap. create_delegation_wait (delegations.rs ~1083) and create_test_run_wait (test_run_waits.rs) push the wait and commit_locked, then return 201; with the background persist worker the commit is only queued, so a crash right after the response can lose a wait the agent was told is durable (the MCP tool text says 'durable'). PersistFenceTarget::WaitRegistration (persist_fence.rs) exists for exactly this but is dead code outside tests. Fix: fence both registrations (a TestRunWaitRegistration target mirroring WaitRegistration, bounded wait) before returning, or soften the tool wording. Test: background-queued persist whose fence resolves late -> the response waits for it; a failed fence -> 500 and the wait is not left half-registered.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

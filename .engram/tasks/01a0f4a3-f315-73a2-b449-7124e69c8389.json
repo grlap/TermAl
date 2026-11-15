@@ -1,0 +1,31 @@
+{
+  "id": "01a0f4a3-f315-73a2-b449-7124e69c8389",
+  "external_ref": null,
+  "title": "Decide navigation-preserving loss repair for attached scrolled-up readers",
+  "outcome": "Coordinator explicitly decides whether attached-but-scrolled-up demand requires the same bounded selected-window repair exception as detached history.",
+  "acceptance": [
+    "A public position/ID regression pins the approved loss recovery behavior; preserving raw pixel scroll alone is insufficient evidence.",
+    "Record the coordinator's scope decision for resident900..999 reading910 with hasNewerHistory=false."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-low",
+    "scope-decision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-5d29-7ca3-9a2e-f26d7c2e64fe",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

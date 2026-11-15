@@ -1,0 +1,28 @@
+{
+  "id": "01a18524-fe48-7ea2-8d19-03f5e1cd2f30",
+  "external_ref": null,
+  "title": "Delegation spawn silently drops a slash command's arguments when the command template has no $ARGUMENTS (e.g. /review-code), so reviewer instructions never arrive",
+  "outcome": "termal_spawn_session never discards caller text without saying so. For a prompt-template command whose content has no $ARGUMENTS, non-empty arguments are either appended (like a note) or refused with an error that names the ` -- note` form. The stored delegation prompt is exactly what the child receives.",
+  "acceptance": [
+    "Delegation spawn silently drops a slash command's arguments when the command template has no $ARGUMENTS (e.g. /review-code), so reviewer instructions never arrive is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "delegation",
+    "review-pair"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

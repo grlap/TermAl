@@ -1,0 +1,36 @@
+{
+  "id": "01a130ac-e591-7a31-acc7-a5fe864bcbb0",
+  "external_ref": null,
+  "title": "Document carried Codex tests, Unknown closure of unended checks, late-end observation lines and capacity/snapshot notices",
+  "outcome": "docs/features/engram-host-adapter.md has a \"Carried Codex tests\" subsection covering the carry at the turn close, the end taken by exact item key, stranding on runtime exit, Stop or replacement, the restart marker's Unknown line and the shared four-slot limit; plus a note on Unknown closure of unended checks, late-end observation lines and capacity/snapshot refusal notices. docs/test.md cross-links it where it describes carried launcher gates.",
+  "acceptance": [
+    "Both documents describe the behaviour as it landed, with cross-links both ways.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

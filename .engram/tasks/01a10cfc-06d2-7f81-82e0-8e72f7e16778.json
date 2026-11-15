@@ -1,0 +1,86 @@
+{
+  "id": "01a10cfc-06d2-7f81-82e0-8e72f7e16778",
+  "external_ref": null,
+  "title": "General, extensible test-runner recognition: agents run their real test command without host friction; structured exit/output/result evidence; framework adapters (first: the team's .NET NUnit/xUnit shapes); PASS only on affirmative run evidence",
+  "outcome": "Pilot: a command declared in termal-tests.toml, run exactly as declared, is a test check judged from its TRX (or, if it fits, JUnit) result artifact as PASS, FAIL or UNKNOWN per the concurred pilot wording; docs land first (w-7df0ce6b1169).",
+  "acceptance": [
+    "P1 DECLARATION (aa219353 P1, amended by 165e393e C2 and C3 and 84ed3456 point 3): One committed file at the repository root, `termal-tests.toml`, read from the worktree when a check is recognised; its SHA-256 and byte length are recorded on the check. Each `[[test]]` entry: `command` (the exact command line; compared after today's normalisation, token for token), `cwd` (root-relative, default \".\"), `artifact` (root-relative path of the ONE result file the command writes). Load rules: a malformed file, a missing field [`command` or `artifact`; see the docs-conformance criterion], an `artifact` outside the worktree after resolving links, or an entry whose command contains `--no-build`, `--list-tests` or a `.dll` token (DD1) disables the whole file with one host reason line. [165e393e C2, replacing \"No lifecycle: no snapshot at command start, no HEAD lookup; the file is read when the check is resolved.\":] the declaration is loaded and matched at the existing command-START recognition boundary (engram_turn_checks.rs :1258-1303 is where recognised commands acquire their source and overlap attribution; :526-565 only resolves checks already captured). The selected entry and the declaration's hash are retained on the check as bounded metadata, and verified again at completion; no durable declaration lifecycle, no HEAD lookup. A command with no valid start-side binding is UNKNOWN, never credited retrospectively. Wording: \"the current worktree declaration\" (uncommitted edits honoured), not \"committed file\". Stated trust limit: an uncommitted edit of the file is honoured; review and the commit rule remain the check on that. [165e393e C3:] The declared `cwd` resolves inside the named source root like the artifact; the declaration has a byte and entry cap and fails closed on ambiguity; token matching preserves quoted-argument content. [84ed3456 point 3, narrowed by the coordinator's allow-list ruling of 2026-10-06:] Inside a declared entry's command, and the command line being matched against it, a quoted ; is literal argument text; the declared route reads a line by the allow-list the docs state, and anything else, a quoted | or & included, is refused and fails closed. Unquoted shell operators, multiple commands, substitution (backtick, `$(`), redirection and unsupported or ambiguous syntax are refused, and fail closed. It is not a general shell evaluator. Built-in recognition and the simple-command predicate for built-ins (engram_check_recognition.rs:80) are UNCHANGED.",
+    "P2 RECOGNITION (aa219353 P2; its timing is replaced by 165e393e C2, see P1): A command the followed shell places in the declared `cwd` whose normalised line equals exactly one entry's `command` is a test check of kind \"declared\"; zero or two matches is not a check. Built-in recognition is unchanged and wins; cargo, vitest, pytest, go, node and the launcher keep their behaviour byte for byte (frozen differential). Fingerprint, placement, overlap, exit mapping and withholding are today's.",
+    "P3 ARTIFACT (aa219353 P3, amended by 84ed3456 point 2, a7b0c025, 5638d152 (B) / 165e393e C3 and A3-3 of 75d7cd3a): [84ed3456 point 2:] The artifact is ONE root-relative FILE everywhere. [aa219353 P3:] At resolve the declared artifact must be a regular file inside the worktree, [5638d152 (B) / C3, replacing \"git-ignored (`git check-ignore`)\":] untracked and ignored at the checked canonical in-root target, using the same Git context as the content-basis capture; a tracked file is inside the basis even when an ignore pattern matches it, so `git check-ignore --no-index` is not evidence; a link must not redirect an ignored path onto a tracked file, [aa219353 P3:] so it is outside the content basis and the run does not change its own source revision, [a7b0c025, replacing \"modified at or after the command's start\":] at command start the host records the artifact path as ABSENT, or its bounded hash and mtime if present; at completion PASS needs the file present, DIFFERENT by hash from that start image, with mtime at or after the start; mtime alone is never proof, [aa219353 P3:] and at most 4 MiB. [165e393e C3:] it is read once as one bounded image, hashed from that image, and a change during the read or an oversized file is UNKNOWN. [aa219353 P3:] Recorded: path, size, SHA-256, mtime. Anything else is UNKNOWN with a reason: missing, stale (mtime before start), not ignored, outside, too large, not a regular file. [A3-3:] if the start-side inspection itself fails (unreadable path, oversized image), that is not \"absent\" and the check is UNKNOWN.",
+    "P4 TRX READING (aa219353 P4, replaced by 165e393e C1, adopted by 5638d152 (A); with 2d0b87b2 point 2): Parse one complete well-formed TestRun document and its direct ResultSummary/Counters, with no external entity or DTD resolution. PASS additionally requires a recognized terminal non-failure ResultSummary outcome, no explicit run-level error/abort, and the supported complete counter shape; missing or unknown required outcome/count fields never default to evidence of success. An explicit run failure/error/abort is FAIL even at exit 0. An incomplete, malformed, ambiguous, unsupported or contradictory report is UNKNOWN, never PASS. Nonzero command exit retains the existing recognised-check failure rule. A textual search for one `<Counters` is insufficient (truncation, comments, CDATA); the holder uses a small bounded XML reader if that is less code than a correct hand-written scanner. Any nonzero counter whose semantics are unknown prevents PASS. Count consistency comes from producer semantics plus the captured files, not an equality assuming skipped tests appear in notExecuted. Fixtures add: positive Counters with ResultSummary outcome=Error or Failed; a file truncated after Counters. [2d0b87b2 point 2:] P4 counter consistency must be VALIDATED against the captured real TRX files, not assumed. Real TRX Counters elements carry more attributes than P4 lists: passedButRunAborted, notRunnable, disconnected, warning, completed, inProgress and pending. A sum rule that real files violate would make every real run UNKNOWN. The holder derives the consistency rule from the three captured fixtures and records the final rule with the fixture evidence. Well-formedness here means the reader checks the docs list for the TRX reader (the bounded promise ruled by the coordinator on 2026-10-06): the reader is not a complete XML 1.0 validator and not a security boundary, because the declared command is trusted; a well-formedness gap outside the listed checks is not a P4 failure.",
+    "P5 OUTCOME (aa219353 P5, with 2d0b87b2 point 2 and A3-3 of 75d7cd3a): PASS = exit 0 AND executed ≥ 1 AND passed ≥ 1 AND failed = error = timeout = aborted = 0 [2d0b87b2 point 2: and passedButRunAborted = 0]. FAIL = exit ≠ 0 (today's rule for a recognised test command) OR failed + error + timeout + aborted ≥ 1 (published even at exit 0, through the existing fences). UNKNOWN = everything else: zero executed, all inconclusive or not executed, any P3/P4 reason; withheld with its reason line and no Engram verification, as today for an unjudged success. A PASS never comes from console text. [A3-3:] a supported run-abort indication (including a non-zero passedButRunAborted) is FAIL, not UNKNOWN; count consistency is producer-based and includes a real mixed pass/skip capture; a passing result is ELIGIBLE for verification and the existing source, ownership and overlap fences still decide what is recorded.",
+    "P6 RECORD (aa219353 P6): The check record carries, in addition to today's fields: kind \"declared\", the entry's cwd, the declaration hash, the artifact facts of P3 and the counters of P4. Env is NOT captured: the host does not observe the agent shell's environment, and the artifact route does not need it. stdout/stderr stay as today's bounded output.",
+    "Behaviour matches docs/features/declared-test-commands.md as landed by this item (superseding the text landed in 961b218a), including: a declaration changed between command start and completion makes the check UNKNOWN, and this takes precedence over the exit status; otherwise a non-zero exit is FAIL even when no artifact exists; a declaration entry missing `command` or `artifact` disables the whole file (a missing `cwd` defaults to \".\")."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "dotnet",
+    "pilot",
+    "team-pilot",
+    "test-runners"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Project-declared command recognition and bounded TRX evidence landed on origin/master at2b1e3f85cc8d5b45b044695319e4f07a35e784b6. Exact18-file reviewed/gated tree8acf846c918f0cad369fd2da6b940d74f731ad48; pair9 noMedium+,fullgate840a10f0 host81517f03PASSED; independent9fa77c6c evaluation7/7. Opus2 installedbinarySHAe92de85fb8ea4ccda408667b8f40fc7781e564a3aaf66f869e915d4db2d1cf32,confirmedbyholder. Runninghost awaitsGregrestart; liveproof separatelyw-529b31db8e07. Low/docsfollowupsfiled.",
+    "completed_at": "2026-10-08T20:11:42.841197800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

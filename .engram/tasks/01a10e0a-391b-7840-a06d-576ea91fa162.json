@@ -1,0 +1,30 @@
+{
+  "id": "01a10e0a-391b-7840-a06d-576ea91fa162",
+  "external_ref": null,
+  "title": "Park a host-wake original after persistent pre-send model discovery refusal",
+  "outcome": "An ungated host original retained after a persistent Codex Fast discovery refusal has an explicit retry/hold owner instead of unbounded per-tick re-promotion and Error churn; original at-most-once and operator authority remain intact.",
+  "acceptance": [
+    "Park a host-wake original after persistent pre-send model discovery refusal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-follow-up",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a147b3-3e36-7200-b73c-3c0775859aff",
+  "external_ref": null,
+  "title": "Coding workers, slice 1: create a writable worker in a fresh worktree at a resolved base commit",
+  "outcome": "A parent can spawn one writable coding worker (mode=worker, writePolicy isolatedWorktree) that starts in a fresh dedicated Git worktree created at one resolved base commit, with read-only roles unchanged. Result handoff (diff/commit and test result) is slice 2.",
+  "acceptance": [
+    "Spawning mode=worker with writePolicy isolatedWorktree and an optional base (ref or commit, default HEAD) resolves the base to exactly one commit object ID with safe argument handling (an option-like or ambiguous ref is refused), creates one fresh dedicated worktree at that OID without copying the parent's staged, unstaged or untracked changes, records that OID as the delegation's baseRevision, and starts one writable worker session there through the existing delegation lifecycle; covered by focused tests through the production spawn route.",
+    "Unsupported combinations are refused clearly and unchanged: sharedWorktree stays deferred with its existing refusal, and writable worker modes other than isolatedWorktree are rejected with a message naming the supported combination; explorer dirty-state carry and reviewer/evaluator read-only behavior are unchanged, proven by the existing read-only tests still passing and one new test asserting a reviewer spawn is still read-only.",
+    "Existing delegation records without a baseRevision still load and display (backward-compatible persistence), covered by a test, and the full five-stage gate passes on the exact final input with an independent review pair having no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "design-pending",
+    "harness-agnostic",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1179c-5897-78b0-8991-055d05204ccf",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered Worker slice1 commit459f854043ec70755cd8c24d5af6367e8d478aaf on base8bc612304e942712fbe7a5b987faf4bd1b1f3a69, current clean tree8314d86f0207cabb979424bdc8ecf47bc312132a verified exactly reviewed/gated. Independent evaluation5157040d308f45bca053438ea51ab718, Claude12987/delegation-9b366f3e-ce66-429c-a705-8bc3206290c1, revision1/cut122, all3passed/fresh; compact/full1693B read to complete=true and dedicated evaluation read. Evaluator did not independently rehash tree after two denied compound commands; parent native HEAD/tree/clean checks supplied that observation. Full5stage gate736a78a7 PASSED hostTestb1867d2f626d43249103a98f5d4a31f5 at same content-v1. R2 Codex12982/ee0b1216 plus Claude12983/40df877a fulloutputs noM+, prior in-scope M fixed/reviewed, fourLow followups filed. D5 frontmatter remains refused by scope. First done attempt with optional author criterion links refused by project policy; removed unsupported links, using already-recorded independent evaluation, no criteria/evidence alteration. No push/install/restart: Opus2handoff follows. No live6provider/containment/slice2delivery claim.",
+    "completed_at": "2026-10-17T05:08:47.495104700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

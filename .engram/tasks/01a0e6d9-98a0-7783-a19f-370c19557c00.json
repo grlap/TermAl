@@ -1,0 +1,48 @@
+{
+  "id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "external_ref": null,
+  "title": "Host-to-Engram named-root binding event (named_root_bind bound/ended) per Engram host contract v1",
+  "outcome": "Host-to-Engram named-root binding event (named_root_bind bound/ended) per Engram host contract v1",
+  "acceptance": [
+    "Bind, status and begin responses decode all three named_root states and tolerate absent and unknown states; a refusal, or an uncertain transport or persistence outcome, never reports an unconfirmed root as successfully named and never credits evidence against it.",
+    "Checkpoint source sightings carry the capture's matching generation and state and retain workspace identity across rename and clear; tests and acceptance evaluation use the correct named worktree; evidence from a foreign workspace or generation cannot count as a named-root check.",
+    "Clear and host cleanup record the matching ended event with the allowed reason, repeating the bound generation's workspace and named_at; rename advances the generation; authoritative named_root reconciliation preserves handoff and recovery bindings and prevents a release and re-claim from reviving an old generation, without inferring release from fence or revision changes.",
+    "Focused regression checks exercise the production naming, reconciliation and checkpoint paths for these transitions and failure cases, and pass in a host-recorded check in the item's named root.",
+    "Naming a claimed registered worktree records the contract's bound event with the exact source-capture workspace identity, a positive generation, its named_at and a stable retry key derived from (claim_id, generation, kind); retries and restart recovery neither duplicate nor silently lose the transition.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "docs/features/engram-host-adapter.md describes the binding event, the reconciliation from named_root, and the refusal and unknown-outcome handling, cross-linked both ways with any feature brief it references."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "PI-28",
+    "control-plane",
+    "post-import"
+  ],
+  "assigned_to": "Termal::Codex (session-7809)",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered named-root bound/ended integration with durable canonical per-work authority, retained-run recovery, exact association checks and sticky uncertain-opening evidence withholding. Landed d70503865327b1f4c0ca392e0965373c27723f4a on origin/master, exact gated/reviewed treeafaa079ef31e27ac72ff408c1f4c10c7fe2d8650. Opus2 confirms fast-forward push and installed buildSHAa4942c232200d0a1af5513e5109c169d5931215a6e4d7d2dc6cef3c8ee3253c6 at12:46:52Z from clean archive release build; no host restart claimed. Fresh independent Claude9780 evaluation eaaa8e441dbf48ec9e5b16d993ce5311 read fully: 7/7PASS revision26/cut1315/source7b7d52e6/stale=null. C4 uses integrated host test2754e648 (full e00dd64c allfivePASS); old-root checks not substituted. Pair9772/9773 independently rechecked all8 earlierMediums fixed; optionalLows filed. Complete evaluator packet read:4failed git/compound commands/8source-docentries, no evaluator native Git re-attestation; parent Git/tree and pair pins are separate evidence.",
+    "completed_at": "2026-10-02T12:51:41.386980Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

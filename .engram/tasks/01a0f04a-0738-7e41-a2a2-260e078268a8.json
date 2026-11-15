@@ -1,0 +1,30 @@
+{
+  "id": "01a0f04a-0738-7e41-a2a2-260e078268a8",
+  "external_ref": null,
+  "title": "Define the final-diff audit's unit and placement check (/review-changes Step 7)",
+  "outcome": "Two auditors reach the same result on the same frozen change: the audit's unit of text, its treatment of whitespace that changes Markdown structure, and its check that a changed passage stands where its concurrence places it are defined, preferably in the maintained audit script (w-d71b5ba37812) where a test pins them.",
+  "acceptance": [
+    "A change of indentation, blank lines or list or quote nesting inside authority text is treated as a change the audit covers; a test shows one.",
+    "Changing Step 7 is authority text: conditions (a), (b) and (c) apply.",
+    "Sentence splitting for the audit is defined, in the maintained script with tests or in Step 7, and handles abbreviations such as 'e.g.' and 'i.e.', quoted text with internal full stops, code spans, list items and quoted lines.",
+    "The audit records for each changed passage whether it stands where the governing concurrence places it, and concurrences name the place (file and section, or the passage it follows) so the check has something to compare against."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "review-cadence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

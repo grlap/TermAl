@@ -1,0 +1,28 @@
+{
+  "id": "01a11e01-322f-7d33-8ec9-c3c634d5d5dc",
+  "external_ref": null,
+  "title": "Review-freeze relative .git aliases in linked worktrees",
+  "outcome": "Decide and document whether leading ./ and Windows case variants of .git are supported for linked-worktree relative manifest paths, with coverage for the chosen contract.",
+  "acceptance": [
+    "Review-freeze relative .git aliases in linked worktrees is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "review-followup",
+    "review-freeze"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

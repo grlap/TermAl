@@ -1,0 +1,34 @@
+{
+  "id": "01a15012-144e-7602-a87a-bb5ffb1e8624",
+  "external_ref": null,
+  "title": "Make the federation retained-lookup yield regression independent of a one-second scheduling deadline",
+  "outcome": "The retained SQLite lookup regression proves the async worker yields while storage is held without treating a slow thread start or first poll as a product defect.",
+  "acceptance": [
+    "Use explicit synchronization to distinguish blocked inline SQLite lookup from an offloaded lookup while the connection remains held; avoid a one-second wall-clock performance threshold deciding correctness.",
+    "Retain detection of the original blocking implementation and safe cleanup on failure; use any timeout only as a bounded hang guard consistent with project policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-891c-7991-8001-8b21e7066000",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

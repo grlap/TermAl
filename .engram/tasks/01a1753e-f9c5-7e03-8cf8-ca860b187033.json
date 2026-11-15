@@ -1,0 +1,30 @@
+{
+  "id": "01a1753e-f9c5-7e03-8cf8-ca860b187033",
+  "external_ref": null,
+  "title": "Focused launcher runs leave TERMAL_TEST_RUN_ROOT unset, so test children sweep the shared system-temp termal/tests folder and hit Access is denied",
+  "outcome": "A focused `cargo test --bin termal` under scripts/test-launcher.mjs gives every test process, child processes included, its own run root. No test sweeps or writes the shared %TEMP%\\termal\\tests folder while other sessions' runs use it.",
+  "acceptance": [
+    "A preserved source and controlled, repository-local request/process-level discriminator establishes whether focused launches and their descendants inherit an isolated run root and whether another live run's unmarked fixture is selected by the legacy sweep; historical cross-run AccessDenied and ECONNRESET causality remain explicitly qualified where unproved.",
+    "The existing launcher/test-temp owner allocates and propagates an exclusive verified temporary root for each launched run and its descendants; focused execution never sweeps or recursively deletes outside that run's owned root, preserves link/path/cleanup protections, and changes no retry, timeout, test assertions or product behavior.",
+    "An assertion-first RED and final exact-input GREEN cover direct and descendant inheritance, two-run isolation with a live foreign-fixture control, success/failure retention and existing temp-root/launcher boundary regressions; independent Codex/Claude full-input reviews have no outstanding Medium+, deferred Lows are tracked, and complete source/test/review evidence is handed to Merger for its full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

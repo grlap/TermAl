@@ -1,0 +1,38 @@
+{
+  "id": "01a14a88-8e97-7391-a2a5-d9f93ea08fd2",
+  "external_ref": null,
+  "title": "Overdue handoff recovery, slice 1: a registered test-run gate with a durable next action proceeds automatically even if its coordinator misses a wake",
+  "outcome": "When a registered test-run gate finishes with a recorded next action, the host durably records the handoff and its owner and, within a bounded time, dispatches the successor (wakes the session that owns the next step, or a designated recovery owner) without any user query. The overdue handoff is observable, a handoff is accepted and completed exactly once, and no evidence is dropped. Carriers and the land/push/install effect path are slice 2 (w-75b31ac5a7c9).",
+  "acceptance": [
+    "A registered test-run gate with a durable next action (a Terminal or Credited test-run prerequisite) is automatically handed to a successor within a bounded time, even if its coordinator is idle or missed a wake. Carrier-completion prerequisites are outside this slice (w-75b31ac5a7c9).",
+    "A test simulating a missed wake or coordinator inactivity proves the successor proceeds without a user query.",
+    "A handoff is accepted by exactly one owner and completed at most once: acceptance and completion are compare-and-swap guarded, a conflicting completion is refused, an identical retry returns the original completion and changes nothing, and a completed handoff's record, evidence and history survive a restart (tests). The land/push/install effect path is outside this slice (w-75b31ac5a7c9).",
+    "The recovery owner and any overdue handoff are durable and observable (visible in host state or the UI and surviving a restart)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "greg-directed",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Handoff ledger slice 1 is delivered in two commits on opus3/handoff-ledger:\n- 7cd250caf4cf138cc43fe999b1af6c19518f72be (parent 21241d54, the TRAIN-4 carrier): the ledger. It has its own handoffs table with version CAS, idempotent registration, the post-boot watchdog that readies on a Terminal or Credited test-run prerequisite, offers recorded with their exact prompt id before queueing and naming the producer, the delivery clock (overdue at delivery + 30 s, recovery at + 5 min, at ready + 60 s for a blocked primary, or after 15 min undelivered), accept by generation with a fence, complete with that fence, recovery to a designated owner, GET /api/handoffs plus three routes, and docs/features/handoffs.md.\n- 3df501dd8eea11fad74e62bb9217865b0010aa0d: two more tests, a completed handoff's evidence and history surviving a restart, and the stale-version CAS refusal.\nReview: pairs r1-r4 on the ledger (r4 clean), plus r5 and r6 on the tests (r6 clean). Gate: the detached full gate test-80363cbb passed 5/5 and was credited (record 4c274ff8). Evaluation 4060ec1f passed all four criteria of revision 9.\nSlice 2 (carriers and the land/push/install effect path) is w-75b31ac5a7c9. Not pushed: integration goes through Merger for TRAIN-5, and only Opus2 pushes. The branch is not a fast-forward of origin/master.",
+    "completed_at": "2026-10-18T02:27:17.419923300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ff-79d1-a304-2888f9e0d577",
+  "external_ref": "tm-68cx",
+  "title": "Preserve Engram work-authority grant on redacted project PATCH",
+  "outcome": "Client-facing project settings redact workAuthorityGrant; replacing settings from a redacted PATCH can wipe the persisted grant when the field is absent.",
+  "acceptance": [
+    "An absent redacted workAuthorityGrant retains the existing secret, an explicit supported clear path is distinguishable, and API/persistence tests cover both."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,44 @@
+{
+  "id": "01a0f2ff-8ddc-7f51-b0be-43a20265fe9d",
+  "external_ref": null,
+  "title": "A session holding two claims with two named source roots is measured in one of them: a recognised test in the other named root gets no credit",
+  "outcome": "A root session that holds several claims is told plainly how its tests are credited: one turn reports evidence for one bound claim, so a recognised test run in another held item's named root is not credited to the bound item, and the host's line names the bound item, the item whose root the test ran in, and the remedy; making an item the focus binds the next turn to it. Crediting one turn's evidence to several claims is a contract change for the architecture brief.",
+  "acceptance": [
+    "A recognised test run in the named root of a held claim that is not the turn's bound claim, where that root is not also the bound claim's root, is not credited to the bound claim's run, and the host's line names the bound item, the item whose named root the test ran in, and the remedy (make that item the focus and run the test in the next turn). Where one root is named for both the bound item and another held item, the test is credited to the bound item only, and the line names the bound item, names the other item, and says the other item receives no credit and must be the focus of a later turn for its own; a test covers both cases.",
+    "A test in a worktree named for no held claim is still refused with the existing line.",
+    "The full five-stage gate is green on the exact reviewed tree, and the note names the run and the diff.",
+    "When the focus is a held claim with a named root, the next turn is bound to it and its root's test is credited to it; a test pins the rebinding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

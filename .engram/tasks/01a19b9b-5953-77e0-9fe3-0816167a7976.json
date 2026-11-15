@@ -1,0 +1,38 @@
+{
+  "id": "01a19b9b-5953-77e0-9fe3-0816167a7976",
+  "external_ref": null,
+  "title": "w-3fe8 source slice: remaining 10 mounted descendants port onto ordinary EO (774e baseline)",
+  "outcome": "w-3fe8 source slice: original remaining9 plus coordinator-assigned retry_hold_producers port onto ordinary EO (774e baseline)",
+  "acceptance": [
+    "A source-only patch for exactly the 9 mounted child test paths in .evidence/execution-observability-12327/remaining-descendants9-774e-contract.json plus src/tests/engram_retry_hold_producers.rs, the exact one-path scope extension assigned by Fable2 and the integrator, base and current product 774ef3c0, is returned to the integrator Sol-03d4 with an immutable tree id and per-path blobs",
+    "Every original test in those paths has an explicit per-original source disposition, and all ordinary, WAL, provider and source controls are preserved",
+    "No aliases, unmounts or cargo, no shared, product or outside-path edits, and no product behaviour change made to obtain green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only exact10 return completed: treec972aaeac1defdbe887e4cb53d0789ab9b3b4f50 vs774e, all69 original dispositions/45 current source tests, nativebefore/resultblobs and fullpatch. Coordinator scopeextension Fable1870/ownnotee262403cb2ec47a6a548e00e574c7d7b is now explicitly reflected in criterion1/title. Fable1873 accepted authorhandoff; integrator100 confirms native exact10/current45/disposition69 intake and no codebody discrepancy. Fourbeginchildmounts preserved; separatelyassigned05601deeper3 belongsintegrator.",
+    "completed_at": "2026-11-02T10:52:45.980231800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

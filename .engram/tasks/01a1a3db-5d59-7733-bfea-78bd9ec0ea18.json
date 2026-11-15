@@ -1,0 +1,29 @@
+{
+  "id": "01a1a3db-5d59-7733-bfea-78bd9ec0ea18",
+  "external_ref": null,
+  "title": "Cover the session runtime capture target limit at 64 and 65 targets",
+  "outcome": "A direct unit witness protects SessionRuntimeCapture::start's explicit target-count admission boundary without changing capture semantics.",
+  "acceptance": [
+    "A unit test uses exactly SESSION_RUNTIME_CAPTURE_TARGETS distinct targets and observes successful capture creation, then uses one additional distinct target and observes refusal.",
+    "The focused session-runtime capture tests pass on the exact changed input; the change follows the repository's standing review and gate rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "session-runtime-capture",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

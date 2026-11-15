@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4e2-79b1-a899-da821f96e50d",
+  "external_ref": "tm-d9gl.3",
+  "title": "Engram identity slice 3: explicit refresh action with turn-boundary rotation, in-flight deferral and confirmed serving identity",
+  "outcome": "Slice 3: explicit refresh, never a silent restart. Host action (Settings > Engram: refresh Engram runtimes) and per-session action, both also reachable through the API/CLI. Semantics: mark runtime_reset_required on each affected session so the agent runtime is rotated at the next turn boundary and relaunches its Engram MCP child from the installed binary (the same lever session_config/session_crud already use for argv and eligibility changes); discard the cached control process so the next control use respawns from the installed binary (coordinate with the control-process liveness work); the host-context provider needs nothing (per-call spawn). In-flight guard: while a session has an active turn or an in-flight Engram control operation (dispatch, checkpoint, restart stage), the refresh is deferred, visibly marked as scheduled for the turn boundary, and the response states the next step (wait for the turn to end, or stop the turn); no restart during a mutation and no replay of a mutation as part of refresh; sessions and their store binding are preserved. Confirmation: the session flips to fresh only when the next launched-with identity (runtime restart) and the next observed context fingerprint match installed; if after the rotation the identities still differ, the state shows refresh did not take effect with the reason (for example the runtime has not restarted yet, or the binary changed again). Failures of the refresh action are visible, never swallowed. Acceptance: deferral during an active turn, application at the boundary, refusal text with next step, and the fresh confirmation are each pinned by a test.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram",
+    "lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c4e0-7e22-943a-82aa6d83139a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

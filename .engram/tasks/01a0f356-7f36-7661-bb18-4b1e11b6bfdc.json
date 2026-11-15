@@ -1,0 +1,46 @@
+{
+  "id": "01a0f356-7f36-7661-bb18-4b1e11b6bfdc",
+  "external_ref": null,
+  "title": "On Windows a read-only Codex delegation runs with sandbox danger-full-access: nothing enforces read-only, and a probe child wrote files",
+  "outcome": "A read-only Codex delegation on Windows cannot change files or run writing commands: either Codex's own read-only sandbox is used again because it now works on Windows (shown by a live probe), or the host puts every command of a read-only Codex child through a gate it controls, as it does for Claude and Kimi. Until then TermAl states the gap where the read-only policy is described, and the review freeze check remains what detects a reviewer's change.",
+  "acceptance": [
+    "A live probe like the one on this item, run by a read-only Codex delegation on Windows against the landed build, is refused before it writes; the probe's exact commands and the refusal are recorded in a note.",
+    "A test pins the configuration the fix relies on for a read-only Codex child on Windows (the sandbox mode it gets, or the approval policy and the host gate's decisions for a writing command and a reading one).",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "docs/features/agent-delegation-sessions.md says how read-only is enforced for Codex on Windows after the fix, and what it did before."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "read-only-delegation",
+    "security",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only Codex delegations on Windows run in Codex's read-only sandbox again. They use a second shared Codex app-server (profile ReadOnlySandbox, its own CODEX_HOME scope, PATH without PowerShell 7, so the shell is Windows PowerShell 5.1), and each session's profile is pinned with its thread. Landed in 27bf0b6, live since the 23:31Z restart. The live probe was refused a write (23:32Z). The host credited the full gate test-b41e1a44 on the landed tree. The third independent evaluation, bb097f9c…, passed all four criteria. Follow-ups: w-27f08e988f1e (read-only children's Engram MCP calls refused), w-53ab42df726c (two-profile tests), w-5632f86d61c9, w-92c391ba7a73.",
+    "completed_at": "2026-10-01T00:04:33.490619100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

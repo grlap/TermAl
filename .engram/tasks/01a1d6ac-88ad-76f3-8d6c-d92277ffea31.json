@@ -1,0 +1,37 @@
+{
+  "id": "01a1d6ac-88ad-76f3-8d6c-d92277ffea31",
+  "external_ref": null,
+  "title": "Carried launcher full gates are never settled or expired after the gated-control removal; overflow and restart lines tell agents to rerun finished gates",
+  "outcome": "A carried launcher full gate leaves the session's carried checks once it is terminal, gone, missing or past its TTL, and no agent is told to rerun a gate that ended normally.",
+  "acceptance": [
+    "In production, a carried launcher gate (ends_by_report=false) is retired when its poll sees it terminal, launcher_gone or run_missing, or past the restored TTL, without waiting for the ENGRAM_CARRIED_CHECK_LIMIT overflow or a restart.",
+    "The overflow and restart paths emit no 'Run the gate again' line for a gate that had already ended; engram_has_open_check no longer counts finished carried gates.",
+    "Behavioural tests cover: a finished gate retired without overflow; a fifth launch after four finished gates emits no rerun line; a restart after a finished gate emits no lost-to-restart line."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "carried-checks",
+    "full-gate",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Retired ordinary launcher carries on observed terminal/gone/missing/TTL, preserved original reservations, removed finished carries from open accounting and corrected restart disclosure. Whole14 independent Codex+Claude pair has no Medium+ and found no weakened reachable-behavior witness; four Lows filed. Verified author896/0 plus pinnedLIVE2/0 and landed WindowsFULL test-637a4410 passed. Required fixture child is complete. Fresh independent evaluation f4ab02f0256c4cc38c57cb810d337ab6 passes all3 criteria at clean7c, byte-identical contributed paths in landedeb78. No duplicate validation/native credit/install claim. Raw evidence retained on open EO epic for C5 and local source audit retained on open Low; remote cleanup approval hold unchanged.",
+    "completed_at": "2026-11-14T03:32:33.292886900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

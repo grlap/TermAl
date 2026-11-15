@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c422-71d3-b33f-ce333e4d7ccf",
+  "external_ref": "tm-84nm",
+  "title": "Remove the pre-existing beads ids from code comments (32 lines in 24 files)",
+  "outcome": "Inventory with a ready design; no owner and no trigger. Filed by Termal::Opus2 on 2026-09-27 while working tm-k90q, which covers only the 12 lines the source-root landing added.\n\nGreg's convention (bd memory code-comments-no-beads-ids): no Beads ids in source comments, identifiers or user-facing copy. Measured at 507ac05 plus the tm-k90q edits: 32 comment lines in 24 files under src/ still carry beads ids. The count uses git grep for tm-xxxx, excluding the beads-reader fixtures, work_visualizer_beads.rs, WorkPanel.test.tsx and App.control-panel.work.test.tsx, where the ids are test data rather than comments.\n\nFiles (src/): content_revision.rs, engram_check_paths.rs, engram_check_recognition.rs, engram_check_toolchain.rs, engram_control_transport.rs, engram_evaluation_refusal.rs, engram_held_claims.rs, engram_host_adapter.rs, engram_turn_checks.rs, engram_turn_observations.rs, engram_work_binding_refresh.rs, test_runs.rs.\nFiles (src/tests/): acceptance_evaluation_source.rs, engram_boot_recovery_targets.rs, engram_control_transport.rs, engram_fixture_contracts.rs, engram_held_claims.rs, engram_host_adapter.rs, engram_phase_compat.rs, engram_session_reconciliation.rs, engram_turn_checks.rs, engram_turn_observations.rs, engram_uncertain_begin.rs, engram_work_binding_refresh.rs.\n\nOpen question for Greg: many of the same headers also cite an Engram item id (w-108a13d58018, with criterion numbers). The convention names Beads ids. Does it cover Engram ids too?\n\nFix: reword each comment so it states the invariant without the id. Where the id carries meaning (for example \"tm-winf step 2\"), replace it with what the step is. This is a comment-only change, with the normal gate and review pair.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

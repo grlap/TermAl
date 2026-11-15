@@ -1,0 +1,50 @@
+{
+  "id": "01a0fd5a-7a54-7061-8aee-4401e489b84d",
+  "external_ref": null,
+  "title": "Boot-recovery concurrency test bets a real 250 ms per-operation deadline on scheduling, so a loaded full gate fails one target",
+  "outcome": "tests::engram_host_adapter::boot_recovery_bounds_worker_concurrency_across_many_targets asserts batch ownership and concurrency, and its result no longer depends on how fast the machine schedules workers.",
+  "acceptance": [
+    "No timeout is raised as the fix, and production deadlines and defaults are unchanged.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note.",
+    "The test's pass or fail no longer depends on wall-clock scheduling. A test that holds a worker past the former 250 ms per-operation deadline before it reaches the transport still sees all 26 status-plus-bind requests and the bounded concurrency. Expiry behavior stays covered by its own budget test, unchanged."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "gate-blocker",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The boot-recovery concurrency test no longer depends on how fast workers are scheduled. Its 250 ms per-operation and batch budgets run on the shared scripted EngramBudgetClock, a worker held 300 real ms still yields all 26 status-plus-bind requests with concurrency 8, and a separate logical-expiry witness keeps deadline_exceeded covered. Production deadlines and defaults are unchanged. Landed in train 18 as 7f10cfb (merge 75718d3, landing 5c6f6dd). Full gate test-3cd1a029 passed on master f7a26a5 and was credited (4631710a). Evaluation 05f844e0 passed 3/3.",
+    "completed_at": "2026-10-03T08:06:32.187960400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

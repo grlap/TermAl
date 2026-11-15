@@ -1,0 +1,29 @@
+{
+  "id": "01a1c382-d6a6-7212-b74a-8e6167287dbf",
+  "external_ref": null,
+  "title": "Align native admission documentation with unavailable submission recapture behavior",
+  "outcome": "Documentation accurately distinguishes full SourceId checks at admission and owner capture from the existing Shared submission behavior when recapture is unavailable; any stronger submission contract is decided separately before implementation.",
+  "acceptance": [
+    "The declared-native admission documentation and module header make no unconditional claim of full source pinning through submission when existing behavior can submit source_id=None.",
+    "A behavior-level assessment records the existing changed-source refusal and unavailable Shared recapture fallback, and any proposed change to that fallback has explicit contract scope rather than silently widening this documentation fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "declared-commands",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

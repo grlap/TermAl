@@ -1,0 +1,25 @@
+{
+  "id": "01a1a4f6-b5b9-7912-bf07-203dee9a8cb2",
+  "external_ref": null,
+  "title": "Other test fixtures can still abort the process from a Drop during unwinding",
+  "outcome": "Each test Drop that can panic during unwinding has been judged, and those that can really abort the process no longer do.",
+  "acceptance": [
+    "Every test Drop in the sweep is listed as able to abort or not, with the reason read from its code",
+    "Those able to abort are fixed, using phase_sync::set_gate where the lock is a gate, each with a recorded failing run or a stated reason"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

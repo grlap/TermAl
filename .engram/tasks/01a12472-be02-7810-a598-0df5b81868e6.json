@@ -1,0 +1,29 @@
+{
+  "id": "01a12472-be02-7810-a598-0df5b81868e6",
+  "external_ref": null,
+  "title": "Document the acceptance-evaluation SUBMISSION refusals: retryable 502 authority-unsettled, final 409 cannot-be-confirmed (3-submission bound), and the existing source-root-changed 409",
+  "outcome": "The POST /api/sessions/{id}/acceptance-evaluation row in docs/architecture.md (about :414), and the acceptance-evaluation section of docs/features/engram-host-adapter.md, describe the submission's refusals:\n- the retryable 502, \"the work's naming authority is still being confirmed … nothing was sent; submit the same verdicts again\";\n- the final 409, \"the work's naming authority cannot be confirmed … do not submit again\", given at once or after 3 unsettled submissions of one attempt;\n- the pre-existing final 409, \"source root changed while it was evaluated\".\nA caller can then tell the retryable answer from the final ones.",
+  "acceptance": [
+    "docs/architecture.md's acceptance-evaluation submission row names the retryable 502 and both final 409s, with the 3-submission bound, in words consistent with src/engram_source_roots.rs.",
+    "docs/features/engram-host-adapter.md's acceptance-evaluation section names the same outcomes, or a note on this item records that it lists none."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — Requested docs describe the removed 502/counter/final-409 ladder. Current 503 documentation is already tracked separately. Source: src/engram_source_roots.rs:916; docs/architecture.md. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1bca1-b94d-7f62-8961-2a58f0c7e9b0",
+  "external_ref": null,
+  "title": "Expose the frozen missing-environment reason on native declared-run observation rows",
+  "outcome": "The client-visible native declared-run row explains UNKNOWN with the same names-only missing-environment reason already carried by its frozen verdict and verification record.",
+  "acceptance": [
+    "Use the existing native settlement owner to carry the frozen environment_missing:NAME reason into the observation detail without leaking values or changing artifact verdict/verification semantics.",
+    "A deterministic native-run fixture asserts missing selection yields UNKNOWN with the original missing name on the row and unchanged verification result, while configured and duplicate-start behavior remains intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "design-pending",
+    "diagnostics",
+    "greg-reported",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b889-670b-70f1-8c76-9e387364abf7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

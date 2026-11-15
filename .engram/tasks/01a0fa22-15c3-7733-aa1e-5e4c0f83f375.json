@@ -1,0 +1,38 @@
+{
+  "id": "01a0fa22-15c3-7733-aa1e-5e4c0f83f375",
+  "external_ref": null,
+  "title": "Classify and migrate provably local-only legacy named-root history",
+  "outcome": "Provide safe legacy-origin remediation without fabricating canonical naming authority or reviving old evaluation tokens.",
+  "acceptance": [
+    "Recoverable local-only provenance retires behind an acknowledged invalidation tombstone and requires fresh evaluation preparation; unexplained positive history stays explicitly unresolved with repair guidance.",
+    "Regression tests distinguish local-only no-event migration from unexplained positive history, preserve unknown-submission bytes, and reject pre-migration tokens across restart."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

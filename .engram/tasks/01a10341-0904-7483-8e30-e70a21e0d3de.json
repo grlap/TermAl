@@ -1,0 +1,24 @@
+{
+  "id": "01a10341-0904-7483-8e30-e70a21e0d3de",
+  "external_ref": null,
+  "title": "Align session waiting guidance with tracking-only recovery",
+  "outcome": "A retained-delete session with queued prompts reports tracking recovery rather than ordinary paused-queue continuation.",
+  "acceptance": [
+    "Align session waiting guidance with tracking-only recovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

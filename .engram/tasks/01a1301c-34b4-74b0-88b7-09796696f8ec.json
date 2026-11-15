@@ -1,0 +1,56 @@
+{
+  "id": "01a1301c-34b4-74b0-88b7-09796696f8ec",
+  "external_ref": null,
+  "title": "Carried Codex test holder lines: rendered restart wording persisted, stranded lines reach the holder a turn late, and a Stop gives both a carried and a closed line",
+  "outcome": "The restart marker of a carried Codex test persists its state (ends_by_report, end reported) as data and the line is built at load; a reported end is persisted promptly so a restart words it right; the stranded-carry close at a runtime reset in turn dispatch happens before the prompt's host line is composed, so this prompt tells it; and a turn closing because its runtime stops or exits does not first carry a test it then closes at once.",
+  "acceptance": [
+    "The marker stores data, not a rendered line, and loads old markers with an unknown_line unchanged; a test shows the restart wording after a reported but unsettled end.",
+    "A test shows the stranded-carry line in the very prompt whose dispatch reset the runtime.",
+    "A Stop with a running Codex test yields one holder line for it.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1b691-457e-73f0-a0fd-f5b824b8e5d6",
+  "external_ref": null,
+  "title": "Linux: after the running termal binary is replaced on disk, new sessions get TERMAL_CLI/MCP command \"<path> (deleted)\" and lose the TermAl MCP tools",
+  "outcome": "Linux: after the running termal binary is replaced on disk, new sessions get TERMAL_CLI/MCP command \"<path> (deleted)\" and lose the TermAl MCP tools",
+  "acceptance": [
+    "On Linux, when the running host's executable file has been replaced on disk (the landing install puts a new build at target/release/termal while the host keeps running until a restart), sessions started afterwards still get a working TermAl delegation MCP server and a TERMAL_CLI that runs: the host never hands out a command path ending in ' (deleted)'. The fix uses the host's own executable in a way that survives replacement (for example the path captured at startup or /proc/self/exe as an executable handle), with no new condition.",
+    "A test reproduces the replacement on Linux (or exercises the path-resolution seam with a ' (deleted)' current_exe value) and shows the session's MCP command and TERMAL_CLI resolve to a runnable executable.",
+    "The cause is recorded on this item from the code and the test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "linux"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

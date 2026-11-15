@@ -1,0 +1,30 @@
+{
+  "id": "01a174c9-ea52-79e1-a235-8837ca2accca",
+  "external_ref": null,
+  "title": "Disambiguate host-qualified mailbox references from literal display names",
+  "outcome": "A Host::Name spelling cannot change from ambiguous to wrong-recipient delivery when a literal namesake on another host becomes unavailable.",
+  "acceptance": [
+    "A shared, explicit grammar distinguishes qualified host/name references from literal display aliases across backend and MCP resolvers.",
+    "Complete-directory and disconnected-peer controls prevent a literal Host::Name namesake from silently changing alias resolution to another recipient.",
+    "Exact participant ids and ordinary complete single-peer name addressing retain their behavior; focused validation and independent review cover the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "pre-existing",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

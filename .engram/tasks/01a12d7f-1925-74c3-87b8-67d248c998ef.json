@@ -1,0 +1,51 @@
+{
+  "id": "01a12d7f-1925-74c3-87b8-67d248c998ef",
+  "external_ref": null,
+  "title": "A Codex test command that outlives the exec tool's initial yield and finishes through a polled exec session gets no host record: TermAl never observes its end",
+  "outcome": "A recognised test command that Codex runs in the foreground is recorded with its real outcome (passed, failed, or a named refusal) whether it finishes inside the exec tool's initial yield or later through polling of the same exec session (write_stdin / host-process-wait). TermAl observes the command's end from whatever event or output the Codex app-server delivers for a polled completion, and attributes it to the original command's check. w-aec234e3f7d0's Unknown closure then remains only for a true missing end.",
+  "acceptance": [
+    "The holder's note identifies, with file:line in TermAl and the Codex app-server event sequence observed, why a command completed through a polled exec session produces no end that TermAl attributes to its check, using the occurrences below.",
+    "A test drives a recognised Codex command whose end arrives through the polled-session path and shows no record on unchanged code, then the correct verification record after the fix; a test also shows that a command finishing within the initial yield is still recorded exactly once.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "codex",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed triple commit 23e77889dd2f2f2eeb4ba650e9bfb7c342773e80 on origin/master, fast-forward from bd839153; exact-tree gate, review pair, and fresh acceptance evaluation are recorded.",
+    "completed_at": "2026-10-13T05:11:48.967371400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

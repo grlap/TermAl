@@ -1,0 +1,27 @@
+{
+  "id": "01a10554-e197-71c2-88b2-f90c72579ebd",
+  "external_ref": null,
+  "title": "The acceptance-evaluation brief has one 64 KiB budget and clips cited evidence oldest-first, so a large per-test inventory cannot reach the evaluator whole, even when cited explicitly",
+  "outcome": "An evaluator can verify evidence larger than one prompt. For example, explicitly cited records are never clipped silently, but delivered whole or paged on demand, or the requester is refused up front with the measured overflow. The current failure costs a full evaluation round and comes back as insufficient_evidence.",
+  "acceptance": [
+    "The acceptance-evaluation brief has one 64 KiB budget and clips cited evidence oldest-first, so a large per-test inventory cannot reach the evaluator whole, even when cited explicitly is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a145cc-d2c4-77f0-9ebc-94f5dee40694",
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: duplicate — Large explicitly cited inventories are covered by the kept P1 whole-selected-record delivery/refusal item; optional on-demand access remains separately tracked. Source: src/acceptance_evaluation.rs:1740. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

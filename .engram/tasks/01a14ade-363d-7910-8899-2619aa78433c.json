@@ -1,0 +1,29 @@
+{
+  "id": "01a14ade-363d-7910-8899-2619aa78433c",
+  "external_ref": null,
+  "title": "Handoff ledger: return 200 for an idempotent registration replay",
+  "outcome": "Handoff ledger: return 200 for an idempotent registration replay",
+  "acceptance": [
+    "Handoff ledger: return 200 for an idempotent registration replay is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "coordination",
+    "greg-directed",
+    "reliability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14a88-8e97-7391-a2a5-d9f93ea08fd2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

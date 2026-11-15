@@ -1,0 +1,34 @@
+{
+  "id": "01a0e6d3-c7a0-70f1-a0ca-3abb3195596d",
+  "external_ref": "tm-v9r.20",
+  "title": "Extract normalized transcript persistence from persist.rs",
+  "outcome": "The indexed-transcript change added roughly 1,200 lines to persist.rs, which is now about 2,500 lines. Schema migration, normalized message row validation, history snapshots, tail loading, quarantine, and retained-window rewrite logic form a cohesive storage boundary with independent invariants and tests.",
+  "acceptance": [
+    "Move normalized transcript schema/migration/read/write/quarantine logic behind a focused module or store interface without compatibility duplication. Keep one authoritative implementation, preserve transaction and error-isolation semantics, and retain existing corruption, migration, paging, and persistence regressions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Pure normalized persistence extraction into four focused include fragments; one unchanged implementation with identical schema/migration/read/write/quarantine/tests and transaction/error-isolation semantics. Parent3690->1509 lines. Exact1345c476 fullgate host252c PASS; complete Codexcc5ca0f5/Claudec26ec82c independent puremove pair noMedium+, two nonblocking wordingNotes. Fresh independent acceptance df004318c5e64bbfb4d92f9336ace42c 1/1pass verified; current four Git checks unchanged HEADd2d/index2f5fe668/emptyworking+untracked. Initial done with authorlinks refused by project acceptance policy, no completion occurred; corrected done consumes existing independent evaluation without links. Completing before explicitfivepath detached commit perFable594; integration owner will land later, no pushed/installed claim.",
+    "completed_at": "2026-10-03T14:12:08.107549600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

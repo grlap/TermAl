@@ -1,0 +1,32 @@
+{
+  "id": "01a17681-2448-7511-b18b-0112196fb688",
+  "external_ref": null,
+  "title": "Define ownership and bounded reclamation for retained launcher test temp",
+  "outcome": "Retained private launcher temp has an explicit owner and reclamation lifecycle that preserves live and evidence-retained runs.",
+  "acceptance": [
+    "Document and implement an owned lifecycle for .tmp/ow/test-* linked to run artifacts or task/worktree retention, preserving live PID, marker, containment and link checks.",
+    "Use repository-local controls to show eligible owned stale temp can be reclaimed and live, foreign, unknown or evidence-retained temp remains untouched; no broad shared-temp sweep."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "review-low",
+    "test-defect",
+    "test-launcher",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1753e-f9c5-7e03-8cf8-ca860b187033",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

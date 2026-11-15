@@ -1,0 +1,37 @@
+{
+  "id": "01a0ff15-4665-7611-a51b-71441b91e4bb",
+  "external_ref": null,
+  "title": "Simplify TermAl project memory: consolidate operational rules into a small canonical set",
+  "outcome": "Simplify TermAl project memory: consolidate operational rules into a small canonical set",
+  "acceptance": [
+    "Every current project memory is audited and given one disposition, recorded in a note on this item: kept as a canonical entry, merged into a named canonical key, forgotten as obsolete (with the reason), or forgotten as superseded (naming the successor).",
+    "Greg's durable decisions keep their verbatim words and provenance, in their own entries or quoted inside the canonical entry that absorbs them; no authority, safety, review or restart rule is weakened, and each merged rule can be traced to the canonical key that now carries it.",
+    "Each workaround tied to an open item stays traceable to its retirement target: its operative line in the live exception list names the retiring item, and its full original text is a note on that item.",
+    "A note on this item reports the counts before and after and lists the resulting canonical keys, and Engram::Advisor is sent that report for Greg."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "memory",
+    "process"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "TermAl project memory went from 97 keys to 14 canonical keys in two stages, each forgotten only after an independent read-only Codex audit passed:\n- stage 1: 54 duplicates, audit round 4;\n- stage 2: 42 keys, consolidated after one Medium was fixed and re-audited.\nEvery Greg quote is kept character-exact in greg-decisions-provenance. Each workaround's full text is a verbatim note on its retiring item, and live-workarounds keeps one line each. No repository text changed; memory content only. The report went to Engram::Advisor for Greg. The independent acceptance evaluation (delegation-20b8d7ca) passed 4/4. Closed by Termal::Fable2 under Greg's 2026-10-03 word that reversible tracker decisions need no confirmation from him (Advisor #185).",
+    "completed_at": "2026-10-03T02:46:25.819839200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a17503-5b21-76b2-a00c-a39f56cf3dba",
+  "external_ref": null,
+  "title": "Make explicit placement after stale automatic mailbox admission recoverable or actionable",
+  "outcome": "An explicit Active placement request for a native root retaining a stale automatic mailbox binding either safely re-admits the mailbox route first or returns an actionable refusal that names the valid recovery operation.",
+  "acceptance": [
+    "A stale automatic binding after re-enrollment or lost mailbox placement authority cannot produce only an opaque PREPARE refusal; recovery preserves identity/receipt and explicit execution-grant boundaries.",
+    "Focused stale-auto-to-explicit-placement coverage and review demonstrate the chosen recovery or actionable error without granting execution from mailbox-only authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "usability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

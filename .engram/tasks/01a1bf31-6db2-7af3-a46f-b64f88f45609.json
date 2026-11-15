@@ -1,0 +1,30 @@
+{
+  "id": "01a1bf31-6db2-7af3-a46f-b64f88f45609",
+  "external_ref": null,
+  "title": "Clarify original-namer lost-claim refusal in launcher documentation",
+  "outcome": "docs/test.md distinguishes a foreign non-holder's unbound launch from an original namer's missing-claim refusal.",
+  "acceptance": [
+    "Scope the no-matching-claim unbound sentence to a caller that did not name the root, and describe the original namer's unchanged 409 refusal accurately. Do not add Markdown-reading tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "low",
+    "review-followup",
+    "test-credit",
+    "verification-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a183bd-a8cb-7f22-a511-600257272d37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

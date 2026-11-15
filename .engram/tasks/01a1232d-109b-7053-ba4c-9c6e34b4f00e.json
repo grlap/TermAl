@@ -1,0 +1,29 @@
+{
+  "id": "01a1232d-109b-7053-ba4c-9c6e34b4f00e",
+  "external_ref": null,
+  "title": "Document the acceptance-evaluations request's new 503 (first brief not saved, retryable) and 409 (taken over meanwhile)",
+  "outcome": "The POST /api/sessions/{id}/acceptance-evaluations row in docs/architecture.md (about :413), and the acceptance-evaluation request outcomes in docs/features/engram-host-adapter.md if that section lists them, describe two outcomes: the 503 returned when a fresh evaluator's first brief could not be confirmed as saved (the evaluator was retired before any turn, and the request may be repeated), and the 409 returned when the evaluator was taken over during that wait (it keeps running; wait for it or cancel it).",
+  "acceptance": [
+    "docs/architecture.md's acceptance-evaluations request row lists the 503 first-brief-unacknowledged refusal as safe to repeat and the 409 taken-over refusal, in words consistent with the messages in src/acceptance_evaluation_api.rs.",
+    "docs/features/engram-host-adapter.md either lists the same two outcomes where it describes request outcomes, or a note on this item records that it lists none."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a152fc-b6ae-71f1-a5c1-05228d61ade6",
+  "external_ref": null,
+  "title": "Named-root capacity follow-ups: own-release 404 ordering, route/bridge/resume/canonical-own tests, typed refusal reason field",
+  "outcome": "The named-root own release and capacity paths are covered end to end and answer precisely: an unknown caller session gets 404 before any lookup; the HTTP own route and the termal_release_named_root bridge handler, an own-release resume, an own release of a canonically associated root, the refused-claim end-to-end path and the Engram error-reason folding all have tests; and the refusal reason is a typed field rather than message text.",
+  "acceptance": [
+    "POST /api/sessions/{id}/engram-named-root-release answers 404 for an unknown session before looking up any root, with a test",
+    "Tests cover: the own HTTP route and the bridge tool's argument checks and forwarding as the serving session; resuming an unconfirmed own release; an own release of a canonically associated root (route canonical, requested_by the session); an authority read refused with claim_not_current_for_run recording the claim and the next pass disposing of the root; EngramControlErrorWire folding `reason`",
+    "EngramControlErrorBody (or the read error) carries `reason` as a typed field and the claim-not-current check matches it exactly, keeping the message-text fallback for older Engram builds"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "named-roots",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

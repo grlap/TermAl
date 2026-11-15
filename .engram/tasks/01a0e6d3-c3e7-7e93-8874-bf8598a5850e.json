@@ -1,0 +1,33 @@
+{
+  "id": "01a0e6d3-c3e7-7e93-8874-bf8598a5850e",
+  "external_ref": "tm-56ga",
+  "title": "Reduce Engram project Save latency from serial post-commit session rebinding",
+  "outcome": "Deferred performance improvement requested by Greg on 2026-09-20 (Engram mailbox123, message mailbox-message-8e15f739-2a0e-4246-8d07-a0bd958d1ee0): Save felt slow while sessions were enabled one by one; not urgent, do not implement now.\n\nOccurrence: project-382ec9e3-f545-4499-8984-1798804819ee; reported bindings for sessions6431-6436,6439,6440 after reviewed inspection-producer installation. Parent GET /api/state at 2026-09-20T17:31:38.0874132Z, revision12235996, observed enabled=true and turnGatedControl=true. This is current host-state evidence, not independent disk reload or fresh-turn acceptance. No precise occurrence duration or dominant phase was measured. Bound phase=sync_required alone does not prove grant/begin/checkpoint.\n\nSource independently inspected: src/session_crud.rs:3065 iterates fresh_targets synchronously after settings/session commit, authority revocation and sidecar shutdown, and before reset/runtime fence release and PATCH return. Each target calls read_work_binding (CLI reads) then SessionBind at src/engram_host_adapter.rs:5415+. Save therefore accumulates per-session work; this establishes serialization, not which component dominates the observed delay. Distinguish settings committed from post-commit recovery completed.\n\nScope: backend Engram control-plane/project-settings latency. Distinct from tm-cnsv.13 (pre-commit absence inspection budget), tm-cnsv.6 (readiness permit scope), and tm-rerc (old whole-store doctor UI wait). Follow-up to tm-cnsv.8 and tm-cnsv, linked by relates_to only; does not block/reopen acceptance work.",
+  "acceptance": [
+    "1. Add correlated monotonic phase timings, target counts and outcomes for readiness, settle/checkpoints, absence inspection, settings commit, revocation/shutdown, per-target work-read plus bind attempts, final fence release and response. Correlate project/reset generation without logging tokens or raw sensitive receipts; distinguish commit success from recovery completion.\n2. Run a bounded same-store benchmark at 1, 8 and 32 sessions. Retain before/after total and phase measurements against the serial baseline, concurrency and process/resource bounds, contention and stale-fence outcomes. Demonstrate improvement and document limitations; do not substitute guessed latency or timeout ceilings for measurements. Use disposable stores, not live operator data without separate approval.\n3. Chosen bounded distinct-session bind pool is awaited under the existing reset/runtime fences. Preserve per-session fresh work reads, owner/settings/token/grant/generation checks, the existing stale-fence retry, and fail-closed/degraded error semantics.\n4. Deterministic tests prove the concurrency cap, no early fence release or response, rejection of late completion after ownership drift, sibling completion when one bind fails, and unchanged abort/persistence/absence-reconciliation safety.\n5. Required parent-owned host gates and paired independent review pass; timing and operational documentation describe bounds, remaining bottlenecks and failure behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "api",
+    "beads-migrated",
+    "config",
+    "engram",
+    "lifecycle",
+    "performance",
+    "resources",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

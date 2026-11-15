@@ -1,0 +1,38 @@
+{
+  "id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "external_ref": null,
+  "title": "A normal installed-build update must not block cross-host mailbox or direct prompts: peers re-attest compatibility automatically instead of needing a manual pinned-profile refresh",
+  "outcome": "After a routine build update on either host of an enrolled pair, ordinary cross-host mailbox delivery and direct prompts keep working with no operator ceremony. Either the peer re-attests and refreshes its compatibility record automatically and safely, or delivery continues on an unchanged protocol/schema/key basis. Build hashes stay as diagnostic and attestation evidence only, never as delivery authority.",
+  "acceptance": [
+    "The code path that pins a peer's compatibility to a binary-hash profile and refuses or holds ordinary delivery when it changes is identified in a note, with file and line, together with the safety property the pin is meant to protect.",
+    "With the fix, deterministic tests show that after either peer's binary hash changes with the federation protocol/schema contract and keys unchanged, ordinary mailbox send, read and ack and direct-prompt delivery succeed with no manual profile refresh; that an already enrolled pair with stored profile schema '2' reconnects after both hosts restart with the '2-metadata-units-2' local storage layout and unchanged federation contract, without profile rewriting or re-enrollment; that a change in the federation protocol/schema contract or keys is still refused or re-attested safely; and that the build hash remains recorded as diagnostic or attestation evidence. Local storage compatibility and migration checks remain enforced independently.",
+    "The full five-stage gate passes on the exact committed tree with an independent review pair and no outstanding in-scope finding of Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 00a4ecea; R9 compatibility tests/pair and landing provenance; reconcile final gate/criterion links. Later link incidents are not proof build-hash pinning persists; live child separate.",
+    "completed_at": "2026-11-08T19:21:36.217671400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

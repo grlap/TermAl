@@ -1,0 +1,51 @@
+{
+  "id": "01a0eed2-ee33-7d93-9cad-72e7daa92a6a",
+  "external_ref": null,
+  "title": "SSE stream can yield an older delta after a newer state snapshot (biased select over two channels)",
+  "outcome": "Broadcast state and delta events reach each client on one channel in the order they were broadcast, so among broadcast events a delta is never delivered after a snapshot of a later revision. The initial and lag-recovery snapshots are catch-up points built for one client: retained broadcast events of a lower revision may follow them and are not suppressed for that revision, and the client handles them under its own revision, identity and body-sequence rules. A client that cannot keep up is resynchronised to its recoverable state; notification-only events already lost to overflow are not replayed.",
+  "acceptance": [
+    "A client that cannot keep up with the stream is resynchronised with a full snapshot and is never left with a gap between the events it received; a test shows a lagging receiver.",
+    "Broadcast state and delta events yielded from one channel retain their broadcast order: among those broadcast events a delta of revision N is never yielded after a state event of a revision above N; a test at the stream layer fails without the fix and passes with it. The initial snapshot and a lag-recovery snapshot are built for one client outside that order: retained broadcast events of a lower revision may follow them and are not suppressed merely because of that revision. Tests show that such retained events, including a notification-only delta, are yielded; the client prevents stale metadata rollback under its revision and identity rules, processes body deltas under their per-session sequence and epoch rules rather than discarding them solely for an older global revision, and still handles an applicable notice.",
+    "The feature documentation of the state broadcast states the ordering guarantee and what a lagging client gets.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "conversation-view",
+    "sse",
+    "state-broadcast"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The SSE catch-up contract after a snapshot is pinned by stream-layer and client tests, and the state-broadcast docs are narrowed. Landed as 0541a6823823841d4e3f1896c17c79c17ebb7e78 in train-18 merge 5c6f6dd42c5c00511b280ff14db2c53f4560a1e0. Evaluation 186ab593390c44199ea5c0b109603301 passed criteria 1-4 and supersedes the carried failure.",
+    "completed_at": "2026-10-03T02:58:42.068028600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

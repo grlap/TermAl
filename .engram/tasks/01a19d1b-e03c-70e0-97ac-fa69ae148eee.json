@@ -1,0 +1,39 @@
+{
+  "id": "01a19d1b-e03c-70e0-97ac-fa69ae148eee",
+  "external_ref": null,
+  "title": "Ordinary (OFF) turns have no source-change baseline, so EO's content_comparison path is dead: wire an ordinary baseline or delete it",
+  "outcome": "Exactly one of two decided outcomes holds, and no dead content_comparison path remains. (a) An ordinary observed turn's recorded closing sighting becomes the claim's baseline for its next turn, so EO reports a measured content_comparison or no change. (b) The content_comparison/baseline path and runtime_checkpoint are deleted, and the EO docs state that ordinary turns report assumed_missing_baseline.",
+  "acceptance": [
+    "The decision between wiring the ordinary baseline and deleting the dead content_comparison path is recorded on this item, with the coordinators' concurrence (Termal::Fable2; Engram::Fable for the w-89f3b3eeb688 evaluation design)",
+    "If wired: after an ordinary turn whose closing source sighting was recorded under a claim, the next turn's unadmitted_turn report carries content_comparison against that baseline when the source changed and no source_change when it did not; uncertain attribution, an unrecorded or refused sighting, or a changed claim, binding or named-root generation never becomes the baseline; a focused test pins promotion and non-promotion",
+    "If deleted: no product code builds content_comparison or reads runtime_checkpoint, persisted historical values still load, and docs/features describing EO source_change say ordinary turns report assumed_missing_baseline",
+    "Under Greg's no-legacy rule the path does not stay dead either way"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Option (a): an ordinary turn's recorded closing sighting becomes the claim's baseline for its next turn, so EO reports a measured content_comparison or no change. Landed in 2707075c.",
+    "completed_at": "2026-11-04T06:56:00.868240800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

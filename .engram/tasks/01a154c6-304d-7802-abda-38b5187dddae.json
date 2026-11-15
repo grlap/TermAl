@@ -1,0 +1,29 @@
+{
+  "id": "01a154c6-304d-7802-abda-38b5187dddae",
+  "external_ref": null,
+  "title": "Design: measure the satellite toolchain identity off the federation request path (cached, re-measured on reconnect)",
+  "outcome": "A design decision, by the O1 author or the architect, on whether the toolchain identity in the execution profile should be measured outside the 5 s federation request window. The candidate: a bounded, typed measurement at startup or in the wake task, cached with its time and re-measured asynchronously on reconnect. If adopted, the identity route serves the cache, so no child process runs inside the listener deadline. The decision records what it does to when toolchain identity is sampled and how a stale toolchain is detected.",
+  "acceptance": [
+    "The O1 author (Termal::Sol-c593) or Termal::Architect1 records a ruling on adopting off-request-path measurement, including its effect on when toolchain identity is sampled and how a changed toolchain is detected.",
+    "If adopted, an implementation item exists with acceptance criteria for the cache, its re-measurement trigger and the typed failure on a stale or missing measurement; if rejected, the reason is recorded here."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

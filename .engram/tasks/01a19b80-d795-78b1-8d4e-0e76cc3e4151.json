@@ -1,0 +1,38 @@
+{
+  "id": "01a19b80-d795-78b1-8d4e-0e76cc3e4151",
+  "external_ref": null,
+  "title": "w-3fe8 source slice: containment_boundaries + settings_races port onto ordinary EO (boundaries2)",
+  "outcome": "w-3fe8 source slice: containment_boundaries + settings_races port onto ordinary EO (boundaries2)",
+  "acceptance": [
+    "A source-only patch for exactly the two paths in .evidence/execution-observability-12327/boundaries2-reroute-2ac.json (containment_boundaries and its mounted settings_races child) is returned to the integrator Sol-03d4, with an immutable tree id and per-path blobs",
+    "Every one of the 26 original tests (18 + 8 at frozen 2ac) has an explicit per-test disposition (ported, consolidated, or retired with reason), and the guarantees added in 584 (Stop, owner, pause and runtime) are preserved",
+    "No shared, product or outside-path edits, no gate aliases, and no product behaviour change made to obtain green; compile and test verdicts belong to the integrator's candidate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 containment/settings test ports; immutable scoped source/disposition records. Latest073f1194 is additional warning advice, not an unimplemented replacement task; close source-handoff scope only.",
+    "completed_at": "2026-11-08T19:22:15.613609100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

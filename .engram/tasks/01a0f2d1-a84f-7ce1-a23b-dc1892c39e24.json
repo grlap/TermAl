@@ -1,0 +1,26 @@
+{
+  "id": "01a0f2d1-a84f-7ce1-a23b-dc1892c39e24",
+  "external_ref": null,
+  "title": "Remove Beads from the repository",
+  "outcome": "Nothing in the repository reads, describes or ships Beads: the .beads directory is gone, the instruction, command and doc files name only Engram acts, and the Work view reads Engram alone.",
+  "acceptance": [
+    "Both children are completed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 2,
+  "labels": [
+    "beads-removal"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

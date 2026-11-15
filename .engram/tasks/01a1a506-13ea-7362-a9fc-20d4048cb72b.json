@@ -1,0 +1,24 @@
+{
+  "id": "01a1a506-13ea-7362-a9fc-20d4048cb72b",
+  "external_ref": null,
+  "title": "One 1 s candidate-fence wait in the removed-reader test can still fail on a slow host",
+  "outcome": "The candidate-fence loop in source_root_authority_removed_reader_requires_a_durable_pre_io_guard only detects a hang, like the loop before it.",
+  "acceptance": [
+    "The loop at about src/tests/engram_root_authority.rs:2046 uses the same long hang bound as the widened one at line 2008, with a stated reason in place of a failing run or a recorded failing run"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

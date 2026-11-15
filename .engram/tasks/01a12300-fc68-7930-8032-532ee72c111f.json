@@ -1,0 +1,27 @@
+{
+  "id": "01a12300-fc68-7930-8032-532ee72c111f",
+  "external_ref": null,
+  "title": "StateMutex::try_lock_now hides mutex poisoning that lock() reports",
+  "outcome": "StateMutex::try_lock_now either reports poisoning as lock() does (for example Option<LockResult<StateMutexGuard>>), or its doc says it deliberately ignores poisoning and is for diagnostic use only, so a later caller cannot read state left half-mutated by a panicked holder without knowing it.",
+  "acceptance": [
+    "StateMutex::try_lock_now hides mutex poisoning that lock() reports is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "host-persistence",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

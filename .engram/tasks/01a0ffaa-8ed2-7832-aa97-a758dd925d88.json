@@ -1,0 +1,29 @@
+{
+  "id": "01a0ffaa-8ed2-7832-aa97-a758dd925d88",
+  "external_ref": null,
+  "title": "Edit-refusal test asserts the full absolute temp path, which the 180-char display bound can cut on a deeper temp root",
+  "outcome": "an_edit_refusal_names_the_file_the_tool_reported (src/tests/engram_carried_checks.rs) asserts that the refusal contains the whole absolute target <test temp root>/engram-turn-check-carried-edit-named-project/target/probe.py. engram_display_reported_target cuts the middle of any escaped target over 180 chars (60 head + 120 tail). Here the path is about 155 chars, so the test passes only because the user's temp root is short. A longer temp root (another user name, or another TEMP location) makes it fail for a reason unrelated to the product. The test asserts something independent of where the machine's temp folder is: the displayed form computed through engram_display_reported_target, or the label plus the stable \"target/probe.py\" tail. It still covers an outside-the-worktree target that fences the gate.",
+  "acceptance": [
+    "an_edit_refusal_names_the_file_the_tool_reported no longer depends on the length of the test temp root: it asserts the displayed target (or a stable suffix and the tool-reported label) and still reports an edit outside the worktree that fences the gate.",
+    "The test passes with a target path longer than 180 chars as well as a short one."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low",
+    "test-robustness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

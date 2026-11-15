@@ -1,0 +1,33 @@
+{
+  "id": "01a14c97-1588-7840-8476-f2b56a13935f",
+  "external_ref": null,
+  "title": "Recover federation workers after cooperative credential-read cancellation",
+  "outcome": "A configuration stop during a side-effect-free credential read does not permanently quarantine the peer after the owned operation completes; unresolved SSH ownership remains fenced.",
+  "acceptance": [
+    "Reconfiguration during a held credential read permits a successor after the read settles, without host restart or duplicate unresolved OS operations.",
+    "Cancellation and timeout are distinguished while preserving late-child exact cleanup; regressions prove re-enable recovery and genuine cleanup uncertainty remains quarantined."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a14bba-5237-7013-b829-8e1fd94e3924",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a14d7d-ce9f-7a82-8c88-3f3091ca87c4",
+  "disposal_reason": "Continue independently after completed L1, batched with its other four Low follow-ups per Fable2 mailbox #117/message a45d0bce-d735-47c8-afe3-d1525b6823d8.",
+  "completion": null
+}

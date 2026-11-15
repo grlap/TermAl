@@ -1,0 +1,52 @@
+{
+  "id": "01a18414-94a9-7341-bebf-5c7161b4298b",
+  "external_ref": null,
+  "title": "Bound Accepted checkpoint accounting retries while an independent enclosure remains held",
+  "outcome": "A durably accounted original component does not churn persistence at the fast retry cadence or report complete settlement while an independently unsettled enclosing duty correctly prevents release.",
+  "acceptance": [
+    "An Accepted original blocked by an independently unsettled selected enclosure reports held rather than settled and avoids unbounded fast-cadence accounting writes, without acquiring the enclosure's shared-ID release latch.",
+    "Actual adopted-duty witnesses show bounded tick and explicit-accounting behavior, durable original receipt and effects, retained independent exclusion and no extra checkpoint or provider delivery.",
+    "Failed first publication or acknowledgement and restart remain recoverable; suppressing redundant accounting cannot mistake unproved in-memory effects for an acknowledged durable cut."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "checkpoint-receipts",
+    "control-plane",
+    "engram-control",
+    "gated-control",
+    "retry-cadence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete removed-feature path; not fixed or tested by this sweep. Fable2722/message43b9a7df-11b7-403a-a0d1-1e21100b4562 authorizes disposition. Full original outcome/criteria read; retained note provenance 75560d3a045643a5bf051ecd7730ac1f, 248150bd2c6a4ef683e800d420c24735, c47a9be535dc4dec914df684bd95f551, 24a972e494414a60add11d85afb4c906. At current master2e03d1a9f0357862cf26e4c6a4f8ddccdadeff00, landed87f49ed0 deleted active admission/begin/replay, containment/reset and checkpoint result-recovery owners (native deleted-path diff inspected). src/engram_session_obligations.rs and engram_containment_checkpoint.rs explicitly retain only passive validated historical records, never restore active exclusion/replay/accounting/admission. The specific old behavior in this item's title/criteria is therefore no longer an executable product contract. Current ordinary delivery/queue/transport/SQLite compatibility concerns were separately preserved in the sweep; this cancels no such behavior. Historical failures, unknown incident causes and existing delivered-work/credit caveats remain unchanged. No source edit, Cargo/test, new verification, old experiment execution or acceptance PASS claimed; keep raw evidence while other open items still cite it.",
+  "completion": null
+}

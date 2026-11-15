@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3b2-78a3-852c-60cb9877e4e1",
+  "external_ref": "tm-0uj7",
+  "title": "Test-run wait prompt names 'test-launcher.mjs recover', which older launchers lack",
+  "outcome": "Reported by Engram::Coder (mailbox-fb21004e #4, 2026-09-27 ~19:55Z). The completion wait test-run-wait-de20f0c3 for run test-0b0211c4 (Engram worktree .worktrees/docs-agent-contract, based on 933d4ec) reported UNKNOWN / process gone. That is accurate: the run was deliberately killed with taskkill /T at ~19:54Z. The wait prompt then said 'Settle it: node scripts/test-launcher.mjs recover \"RUN_DIR\"' (src/test_run_waits.rs:283). The launcher in that worktree has no recover mode; its modes are full, focused, summary, notify and _run. The hint names a command the run's own launcher cannot execute.\n\nFix direction:\n- Offer recover only when the run's launcher supports it. For example, the run directory or request.json could record the launcher's supported modes or version, or TermAl could probe the launcher script for the mode.\n- Otherwise say that settling needs a newer launcher, and that the run must not be counted as a pass.\n- Update the test at src/tests/test_run_waits.rs:288.\nNo blocker for the reporter: artifacts preserved and the interruption recorded.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e98c-a4cb-7562-97d9-3e3c395c1d4b",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate. The same line, src/test_run_waits.rs:283 (the host text names the launcher's `recover`); covered by w-3e3c395c1d4b.",
+  "completion": null
+}

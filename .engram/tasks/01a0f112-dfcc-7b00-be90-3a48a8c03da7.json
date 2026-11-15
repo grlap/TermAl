@@ -1,0 +1,29 @@
+{
+  "id": "01a0f112-dfcc-7b00-be90-3a48a8c03da7",
+  "external_ref": null,
+  "title": "Input fingerprint is unstable on Windows: isolated Git config drops the system core.autocrlf, so CRLF worktree files flip in and out of the tracked diff with the index stat cache",
+  "outcome": "On 2026-09-30 two independent changes each showed a mismatch between the gate's recorded input fingerprint and a later recompute, although the tracked content was byte-identical under normal Git:\n- TermAl w-ae4b52018e7f: gate 7f640022…, later 1d61d1d6….\n- w-2900a7cfebdc: gate 43278021…, later 40423d1e…. There, HEAD, index and untracked matched, and the tracked diff and status differed.\nCause, confirmed in .tmp/wt-ci:\n- isolatedGitEnvironment (scripts/review-freeze-fingerprint.mjs:36) sets GIT_CONFIG_NOSYSTEM=1 and GIT_CONFIG_GLOBAL=NUL. On this host core.autocrlf=true comes only from the system config (C:/Program Files/Git/etc/gitconfig).\n- Worktrees are checked out with CRLF (`git ls-files --eol`: i/lf w/crlf).\n- Under the isolated config Git compares CRLF worktree bytes with LF blobs. Any file Git re-reads, because its stat entry is dirty, shows as a whole-file change. On the clean commit 9367f56, `git diff HEAD --stat` gives 1318+/1318− for scripts/test-launcher.test.mjs. Files whose stat entry matches the index are assumed unchanged.\nSo the fingerprint's trackedHeadDiff and status depend on which files the index stat cache marks dirty. That changes with any normal-environment git command that refreshes the index, an edit, a checkout or a build.\nThe launcher's before and after (computed in one run) agree, but a recompute later need not. Exact-input evidence is therefore unreliable on Windows.\nFix direction: make the fingerprint's Git view independent of the stat cache and of the ambient eol configuration. For example, pin core.autocrlf and core.eol explicitly in the isolated environment to match the repository's checkout convention, or hash normalized content (git diff with a fixed conversion), and refresh the index under that same configuration before reading. Tests must show that a recompute after a normal-environment `git status` equals the original.",
+  "acceptance": [
+    "A real content change still changes the fingerprint.",
+    "On Windows with a CRLF checkout, captureFingerprint returns the same value before and after a normal-environment `git status`, a checkout touch, and a build that rewrites no tracked content; a test covers each.",
+    "The fingerprint of a clean committed tree shows no tracked diff."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "review-freeze",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

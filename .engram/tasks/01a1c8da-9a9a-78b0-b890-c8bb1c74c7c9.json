@@ -1,0 +1,28 @@
+{
+  "id": "01a1c8da-9a9a-78b0-b890-c8bb1c74c7c9",
+  "external_ref": null,
+  "title": "Strengthen past-256 journal naming test with a fresh-generation assertion",
+  "outcome": "The past-old-capacity naming witness rejects reuse of the template generation and still verifies all retained pending entries.",
+  "acceptance": [
+    "The behavioral naming test captures the prior template generation and requires the returned and confirmed generation to exceed it, while preserving pending-prefix assertions.",
+    "Focused tests pass on the changed input without changing production naming behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "named-root",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

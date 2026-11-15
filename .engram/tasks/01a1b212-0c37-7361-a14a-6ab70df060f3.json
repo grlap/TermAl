@@ -1,0 +1,29 @@
+{
+  "id": "01a1b212-0c37-7361-a14a-6ab70df060f3",
+  "external_ref": null,
+  "title": "Improve turn-summary precision for ambiguous watcher removals and renames",
+  "outcome": "Turn summaries distinguish ambiguous covering notifications from confirmed file edits, removals and recreations, preserving conservative notification coverage and useful navigation for confirmed surviving regular files.",
+  "acceptance": [
+    "Confirmed regular-file changes retain useful summary classification and navigation, while ambiguous subtree changes are described truthfully.",
+    "Regressions cover Windows-shaped Remove(Any), delete/recreate and rename-into-place without losing covering notifications for real directory removals or renames."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "ui",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

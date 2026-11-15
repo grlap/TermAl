@@ -1,0 +1,29 @@
+{
+  "id": "01a1b17e-63f2-75e1-889b-ebbbb2bd8259",
+  "external_ref": null,
+  "title": "Bound turn file-change summaries across successive watcher generations",
+  "outcome": "Design and validate a separate bound on the accumulation of distinct paths in turn file-change summaries, preserving truthful coverage and named-root attribution.",
+  "acceptance": [
+    "A documented policy bounds retained turn-summary storage across successive watcher flushes while preserving exact paths or truthful covering markers for every accumulated change.",
+    "Focused tests exercise distinct workdir and named source root, repeated flushes, late summaries and unrelated-root isolation; the implemented input passes the required review and gates."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "memory",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

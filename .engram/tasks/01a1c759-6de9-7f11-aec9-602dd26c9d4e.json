@@ -1,0 +1,30 @@
+{
+  "id": "01a1c759-6de9-7f11-aec9-602dd26c9d4e",
+  "external_ref": null,
+  "title": "Offer more acceptance-evaluator agents than Claude and Codex, each behind a safe authenticated submission contract",
+  "outcome": "Offer more acceptance-evaluator agents than Claude and Codex, each behind a safe authenticated submission contract",
+  "acceptance": [
+    "Each additional evaluator agent offered in Settings > Acceptance evaluation > Evaluator agent submits its verdict only through a contract that authenticates the submission tool's origin (native permission identity, or an agreed equivalent such as Kimi's qualified-name host gate) and enforces read-only; agents without such a contract stay unavailable, with the reason shown; a test shows an admitted agent's submission accepted and an unauthenticated one refused.",
+    "The UI and the settings validation list exactly the agents the backend admits as evaluators, with any documented weakness (for example network access or reads outside the workspace) shown next to that choice; a test shows the offered list matches the backend's admitted set.",
+    "Auto evaluator selection keeps preferring a ready agent from a vendor other than the parent's; adding agents does not change existing Claude and Codex behaviour; tests cover both."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "agent-support",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

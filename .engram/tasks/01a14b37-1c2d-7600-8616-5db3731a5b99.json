@@ -1,0 +1,27 @@
+{
+  "id": "01a14b37-1c2d-7600-8616-5db3731a5b99",
+  "external_ref": null,
+  "title": "Bound admission trace logging volume and reduce test stderr noise",
+  "outcome": "Establish the host stderr retention/rotation boundary for per-admission trace records, then reduce unnecessary trace emission in tests without losing the isolated stderr witness or production failure diagnostics; verify the chosen bounded policy.",
+  "acceptance": [
+    "Bound admission trace logging volume and reduce test stderr noise is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "observability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

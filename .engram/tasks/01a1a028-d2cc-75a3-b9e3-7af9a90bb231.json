@@ -1,0 +1,29 @@
+{
+  "id": "01a1a028-d2cc-75a3-b9e3-7af9a90bb231",
+  "external_ref": null,
+  "title": "Acknowledging a relay mailbox with the exact read receipt and tool-returned locator fails 400 \"unsupported or invalid mailbox relay locator\"",
+  "outcome": "A participant who read a relay mailbox successfully can acknowledge it with the unchanged mailboxId and receipt that the read returned, so the cursor advances and the messages are not re-delivered.",
+  "acceptance": [
+    "The code path that rejects the acknowledgement with 400 'unsupported or invalid mailbox relay locator' for a locator that termal_read_mailbox accepted is identified, and the difference between the read and acknowledge locator handling is explained.",
+    "A regression test reads a relay mailbox of the same kind (home host and relay type as the reported case) and acknowledges it with the returned mailboxId and receipt, and asserts success and an advanced cursor. The review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

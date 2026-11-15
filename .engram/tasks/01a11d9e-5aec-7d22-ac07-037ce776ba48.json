@@ -1,0 +1,29 @@
+{
+  "id": "01a11d9e-5aec-7d22-ac07-037ce776ba48",
+  "external_ref": null,
+  "title": "Move causal test-fixture assertions outside StateInner guards",
+  "outcome": "Causal test fixtures snapshot queue and message state under StateInner and assert after releasing the guard, so an ordinary test failure cannot poison the lock and trigger a Drop-time double-panic abort. No production persistence or recovery behavior changes.",
+  "acceptance": [
+    "Move causal test-fixture assertions outside StateInner guards is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host-adapter",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

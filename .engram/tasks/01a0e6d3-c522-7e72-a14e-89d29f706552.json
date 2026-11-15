@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c522-7e72-a14e-89d29f706552",
+  "external_ref": "tm-h8ue",
+  "title": "Refuse at naming a source root longer than Engram's 512-byte basis bound",
+  "outcome": "Found by the Claude /review-code of tm-5gi4 phase 2, round 8 (freeze 116856cb).\n\nvalidate_engram_source_root accepts a root up to MAX_DELEGATION_CWD_CHARS (4096 characters). Every named-root basis goes through engram_bounded_source_basis, which refuses a workspace_id over ENGRAM_SOURCE_BASIS_MAX_BYTES (512 bytes). So a root longer than 512 bytes can be named but never measured: its begin and closing bases are always None. The naming response says only 'unmeasured ... see the host log'; the host log names the cause ('its root exceeds 512 bytes').\n\nCurrent behaviour is conservative. The turn reports no basis, the same as a workdir whose root is that long, and the obligation can only be waived. So this is a UX gap, not a misreport.\n\nChecked and not reachable: the sealed-basis fallback in engram_turn_end_basis builds workspace_id from the stored root without the bound. But a seal exists only if the seal capture passed the bound, and the stored root and the capture's workspace_id are the same ReviewFreezeGit root string.\n\nFix direction:\n- In validate_engram_source_root, refuse a root whose string exceeds ENGRAM_SOURCE_BASIS_MAX_BYTES, with a 400 that names the bound.\n- Extract that check as a pure helper so it can be tested without a >512-byte worktree. Windows MAX_PATH makes a real one impractical in tests.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4c6-77d0-a7b4-d2c6537a2e07",
+  "external_ref": "tm-bwgk",
+  "title": "Decouple Engram refusal-expiry tests from adapter policy",
+  "outcome": "The stateful Engram fake determines whether begin refusal expires a grant by calling the adapter's own engram_begin_refusal_allows_reevaluation helper. Adapter and fake can therefore drift together while S2/non-expiring tests stay green. The fake must encode Engram's external refusal semantics independently.",
+  "acceptance": [
+    "The fake hard-codes or otherwise independently models Engram's five expiring refusal decisions; a mutation to the adapter policy causes focused tests to fail; production behavior is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 final batch 58fdd104, applied by Termal::Fable2): CLOSE-DONE. An independent five-code fake and an external-contract test are present on master; markers are in note 58fdd104. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

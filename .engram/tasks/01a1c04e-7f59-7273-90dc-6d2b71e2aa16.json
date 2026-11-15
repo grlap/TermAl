@@ -1,0 +1,30 @@
+{
+  "id": "01a1c04e-7f59-7273-90dc-6d2b71e2aa16",
+  "external_ref": null,
+  "title": "Qualify unconfirmed-root notice for acceptance-request refusals",
+  "outcome": "The unconfirmed-root opening notice makes clear that ordinary work proceeds while acceptance requests can still be refused by the existing authority and source checks; no evidence or admission check is weakened.",
+  "acceptance": [
+    "Obtain coordinator concurrence on exact revised notice wording describing acceptance-request refusal while ordinary work continues.",
+    "The notice uses that wording and keeps the existing authority, evidence and acceptance-request refusal behavior.",
+    "A behavior regression verifies the delivered notice alongside the unchanged refusal and opening attribution behavior; required review and full validation pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

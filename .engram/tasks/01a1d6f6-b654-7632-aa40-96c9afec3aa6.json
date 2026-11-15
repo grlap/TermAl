@@ -1,0 +1,38 @@
+{
+  "id": "01a1d6f6-b654-7632-aa40-96c9afec3aa6",
+  "external_ref": null,
+  "title": "Remote sync rejects state snapshots and summary deltas from a pre-87f49ed0 peer: retired summary fields hit deny_unknown_fields",
+  "outcome": "A host on the current build decodes state snapshots and summary deltas from a peer still running the pre-removal build: the retired summary fields (engramControlOff and the other fields 87f49ed0 removed from StateSessionSummary) are accepted and discarded at the remote decode boundary without restoring any control behaviour, and remote synchronization keeps working through a staggered host upgrade.",
+  "acceptance": [
+    "A behavioural test decodes a BASE-shaped StateResponse snapshot whose session summaries carry engramControlOff (and every other retired summary field) through the remote decode path, and the snapshot applies with the retired values discarded",
+    "A behavioural test does the same for BASE-shaped SessionCreated and OrchestratorsUpdated summary deltas",
+    "Unknown fields that are NOT retired summary fields are still refused (deny_unknown_fields is not simply dropped)",
+    "No retired gated-control behaviour is restored"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "remote-sync",
+    "review-medium",
+    "wire-compatibility"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed d377696e makes remote snapshot/delta and HTTP action decoding accept and discard exactly the three retired summary fields while retaining canonical strictness and existing authority guards. Original independent evaluation d6bfafb73ae6421182ea23bea6e1201f passed all four revision3 criteria on the landed clean source; the exact-tree full gate passed.",
+    "completed_at": "2026-11-14T08:38:26.019159Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

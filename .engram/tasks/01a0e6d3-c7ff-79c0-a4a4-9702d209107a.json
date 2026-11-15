@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7ff-79c0-a4a4-9702d209107a",
+  "external_ref": "tm-z2t8",
+  "title": "Check summary says 'succeeded' for a piped test run whose verdict is unknown (and whose output says FAILED)",
+  "outcome": "Reported by Engram::Opus (session-7284, mailbox #195, 2026-09-25). Evidence locators be816829f99648d196b0162678d458f6 and bb95818266ca4cf9830e7eb4e1d68d99 were deliberate FAILED negative controls; 0159021a62a4493bbb8b6dd702323197 was an ok run.\n\nA command such as `cargo test ... 2>&1 | grep ...` is recorded with outcome Unknown, which is correct: engram_check_outcome returns Unknown for non-simple lines, and that outcome is on the producer observation. But engram_check_summary (src/engram_check_recognition.rs:695) builds its first line from the runtime's end alone. So the evidence text reads \"`cmd` succeeded (the runtime reports no exit status)\" followed by \"test result: FAILED ...\". A reader, or anything that goes by the text, can take that for a pass.\n\nFix: pass the resolved outcome and its reasons into the summary, and lead with the verdict: passed / failed / result unknown. For unknown, give the reason: pipe or list may mask the exit status; overlapped by another writer; no result line showed a passing test; no exit status. Then what the runtime reported. Update the existing summary tests and add piped FAILED and piped ok cases. Part of the tm-winf step-2 feature (5fee74f).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

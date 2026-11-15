@@ -1,0 +1,35 @@
+{
+  "id": "01a151a0-f950-7b62-8dc8-0fa7591ee2fe",
+  "external_ref": null,
+  "title": "Align central control-plane transport documentation with A1 attestation and request MACs",
+  "outcome": "The central control-plane brief accurately describes A1's attested control stream and authenticated requests, with the runtime pair key never transmitted.",
+  "acceptance": [
+    "The L1 transport section of docs/features/central-control-plane.md describes mutual control-stream attestation, HKDF-derived request keys, per-request MAC and counter window, and states that the runtime pair key is never transmitted.",
+    "The obsolete transmitted-capability and signing-as-a-later-slice statements are removed or updated, with a cross-reference to docs/features/federation-link.md; the edit changes documentation only."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "docs",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14d7d-ccb4-79f3-a4dd-06dfdd4ab87e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

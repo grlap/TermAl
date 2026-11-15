@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-8a7ef4115f1f",
+  "external_ref": "tm-ncc6.7",
+  "title": "UI: Test Runs workspace tab - run list, run detail with stages and timings, live log viewer, history, cancel/rerun, input identity",
+  "outcome": "HOW (children: tm-ncc6.7.1 tab wiring, .7.2 list+detail, .7.3 log viewer)\n- Follow the Work tab exactly: kind \"testRuns\" in ui/src/workspace-types.ts, factory in ui/src/workspace-tabs.ts (createWorkTab at 161), validation in ui/src/workspace-tab-validation.ts (28, 88), label in ui/src/panels/pane-tab-labels.ts (87), dock action in ui/src/panels/ControlPanelSurface.tsx (93 'Open Work'), open action in ui/src/app-workspace-actions.ts (41/801) and the one-tab-per-pane singleton in ui/src/workspace.ts (openWorkInWorkspaceState ~940-988).\n- New small modules under ui/src/panels/: test-runs-api.ts (GET/POST wrappers with preserveGatewayErrorBody like work-visualizer-api.ts), use-test-runs.ts (list state fed by the 'testRunChanged' live delta, no polling), TestRunsPanel.tsx (list + filters), TestRunDetail.tsx (stages table, first-failure diagnostics, run dir + fingerprint copy, cancel with confirm, rerun), TestRunLog.tsx (SSE follow client modeled on ui/src/api-terminal.ts:80, bounded buffer, follow/wrap/jump), test-runs.css.\n- Layout, states and copy per the prototype linked on the epic; theme tokens (--signal-*), phone width, keyboard focus.\n\nDEPENDS ON: tm-ncc6.6. BLOCKS: tm-ncc6.8, .9 UI parts.\n\nREVIEW FIXES (F2, F13): the API client module pattern is ui/src/work-visualizer-api.ts (not panels/); a disk-`running` stage inside a canceled/unknown record is rendered as 'interrupted'; theme/phone-width checks are a manual checklist plus a string test that test-runs.css defines both light and dark token sets.",
+  "acceptance": [
+    "- The tab opens from the dock action, persists/validates like the Work tab (workspace tests extended for kind testRuns).\n- List shows state pill, preset, requester, short fingerprint, started, duration, drift/unknown flags; filter by state; deltas update without polling (no second read after the initial load).\n- Detail shows every stage with state/exit/duration, 'unrun' and 'interrupted' explicitly, first-failure diagnostics, run dir and fingerprint; cancel asks for confirmation; a 409 on rerun is rendered.\n- Log viewer follows a running stage over SSE, stops when the stream ends, offers wrap and jump-to-end, buffer bounded (long-stream test).\n- tsc clean; vitest green; test-runs.css defines light and dark tokens (string test); manual checklist: 400 px width, both themes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0f9f8-21d2-7f71-ba30-9dd210d23c2a",
+  "external_ref": null,
+  "title": "Extract the delegation event publication helpers out of delegations.rs (about 5,000 lines) as a pure-move commit",
+  "outcome": "The publish_delegation_*_delta, publish_parent_delegation_card_delta, publish_delegation_child_transcript_delta and enqueue_delegation_refresh_locked helpers live in their own module with a provenance header",
+  "acceptance": [
+    "Extract the delegation event publication helpers out of delegations.rs (about 5,000 lines) as a pure-move commit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a19562-239c-7493-b860-ca91dc436ec3",
+  "external_ref": null,
+  "title": "Test that control_cleanup_pending names the recorded cleanup cause, and the confirm-absence failure path",
+  "outcome": "Deterministic tests cover the Engram control cleanup cause. One test sets a retained EngramControlProcess's cleanup_failure to Some(cause) with cleanup_finished false. It asserts that process_for_until's control_cleanup_pending refusal message contains that cause, and that the fallback messages appear when no cause is recorded. A Unix test drives finish_engram_control_cleanup through the failure path where the group is still present after the reap, or through the EPERM → ConfirmAbsenceAfterReap branch, without relying on a macOS kernel race. Optionally, shutdown_session_until's reset-path errors also carry the recorded cause, for consistency.",
+  "acceptance": [
+    "a test asserts that process_for_until's control_cleanup_pending message contains a recorded cleanup_failure cause, and one asserts the fallback message when none is recorded",
+    "a Unix test exercises finish_engram_control_cleanup's confirm-absence failure path or the EPERM confirm-after-reap branch deterministically",
+    "the change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control-transport",
+    "found-by-review",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

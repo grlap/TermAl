@@ -1,0 +1,38 @@
+{
+  "id": "01a0fec5-8d6c-7ea0-bb05-e3abb15d4151",
+  "external_ref": null,
+  "title": "Fence detached-loss targeted metadata refresh against older response stamps",
+  "outcome": "Fence detached-loss targeted metadata refresh against older response stamps",
+  "acceptance": [
+    "A public regression for a local session with an admitted paired tail, creation or fork body response in the current instance delays a targeted tail or action response with a known numeric stamp until after newer known idle/status/preview/queue metadata is adopted and proves the older response cannot roll those fields or their mutation stamp back in ref, store or render, including when its admissible tail bodies are adopted.",
+    "The exact corrected input passes focused regressions, the full five-stage gate and a fresh complete independent Codex/Claude pair with no outstanding in-scope Medium-or-higher finding.",
+    "The same-instance known-older-stamp check is at D7's central owner commit gate, only for local sessions with an admitted paired tail, creation or fork body response in the current instance. The guard compares two known numeric stamps; absent or null stamps are incomparable and retain master's global admission. Remote, foreign-epoch and never-paired sessions remain unguarded. A current targeted response retains authoritative omitted-empty queue/marker clearing; a known older response within the guard domain preserves resident metadata. An accepted instance reset clears the comparison domain."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Already fixed on master in a234b129efbb7c94b1996888d3ead7e682d11b68 (Landing train 16, P0 w-1b692f268123), per coordinator Fable2 03723eab #409. The same-instance known-older-stamp guard is in the central publication gate commit() at ui/src/transcript-repair-authority.ts:263-273. It applies only to local sessions with admittedBodySnapshot (paired tail, creation or fork read in the current instance); null stamps keep global admission; remote, foreign-epoch and never-paired sessions are excluded; and an instance reset clears the domain. Covered by the App test \"F2: delayed loss-tail metadata and range commit cannot roll newer idle metadata back\" (ui/src/App.transcript-loss-authority.test.tsx:589) and the unit tests at ui/src/transcript-repair-authority.test.ts:91, :124 and :136. Evidence is in my pre-claim note on this item. Coverage gaps are filed separately as a Low test item.",
+  "completion": null
+}

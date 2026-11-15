@@ -1,0 +1,37 @@
+{
+  "id": "01a1be6c-1d92-7803-90e9-1e698c69edff",
+  "external_ref": null,
+  "title": "Test-run view jumps on refresh: 'Loading test-run history...' appears and disappears",
+  "outcome": "Refreshing the test-run view keeps its geometry stable, with no flicker or unnecessary rerender, while first load, errors and an empty list stay clear.",
+  "acceptance": [
+    "During a refresh with existing data, the view keeps showing the last data and does not show the loading line, so the panel does not jump; a behaviour test covers this.",
+    "First load with no data still shows a readable loading state, and an error and a genuinely empty list still show as they do today; behaviour tests cover each.",
+    "The fix uses existing state and adds no new mechanism. A before-and-after measurement of renders or layout shift on the real view is recorded in proportion to the change.",
+    "A review pair finds no Medium or higher, and the normal focused checks and gate pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed stable Test Runs refresh: existing rows/empty state stay visible, first-load/error behavior retained; observed layout jump reduced from33.796875px to0 in controlled real-App A/B.",
+    "completed_at": "2026-11-09T07:43:42.381973200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

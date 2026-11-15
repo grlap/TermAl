@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7d5-7890-9c90-ea4d13de978e",
+  "external_ref": "tm-x01e",
+  "title": "Teardown paths capture the Engram turn observation before the runtime is quiesced",
+  "outcome": "Found by round-2 review of tm-winf step 1 (Codex /review-code, Medium). kill_session (src/session_lifecycle.rs, the engram_session_ids_to_terminate loop) and the revocation path shutdown_revoked_engram_mcp_runtimes (src/session_crud.rs) call checkpoint_engram_turn_off_lock with outcome Unknown, which captures the end basis and sends source_changed/source_basis, before shutdown_removed_runtime / shutdown_stopped_runtime stop the provider runtime. A mutating child can therefore write after the end capture or while the control call is pending; those writes are absent from the turn's only observation, which can even say source_changed=false and open no mutation-check obligation. Documented as a known limit in docs/features/engram-host-adapter.md. Fix direction: fence and stop the runtime while retaining the grant and the Engram control connection, then capture and checkpoint; a still-running runtime's snapshot is not its final execution source state. Care: the exit/termination callbacks of a stopped runtime also try to checkpoint; the per-grant report cache (round 2) makes the second closer repeat the first report, so ordering must keep exactly one closer building the report after the runtime is quiet.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

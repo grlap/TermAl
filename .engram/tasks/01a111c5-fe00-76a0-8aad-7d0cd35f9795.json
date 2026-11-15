@@ -1,0 +1,40 @@
+{
+  "id": "01a111c5-fe00-76a0-8aad-7d0cd35f9795",
+  "external_ref": null,
+  "title": "F — ATOMIC ORDINARY-ACTIVATION CUTOVER",
+  "outcome": "F — ATOMIC ORDINARY-ACTIVATION CUTOVER",
+  "acceptance": [
+    "F — ATOMIC ORDINARY-ACTIVATION CUTOVER, cap +500. Depends on B/C/D/E together. Wire durable preparation before boot/recovery/runtime target composition and all new-session/host-reader paths; switch every inventoried consumer to acknowledged mapping and remove transitional production legacy bypasses in the same landing. Existing associations migrate with unchanged wire id/ref; new ones use fresh ids. Missing mappings and pending/unhandled/invalid restore evidence hold all relevant admission. No restore rotation caller. Acceptance subset: integrated I2/I3/I6 and ordinary-operation parts of I5/I7, complete boundary matrix, pinned producer identity acceptance. The stage must demonstrate there is no mixed old/new wire identity for a single association and no wire use before ACK. It cannot be split into separate live per-consumer cutovers; if its glue exceeds cap, move more behavior-preserving preparation into preceding dormant stages first. This is the first stage that may enable ordinary fresh issuance."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-backup",
+    "engram-host",
+    "identity-stage-f"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0fa84-7f43-7782-b76d-47338f8245e3",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a111c5-fce2-71d3-a457-b22c9ab51bb7",
+    "01a111c5-fd68-75b3-872f-28bbf0c41e19",
+    "01a111c5-fd9d-71f3-bd26-a40efb6e3b33",
+    "01a111c5-fdcc-7640-97d9-69d5bf0d779f"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

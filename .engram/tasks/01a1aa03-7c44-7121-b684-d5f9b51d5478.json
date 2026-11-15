@@ -1,0 +1,40 @@
+{
+  "id": "01a1aa03-7c44-7121-b684-d5f9b51d5478",
+  "external_ref": null,
+  "title": "Bound Test Runs row rendering while preserving complete history and keyboard access",
+  "outcome": "Opening and filtering Test Runs no longer mounts thousands of complete run cards. The existing row window bounds DOM work while all history, filters, detail access and session choices remain available.",
+  "acceptance": [
+    "The Test Runs list mounts a bounded window through the existing measured row-window mechanism instead of every matching run, while all loaded and live canonical run identities remain reachable by scrolling and keyboard traversal. Filtering, alias reconciliation, selected detail, exact-id recorded-card fallback, explicit Load older and read-only execution behavior remain intact; no history, evidence or artifact is removed.",
+    "Unchanged session choices and run ordering are reused across local state-filter and selection updates without truncating the session or run domain. Keyboard focus, Tab and Shift+Tab across window boundaries, selected rows outside the viewport, filter changes and late history/live updates have deterministic regression controls with no wall-clock pass threshold.",
+    "Retain the actual served-UI opening/filter/selection baseline and validate the bounded DOM and visible behavior on the changed client with a comparable explicitly described browser workload. Report EventTiming, CDP roundtrip, CPU/layout work and network observations separately; do not claim a live deployment speedup, quiet-host guarantee or backend snapshot reduction from a fixture result.",
+    "The exact candidate has passing focused UI regressions and TypeScript checking, an independent Codex/Claude review pair without outstanding in-scope Medium-or-higher findings, and the standing full gate before landing. Backend counters/snapshot transport, lifecycle settlement, retention, install and restart remain outside this UI-only change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "state-flood",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14b89-c82a-7330-b1db-5f17deb1e060",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed bounded Test Runs rendering on master7eb731fc with unchanged reviewed UI contribution, full logical history/filter/session domains, measured scrolling and native keyboard traversal. Exact focused25/0 and TypeScript passed, independent Codex/Kimi pair clean under recorded Claude-limit exception, qualified final combined five-stage gate passed. Actual served baseline and isolated comparison retained with explicit limits. Live UI deployment/install/restart remain outside this item and pending; backend parent remains open.",
+    "completed_at": "2026-11-05T09:23:29.994508Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

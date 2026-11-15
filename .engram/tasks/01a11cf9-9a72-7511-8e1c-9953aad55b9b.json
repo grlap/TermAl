@@ -1,0 +1,34 @@
+{
+  "id": "01a11cf9-9a72-7511-8e1c-9953aad55b9b",
+  "external_ref": null,
+  "title": "Clarify the declared-command docs' cmd refusal scope",
+  "outcome": "Clarify the declared-command docs' cmd refusal scope",
+  "acceptance": [
+    "docs/features/declared-test-commands.md describes the cmd/powershell refusal as applying to the first program of the bare line or accepted wrapper script and the recognized Cmd dialect; it makes no claim that TermAl follows commands invoked indirectly by another program."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "declared-checks",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Shell-refusal docs landed f5a965829569727027fbd2a5b1a42cd6c5b6f063 on origin/master. Exact treeb746 reviewed Codex+Claude clean, full9d2 gate PASSED, independent17cfe80b1PASS fresh. Opus2 mailbox4917faac#185 and note c6fe0690 FULLread; holder independently verified localmaster+ls-remote exacthash. Binary unchanged e3702155; no running-host update needed.",
+    "completed_at": "2026-10-09T03:19:42.037605500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

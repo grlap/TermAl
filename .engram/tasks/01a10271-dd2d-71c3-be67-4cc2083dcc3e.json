@@ -1,0 +1,24 @@
+{
+  "id": "01a10271-dd2d-71c3-be67-4cc2083dcc3e",
+  "external_ref": null,
+  "title": "Claude compact hook: a compaction that ends without compact_boundary can leave compaction_refresh_requested set and swallow the next boundary's refresh",
+  "outcome": "Review Low from the w-30eca590e985 review pair (Claude claude-fable-5-1 delegation-69c3545a, freeze cd5dedb8). In src/claude_frame_application.rs, ClaudeReaderFrames.compaction_refresh_requested is reset only by a status=compacting frame and consumed only by compact_boundary. Suppose a callback is answered but its compaction ends without a boundary (an aborted compaction), on a runtime that emits no status=compacting before the next compaction. Then the next boundary's refresh request is swallowed, and the following prompt carries no fresh context. Live Claude Code 2.1.288 sends status=compacting before every capture's callback, so the window needs both an aborted compaction and no status frame. Possible fixes: clear the flag at the end of a compaction without a boundary (a status frame with compact_result other than success), or at the runtime's next init, with a test.",
+  "acceptance": [
+    "Claude compact hook: a compaction that ends without compact_boundary can leave compaction_refresh_requested set and swallow the next boundary's refresh is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

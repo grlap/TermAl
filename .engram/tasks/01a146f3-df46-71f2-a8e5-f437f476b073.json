@@ -1,0 +1,29 @@
+{
+  "id": "01a146f3-df46-71f2-a8e5-f437f476b073",
+  "external_ref": null,
+  "title": "Named roots of abandoned or parked open items (lapsed claims) are retained forever; no coordinator release exists, so the global cap fills",
+  "outcome": "The global named-root cap cannot be filled indefinitely by roots nobody is using: roots of open items whose claims have lapsed become reclaimable through a supported, auditable route, without killing sessions.",
+  "acceptance": [
+    "A root whose item has been open with no live claim for longer than a documented period (or which the coordinator explicitly releases through a documented, audited route) stops counting against the global cap, without killing any session and without changing the item's lifecycle.",
+    "Releasing such a root records who released it and why, and a later re-naming of that item works normally (a new generation; no stale evidence is credited).",
+    "Regression tests cover: a lapsed-claim open item's root becomes reclaimable; a live-claim item's root is never reclaimed; cargo test --bin termal is green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination-cost",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

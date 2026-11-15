@@ -1,0 +1,28 @@
+{
+  "id": "01a1c2e4-6923-7333-9908-3360c217bc73",
+  "external_ref": null,
+  "title": "Remove or relocate the retained test-only legacy source capture stack",
+  "outcome": "Production modules no longer carry the large retired cfg(test) capture chain merely to exercise unshipped historical logic; required stored-record readers and shipped owner-path tests remain.",
+  "acceptance": [
+    "Inventory cfg(test)-only legacy capture functions in engram_source_roots.rs near1359, engram_turn_observations.rs and ordinary_commit_input.rs; relocate genuinely needed test helpers to src/tests or remove them after owner-path behavioral coverage, preserving stored Pending/Unconfirmed replay and historical record readers. Do not replace removed stub tests with text pins or mirror tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "severity-low",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

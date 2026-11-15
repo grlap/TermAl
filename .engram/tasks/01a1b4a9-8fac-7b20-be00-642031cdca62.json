@@ -1,0 +1,28 @@
+{
+  "id": "01a1b4a9-8fac-7b20-be00-642031cdca62",
+  "external_ref": null,
+  "title": "Clean up Sol-1cee (session-13169) leftovers: 43 worktrees, lane/candidate branches and about 18 stash entries",
+  "outcome": "Every worktree, branch and stash entry left by Sol-1cee (session-13169) is either removed after a check that it holds no unlanded work, or kept with a recorded need and an end date. The removals are recorded.",
+  "acceptance": [
+    "Clean up Sol-1cee (session-13169) leftovers: 43 worktrees, lane/candidate branches and about 18 stash entries is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cleanup",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

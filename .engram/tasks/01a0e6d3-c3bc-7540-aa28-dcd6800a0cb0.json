@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3bc-7540-aa28-dcd6800a0cb0",
+  "external_ref": "tm-1ur",
+  "title": "clear_shared_codex_turn_session_state must account for pending_setup_command (no exhaustiveness guard)",
+  "outcome": "codex_turn_cleanup.rs:258-271 clear_shared_codex_turn_session_state documents itself as clearing 'every shared-session per-turn field ... so the next turn starts from a clean slate', but it is a field-by-field reset with NO compile-time exhaustiveness check (unlike the destructure in codex_events.rs:293-301, which is what forced pending_setup_command to be considered there).\n\nAny new SharedCodexSessionState field silently escapes this routine. Concretely for the thread-setup work: if someone adds the obvious-looking 'session_state.pending_setup_command = None;' here, the thread-setup waiter falls through to .unwrap_or(command) and the session answers the OLDER prompt — silently, with no test failing.\n\nFix direction: make the clear routine an exhaustive destructure (like codex_events.rs) so adding a field is a compile error, forcing an explicit keep/clear decision.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

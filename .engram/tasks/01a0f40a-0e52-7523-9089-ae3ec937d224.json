@@ -1,0 +1,35 @@
+{
+  "id": "01a0f40a-0e52-7523-9089-ae3ec937d224",
+  "external_ref": null,
+  "title": "The focus-rebind test scripts the binding it should prove the production selection makes",
+  "outcome": "The focus-rebind test scripts the binding it should prove the production selection makes",
+  "acceptance": [
+    "The full gate passed on the exact landed input.",
+    "focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence (src/tests/engram_source_root_naming.rs) takes the next turn's binding from the production selection over the replaced held claims, not from a binding the test computes and pushes; breaking the focus-driven selection makes it fail."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "named-root",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

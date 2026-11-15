@@ -1,0 +1,28 @@
+{
+  "id": "01a1d655-080b-7f82-9a79-38c039768f39",
+  "external_ref": null,
+  "title": "Gemini model-refresh auth-failure fallback still points at GEMINI_API_KEY/Vertex AI/Google login after the Antigravity switch",
+  "outcome": "A Gemini (Antigravity) auth failure tells the user an applicable remedy.",
+  "acceptance": [
+    "The auth-failure fallback in ui/src/session-model-utils.ts (~573), and the related harness fixture text, tell the user to sign in through the Antigravity CLI (agy) or set GEMINI_API_KEY or GOOGLE_CLOUD_PROJECT plus GOOGLE_CLOUD_LOCATION in the host process environment, with no Vertex AI or Google-login wording; a UI test covers the message."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "gemini",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

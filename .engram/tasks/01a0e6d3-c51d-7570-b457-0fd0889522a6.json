@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c51d-7570-b457-0fd0889522a6",
+  "external_ref": "tm-h6uc.4",
+  "title": "Verify Workspaces panel UX and document the new navigation",
+  "outcome": "Owner Termal::Grok; depends on integrated Workspaces section. Run TypeScript and focused tests during implementation; include ControlPanelSurface, control-surface-state, new WorkspacesPanel, App.workspace-layout and workspace-labels coverage. Preserve recovery/autosave/pagehide behavior and new-tab current-workspace safeguard; add concrete ordering expectations (existing tm-md1b) and long unbroken 80-char names at narrow dock widths (existing tm-x80k). Keyboard traversal, menu/rename/delete Escape and focus return, loading/empty/search-empty/errors, left/right dock, disabled duplicate actions and current fallback. Browser check via isolated preview, no build into live ui/dist: label truncation, usable menus and one scroll container. Update docs/features/multi-browser-workspaces.md and relevant navigation docs to Workspaces section with screenshots/geometry evidence clearly distinguished from JSDOM tests. Report changed paths, focused results, unresolved concerns and freeze fingerprint to Codex; stop editing at handback. Codex runs full required parent gates and exactly one Codex+Claude reviewer pair. No commit/push/deploy or Beads close until Greg authorizes.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c51b-7df2-8753-e4ea12b01b75",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a0e6d3-c51d-7570-b457-0fc81fde619f"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-DONE. The verification rounds landed in cd467a5, 90e434c and 871e123 (all ancestors of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

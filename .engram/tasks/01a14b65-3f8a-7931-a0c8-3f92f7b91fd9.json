@@ -1,0 +1,30 @@
+{
+  "id": "01a14b65-3f8a-7931-a0c8-3f92f7b91fd9",
+  "external_ref": null,
+  "title": "Cover detached launcher admission in the early-terminal execution guard",
+  "outcome": "The Ordinary-disposition guard has a deterministic regression that fails if detached full-gate launch success is treated as execution completion.",
+  "acceptance": [
+    "A simple full launcher --detach reporting Code(0) or ReportedSuccess cannot set an early execution terminal or release the running key for a later check; the test fails if the Ordinary guard is removed.",
+    "A normal coded foreground terminal retains expected behavior, including an optional nonzero-Code control.",
+    "The exact changed input has required green checks and independent review."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

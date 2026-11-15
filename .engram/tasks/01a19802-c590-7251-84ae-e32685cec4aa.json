@@ -1,0 +1,29 @@
+{
+  "id": "01a19802-c590-7251-84ae-e32685cec4aa",
+  "external_ref": null,
+  "title": "Define synchronous own-row persistence semantics for Human choice and other queue-only commits",
+  "outcome": "Human choice markers and other remaining generic queue-only owners have explicit scoped persistence or documented queue-only semantics in the disconnected-writer window.",
+  "acceptance": [
+    "Review the remaining generic Human choice, retained accepted-failure, plain Stop and contained queue append owners and state their intended synchronous durability contract.",
+    "For any migrated owner, disposable own-row rejection preserves rollback and custody while a healthy sibling succeeds; existing exact containment and receipt fences, Human authority and nonce rules remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "human-prompts",
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

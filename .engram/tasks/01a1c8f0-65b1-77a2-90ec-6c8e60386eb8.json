@@ -1,0 +1,28 @@
+{
+  "id": "01a1c8f0-65b1-77a2-90ec-6c8e60386eb8",
+  "external_ref": null,
+  "title": "Cover standalone worker host-origin substitution before stage execution",
+  "outcome": "Note scripts/test-launcher.test.mjs:2960 owner substitution before execution is tested but host URL substitution only at notify/recover. Add a behavioral executeRun control with swapped TERMAL_BASE_URL, failed run/all stages unrun/no stage side effect; preserve current guards.",
+  "acceptance": [
+    "A standalone worker with substituted host origin is observably refused before any stage executes, without stage side effects."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-follow-up",
+    "review-note",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

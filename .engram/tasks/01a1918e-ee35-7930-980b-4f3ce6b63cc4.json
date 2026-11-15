@@ -1,0 +1,29 @@
+{
+  "id": "01a1918e-ee35-7930-980b-4f3ce6b63cc4",
+  "external_ref": null,
+  "title": "Test the GetExtendedTcpTable decoding (address and port byte order, IPv6 rows) against a real loopback connection",
+  "outcome": "engram_tcp_connections and engram_tcp_table in src/engram_host_identity.rs decode the Windows owner-pid TCP tables (dwRemoteAddr.to_ne_bytes, u16::from_be(raw as u16), IPv6 rows, the row offset after the count), and no test reads a real table. A byte-order regression on the remote address could turn an SSH connection to this machine's own address into a foreign one and give credit that should be withheld; a port-order regression would break the -L forward exclusion. A #[cfg(windows)] test opens a TcpListener on 127.0.0.1 and an IPv6 [::1] one, connects a TcpStream to each, and asserts that engram_tcp_connections() lists rows with pid == std::process::id() and the exact local and peer SocketAddrs (127.0.0.1 reversed would read 1.0.0.127).",
+  "acceptance": [
+    "A Windows-only test asserts that engram_tcp_connections() reports this test process's own established IPv4 and IPv6 loopback connections with their exact local and peer addresses and ports."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "credit",
+    "review-low",
+    "test-coverage",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

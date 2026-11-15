@@ -1,0 +1,28 @@
+{
+  "id": "01a1dacf-f44a-7160-a854-f187c1f9dcfa",
+  "external_ref": null,
+  "title": "Remove the relay snapshot test's dependence on boot reconciliation's elapsed-time budget",
+  "outcome": "The original snapshot test's final boot.complete assertion remains deterministic when boot reconciliation processes only part of a page; preserve the fixed through bound and later-notification handoff protection without raising timeouts or changing production scheduling.",
+  "acceptance": [
+    "Remove the relay snapshot test's dependence on boot reconciliation's elapsed-time budget is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox-relay",
+    "review-low",
+    "test-determinism"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

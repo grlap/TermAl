@@ -1,0 +1,27 @@
+{
+  "id": "01a15147-35db-7032-8726-9824d5ae5cad",
+  "external_ref": null,
+  "title": "Bound the resend of a verification bind on an unknown Engram error code",
+  "outcome": "An Engram error code that the bind classification does not know (for example invalid_request, or the answer of an Engram build without verification_bind) settles the member with a line its holder is told, instead of being resent with identical bytes without end and never giving the holder a line.",
+  "acceptance": [
+    "Bound the resend of a verification bind on an unknown Engram error code is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a13343-8dbe-75a1-b35a-540531f46f53",
+  "disposal_reason": "The Claude review of w-540531f46f53 slice (i), round 2 (delegation-c2894412), raised this Low to a Medium, so it is fixed inside that change rather than separately. engram_bind_outcome now resends only control_request_expired, control_store_busy and storage_error, the codes in Engram src/host.rs store_error_code that a resend can settle. Every other remote code, an unknown one included, settles as Final with a line for the holder. Tests cover invalid_request, store_not_initialized, task_access_denied and an unknown code. It lands with w-540531f46f53.",
+  "completion": null
+}

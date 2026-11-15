@@ -1,0 +1,29 @@
+{
+  "id": "01a1cc6e-7a17-76b1-b872-a5cc30a61e86",
+  "external_ref": null,
+  "title": "termal_get_session_result refuses a non-parent root's read of a completed evaluator delegation as 'delegation not found'",
+  "outcome": "A root session that integrates another session's work (the parent integrator of an Engram worker, or the TermAl integration owner) can recover the authoritative result of that worker's completed evaluator delegation through a supported, documented route, or the refusal names the parent-only rule instead of reporting the delegation as missing.",
+  "acceptance": [
+    "A documented decision states whether a non-parent root session may read a completed evaluator delegation's result through termal_get_session_result (or another named route), and why.",
+    "If reading is allowed: a test shows a non-parent root session reading a completed evaluator delegation's result, and a test shows the permitted scope (who may read it) is enforced.",
+    "If reading stays parent-only: the refusal for an existing delegation read by a non-parent session says that only the parent session may read it, and is distinct from the response for a delegation id that does not exist; a test covers both cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "evaluator"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a154fc-c2ac-79a2-93d8-6cf3141a12c3",
+  "external_ref": null,
+  "title": "A second work named onto an already-captured clean root has no Engram sighting, so its acceptance evaluation is refused 409 until a focused checkpoint turn",
+  "outcome": "Reported by Engram::Coder-HostTestSplitFresh (session-11334, TermAl mailbox 50bdc9e4 #86/#88, 2026-10-19 16:20Z), filed by Termal::Fable2. Two presentation items, w-a25eceeda553 and w-9944dbf6648d, were named on the same physical root C:\\github\\Personal\\Engram\\.worktrees\\presentation-refresh-11334-54cb (generations 1528 and 1535), both clean at 58a4, before 16:14:38Z. The prior turn ended at 16:15, and the idle interval was satisfied by 16:16:41Z. A fresh evaluation for w-a25e was accepted (evaluator delegation-eec8bbb1, basis 111). A fresh termal_evaluate_acceptance for w-9944 at 16:20Z returned 409: \"Engram has no sighting of `w-9944dbf6648d`'s named source root … (generation 1535) at the task's evidence basis (run 01a151ba-d0fc-7723-bb19-995b49fcdad0, cut 31), so an evaluation recorded there would be refused; no evaluator was started. That root needs an acknowledged capture under `w-9944dbf6648d`'s claim first: a checkpointed turn of the claim's session with `w-9944dbf6648d` as its focus.\" Workaround, which succeeded: switch focus to w-9944, run a checkpointed turn, then request a fresh evaluation (recorded 87a4c1b6 at cut 38, pass 1/1). The refusal itself is the designed guard from w-837ea1a08c4e. The gap is that a second work named while the session's focus is another work never gets a capture, and nothing tells the agent before it requests the evaluation. Desired: naming a non-focus work either leads to a captured sighting at the next checkpoint, or the naming result names the remedy up front.",
+  "acceptance": [
+    "Naming a source root for a work that is not the session's focus either captures an acknowledged sighting for that work at its next checkpoint, or the naming result names the exact remedy (focus that work and checkpoint) before any evaluation is requested; a test covers two works named on one physical root.",
+    "The full five-stage gate passes on the exact reviewed input with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "named-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

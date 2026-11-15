@@ -1,0 +1,28 @@
+{
+  "id": "01a136f5-e747-77c3-a05e-3080b990c66d",
+  "external_ref": null,
+  "title": "Focused cargo test runs skip the test-temp cleanup guard, so leaked test state surfaces only at the full gate",
+  "outcome": "A focused `cargo test` run through the launcher applies the same test-temp cleanup guard as the full gate's rust-tests stage (scripts/test-temp-root.mjs), or reports clearly that it did not. A test that leaks its state root is then caught in the producer's focused GREEN rather than costing a full gate.",
+  "acceptance": [
+    "A test shows that a focused cargo test run whose test leaves an entry in its run root reports the leftover and its creator, as the full gate does, and fails the same way; a clean focused run is unchanged.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination-cost",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

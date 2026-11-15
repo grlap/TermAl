@@ -1,0 +1,27 @@
+{
+  "id": "01a167e3-f6c3-7501-a86c-82f3b103acba",
+  "external_ref": null,
+  "title": "Add session-reconcile tests for sameQueueHold, the path hold-only changes reach the UI by",
+  "outcome": "A regression in the queueHold comparison of sameSessionSummary fails a test.",
+  "acceptance": [
+    "ui/src/session-reconcile.test.ts covers sameQueueHold through reconcile: summaries identical except queueHold.retryAt give a new session object; an identical hold keeps the object; a hold present then absent gives a new object."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-gap",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

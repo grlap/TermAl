@@ -1,0 +1,30 @@
+{
+  "id": "01a1b1fd-3393-7581-9f2f-ba921b4b30b8",
+  "external_ref": null,
+  "title": "Limit unavailable companion-claim warnings to relevant received candidates",
+  "outcome": "An optional held-claim read failure stays silent when the only retained receipt candidates belong to the root side the current placement mode does not consult.",
+  "acceptance": [
+    "Shared and separate-root placement select receipt candidates only for the roots relevant to that mode.",
+    "A failed-read test with only an irrelevant-side candidate preserves BASE silence; relevant-candidate unavailable diagnostics and no-credit fences remain covered."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "diagnostics",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

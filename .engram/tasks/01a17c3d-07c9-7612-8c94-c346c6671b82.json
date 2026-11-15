@@ -1,0 +1,32 @@
+{
+  "id": "01a17c3d-07c9-7612-8c94-c346c6671b82",
+  "external_ref": null,
+  "title": "Rust tests are not portable to a fresh Windows host: 133 fail on a hard-coded \"/tmp\" workdir, 70 on path length (Windows B gate on 09d5875a)",
+  "outcome": "Rust tests are not portable to a fresh Windows host: 133 fail on a hard-coded \"/tmp\" workdir, 70 on path length (Windows B gate on 09d5875a)",
+  "acceptance": [
+    "Each of the 203 rust-tests failures in Windows B gate test-e725bb78 (on 09d5875a) is attributed to a recorded cause group with evidence: hard-coded '/tmp' workdir (133), 'Filename too long' / '$GIT_DIR too big' path-length failures (43 + up to 27), or another named cause.",
+    "Tests no longer depend on a host directory existing outside their own fixtures (for example '/tmp' resolving to <drive>:\\tmp on Windows). They use the existing fixture temp facilities, without retries, skips or weakened assertions.",
+    "The 43 path-length failures and the 26 other failures that pass on the default temp are attributed, with Windows B r2 evidence (gate test-4bdb83a3 on 09d5875a), to that run's in-repository TERMAL_TEST_USER_TEMP placement, not to a product or fixture defect. They are resolved by running with the launcher's default tool-owned test temp, with no host or global Git configuration change. Supporting a long in-repository test temp on Windows, if needed, is tracked as its own item.",
+    "A full gate on Windows B with the launcher's default test temp, on an input containing the fixes, passes the rust-tests stage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "gate-failure",
+    "portability",
+    "tests",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

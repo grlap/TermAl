@@ -1,0 +1,41 @@
+{
+  "id": "01a1410b-575f-7b72-b956-dce32f8c526d",
+  "external_ref": null,
+  "title": "Shrink acceptance omission metadata before blaming prompt overflow on criteria",
+  "outcome": "Treat continuation/locator text as shrinkable brief context, or clearly attribute and document its share of the prompt floor, while preserving complete criteria and structured omissions.",
+  "acceptance": [
+    "When the complete criteria fit the acceptance brief but its omission metadata would not, the independent and same-session briefs keep every criterion whole, show omissions as counts with a notice that details were not shown to fit the brief, and present no partial continuation; src/tests/acceptance_evaluation_omissions.rs acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused shows it.",
+    "The request response's evidenceOmissions still carries the bounded locator inventory and the full captured continuation; the same test asserts it.",
+    "docs/features/engram-host-adapter.md describes omission metadata as shrinkable prompt context.",
+    "The test passes in a full five-stage launcher gate on a master tree that contains the change, cited by run directory and launcher fingerprint."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verification-only closure. Since 4a0c2796 (an ancestor of master d8fdd2dc), acceptance omission metadata shrinks before a fitting contract is refused:\n- the independent and same-session briefs keep every criterion whole, show omissions as counts with a \"not shown to fit the brief\" notice, and present no partial continuation;\n- the response keeps the bounded locator inventory and the full captured continuation.\nCovered by acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused, which passed in full gate test-9a715c89. Documented in docs/features/engram-host-adapter.md. Criteria concurred by Termal::Fable2 (f0c0d78d). Independent evaluation aebf2e6457144399abb0aa32082cc64e passed 4/4. No source change.",
+    "completed_at": "2026-10-15T19:37:40.179341700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

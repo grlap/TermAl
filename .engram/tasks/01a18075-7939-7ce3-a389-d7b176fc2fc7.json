@@ -1,0 +1,37 @@
+{
+  "id": "01a18075-7939-7ce3-a389-d7b176fc2fc7",
+  "external_ref": null,
+  "title": "Local platform-probe test requires a live rustc answer within the probe's 2 s deadline and failed the B17 full gate under load",
+  "outcome": "The cause of the B17 gate failure in federation_onboarding_local_probe_resolves_paths_and_reaps_fixed_child is diagnosed with discriminating evidence and classified. If it is a test defect, the test checks the probe's real spawn and reap behaviour deterministically, and checks toolchain identity through an injected probe, without depending on a live rustc answering within the product's 2 s deadline. Product semantics are unchanged and no timeout is inflated.",
+  "acceptance": [
+    "A note on this item preserves and cites the failed run test-13c58314 (B17 tree dacdaa23; rust-tests.log; retained temp run-jkcPge) and states falsifiable hypotheses: (H1) under full-gate load, `rustc --version` through the rustup proxy exceeded the 2 s deadline in federation_probe_command, so federation_toolchain_observation returned \"unavailable\"; (H2) rustc was not resolvable on the test's PATH; (H3) the rustc output was empty or non-UTF-8, or the exit status was non-zero. The note records which evidence discriminates them and the resulting classification: product, test/runner, or environment/resource.",
+    "If it is classified as a test defect: the test asserts the deterministic parts (paths resolved, the fixed child spawned and reaped, platform, arch) against the real probe, and checks toolchain identity by driving federation_platform_probe_with with an injected probe, covering a version string and the documented \"unavailable\" fallback. No product deadline, timeout or semantics change. A focused run of the federation_onboarding tests passes on the frozen fix.",
+    "The fix lands with an independent review pair and no outstanding in-scope Medium-or-higher finding, and B17 (or its successor batch containing the fix) passes the full five-stage gate on its exact tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "gate-blocker",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; da6c938b; deterministic platform-probe fixture/pair/FULL94b815be + install0c98fc44; closure only, preserve original loaded rustc failure limits.",
+    "completed_at": "2026-11-08T19:21:48.293028300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

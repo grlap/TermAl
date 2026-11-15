@@ -1,0 +1,30 @@
+{
+  "id": "01a1a25e-d858-7e40-a0b7-4ad2070c6bbc",
+  "external_ref": null,
+  "title": "Live test ordinary_live_policy_is_not_a_provider_admission_authority still calls the retired `control-policy set-required-assurance` Engram command",
+  "outcome": "The ignored live test either uses only commands that current pinned Engram supports, or is removed as obsolete with its intent covered by an ordinary Execution Observability oracle. No retired gated command remains in TermAl's live tests.",
+  "acceptance": [
+    "src/tests/engram_root_recovery_live.rs contains no call to `control-policy set-required-assurance` or any other Engram command that pinned build 0fe6348 or later rejects, shown by a cited source search.",
+    "The test's intent (an ordinary policy is not a provider admission authority) is either preserved against current Engram behaviour, or the test is deleted with a recorded reason and an existing ordinary-EO test cited as coverage.",
+    "The review pair is clean, and the live test passes once on an approved pinned Engram."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "legacy-cleanup",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a19277-f84a-7483-91c7-c728d173b518",
+  "external_ref": null,
+  "title": "Require a landing candidate's recorded BASE to equal the candidate commit's parent (the current master)",
+  "outcome": "Require a landing candidate's recorded BASE to equal the candidate commit's parent (the current master)",
+  "acceptance": [
+    "review-changes.md's candidate-commit paragraph requires, for a candidate meant for landing, that the recorded BASE equals COMMIT's parent, the current master, so the reviewed diff is exactly the change being landed",
+    "The change lands under the instruction-change conditions (a), (b) and (c), with a clean review pair and full gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

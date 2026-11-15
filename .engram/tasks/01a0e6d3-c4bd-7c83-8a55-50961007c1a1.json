@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4bd-7c83-8a55-50961007c1a1",
+  "external_ref": "tm-azqa",
+  "title": "Delegation status returns 404 for both an absent delegation and another parent's delegation",
+  "outcome": "The parent-scoped delegation endpoints answer \"not found\" and \"not yours\" with the same 404 and the same body text (\"delegation not found\"). The two facts need different responses from the caller: absent means the record is gone and the caller should stop waiting; out-of-scope means the delegation is alive and owned by another parent, and the caller should ask that parent.\n\nOBSERVED, not theorised. Two sibling coordinator sessions share one repository. Session B spawned a read-only reviewer pair and announced the delegation ids over the mailbox. Session A, which did not own them, called the list endpoint and the status endpoint:\n  - the list endpoint returned twenty delegations, all owned by A, and neither of B's;\n  - the status endpoint returned 404 \"delegation not found\" for both of B's ids.\nBoth answers are correct under parent scoping and both are indistinguishable from the answers for a deleted delegation.\n\nIMPACT AS IT ACTUALLY HAPPENED: session A concluded the reviewers were dead, and sent an urgent correction to a peer project retracting an earlier disclosure that two agents were loading the machine. The peer was at that moment entering a serialized benchmark window and had pre-committed to classifying any slowdown rather than attributing it to our reviewers. The false retraction handed them an exculpatory story for a load that was in fact real. The pair had in truth completed normally; the fan-in landed in session B four minutes later.\n\nWHY THE CALLER CANNOT DEFEND AGAINST THIS: an instrument that answers \"absent\" when it means \"outside your scope\" gives a caller no way to detect that the question left its domain. A caller who has verified the instrument on twenty in-scope questions carries that trust into the twenty-first, which is a question of a different class. The failure is not inattention; it is that the API never says \"I cannot see that\".\n\nFIX DIRECTION: separate the two cases at the boundary. 403/404 split, or one status with a machine-readable reason field distinguishing \"unknown id\" from \"id belongs to another parent\". Whichever is chosen, the message text must differ, because a human reader and a log both key on the text. A cheap partial improvement, if scope leakage is a concern: keep 404 but return a distinct reason code, since acknowledging the existence of an id the caller already possesses leaks nothing the caller does not already have.\n\nRELATED SURFACE WORTH CHECKING IN THE SAME PASS: every other parent-scoped delegation route (result, cancel, follow-up, wait, resume) shares the same scoping predicate and very likely the same conflation.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

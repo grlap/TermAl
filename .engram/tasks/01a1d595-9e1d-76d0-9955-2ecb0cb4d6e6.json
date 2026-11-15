@@ -1,0 +1,36 @@
+{
+  "id": "01a1d595-9e1d-76d0-9955-2ecb0cb4d6e6",
+  "external_ref": null,
+  "title": "A registered check from a retired named root blocks acceptance evaluation with no way to record a waiver",
+  "outcome": "When an item's only registered check belongs to a retired named root and is invalid or irrelevant, a coordinator-recorded waiver, or a supported \"retired-root check\" disposition, lets the independent evaluation proceed and judge the criteria, instead of termal_evaluate_acceptance refusing forever with registered_check_root_rebound.",
+  "acceptance": [
+    "A behavioural test shows termal_evaluate_acceptance proceeding for an item whose only registered check belongs to a retired root once that check is disposed of by a recorded, attributed waiver or an equivalent supported disposition. Without one, it still refuses with registered_check_root_rebound, as today.",
+    "The disposition is visible to the evaluator and in the item's evidence, with the waiver's author and reason, and does not credit the stale check as a pass.",
+    "The change has a clean review pair and passes the full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered explicit, requester-attributed retired-check dispositions for evaluation admission. Original verification/outcome/acknowledgement/reason remain disclosed without granting stale credit; absent disposition still refuses and unknown/unacknowledged audit writes stop spawning. Landed at73177116 with byte-identical reviewed contribution. Fresh independent Claude evaluation c011d042b4084d318b4debb6bca7bf1f/session18048 recorded16:19:39.6940335Z: all3PASS on unchanged revision9/source731/tree1695. Requiredchild38DONE; five optionalLows remain tracked. LandingFULL08b6 supplies exact-tree coverage; registered448d/native6cf isADMISSION ONLY. No duplicate tests, source changes or newcredit claim. Raw evidence/worktree cleanup holds remain pending ownerrelease.",
+    "completed_at": "2026-11-14T16:21:11.211595800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

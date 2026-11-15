@@ -1,0 +1,30 @@
+{
+  "id": "01a168f5-d998-77b2-99d3-710a3aacfbed",
+  "external_ref": null,
+  "title": "Cover review-input boot ordering and the reserved re-check with end-to-end tests",
+  "outcome": "The review-input boot order (settle, then reconcile) is tested on a fresh AppState started from the store, the under-lock re-check that refuses check begin and submission recapture for a reserved or non-Running delegation is tested, and the vacuous explorer test is retargeted or removed.",
+  "acceptance": [
+    "A test boots a fresh AppState from a store holding a Running read-only reviewer attempt (with and without a durable accepted envelope) and asserts settle-then-reconcile outcomes.",
+    "A test reserves the delegation (or ends its turn) between the check's authority read and check begin, and between a submission's snapshot and its recapture, and asserts the refusals.",
+    "review_input_identity_explorer_does_not_require_review_proof either submits a structured result that reaches the not-required branch or is removed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

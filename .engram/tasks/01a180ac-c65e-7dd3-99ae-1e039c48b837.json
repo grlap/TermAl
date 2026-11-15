@@ -1,0 +1,32 @@
+{
+  "id": "01a180ac-c65e-7dd3-99ae-1e039c48b837",
+  "external_ref": null,
+  "title": "Document ownership and invariants of the bounded HTTP panic-context adapter",
+  "outcome": "Document ownership and invariants of the bounded HTTP panic-context adapter",
+  "acceptance": [
+    "A concise ownership header identifies the module's context, concrete serving and capture responsibilities and key invariants, without adding a parallel lifecycle or unrelated refactor."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "deferred",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18073-bc4d-7e21-8d46-a81c8a3f5351",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

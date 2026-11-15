@@ -1,0 +1,28 @@
+{
+  "id": "01a1089c-4d27-7653-b3a2-b50b58a9629d",
+  "external_ref": null,
+  "title": "Admission-retry test gaps: Stop of a no-intent retry head, delegation hold fields for a scheduled retry, post-reconfigure bind deferral",
+  "outcome": "Admission-retry test gaps: Stop of a no-intent retry head, delegation hold fields for a scheduled retry, post-reconfigure bind deferral",
+  "acceptance": [
+    "Tests cover: a Stop of a no-intent admission-retry head (held, not resumable, never replayed by a tick) and its stale-cleanup path (preview reset to the held preview); a held delegation reporting nextRetryAt/attempts/heldSince for a scheduled admission retry, with a decision recorded on whether nextRetryAt waits for acknowledgement; and the post-reconfigure bind deferring for a retry head when the cap is full, the session staying marked for rebinding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

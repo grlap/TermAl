@@ -1,0 +1,29 @@
+{
+  "id": "01a18dd4-374d-7242-933a-9059414ac95e",
+  "external_ref": null,
+  "title": "Extract named-root sighting advice from the oversized source-root module",
+  "outcome": "Move the shared named-root sighting precondition and evaluation-notice vocabulary into an existing appropriate small owner or a focused module, preserving naming and acceptance behavior.",
+  "acceptance": [
+    "The shared sighting precondition, evaluation-notice enum/message and current-project notice lookup have one appropriate owner outside the oversized source-root module, with existing callers and behavior preserved.",
+    "The standard review and validation requirements pass on the extraction."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "file-size",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

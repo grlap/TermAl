@@ -1,0 +1,42 @@
+{
+  "id": "01a19c61-d8d5-75d0-a9e5-86607596def3",
+  "external_ref": null,
+  "title": "Repair failed Stop restoration with exact promoted receipt custody",
+  "outcome": "Fable2319/messagecc0e7d2c-3b55-4d0f-b6d8-6af6975685c3 approves05bb-v2 source-only product exact2 against TREE0c00: add separate PromotedPromptReceiptOwner to RequestedStopClaim for dequeued real HandingOff custody, retain queued05bb alternative and H3 removal. New named root, separate binding turn, no Cargo or validation claims. Supersedes handed05bb9d86 on source return.",
+  "acceptance": [
+    "After claim and separate NEW root naming turn, edit only src/session_lifecycle.rs and src/prompt_delivery.rs against TREE0c00. Implement approved separate receipt owner captured before Stop, rebound to post-Stop generation/pause, with exactly one acknowledged current HandingOff receipt and exact prompt/entry, generation, nonce, attempt, message and attempt-key identity; ambiguity or mutation cannot restore through that arm.",
+    "Keep existing runtime/Stop/active-generation fences, prohibit None-success and grant restoration, retain05bb queued-owner.matches plus handing_off_head OR alternative for retained queue promotions, and retain05bb H3 removal. No widening of QueuedTurnOwner, cleanup policy or runtime_process_tree.rs.",
+    "Return immutable tree, before/after blobs, scoped exact2 patch and rationale to Sol-03d4 cc Fable2, mark05bb9d86 superseded as source dependency, disclose separate third-root tests and no Cargo/compiler/test/parser/formatter/linter/live/agents/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "stop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered source-only05bb-v2 TREE540f5d2a exact2 +63/-9 with exact receipt custody and retained queued alternative/H3. Handed separately to integrator cc coordinator, superseding05bb9d86 source dependency. No compilation/tests/READY; separate test slice pending.",
+    "completed_at": "2026-11-02T13:13:05.198193Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

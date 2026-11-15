@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3fa-70d2-8fec-7855133d65e0",
+  "external_ref": "tm-5o0w",
+  "title": "Remove Engram Defer decision handling once Engram w-b7190f794266 stops producing it",
+  "outcome": "Turn-gate simplification (Engram::Opus relay, mailbox #200). Engram removes the defer decision and the refusal codes it can never produce; recovery turns and recovery_required are also gone. TermAl has no recovery_required handling, so nothing to remove there, and Engram's recovery-turn item w-dcd85dacb399 is superseded. TermAl does have Defer handling: EngramTurnDecisionResponse::Defer, EngramDispatchEvaluation::Defer, EngramControlCardDecision::Defer, and the retry disposition in engram_queued_admission.rs. Remove it after Engram::Opus lists the removed variants and codes, before install. Refusal codes are strings in TermAl and need no change.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

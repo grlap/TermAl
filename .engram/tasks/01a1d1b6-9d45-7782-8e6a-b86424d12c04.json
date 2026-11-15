@@ -1,0 +1,29 @@
+{
+  "id": "01a1d1b6-9d45-7782-8e6a-b86424d12c04",
+  "external_ref": null,
+  "title": "Verify UTC clock footer sizing across main and fixed-section pane hosts",
+  "outcome": "Establish whether the clock shell flex-basis0 requires a height guarantee missing from any supported pane host, and preserve visible filters/body at narrow, normal and wide widths.",
+  "acceptance": [
+    "Real-browser evidence covers main and fixed-section control panels at narrow, normal and wide widths and records usable shell/body/filter geometry with the footer present.",
+    "The indefinite-height concern is either disproved for all supported pane hosts with parent-height evidence, or fixed with an observable layout regression check."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "browser-verification",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

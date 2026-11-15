@@ -1,0 +1,30 @@
+{
+  "id": "01a157ea-73f9-7210-85f2-2abc56a33925",
+  "external_ref": null,
+  "title": "Replace vacuous M5 persisted-reference all assertion with exact cardinality",
+  "outcome": "Make the post-install prepared-reference persistence-failure assertion distinguish absent durable rows from unintended durable state.",
+  "acceptance": [
+    "The failure case asserts the exact intended persisted reference cardinality (currently zero with app_state writes rejected) and explicitly checks any expected surviving row identity/publication state.",
+    "A focused test passes and review explains which incorrect persisted outcomes the assertion rejects."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

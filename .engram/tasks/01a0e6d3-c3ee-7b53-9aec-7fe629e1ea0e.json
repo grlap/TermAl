@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-7fe629e1ea0e",
+  "external_ref": "tm-5fsy.6",
+  "title": "Freeze checker: add independent nonempty Engram schema-1 golden vectors",
+  "outcome": "Merged Claude session-6885 Medium and Codex session-6884 follow-up. Only independent golden is empty/unborn; other expectations use capture_review_freeze itself. Parent successfully checked real Engram V4 with the compiled candidate, but that is not a durable independent regression fixture. Separate from tm-0q0z, which concerns the existing TermAl JS five-field helper.",
+  "acceptance": [
+    "Reference-produced fixed expected fingerprint for staged, unstaged and nested untracked files; Unix executable/symlink framing and byte path order covered with explicit provenance and platform limits."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c790-7f40-ba93-3c6f2646dcbd",
+  "external_ref": "tm-uxyq",
+  "title": "Test the wait rollback when a revocation-completed Stop fails to commit",
+  "outcome": "From the changeset-3 (run waits) dual review and mutation checks. finish_revoked_engram_mcp_runtime_if_matches (src/turn_lifecycle.rs) completes a user Stop that a pending Engram MCP revocation took over (take_pending_engram_mcp_revocation_after_stop_failure_locked, stop_options.pause_automatic_resumes_on_success). It consumes the session's delegation waits and run waits inside its commit, and restores both if that commit fails (~lines 665-740).\n\nConsumption on this path is now covered: engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automatic_work seeds two run waits, and a mutation of the consume call fails it. The RESTORE on commit failure is covered by no test, for either wait kind. The mutation 'inner.test_run_waits = test_run_waits_before_stop' -> drop(...) survives the suite, and the delegation-wait restore on this path is likewise untested. session_lifecycle's Stop restore is covered (stop_session_restores_parent_delegation_wait_when_persist_fails).\n\nNeeds a fixture that makes the finalize commit fail after the Stop transfer, for example an injectable persistence failure on the revocation's commit rather than swapping AppState.persistence_path, which a cloned AppState in the Stop thread would not see. Assert both wait lists come back in their original order and nothing is published.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

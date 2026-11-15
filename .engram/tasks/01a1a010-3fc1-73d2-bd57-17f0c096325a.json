@@ -1,0 +1,29 @@
+{
+  "id": "01a1a010-3fc1-73d2-bd57-17f0c096325a",
+  "external_ref": null,
+  "title": "Codex app-server notifications TermAl does not handle: thread/goal/cleared, thread/settings/updated, thread/readState/changed, turn/moderationMetadata, account/updated",
+  "outcome": "TermAl's Codex adapter recognises current Codex app-server notifications, handles the ones that matter, and ignores the rest deliberately without logging them as unhandled. account/updated, which carries no thread id, is accepted as a global event.",
+  "acceptance": [
+    "Each of the five notifications is classified, from the Codex protocol, as handled, ignored or global, and the adapter's dispatch reflects that classification.",
+    "A regression test feeds each notification to the adapter and asserts that no unhandled-event or missing-thread-id warning is logged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-adapter",
+    "greg-reported",
+    "logging"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

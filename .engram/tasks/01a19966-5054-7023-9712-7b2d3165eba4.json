@@ -1,0 +1,31 @@
+{
+  "id": "01a19966-5054-7023-9712-7b2d3165eba4",
+  "external_ref": null,
+  "title": "Full gate: record per-test durations for the Rust test stage and report the slowest tests",
+  "outcome": "Full gate: record per-test durations for the Rust test stage and report the slowest tests",
+  "acceptance": [
+    "A full or focused run records each Rust test's duration in a bounded artifact next to the existing Node and Vitest duration reports, and the summary lists the slowest tests",
+    "Collecting durations changes no test selection, ordering assumption, coverage or pass/fail outcome",
+    "The recorded data is enough to say which tests account for most of the rust-tests execution time on a measured run"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "greg-directed",
+    "launcher",
+    "performance",
+    "test-durations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

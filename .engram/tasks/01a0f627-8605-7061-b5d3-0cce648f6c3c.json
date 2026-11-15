@@ -1,0 +1,40 @@
+{
+  "id": "01a0f627-8605-7061-b5d3-0cce648f6c3c",
+  "external_ref": null,
+  "title": "Replying on a mailbox before acknowledging its page takes five calls (read, send, ack, re-read own send, ack); document or provide a lower-friction sanctioned protocol",
+  "outcome": "An agent that replies on a mailbox while processing a page can complete that exchange in fewer calls, or the five-call sequence is documented as the sanctioned protocol with its reason, keeping the current durable acknowledgement semantics. Reported by Engram::Advisor (TermAl mailbox b9d13887 #118, 2026-10-01 05:34Z), first observed in CV2 session-9302 at 05:33Z: replying before acknowledging a page requires read, send, acknowledge, re-read own send, acknowledge (five calls); later sends advance the cursor automatically only when the cursor already sits directly before the new message. Directions: let an acknowledgement with a receipt also cover the sender's own messages appended after the page, or let send accept the page receipt and acknowledge it atomically; or document the sequence in the mailbox tool descriptions.",
+  "acceptance": [
+    "An agent that reads a page, replies on the same mailbox and then acknowledges the page ends with its cursor past its own reply without a second read, or the tool descriptions document the required sequence and why; a test covers the chosen behaviour.",
+    "Durable acknowledgement semantics are unchanged: no unread inbound message is ever skipped; a test covers an inbound message arriving between the read and the reply."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

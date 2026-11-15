@@ -1,0 +1,32 @@
+{
+  "id": "01a19341-bffa-75d2-881b-ab0139369c83",
+  "external_ref": null,
+  "title": "Disclose test-run history omissions and show continuation guidance only when available",
+  "outcome": "The Test Runs panel truthfully discloses available versus omitted/compacted detail and does not imply that an exhausted current page cursor is complete retained history.",
+  "acceptance": [
+    "The panel displays accurate existing history disclosure or equivalent truthful retention wording, including the case with omitted identities and no next cursor.",
+    "Load older guidance is conditional on an available continuation; project switches and failed reads do not display stale disclosure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "review-low",
+    "state-flood",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19336-6946-7502-b7b6-2e2e7001a9cf",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0f31c-4d38-7bd1-9305-3f714ce4ce70",
+  "external_ref": null,
+  "title": "The evaluation request's cut notice gives advice that is wrong for entries the tracker's window did not give in full, and does not say the running evaluator's brief is fixed",
+  "outcome": "The notice words its advice per group: for entries the host clipped or left out, a newer note is carried whole; for entries the tracker's window did not give in full, the new note has to fit the tracker's window (or be split); and it says that the evaluator already spawned has a fixed brief, so a new note is read only by a later request.",
+  "acceptance": [
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "The notice says a new note is read only by an evaluation requested after it; a test reads it.",
+    "The notice's advice for the tracker group says the note must be short enough for the tracker's window and does not say that a newer note is enough; a test reads it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0fed9-b52d-7bc1-b3d8-d4671ed49d27",
+  "external_ref": null,
+  "title": "Launcher test \"detached worker reaches readiness, runs once, and sends one notification\" failed once under load; cause unproven",
+  "outcome": "Launcher test \"detached worker reaches readiness, runs once, and sends one notification\" failed once under load; cause unproven",
+  "acceptance": [
+    "The cause of the observed failure is established from preserved evidence or a deterministic witness, and recorded.",
+    "If it is the 10 s real-time watchdog, the test's pass or fail no longer depends on machine load: the watchdog only fails a hung fixture, distinctly from the behaviour under test, and no timeout is raised as the fix.",
+    "The full five-stage gate passes; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "gate-nondeterminism",
+    "launcher",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

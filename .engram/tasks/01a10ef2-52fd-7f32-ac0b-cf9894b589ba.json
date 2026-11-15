@@ -1,0 +1,50 @@
+{
+  "id": "01a10ef2-52fd-7f32-ac0b-cf9894b589ba",
+  "external_ref": null,
+  "title": "Read-only Claude shell check splits on `|`, `&&`, `||` without respecting quotes, so a quoted regex alternation (git grep -E \"a|b\") is refused as unbalanced quotes",
+  "outcome": "Read-only Claude shell check splits on `|`, `&&`, `||` without respecting quotes, so a quoted regex alternation (git grep -E \"a|b\") is refused as unbalanced quotes",
+  "acceptance": [
+    "A fail-first test shows the current read-only check refusing `git grep -n -E \"mod tests|cfg\\(test\\)\" -- <file>` (and `rg -e \"a|b\" <file>`) with the 'unbalanced quotes' refusal",
+    "The read-only command check (src/claude.rs:614-615) and its refusal explanation (src/claude_read_only_refusal.rs:171-172) split a line into segments only at unquoted `|`, `&&` and `||`, using one shared quote-aware splitter, so the decision and its explanation cannot disagree",
+    "Tests pin that a quoted `|`, `&&` or `||` inside single or double quotes stays inside its argument, that real unquoted pipes and chains are still split and vetted segment by segment, and that unbalanced quotes are still refused; no command that is refused today for a write or for unsupported syntax becomes allowed",
+    "cargo test --bin termal passes"
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "claude",
+    "read-only-delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

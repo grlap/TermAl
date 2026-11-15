@@ -1,0 +1,37 @@
+{
+  "id": "01a14212-1525-7191-b6a5-a6bec2d34856",
+  "external_ref": null,
+  "title": "Align the lost-Begin restart live witness with exact replay recovery",
+  "outcome": "Align the lost-Begin restart live witness with exact replay recovery",
+  "acceptance": [
+    "The lost-Begin restart live witness agrees with the current exact replay recovery contract while still proving that a possibly delivered prompt cannot be delivered twice.",
+    "A pinned disposable live check passes the corrected witness, preserving the original failed baseline and proving the intended recovery behavior.",
+    "The exact input passes independent review and the full integration gate before landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "live-proof",
+    "pre-existing",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a0f4e5-8bb6-7560-8b58-072e84b182c7",
+  "external_ref": null,
+  "title": "A carried full gate that settles with no credit and no refusal line: the host records nothing and says nothing",
+  "outcome": "Host 27bf0b6, 2026-10-01. Termal::Opus2's full gate test-7cfc824b-38c3-4fb2-b6d2-8861ba3287ed was a Claude Bash background command, `pushd \"C:\\github\\Personal\\TermAl\\.tmp\\wt-tmpfence\" && node scripts/test-launcher.mjs full`. It ran 2026-09-30T23:48:22Z–2026-10-01T00:06:06Z and all five stages passed, with no holder edits in that worktree.\n\nTwo turns closed after it settled, but no verification record landed on the bound claim's item, w-a450af06e8bd. No \"[TermAl] Check credit\" line reached the session either, neither credited nor refused.\n\nContrast: Termal::Fable2's run of the same shape, test-b41e1a44 in .tmp/wt-codex-ro-sandbox-m, was recorded on w-4b1e11b6bfdc at 23:55:14.714Z as verification bf310480b37d40d2b83bbb0673d4a743. That happened at the first turn checkpoint after it settled. His claim had been renewed, and his root was still bound (generation 115).\n\nLikely cause, per Fable2 and not yet verified: Opus2's claim was recovered at 23:32:44Z, and naming is per claim, so the recovered claim had no named root. The item's observations at 23:50–23:54Z show root_generation null.\n\nWhatever the cause, a carried gate that settles uncredited must say why: for example, that the bound claim has no named source root, so the run was not carried. This is a silence-shaped failure. The session cannot tell a pending record from a dropped one. Related: w-f6b5832f2141.",
+  "acceptance": [
+    "A gate launched under a claim whose named root was set before a claim recovery either is carried for the recovered claim or is reported as not carried, never silently dropped; a test covers it.",
+    "When a background full gate settles and the host records no verification for it, the session receives a line naming why (for example no named source root for the bound claim, or no bound claim), at the first checkpoint after it settles; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

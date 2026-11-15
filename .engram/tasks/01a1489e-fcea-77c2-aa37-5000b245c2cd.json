@@ -1,0 +1,30 @@
+{
+  "id": "01a1489e-fcea-77c2-aa37-5000b245c2cd",
+  "external_ref": null,
+  "title": "Repeat the bounded Worker handoff reporting contract on accepted follow-ups",
+  "outcome": "A Worker follow-up receives concise current-attempt Git/native-outcome reporting guidance without relying on retained provider context or granting staging/commit/integration authority.",
+  "acceptance": [
+    "An actual accepted Worker follow-up prompt carries the bounded Notes Git-handoff/native-outcome instructions and applicable authority caveat; other delegation modes remain unchanged.",
+    "A focused follow-up test pins current-attempt reporting and unavailable behavior without reusing prior-attempt evidence or claiming live-provider proof."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation",
+    "review-followup",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

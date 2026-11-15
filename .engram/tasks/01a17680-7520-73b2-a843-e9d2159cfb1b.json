@@ -1,0 +1,32 @@
+{
+  "id": "01a17680-7520-73b2-a843-e9d2159cfb1b",
+  "external_ref": null,
+  "title": "Ordinary provider-handoff diagnostics: retain attribution and reconcile delivered evidence",
+  "outcome": "The gated-control release observation (parent criterion 3) can judge (b) and (d) from host API samples: each ordinary prompt's original admission deadline, which retries never reset, and the actual provider handoffs per enabled project record, with prompt source and outcome, are readable without changing any admission, retry, handoff or gating behaviour.",
+  "acceptance": [
+    "A note identifies, with file and line on current master, where a prompt's original admission deadline and its retries are recorded, and where provider handoffs are recorded (session, enabled project record, prompt source user or mailbox, time, outcome). It states which of these the host API already serves and which it does not.",
+    "For each fact the API does not already serve, an existing read path is extended, or one new read-only path is added if no existing path fits, so that the sampler can read it. The original admission deadline is stable across automatic retries. Handoff records can be filtered by time window and identify the enabled project record. Deterministic tests cover a retried prompt keeping its original deadline, handoffs from both prompt sources, and project-record attribution. No admission, retry, handoff or gating behaviour changes.",
+    "The independent review pair finds no Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "control-plane",
+    "cross-project",
+    "gating-removal-audited",
+    "greg-directive",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16637-ea9c-7001-907d-0d2e12f303a8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

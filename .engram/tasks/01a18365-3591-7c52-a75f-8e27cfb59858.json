@@ -1,0 +1,27 @@
+{
+  "id": "01a18365-3591-7c52-a75f-8e27cfb59858",
+  "external_ref": null,
+  "title": "Launcher panic-journal join can attach another process's thread name when Windows reuses a pid (pid+seq Map, last write wins)",
+  "outcome": "Each journaled panic is joined only to its own thread line, or shown with an unknown thread, never to another process's.",
+  "acceptance": [
+    "Launcher panic-journal join can attach another process's thread name when Windows reuses a pid (pid+seq Map, last write wins) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

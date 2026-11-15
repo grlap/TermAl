@@ -1,0 +1,29 @@
+{
+  "id": "01a1026e-91ff-71f3-ab4d-cb13f6a1aee2",
+  "external_ref": null,
+  "title": "Retire a delegation child's cached Engram control transport when the delegation reaches a terminal state, instead of after the 5-minute idle timeout",
+  "outcome": "When a delegation child (an evaluator or any read-only child) completes, fails or is cancelled, its cached per-session Engram control transport and process tree are retired promptly, rather than idling up to the control worker's 5-minute receive timeout. The stale cache entry is removed with it. Explicit deletion and project reset keep their current behaviour.",
+  "acceptance": [
+    "Retire a delegation child's cached Engram control transport when the delegation reaches a terminal state, instead of after the 5-minute idle timeout is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegations",
+    "engram-host",
+    "resources"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

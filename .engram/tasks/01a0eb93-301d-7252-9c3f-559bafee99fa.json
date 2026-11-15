@@ -1,0 +1,26 @@
+{
+  "id": "01a0eb93-301d-7252-9c3f-559bafee99fa",
+  "external_ref": null,
+  "title": "Decide whether the 6 s Engram CLI command timeout joins the doubled load-sensitive limits",
+  "outcome": "Raised by the Claude /review-code child in the w-33bee3bec3f0 review round 4 (delegation-0239f4f4-fe46-4b57-9961-974193f8d18e, session-8473). ENGRAM_WORK_BINDING_COMMAND_TIMEOUT stays 6 s in production (30 s under test). It bounds one-shot Engram CLI processes, including work-binding reads, acceptance task reads and evidence pages, and its lock-retry wrapper. Its value was measured against Engram's 5 s SQLite writer-lock wait, not chosen as load headroom, so the w-33bee3bec3f0 audit left it out, and Fable2 concurred on criteria that do not list it. Greg's reason for doubling (\"if CPU is high it will affect also the product\") applies to it too: under load, a process start plus the 5 s lock wait can exceed 6 s. If it changes, acceptance_evaluation_request_tracker_budget and the Codex tool_timeout_sec derived from it grow with it. This needs Greg's or the coordinator's decision, then its own changeset.",
+  "acceptance": [
+    "Decide whether the 6 s Engram CLI command timeout joins the doubled load-sensitive limits is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

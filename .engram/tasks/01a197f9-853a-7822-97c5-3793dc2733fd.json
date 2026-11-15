@@ -1,0 +1,29 @@
+{
+  "id": "01a197f9-853a-7822-97c5-3793dc2733fd",
+  "external_ref": null,
+  "title": "Remote proxy transcript: reconcile positions when the Mac inserts before the hydrated window, so a shifted tail never writes an existing message id at a new position",
+  "outcome": "Remote proxy transcript: reconcile positions when the Mac inserts before the hydrated window, so a shifted tail never writes an existing message id at a new position",
+  "acceptance": [
+    "When the upstream session gains a message before the proxy's hydrated window and the window's tail shifts by one or more positions, the proxy's next persist writes no row whose (session_id, message_id) already exists at another position, and the proxy's transcript matches upstream order",
+    "A regression test drives the real remote proxy path with the insert-before-window, shifted-tail shape (the shape of the evidence run test-9ae427c1, evidence commit 171e7b5d) and passes; on the pre-fix code it fails with the UNIQUE messages.session_id, messages.message_id error",
+    "No change to isolation semantics of a failed session write; a persist conflict in one proxy session still never rolls back other sessions' writes"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

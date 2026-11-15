@@ -1,0 +1,31 @@
+{
+  "id": "01a1989b-1004-7613-86cb-c5805e410bf4",
+  "external_ref": null,
+  "title": "W528F R6 full gate (DL560, Linux): a green Rust run leaves a termal-delegation-<uuid> temp root with state/termal.sqlite behind",
+  "outcome": "The cause of the leftover termal-delegation-<uuid> temp root (holding state/termal.sqlite) after a green Rust run on the DL560 is identified and classified as product, test or runner, and fixed at the cause, so that the W528F full gate passes without a retry.",
+  "acceptance": [
+    "Preserve original failed run and residual evidence; identify and classify the fixture lifetime path that can recreate state/termal.sqlite after root cleanup, distinguishing the observed failure from unproven historical attribution and documenting whether W528F changes that path.",
+    "Fix the confirmed lifetime defect only in test support/fixtures using existing AppState root ownership or a deterministic continuation join; no product semantics, new lifecycle registry, cleanup retries, timeout inflation or temp-guard weakening.",
+    "A deterministic regression using existing synchronization/cleanup receipts shows the root survives every state owner capable of the late operation and is removed after the final owner; no sleeps or wall-clock success thresholds. Existing affected fixture controls and persist-worker source guard remain green.",
+    "Exact-input focused compile/tests and independent review pair have no outstanding Medium-or-higher finding; integration owner records a green standard full gate for the final input before landing, with independent acceptance per policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "found-by-gate",
+    "nondeterminism",
+    "rust-tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a18abb-fd26-7380-8e90-214437118fcf",
+  "disposal_reason": "Fable2 mailbox1956 explicit assignment: same known late-writer fixture lifetime class already tracked by2144 and its broad unpublishedfix. Preserve c5805 RED/RED2/GREEN24+pair proof in holder9a537c8900a2426b8bbd9612cfbe8209 and carry note2144/4cd77ed96bfe48b7b195bcf31c39b2cf; historical UUID creatorUNKNOWN. New current-master broadcandidate, focusedGO,delta pair/fullgate/acceptance still required. Standalone nativeoffer cancelled.",
+  "completion": null
+}

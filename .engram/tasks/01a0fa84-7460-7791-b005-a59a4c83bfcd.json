@@ -1,0 +1,28 @@
+{
+  "id": "01a0fa84-7460-7791-b005-a59a4c83bfcd",
+  "external_ref": null,
+  "title": "Show Engram backup status (durability mode, off-host assurance, last attempt and error) where Greg looks",
+  "outcome": "Show Engram backup status (durability mode, off-host assurance, last attempt and error) where Greg looks",
+  "acceptance": [
+    "Show Engram backup status (durability mode, off-host assurance, last attempt and error) where Greg looks is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "engram-backup",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

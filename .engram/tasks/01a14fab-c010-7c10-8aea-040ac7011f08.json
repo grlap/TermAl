@@ -1,0 +1,35 @@
+{
+  "id": "01a14fab-c010-7c10-8aea-040ac7011f08",
+  "external_ref": null,
+  "title": "Cover federation onboarding and mailbox route body limits after router composition",
+  "outcome": "Loopback regressions protect the onboarding 4096-byte request cap and the independently configured mailbox request limit against router-layer reordering.",
+  "acceptance": [
+    "An authenticated loopback request with a body larger than 4096 bytes to an onboarding JSON POST route is rejected with 413 before the probe is executed.",
+    "An authenticated valid mailbox request larger than 4096 bytes but below its negotiated mailbox request limit reaches the mailbox handler without a 4096-byte body-limit rejection.",
+    "The tests distinguish authentication, parsing and business-rule failures from body-limit enforcement and fail if the relative onboarding/body-limit/mailbox layer order is reversed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-abb8-7110-a31d-c593b94cf600",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

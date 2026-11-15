@@ -1,0 +1,30 @@
+{
+  "id": "01a1c5ec-9483-74b3-bbe0-57e42ea8c0e4",
+  "external_ref": null,
+  "title": "Evaluation refusal named_root_sighting_unavailable doesn't tell a session whose recent turns were all runtime-started that it needs a host-delivered turn",
+  "outcome": "Evaluation refusal named_root_sighting_unavailable doesn't tell a session whose recent turns were all runtime-started that it needs a host-delivered turn",
+  "acceptance": [
+    "When termal_evaluate_acceptance refuses because no named-root sighting exists at the current cut, and the session has a naming pending since its last host-begun turn, the refusal names the pending naming and says it takes effect at the next host-delivered turn (for example, a prompt or a mailbox wake), not only at a background-task completion; a test drives a pending naming followed by an unadmitted runtime-started turn and checks the refusal text names that remedy.",
+    "When no naming is pending, the existing refusal is unchanged; a test shows it.",
+    "No change to admission: a runtime-started turn still records no turn begin, checkpoint or root sighting."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "diagnostics",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a0ffab-5024-73a2-ba10-f7b6b009a849",
+  "external_ref": null,
+  "title": "A refused criterionEvidence selection does not say why: one generic 409 covers a non-holder note, an omitted body, a truncated summary and a locator mismatch",
+  "outcome": "When termal_evaluate_acceptance refuses a selected criterionEvidence locator, the refusal names the reason for that locator, so the requester knows the fix: cite it from the holder's own note, or supply a smaller or whole record. The acceptance rule itself is unchanged.",
+  "acceptance": [
+    "A test first fails on unchanged code: selecting a non-holder note returns only the generic \"selected evidence was not returned whole as a citable record of this task\".",
+    "Each refusal cause in src/acceptance_evidence_selection.rs (another locator returned, non-holder note, body omitted, summary truncated) returns its own message naming the locator and the cause; for a non-holder note it says that the holder must cite it in a note of its own. Tests cover each cause.",
+    "What is accepted or refused is unchanged: the same records are refused, and the existing selection tests pass.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

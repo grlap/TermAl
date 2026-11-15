@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7f6-7ce2-b1e9-44460a873d2d",
+  "external_ref": "tm-yfxs.3",
+  "title": "A defaultKimiEffort the session's model does not advertise refuses every first prompt",
+  "outcome": "Review finding (Claude /review-code, Kimi parity, 2026-09-26). state_inner.rs create_session copies defaultKimiEffort onto every new Kimi session as kimiEffort without knowing which model the session will run; configure_kimi_thinking refuses the prompt when the model does not advertise that effort. A user who sets e.g. 'max' (advertised by one model) and starts sessions on a model without it gets a hard failure on each new session's first prompt until the effort is changed. Documented ('Checked when prompting') but a preference should not turn into a refusal. Options: show the mismatch in the creation dialog once the catalog is known, fall back to auto for a default-derived effort the model lacks (needs provenance: explicit vs default), or scope the default effort to the default model. Needs a product decision (Greg).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c7f4-7742-b0fb-62261cd1080a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

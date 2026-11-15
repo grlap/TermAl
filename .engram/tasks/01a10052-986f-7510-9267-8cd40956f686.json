@@ -1,0 +1,37 @@
+{
+  "id": "01a10052-986f-7510-9267-8cd40956f686",
+  "external_ref": null,
+  "title": "The categories-plan linked-root test creates its fixture inside the gated worktree's .tmp, so a full gate can fence its own credit",
+  "outcome": "A full gate's own tests never write inside the worktree the gate is carried in, so the host's watcher cannot refuse the gate's credit for a file the gate itself created. Today scripts/test-categories-plan.test.mjs:328 (the linked-root junction fixture added in c5a1f29) creates its fixture with mkdtempSync(join(projectRoot, \".tmp\", \"categories-fixture-\")) inside the gated worktree. Occurrence: gate test-b8d91f08-8856-433b-9382-fca6cc7fd4de (w-4401e489b84d, .tmp/wt-category-cli-9474 at master 593c783) was refused while still running: \"a file in its worktree changed: …\\.tmp\\categories-fixture-ME2NWO\\real\". Gates on bases containing c5a1f29 were credited before (w-837 test-c339cbe6, w-1313 test-7bccabe7), so whether the watcher sees it depends on timing. Fix direction, to decide: (a) the test places its fixture outside the gated worktree but inside the repository (for example the main checkout's .tmp, found through git's common dir), or the test temp root; or (b) the host's watcher ignores paths git ignores, since content_revision never counts them. (b) is a host change and needs an architect.",
+  "acceptance": [
+    "A full gate's own fixtures create nothing inside the gated worktree, or the host does not fence a carried gate for a change that cannot alter its source revision; a test shows the categories-plan linked-root test no longer writes under the gated worktree (or that an ignored-path change does not fence).",
+    "The linked-root accounting test still covers a UI root reached through a directory link.",
+    "A full gate on master passes and is credited to the item it was launched for."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "gate-blocker",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The categories-plan linked-root fixture is now created under testTempDirectory() instead of the gated worktree's .tmp, so a full gate's own fixture can no longer fence that gate's credit. The test still exercises a UI root reached through a directory junction. Landed as f7a26a5. Gate test-684124bb passed and was credited. Review pair clean (one Low filed as w-7b199d2e2dda). Evaluation 681223b03b674f94aedfcd17da084692 passed 3/3.",
+    "completed_at": "2026-10-03T07:31:58.064459Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

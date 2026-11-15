@@ -1,0 +1,29 @@
+{
+  "id": "01a1b22b-4619-72b2-8cbb-9267983ddb89",
+  "external_ref": null,
+  "title": "Reserve trie overflow headroom and cover burst-first cross-root insertion order",
+  "outcome": "Pending workspace trie overflow avoids unnecessary shared-ancestor widening when a full burst is followed by the first notification in a different branch, without losing coverage or exceeding fixed storage limits.",
+  "acceptance": [
+    "A deterministic burst-first/new-branch regression exercises near-budget insertion and asserts bounded storage and complete exact-or-covering delivery.",
+    "An independently reviewed policy reduces unnecessary shared-ancestor widening or explicitly demonstrates why the retained workload requires it, with bounded callback work."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "review-followup",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

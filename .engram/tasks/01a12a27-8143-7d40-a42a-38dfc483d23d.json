@@ -1,0 +1,28 @@
+{
+  "id": "01a12a27-8143-7d40-a42a-38dfc483d23d",
+  "external_ref": null,
+  "title": "Engram card boundary lookup resolves Object.prototype keys (ENGRAM_CODE_BOUNDARIES indexed by a wire code)",
+  "outcome": "The card's code-to-boundary lookup in ui/src/message-cards.tsx matches only its own entries (Object.hasOwn, a Map, or Object.create(null)). A refusal code such as 'constructor' or 'toString' falls back to 'Original failure details unavailable', not a function's source text. A vitest covers it.",
+  "acceptance": [
+    "Engram card boundary lookup resolves Object.prototype keys (ENGRAM_CODE_BOUNDARIES indexed by a wire code) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

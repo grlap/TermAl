@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c70b-7f41-98e7-8a3fd45c6396",
+  "external_ref": "tm-ncc6.7.2",
+  "title": "List and detail panels fed by live deltas",
+  "outcome": "test-runs-api.ts, use-test-runs.ts (initial GET, then testRunChanged deltas; no polling), TestRunsPanel.tsx (list, state filter), TestRunDetail.tsx (stages table, first-failure diagnostics, run dir/fingerprint copy, cancel confirm, rerun) per the prototype; sort/columns reuse the Work table conventions where sensible.\n\nREVIEW FIXES (F13, F2): client module ui/src/test-runs-api.ts next to ui/src/work-visualizer-api.ts (preserveGatewayErrorBody pattern); render disk-running stages of canceled/unknown records as 'interrupted'.",
+  "acceptance": [
+    "- Initial load once; deltas update without a second GET.\n- Cancel confirm and 409 rerun message rendered.\n- Unknown/canceled/drift/interrupted states rendered distinctly with their reasons."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a7ef4115f1f",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

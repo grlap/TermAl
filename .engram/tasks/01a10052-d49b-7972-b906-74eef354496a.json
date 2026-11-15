@@ -1,0 +1,29 @@
+{
+  "id": "01a10052-d49b-7972-b906-74eef354496a",
+  "external_ref": null,
+  "title": "Sighting preflight answers 409 for transport failures where the rest of the evaluation request answers 502; docs omit the preflight",
+  "outcome": "Two follow-ups to the acceptance sighting preflight.\n(1) Transport-class failures of named_root_sighting_read (deadline, dead worker, protocol error, spent budget) map to bad_gateway (502), as acceptance_evaluation_transport_error does for every other tracker transport failure in the request. The semantic refusals stay 409: unsupported operation, incoherent or malformed answer, root mismatch, no sighting.\n(2) docs/features/host-architecture.md (\"What TermAl calls\") lists named_root_sighting_read. docs/features/engram-host-adapter.md (request steps) and docs/architecture.md describe the preflight, its refusals with the remedy wording, and the minimum Engram build that supports the operation (2594b1a).",
+  "acceptance": [
+    "A transport-class failure of the sighting read answers 502 and a semantic refusal answers 409; tests cover both.",
+    "host-architecture.md, engram-host-adapter.md and architecture.md document the preflight, its refusals and the minimum Engram build."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

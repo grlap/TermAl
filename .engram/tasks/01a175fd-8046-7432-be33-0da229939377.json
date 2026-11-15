@@ -1,0 +1,29 @@
+{
+  "id": "01a175fd-8046-7432-be33-0da229939377",
+  "external_ref": null,
+  "title": "Codex app-server notification turn/moderationMetadata is unhandled by TermAl's Codex adapter",
+  "outcome": "Codex app-server notification turn/moderationMetadata is unhandled by TermAl's Codex adapter",
+  "acceptance": [
+    "The Codex adapter recognizes the turn/moderationMetadata shared notification (records or deliberately ignores it, with a test using a captured or documented payload shape) so it no longer produces an unhandled-notification diagnostic, and no turn, receipt or delivery behavior changes.",
+    "A review pair has no outstanding Medium or higher and one complete READY goes to Merger2."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "greg-reported",
+    "provider-integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

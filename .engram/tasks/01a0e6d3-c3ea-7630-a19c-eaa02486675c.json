@@ -1,0 +1,36 @@
+{
+  "id": "01a0e6d3-c3ea-7630-a19c-eaa02486675c",
+  "external_ref": "tm-59w8",
+  "title": "termal_read_mailbox returns the reader's own sent messages in full",
+  "outcome": "Reported by Engram::Fable (2026-09-27, mailbox-703fddd4 #2). The reader's own 9 KB project review came back in full on its next read (mailbox-e3d12b08-a6c6-4fe2-b247-6a2911631303, sequence 25). Own sends cost context on every read that spans them. Request: return own sends as a header only (sequence, topic, time), with the body available on request (termal_read_mailbox_message).",
+  "acceptance": [
+    "A mailbox range read through TermAl's MCP returns messages sent by the reading session without body and with bodyOmitted:true, while preserving their message IDs, sequence, topic and creation time; incoming bodies and the page receipt/cursor/paging metadata remain unchanged.",
+    "termal_read_mailbox_message can retrieve the full durable body of such an own message by messageId; the omission is confined to the MCP range-read projection and does not mutate durable messages or change receipt acknowledgement."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verified delivered own-mailbox-body MCP projection and full exact-message retrieval. Independent Claude session12682/delegation-eb1e41bf-4eef-425f-a99c-069bc49ef6c2 recorded evaluation729e550e21b745e38376623febfe3c87 PASS2/2 (judgment), stale:null confirmed before done. Acceptance revision2 exactly matches coordinator own-note0a5e5640e842406eb81f01ceb079a9bf/proposal1b7542a812854a5cb6fcfa1a28436e03; no bindings. C1fed4b17472694ddeb1b756bb1633a616, C2 4b77c832e35841e190f6234a651e7d71. Delivery499c5af2 ancestor1495e8d3 confirmed. No source edit, test/build, commit/push/deploy; existing regression source was read only and ordinary on-demand exact lookup observed.",
+    "completed_at": "2026-10-15T15:34:25.212000700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

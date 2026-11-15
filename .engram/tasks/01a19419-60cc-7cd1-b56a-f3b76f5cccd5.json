@@ -1,0 +1,40 @@
+{
+  "id": "01a19419-60cc-7cd1-b56a-f3b76f5cccd5",
+  "external_ref": null,
+  "title": "Terminal preflight failures without an input record do not block acceptance admission",
+  "outcome": "A registered launcher run that failed coherently before input capture or any stage is recognized as never started, without weakening genuine failure or newest-result selection.",
+  "acceptance": [
+    "A coherent terminal failed launcher result with no input member and an explicit list of unrun stages with no start timestamp is classified as NotStarted, so it does not block a complete never-started-only claim from taking the legacy evaluation flow.",
+    "Such a never-started result does not prevent selection of an older applicable eligible run, while a genuinely started newer failure still supersedes an older pass and missing or incoherent results still refuse admission.",
+    "Behavioral tests through committed-input admission cover the terminal preflight-failure shape, legacy and eligible-run selection, genuine newer failures, and ambiguous missing-input results without changing historical run artifacts."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed terminal pre-input failed/no-stage-start classification; qualified adopted Codex/Claude source pair, direct registered PASS41 Test credit, and fresh independent evaluation3e52cf1ba37940ab870ac5555a2700aa passed all3criteria at exact landedbcf66e4d. Original b015/f163 artifacts unchanged; wrapper recognition and >32cap follow-ups remain separate.",
+    "completed_at": "2026-11-11T00:23:47.430311200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

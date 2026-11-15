@@ -1,0 +1,30 @@
+{
+  "id": "01a14276-ab58-7e60-aeff-8ddfbea66b2a",
+  "external_ref": null,
+  "title": "Cover pinned-submodule revalidation races and malformed gitlink refusals",
+  "outcome": "Deterministic disposable tests fail if post-capture gitlink, exclusion-policy or checkout revalidation is removed, and cover malformed, duplicate and unsafe gitlink parsing without relying on unrelated refusal paths.",
+  "acceptance": [
+    "Barrier-driven tests mutate a gitlink, committed exclusion policy or checkout between capture phases and verify that the resulting basis is refused for the intended revalidation guard.",
+    "Targeted malformed, duplicate and unsafe gitlink fixtures establish their preconditions and fail for the intended path or identity validation guard.",
+    "The final exact change passes required review, tests and independent acceptance before completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "source-revision",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

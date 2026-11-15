@@ -1,0 +1,31 @@
+{
+  "id": "01a17679-ad50-7a61-a4f0-d833db602a92",
+  "external_ref": null,
+  "title": "Assert the escaping Windows probe startup exception after finalization completes",
+  "outcome": "The release-order probe regression distinguishes the original startup exception from any replacement thrown during finalization.",
+  "acceptance": [
+    "A locale-neutral observation is emitted outside the probe try/finally and asserts the final escaping exception type and native code.",
+    "A deterministic finalizer-replacement control demonstrates that the assertion rejects masking, while the existing successful command-release and missing-start controls remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gate-blocker",
+    "launcher",
+    "review-low",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173e6-4ed9-70d0-b41f-c764fe48a89e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

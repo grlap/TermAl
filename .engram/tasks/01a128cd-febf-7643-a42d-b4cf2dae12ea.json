@@ -1,0 +1,37 @@
+{
+  "id": "01a128cd-febf-7643-a42d-b4cf2dae12ea",
+  "external_ref": null,
+  "title": "Phase-level timing account of the 20 s control incidents of 2026-10-11 (Greg): which phase consumed the dispatch budget",
+  "outcome": "For each 20 s incident of 2026-10-11, a measured phase-level account, not an inference: (a) session-11312 at 01:19:38Z (begin_preparation_unacknowledged, evaluate 7412 ms, total 20014 ms); (b) session-11296 at 02:26:03Z (same code, evaluate 2883 ms, total 20014 ms); (c) the Advisor's session at 02:23:53Z (turn_begin dispatch_budget_exhausted, 20521 ms, recovered in 4 s). Each account gives: time in TermAl admission before evaluate (status/rebind, work-binding read, retained-evaluate durability fence); Engram control process acquisition or spawn, if any (whether a process was created, and whether it received the request); request write; response wait; durable acknowledgement (the prepared-Begin fence on the single persist writer); and which phase consumed the budget. Sources are read-only: host logs, session records through the HTTP API, the engramControl cards and causal records, and Engram's own control logs (Engram side). No sqlite on live stores. Where the data doesn't exist, say so and name the minimal instrumentation that would capture it next time (w-cfcf10b68c9b's C11(c) adds the card's phase split).",
+  "acceptance": [
+    "For each of the three named incidents, durable notes identify the original session/card, measured aggregate latencies and observed failure boundary/causal record, and explicitly classify each requested phase as measured, not entered, or unknown without inventing phase durations.",
+    "Durable notes identify missing historical evidence and the minimal correlated host/Engram instrumentation needed to distinguish the phases on a subsequent occurrence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "control-plane",
+    "cross-project",
+    "diagnostics",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered read-only measured/unknown phase account for all three named 20s incidents, original card/causal boundaries, explicit missing historical host/Engram evidence and minimal correlated instrumentation. Independent Claude evaluator session11927/delegation2e4fd885 recorded fresh 2/2 judged PASS evaluation0b57c593e700405eb5855a87574c9660 on revision2/cut27, citing full notes44719b6ac92d4466a28ac30e0682693b andde2729bfb40044e4a6c7307ae777c601. Broad evaluate aggregates remain7412/20014,2883/20014,20500/20521ms; residuals are not writer measurements, missing traces do not prove nonreceipt or zero. No code/config/test/build/store changes by executor, no historical cause reconstructed. Source obligation disposition is handled by done as instructed; this completion claims research evidence only.",
+    "completed_at": "2026-10-11T02:49:43.713228400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

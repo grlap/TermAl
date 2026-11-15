@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a6061010804",
+  "external_ref": "tm-7cu.32",
+  "title": "Preserve prepend authority on immobile attached-bottom input",
+  "outcome": "virtualized-conversation-scroll-events markUserScroll clears pendingPrependNativeReflowRef and advances userScrollGeneration before it determines that a downward boundary input cannot move the attached viewport. That no-op tick can invalidate a pending prepend anchor restore and its one-shot reflow token even though the reader did not navigate. Compute attached-downward-boundary status first and preserve generation and prepend authority for that case.",
+  "acceptance": [
+    "A viewport-immobile downward wheel at attached physical bottom does not clear the pending prepend reflow token or advance user-scroll generation; genuine movable input still invalidates stale prepend work; deterministic prepend and boundary regressions plus UI gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

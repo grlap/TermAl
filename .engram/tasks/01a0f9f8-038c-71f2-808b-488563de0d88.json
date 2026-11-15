@@ -1,0 +1,27 @@
+{
+  "id": "01a0f9f8-038c-71f2-808b-488563de0d88",
+  "external_ref": null,
+  "title": "Restore the broadcaster mailbox drop-oldest / never-block tests removed by the ordered-publication change, using typed DeltaEvents",
+  "outcome": "Tests again pin that the state broadcast mailbox drops the oldest work at capacity and never blocks a producer holding the state lock",
+  "acceptance": [
+    "Restore the broadcaster mailbox drop-oldest / never-block tests removed by the ordered-publication change, using typed DeltaEvents is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "sse",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f9c5-c2e4-73a2-9c9a-1bbb82455e27",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate. Restore the broadcaster mailbox drop-oldest tests; covered by w-1bbb82455e27.",
+  "completion": null
+}

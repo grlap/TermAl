@@ -1,0 +1,36 @@
+{
+  "id": "01a1a838-dcf3-7ce2-addf-e66983e3d919",
+  "external_ref": null,
+  "title": "Committed-input early acceptance must use the newest terminal result and retain a recovered same-run registration",
+  "outcome": "The existing early committed-input reader refuses an older PASS superseded by a newer terminal failure at the judged commit and continues using the original applicable registration after claim recovery on the same work run, preserving root, store and work-run checks.",
+  "acceptance": [
+    "At the exact judged commit, the early committed-input reader selects the newest applicable terminal result before judging its outcome; a newer terminal failure cannot be bypassed by an older PASS. Other commits and nonmatching work/root/store results cannot decide that selection.",
+    "Recovering a claim on the same work run uses the applicable registration's original binding rather than requiring the current claim fence, preserves root/store/work-run checks, and does not fall back to the legacy sighting flow merely because the claim fence changed. Discriminating RED/GREEN tests cover both repairs; the final exact candidate receives the required review pair and FULL gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed newest-terminal committed-input acceptance and original same-work-run recovery evidence preservation, including fail-closed unknown reads, Pending rereads and installed compacted registrations. Discriminating RED/GREEN, exact focused PASS28, Codex+Claude no Medium+, byte-identical current-master carry, standard exact-tree FULL and actual remote-master confirmation recorded. Two Low follow-ups and one pre-existing unreproduced race investigation remain optional.",
+    "completed_at": "2026-11-05T01:32:11.715980800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

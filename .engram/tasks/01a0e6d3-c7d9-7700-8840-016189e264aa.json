@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c7d9-7700-8840-016189e264aa",
+  "external_ref": "tm-xaur",
+  "title": "Animate new transcript messages without changing scroll geometry",
+  "outcome": "Add a subtle, motion-safe reveal for newly appended transcript content while preserving the single pre-paint scroll authority that keeps LIVE TURN stable. The animation must not affect layout height, scrollTop, virtualization measurement, tail attachment, or first-wheel geometry; respect prefers-reduced-motion and avoid replaying on hydration/history adoption.",
+  "acceptance": [
+    "New resident messages may fade/translate visually without changing layout geometry; attached streaming remains frame-stable; detached readers keep their viewport; historical/hydrated messages do not replay entry animation; reduced-motion disables the transition; focused tests and a built UI verify no scroll regressions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 4, spot-checked by Termal::Fable2): CLOSE-DONE. Message reveal animation, final review complete 2026-08-22; ui/src/styles.css:5184 `conversation-message-entry-reveal 180ms ease-out backwards` on master f7db2c58.",
+  "completion": null
+}

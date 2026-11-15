@@ -1,0 +1,31 @@
+{
+  "id": "01a17b37-2e30-70a3-8640-633a71636fd6",
+  "external_ref": null,
+  "title": "An Explorer delegation that completes its inspection is reported as failed (\"Delegation failed\", 0 commands) when the prompt asked for a structured review submission it cannot make",
+  "outcome": "An Explorer delegation that completes its inspection is reported as failed (\"Delegation failed\", 0 commands) when the prompt asked for a structured review submission it cannot make",
+  "acceptance": [
+    "A non-Reviewer (Explorer) delegation whose agent finishes and produces output is not reported with the compact summary 'Delegation failed'. Its status and summary say the inspection completed. If the prompt asked for a structured submission the mode does not offer, the result says that separately.",
+    "The compact delegation result's command/inspection counts are not shown as 0 when the child actually ran commands, or they are explicitly marked as unavailable for that mode.",
+    "A regression test covers an Explorer child that completes with full output and no termal_submit_review_result call.",
+    "The read-only child's no-argument TERMAL_CLI discovery failure (Access is denied opening ~/.termal/termal-server.lock) is either routed to an existing item or given a clear, non-fatal message saying the CLI is unavailable in that sandbox."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "cross-project",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

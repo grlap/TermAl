@@ -1,0 +1,30 @@
+{
+  "id": "01a1d5ba-93ef-79a0-bdfe-9af9586a18c2",
+  "external_ref": null,
+  "title": "Gemini harness: migrate from the deprecated Gemini CLI to Antigravity CLI (agy)",
+  "outcome": "It is known, with evidence, whether TermAl's existing Gemini adapter can drive Antigravity CLI (agy) unchanged or what adapter changes are needed, which Gemini environments remain supported after Google's deprecation, and what this means for Execution Observability epic w-3fe8f4472e5d criterion 6 (the Gemini harness row). A sized migration plan exists as follow-up items; the integration itself is not started here.",
+  "acceptance": [
+    "The item records, from agy's own documentation and its CLI surface on Central (C:\\Users\\grzeg\\AppData\\Local\\agy\\bin\\agy.exe, invoked only for help/version output), how agy is launched and whether it speaks the protocol TermAl's Gemini adapter uses (ACP/stream-json, auth, approval modes), each with a source.",
+    "The item states which Gemini CLI environments remain supported after the deprecation (Google's announcement https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/), and the consequence for criterion 6's Gemini row: replaced by agy, or kept on a still-supported Gemini path. The decision goes to Greg; the criterion is not waived here.",
+    "Follow-up implementation items are filed with sizes and dependencies; no integration code is written under this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "gemini",
+    "greg-reported",
+    "harness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

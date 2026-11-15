@@ -1,0 +1,34 @@
+{
+  "id": "01a15696-8985-7110-af69-f926deb7facb",
+  "external_ref": null,
+  "title": "Freeze the health-cancellation fixture clock before its RPC deadline can expire",
+  "outcome": "A long host stall between holding the authenticated health reply and pausing test time cannot make the cancellation fixture fail for the unrelated RPC timeout.",
+  "acceptance": [
+    "The held-probe fixture prevents expiry of the real RPC deadline before its cancellation measurement begins, while preserving genuine authenticated transport and stop/control-end triggers.",
+    "The change retains the explicit exact-child cleanup/replacement assertions, cannot pass through natural RPC expiry, and releases/joins fixture work without inflating production timeouts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low",
+    "test-hardening"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1560b-26d9-7820-bfc7-594185e18ac3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

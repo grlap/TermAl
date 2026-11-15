@@ -1,0 +1,41 @@
+{
+  "id": "01a19d06-3060-78a1-8092-1b4a9a59923b",
+  "external_ref": null,
+  "title": "Diagnose four remaining observation failures in the composed C2 50226370 input",
+  "outcome": "Fable2367/message63bcc84f-582c-4dc9-be4d-ec775ecde212 assigns read-only classification of three legacy recovery observation timeouts plus root-owner stale publication assertion in diagnostic test-c9d619a1-2609-4989-866a-58fca855b895/TREE50226370 containing22returns. Compare original09f1 and currentD1v2/711a/35a1 composition; no source edits or execution. Return T/P table with both source sides within30min.",
+  "acceptance": [
+    "Read the exact existing four first-panic/log bodies and immutable composed50226370 versus09f1/base/master source paths from main, with no commands in handed roots and no new execution or source edits.",
+    "Classify each failure T or P with both source sides and concrete discriminating evidence, separating next blocker/composition/fixture from unsupported inference; unresolved causal limits remain explicit.",
+    "Mail compact classification table to Fable2 and integrator, record evidence, noCargo/compiler/tests/parser/fmt/lint/live/agents/review/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "diagnosis",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only four-failure diagnosis delivered: four fixture/oracle T findings, no production defect established; source/log/control-flow limits explicit. No edits or execution.",
+    "completed_at": "2026-11-02T16:17:16.237341400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

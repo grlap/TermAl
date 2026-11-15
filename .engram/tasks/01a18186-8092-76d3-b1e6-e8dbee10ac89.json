@@ -1,0 +1,31 @@
+{
+  "id": "01a18186-8092-76d3-b1e6-e8dbee10ac89",
+  "external_ref": null,
+  "title": "Scripted Engram budget-clock watchdog panic turns into a process abort (0xc0000409): poisoned event mutex panics again during unwinding and hides all later test results",
+  "outcome": "When a test using the scripted Engram budget clock fails, its failure is reported as an ordinary test failure with its own message. The panic no longer becomes a second panic during unwinding, so the test process does not abort with 0xc0000409, and libtest still reports every other test's result and its final summary.",
+  "acceptance": [
+    "From source and a reproduction: the path from the watchdog panic (src/engram_budget.rs:127, \"scripted Engram driver watchdog expired\") to the second panic (src/engram_budget.rs:71, \"budget event mutex poisoned\") is explained, including which Drop or notify path locks the event mutex during unwinding.",
+    "A test makes the scripted driver watchdog expire on purpose and asserts that the run reports an ordinary test failure and does not abort the test process. It fails (process abort) before the fix and passes after it.",
+    "No production timing, guard, timeout or retry semantics change; the fix is limited to the scripted clock and its test notification path, for example by tolerating a poisoned lock or skipping the notify while the thread is panicking. The review pair has no outstanding finding of Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "abort",
+    "engram-budget",
+    "gate-load",
+    "test-harness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

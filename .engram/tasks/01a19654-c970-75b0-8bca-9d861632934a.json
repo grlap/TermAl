@@ -1,0 +1,29 @@
+{
+  "id": "01a19654-c970-75b0-8bca-9d861632934a",
+  "external_ref": null,
+  "title": "Restore the prior Human queue choice when its initial commit fails",
+  "outcome": "Restore the prior Human queue choice when its initial commit fails",
+  "acceptance": [
+    "A failed initial choice commit restores the exact prior human_queue_choices entry, preserving unrelated state and existing receipt/runtime/control custody; a deterministic persistence-failure regression covers empty and replacement entries."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "stop-the-line"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a194c1-6a65-7c50-86ba-135181fe8685",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete specific state path, not fixed or tested by this sweep. Fable2722/message43b9a7df-11b7-403a-a0d1-1e21100b4562 authorizes cancellation with provenance. Original3209ed10ef444fbbaf76dc9b4e3e7a86 described an inserted human_queue_choices map entry surviving failed commit. At current master2e03d1a9, the entire current src/human_queue_choices.rs has no such map or insertion: it captures exact HumanResumeOwner/selection and translates directly into ordinary Resume. Physical removal87f49ed0 removed the old gated choice/recovery storage. Preserve original report and failed-run evidence; no new source change, test, verification, historical provider execution or old criterion PASS is claimed.",
+  "completion": null
+}

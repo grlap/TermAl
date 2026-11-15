@@ -1,0 +1,37 @@
+{
+  "id": "01a16cac-987f-70f0-8369-c75f102fcb10",
+  "external_ref": null,
+  "title": "Root-reclamation scheduler holds the state lock for seconds while planning (engram_named_root_reclamation.rs:388)",
+  "outcome": "The test-run index tick's root-reclamation scheduling no longer holds the global state mutex for more than a short, bounded time under real multi-lane load, so mailbox, MCP-config and outstanding-work callers stop queueing behind it.",
+  "acceptance": [
+    "AppState::schedule_engram_root_reclamation does its planning (engram_root_reclamation_plan_locked, engram_named_root_disposition_due_locked) without holding the state mutex for work proportional to the full state, or otherwise bounds that hold, with the observable decisions (flight single-flight, next_due, returned reason strings) unchanged.",
+    "A regression test proves that the hold is bounded, e.g. a scaled state where the scheduling hold stays under a stated bound while the plan contents equal the current implementation's, and the test fails against the current code.",
+    "Focused Rust tests for named-root reclamation and capacity pass on the exact input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed and pushed bb338026ebb7c1a7be9a19058a83364dd0083d27 to origin/master. Exact tree 17a743c5694fb3731a918e673493a1f1ea73fb08 passed the five-stage full gate and independent post-landing acceptance evaluation c6f982947feb45febd5cc9ca13946556 (3/3). No install or restart.",
+    "completed_at": "2026-10-24T09:27:26.647084900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

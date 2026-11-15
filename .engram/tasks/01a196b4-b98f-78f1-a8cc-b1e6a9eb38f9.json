@@ -1,0 +1,31 @@
+{
+  "id": "01a196b4-b98f-78f1-a8cc-b1e6a9eb38f9",
+  "external_ref": null,
+  "title": "Gate test-only SharedSequence mutation helpers out of production builds",
+  "outcome": "SharedSequence iter_mut, last_mut and swap_remove are compiled only where used, avoiding introduced dead_code warnings while preserving test behavior.",
+  "acceptance": [
+    "Confirm all production and test callers of iter_mut, last_mut and swap_remove, and gate each test-only method appropriately without changing sequence semantics.",
+    "The relevant compile checks and mutation/removal tests pass; review has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "immutable-snapshot",
+    "performance",
+    "preparatory",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a192f8-de97-78d1-ab7d-528f6c17064a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

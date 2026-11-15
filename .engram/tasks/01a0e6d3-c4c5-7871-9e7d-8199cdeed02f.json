@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4c5-7871-9e7d-8199cdeed02f",
+  "external_ref": "tm-bowv",
+  "title": "Remove Project.engramCleanupWarning: never set since the grant subsystem was deleted (tm-zykn)",
+  "outcome": "tm-zykn deleted the only writers of Project.engram_cleanup_warning: the background authority-revocation degraded notice, and the project-fence-release degraded notice from the deferred grant-rotation release. The field is still persisted and on the wire (src/wire.rs Project; src/state_inner.rs init; UI ui/src/types.ts engramCleanupWarning, rendered in ui/src/EngramProjectSettingsPanel.tsx ~326). A store written before tm-zykn may still carry an old warning text, which nothing clears any more.\n\nRemove the field end to end: backend, wire, UI type and panel, plus any tests. A persisted value is dropped on load (no migration: PersistedState and Project have no deny_unknown_fields). Kept out of tm-zykn because ui/ was held by the tm-ncc6.13.3/.8 card and wait UI work (types.ts overlap); do it after that lands.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

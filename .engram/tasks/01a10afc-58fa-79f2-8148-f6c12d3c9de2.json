@@ -1,0 +1,27 @@
+{
+  "id": "01a10afc-58fa-79f2-8148-f6c12d3c9de2",
+  "external_ref": null,
+  "title": "The review-freeze fingerprint changes after a byte-identical `git restore` until the paths are re-staged, because it runs git with global config off (no core.autocrlf) and the restore rewrote CRLF files and broke index stat data",
+  "outcome": "The review-freeze fingerprint of a tree depends only on the tracked content (blobs, tree and index entries), not on worktree stat state or line-ending conversion. A byte-identical restore yields the same fingerprint without re-staging, and a test covers restore-then-fingerprint.",
+  "acceptance": [
+    "The review-freeze fingerprint changes after a byte-identical `git restore` until the paths are re-staged, because it runs git with global config off (no core.autocrlf) and the restore rewrote CRLF files and broke index stat data is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-freeze",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

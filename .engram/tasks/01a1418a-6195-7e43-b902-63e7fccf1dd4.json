@@ -1,0 +1,46 @@
+{
+  "id": "01a1418a-6195-7e43-b902-63e7fccf1dd4",
+  "external_ref": null,
+  "title": "Witness the independent evaluator brief's minimal omission detail and refusal floor",
+  "outcome": "Witness the independent evaluator brief's minimal omission detail and refusal floor",
+  "acceptance": [
+    "A discriminating evaluator-brief test crosses the Compact floor into Minimal while retaining complete criteria, and one byte below the actual Minimal floor refuses with the correctly reported floor.",
+    "The full gate passes on the master tree that contains the change."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Witnessed the evaluator brief's Compact-to-Minimal floor behavior and exact below-floor refusal. Fresh independent evaluation c41d55365c1440ff9abf65f391cf1072 passed both criteria, including the landed master-tree full-gate criterion.",
+    "completed_at": "2026-10-16T23:19:09.187006400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

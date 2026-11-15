@@ -1,0 +1,28 @@
+{
+  "id": "01a16e96-e4d1-78e3-b079-420d90df3470",
+  "external_ref": null,
+  "title": "Turn-start capture under test: the cleanup flush and the capture each get a full deadlock guard, and only the capture asserts an overrun",
+  "outcome": "In record_engram_turn_start_basis_and_snapshot_off_lock (src/engram_turn_observations.rs), production shares one REVIEW_FREEZE_TIMEOUT deadline across the root-cleanup flush and the basis capture. Under the cfg(test) turn-start capture clock, each phase now gets its own TEST_PHASE_DEADLOCK_GUARD (60 s), and only the capture panics past it. A stuck fixture can therefore wait about 120 s, and a stuck test-transport flush falls through silently. Either give both phases one shared guard deadline in tests, or assert a flush overrun too, so a stuck flush fails as fast as a stuck capture. There is no production impact.",
+  "acceptance": [
+    "Turn-start capture under test: the cleanup flush and the capture each get a full deadlock guard, and only the capture asserts an overrun is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-control",
+    "review-follow-up",
+    "test-infrastructure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

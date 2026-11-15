@@ -1,0 +1,57 @@
+{
+  "id": "01a16862-bf9e-7cc0-9225-bcb5ee3a4740",
+  "external_ref": null,
+  "title": "Conditional startup tail/overview paint independent of delayed enhancements, using the actual virtualizer-children marker",
+  "outcome": "Investigate the conditional cold-load client paint barrier and render transcript/overview when their data is ready while delayed enhancements hydrate progressively.",
+  "acceptance": [
+    "C1 (warm-bootstrap pin). A Vitest App-level test sets up a cold load with: a saved layout in localStorage whose pane shows one session; the SSE state snapshot delivered; the session's tail served with at least 30 messages (so it is virtualized), including one mailbox-sourced message; the overview served; api.saveWorkspaceLayout (the workspace PUT) and that session's mailboxes GET each held on an unresolved deferred. With both deferreds still unresolved and no timer advanced by 500 ms or more, the test asserts: the tail's rows render as `.virtualized-message-list .virtualized-message-slot[data-message-id]` (the real virtualizer children, not pane chrome or innerText); `[data-testid=\"conversation-overview-rail\"]` renders. After both deferreds resolve, the rendered data-message-id list is unchanged.",
+    "C2 (deferred-adoption pin). The same as C1, but with no layout in localStorage and the server layout (fetchWorkspaceLayout) referencing the session, so adoption is deferred until the state snapshot. Rows and the rail render once the snapshot and the tail are in, while the PUT and mailbox deferreds are still unresolved.",
+    "C3 (fix only where a pin fails). If C1 or C2 fails on master, the fix removes only the gate that blocked paint. It keeps the PUT-after-layout-ready ordering, the save acknowledgement and the mailbox summary semantics; the tests then pass. If both pass on master, B makes no product change. It lands the two tests as regression pins and records on the item and the parent that client paint is not gated by the PUT or mailboxes (with this code basis), attributing the residual cold-load delay to the server/state path (child A).",
+    "C4 (validation and landing). `cd ui && npx tsc --noEmit` is clean; the full gate passes on the exact tree submitted for landing; the review pair has no outstanding finding of Medium or higher; the item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "cold-load",
+    "frontend"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c408-7451-8bb4-89dea85d8b43",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

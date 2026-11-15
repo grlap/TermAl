@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c53a-7053-b8c5-a8143494c616",
+  "external_ref": "tm-jfbk",
+  "title": "Delegation listing is unbounded and unprojected: recovering delegation ids after compaction costs tens of thousands of tokens",
+  "outcome": "Reported from a peer project after a natural compaction dropped the reviewer delegation ids from a summary: one termal_list_delegations call returned roughly 34k tokens and was itself clipped, so the recovery read nearly cost a second compaction. Inspection confirms there is nothing to tune today. The MCP tool takes NO arguments at all (src/delegation_mcp.rs:2180-2186, inputSchema properties empty) and simply forwards the whole parent-scoped listing (:900-905 -> GET /api/sessions/{id}/delegations, src/api.rs:1102-1108). The response is every delegation the parent has ever owned, in full: DelegationListResponse.delegations is a Vec<DelegationSummary> (src/wire.rs:1435-1440, :1345-1372) and each entry embeds an optional DelegationResultSummary whose summary field is the childs entire result prose, unbounded (:1236-1241). A long-lived coordinator accumulates hundreds of delegations, so the discovery payload grows without limit and the heaviest part of it is result prose that discovery does not need. The tool description also calls the payload compact metadata, which is no longer true. Requested shape, from the reporting agent: newest-N discovery of id, childSessionId, status, title, agent, mode and timestamps, with details read on demand through the existing status/result tools. Proposed fix: give the endpoint bounded query parameters (limit with a sane default, newest first, plus a status filter) and have the MCP tool project discovery fields only, omitting or hard-truncating result.summary; keep the full listing reachable explicitly for callers that want it, keep same-title delegations distinct, and correct the tool description. Also worth checking whether the same unbounded shape reaches the delegation SSE deltas and the UI. Related: the 2.1 GB / 136 entry delegation store already flagged for cleanup elsewhere.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

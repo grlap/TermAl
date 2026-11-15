@@ -1,0 +1,29 @@
+{
+  "id": "01a0f6aa-ed48-7a11-9756-7d382da65fa1",
+  "external_ref": null,
+  "title": "Suppress repeated full-state resyncs while a session body repair is already in flight",
+  "outcome": "Bound redundant /api/state fetches from streaming sequenced frames during an already-pending covering body repair, without suppressing independent global metadata gap recovery.",
+  "acceptance": [
+    "Suppress repeated full-state resyncs while a session body repair is already in flight is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "deferred-review",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-6910-7021-9f06-a36cfb28359b",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

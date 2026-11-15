@@ -1,0 +1,30 @@
+{
+  "id": "01a1cba7-4ed4-7cc2-95b0-9f21238e9a3e",
+  "external_ref": null,
+  "title": "Keep publication connection rollback and close ahead of writer-admission release during unwind",
+  "outcome": "An unwind after BEGIN IMMEDIATE closes or rolls back the publication connection before releasing its writer ticket, preserving the explicit-path custody order.",
+  "acceptance": [
+    "Publication owns connection and writer admission so unwind cleanup closes or rolls back the connection before releasing writer admission.",
+    "A behavioral unwind fixture demonstrates the cleanup order without changing exact-marker reconciliation or unknown-commit replay policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "limits",
+    "publication",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

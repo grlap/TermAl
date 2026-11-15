@@ -1,0 +1,37 @@
+{
+  "id": "01a0f981-f159-7031-9b41-86b5b27280f5",
+  "external_ref": null,
+  "title": "Preserve uncertified session identity across identical paired summaries",
+  "outcome": "Preserve uncertified session identity across identical paired summaries",
+  "acceptance": [
+    "A non-eligible remote or foreign-epoch pair and an unpaired peer retain master behavior without a client sequence certificate or additional proof-only read. The exact corrected input passes focused identity/parity regressions, the full five-stage gate and a fresh complete independent Codex/Claude pair with no outstanding in-scope Medium-or-higher finding.",
+    "An uncertified hidden local session receiving two identical valid current-instance paired summaries preserves the resident Session object, session-list identity and record-store slice identity and causes no list publication, while the owner still observes the pair for the D5 needsTailRead predicate when visible and attached."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fe83-875c-7541-a703-f2e2247504f6",
+  "disposal_reason": "Greg closed the parent P0 w-1b692f268123 at about 21:25Z on 2026-10-02 (note 13ee75cf). This required child continues as standalone work in w-f2e2247504f6, so it no longer blocks the parent. Coordinator: Termal::Fable2.",
+  "completion": null
+}

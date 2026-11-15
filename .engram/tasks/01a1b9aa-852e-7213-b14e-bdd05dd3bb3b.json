@@ -1,0 +1,27 @@
+{
+  "id": "01a1b9aa-852e-7213-b14e-bdd05dd3bb3b",
+  "external_ref": null,
+  "title": "Describe an actual completed-root retirement accurately in the own-clear success notice",
+  "outcome": "A clear that retires a retained local name says that it retired the name; an already-retired binding keeps the read-only already-ended notice.",
+  "acceptance": [
+    "A successful own-clear that performs canonical reconciliation and removes a retained completed selection reports that retirement without saying no name changed; repeat already-ended calls retain the read-only lifecycle result.",
+    "Behavioral tests distinguish the first retirement from a repeated no-op without changing producer authority or weakening stale-image refusals."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b8b7-2993-7d40-ade6-0bfc97b43f43",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

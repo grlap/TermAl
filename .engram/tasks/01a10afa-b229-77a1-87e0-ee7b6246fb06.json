@@ -1,0 +1,28 @@
+{
+  "id": "01a10afa-b229-77a1-87e0-ee7b6246fb06",
+  "external_ref": null,
+  "title": "Expose a typed queue-pause cause in the session API so UI cards stop matching backend preview strings",
+  "outcome": "The session API carries a typed cause for a paused queue (for example: user stop, Engram admission retrying automatically with attempt and next time, Engram hold needing Resume or Cancel, provider or turn failure, source observation), and the paused-queue and retained-prompt cards read it instead of matching session.preview strings.",
+  "acceptance": [
+    "Expose a typed queue-pause cause in the session API so UI cards stop matching backend preview strings is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host-adapter",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

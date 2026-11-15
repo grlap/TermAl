@@ -1,0 +1,27 @@
+{
+  "id": "01a151e9-fe86-74d1-8192-552cc524ec53",
+  "external_ref": null,
+  "title": "Tests: a failed carried batch gate and a foreground launcher gate record no members, read no held claims and owe no binds",
+  "outcome": "Flow tests in src/tests/engram_batch_gate_flow.rs pin two rules that are stated but untested. (1) A carried batch gate whose run failed leaves no pending batch and no owed bind; the credit path's Succeeded filter in engram_carried_checks.rs is what enforces this. (2) A foreground (Ordinary) launcher full gate, or a dropped one, records no bind_targets and makes no held-claims request, because engram_launch_needs_held_read is limited to the Carry disposition. Both rules are stated in the engram_batch_binds.rs header and in docs/features/batch-full-gates.md (\"Only a carried gate records members\"; \"A failed or refused gate binds nothing\").",
+  "acceptance": [
+    "Tests: a failed carried batch gate and a foreground launcher gate record no members, read no held claims and owe no binds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

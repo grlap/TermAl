@@ -1,0 +1,28 @@
+{
+  "id": "01a1cc6d-65f3-7a73-84aa-ee1a66576202",
+  "external_ref": null,
+  "title": "Keep agent names readable in the website desktop agent band",
+  "outcome": "Keep agent names readable in the website desktop agent band",
+  "acceptance": [
+    "At viewport widths 1021, 1280, 1366, and 1440 pixels, all six agent names in the secondary agent band are visible without truncation, while the grid remains responsive and accessible."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "low",
+    "review-followup",
+    "website"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

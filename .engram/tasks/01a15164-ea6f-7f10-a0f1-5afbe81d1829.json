@@ -1,0 +1,29 @@
+{
+  "id": "01a15164-ea6f-7f10-a0f1-5afbe81d1829",
+  "external_ref": null,
+  "title": "A mailbox read succeeds and issues a receipt, but acknowledging that receipt in the same session returns 404 'mailbox not found for this session'",
+  "outcome": "A mailbox read succeeds and issues a receipt, but acknowledging that receipt in the same session returns 404 'mailbox not found for this session'",
+  "acceptance": [
+    "A receipt issued by termal_read_mailbox to a session can always be acknowledged by that same session, unless a documented, typed condition applies (participant left, mailbox retired), which the acknowledgement names instead of a 404 'not found'",
+    "A regression test covers read then acknowledge for the observed mailbox shape (another session's message in a two-party mailbox), plus each typed refusal",
+    "Focused tests, the full gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

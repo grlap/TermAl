@@ -1,0 +1,29 @@
+{
+  "id": "01a168dd-076e-7bf3-bab6-4a214468978d",
+  "external_ref": null,
+  "title": "Cover the review-input mailbox-read failure and follow-up capture failure with fault-injection tests",
+  "outcome": "Two review-input behaviours that need injected faults are covered: a mailbox read error during a reviewer submission refuses with [identity-mailbox-unavailable] and never verifies afresh, and a follow-up whose input capture fails names REVIEW_INPUT_UNAVAILABLE_BRIEF in its model-facing prompt and installs the unavailable reason at re-arm.",
+  "acceptance": [
+    "A test injects a mailbox read failure into a read-only reviewer's submission and asserts [identity-mailbox-unavailable] with nothing published.",
+    "A test makes the follow-up's input capture fail and asserts the unavailable brief in the follow-up prompt, review_input_unavailable set at re-arm, and an [identity-unavailable] refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,45 @@
+{
+  "id": "01a113eb-650c-72b1-8a61-21140dbf98a2",
+  "external_ref": null,
+  "title": "Isolate evaluation-cut and source-accounting order with a deterministic diagnostic fixture",
+  "outcome": "A bounded isolated fixture distinguishes evaluation fingerprint sampling from scoped source accounting and ACK order, without changing production admission or claiming to reconstruct missing historical evidence.",
+  "acceptance": [
+    "The fixture drives the existing acceptance preparation and source-observation/accounting paths under deterministic scheduling and records cut, sampling, scope/claim/root/grant, pending-close/owner, request and validated-ACK transitions with immutable attempt-local identities and full content revisions.",
+    "Paired schedules distinguish accounting before the cut from accounting after the cut while holding bytes constant; controls cover a different scope on the same root, a delayed or refused closing ACK, and an actual post-cut change/revert. Missing evidence is explicit and no result claims to prove the historical incident's cause.",
+    "A bounded report states which mechanisms were reproduced, which hypotheses remain untested, exact source and tool inputs, and the resulting design question. No live-store/database access, durable schema change, production admission change, interval-only workaround, or relaxed positional refusal is introduced."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "design",
+    "design-pending",
+    "diagnostics",
+    "source-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a110b0-0489-7e52-a714-5c5daa854838",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

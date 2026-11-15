@@ -1,0 +1,42 @@
+{
+  "id": "01a14bba-5237-7013-b829-8e1fd94e3924",
+  "external_ref": null,
+  "title": "Remote foundations L1: host-to-central federation link over OpenSSH — A-initiated session per satellite with local and reverse forwards, a federation-only listener and pair-capability channel binding",
+  "outcome": "Remote foundations L1: host-to-central federation link over OpenSSH — A-initiated session per satellite with local and reverse forwards, a federation-only listener and pair-capability channel binding",
+  "acceptance": [
+    "The central host opens one OpenSSH session per enrolled satellite (batch mode, strict host-key checking, keepalive) that carries HTTP both ways: a local forward to the satellite and a reverse forward to the central host, each bound to loopback; it reuses the existing remote connector seams where possible. No UI or human relay is in the path.",
+    "Each forwarded listener mounts ONLY the federation routes, never the general local API; every request carries the pair capability and the receiving host binds the caller to exactly one enrolled peer by capability plus channel, never by a payload host id. Tests: a request without, or with another pair's, capability is refused; general API routes are unreachable through the forward.",
+    "Per-peer bounds: at most 4 in-flight RPCs, exponential backoff with jitter from 1 s to 5 min, no network I/O under the global state lock. Link incarnation is recorded so that stale replies after a reconnect are fenced (tests on one machine with two TermAl processes and a fake or loopback link).",
+    "Behind the M1 disabled-by-default setting; local behaviour unchanged.",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14b98-032e-7f70-922a-93105e5592c0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented and landed central-initiated OpenSSH federation transport, capability-bound dedicated listeners, bounded per-peer RPC/retry, exact-incarnation fencing and durable cancellation/recovery handling, behind disabled-by-default M1 settings. Opus2 pushed exact tree643a as7f5580e7; independently verified remote master and commit tree/parent. Clean Codex+Claude R4 review carried byte-exact; fresh independent acceptance4bfd495b passed all5 by judgment. Focused83/0 and full launcher5/5 (5019Rust,4742Vitest).",
+    "completed_at": "2026-10-18T05:28:55.868517100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

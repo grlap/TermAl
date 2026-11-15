@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d9-ef0c-7012-b86a-32d02e1dd7f6",
+  "external_ref": null,
+  "title": "A recognised test refused as a check for naming a place outside the measured worktree leaves no host line",
+  "outcome": "A recognised test refused as a check for naming a place outside the measured worktree leaves no host line",
+  "acceptance": [
+    "A recognised test refused as a check for naming a place outside the measured worktree leaves no host line is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "PI-22",
+    "host-recording",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

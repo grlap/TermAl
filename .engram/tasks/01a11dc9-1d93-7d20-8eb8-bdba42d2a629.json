@@ -1,0 +1,28 @@
+{
+  "id": "01a11dc9-1d93-7d20-8eb8-bdba42d2a629",
+  "external_ref": null,
+  "title": "Producer-authored error text in the causal record is redacted for known secrets but not value-free",
+  "outcome": "Producer-authored error text in the causal record is redacted for known secrets but not value-free",
+  "acceptance": [
+    "A decision recorded by the TermAl coordinator on whether producer-authored diagnostics (an Engram remote error body's code and message, and an Engram CLI's stderr detail) may enter the persisted and rendered causal record as received text, and, if not, a change that keeps them out of the causal record without changing any decision that reads the transport error's message."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-diagnostics",
+    "low",
+    "privacy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

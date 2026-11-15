@@ -1,0 +1,29 @@
+{
+  "id": "01a19f95-9308-7ca2-8bf2-b78fc6607963",
+  "external_ref": null,
+  "title": "A force-stopped full-gate launcher left its rust-tests stage tree running on Windows",
+  "outcome": "When a full-gate launcher is terminated from outside (forced exit), its running stage's whole process tree is ended, as docs/test.md promises (\"A forced launcher exit ... closes the owner's private control channel, so its owner also shuts down the tree\"), and recover does not settle a run while its stage processes are still alive.",
+  "acceptance": [
+    "a regression terminates a full-gate launcher during a running stage on Windows and finds no surviving stage processes after the documented teardown budget",
+    "recover refuses or reports unresolved while processes of the run's stage remain"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "runner",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

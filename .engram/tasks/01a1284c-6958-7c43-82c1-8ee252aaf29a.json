@@ -1,0 +1,39 @@
+{
+  "id": "01a1284c-6958-7c43-82c1-8ee252aaf29a",
+  "external_ref": null,
+  "title": "Publish Resume feedback body deltas without sequence holes or same-revision duplicates",
+  "outcome": "Resume terminal feedback updates use contiguous body sequences and one appropriate publication per revision, avoiding forced full-snapshot refetches.",
+  "acceptance": [
+    "Build Resume message-update delta parts before the commit advances the body clock, and avoid publishing a full state and stale delta at the same revision when marking reporting Unknown.",
+    "A regression verifies terminal and Unknown Resume updates preserve the expected body sequence and client recovery does not require a snapshot solely because of these publications."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "body-delta",
+    "engram-host-adapter",
+    "reliability",
+    "resume-outcomes",
+    "retained-prompt",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12188-9cc9-7b60-9301-b21c5132848c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1d2f9-ca2f-7510-97c2-ee0454f76b19",
+  "external_ref": null,
+  "title": "A mailbox send to a local session's listed display name resolves to its domain principal and is saved without waking the recipient",
+  "outcome": "Sending routine mail to a local root session by its listed display name either wakes that local session through its native mailbox, or is refused with a remedy naming the native session id; it is never silently saved unwoken in a separate domain mailbox.",
+  "acceptance": [
+    "A routine send whose target is a listed display name of a LOCAL root session (for example 'Termal::Sol-03d4') is delivered to that session's native mailbox and wakes it, or is refused before saving with a remedy naming the exact native id (session-N or host:UUID::session-N); it does not create or use a separate domain-principal mailbox that the recipient is never woken for.",
+    "A behavioural test covers name-to-local-session delivery and wake, plus the remote-host case, and existing exact-id and domain-id sends keep their behaviour; the change has a clean review pair and passes the full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "greg-reported",
+    "mailbox",
+    "workaround"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

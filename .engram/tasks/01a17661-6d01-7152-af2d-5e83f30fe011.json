@@ -1,0 +1,29 @@
+{
+  "id": "01a17661-6d01-7152-af2d-5e83f30fe011",
+  "external_ref": null,
+  "title": "Log persistence failures while recording ordinary and OFF checkpoint accounting reasons",
+  "outcome": "Log persistence failures while recording ordinary and OFF checkpoint accounting reasons. Keep the existing authority, ownership, validation and persistence contracts.",
+  "acceptance": [
+    "Log persistence failures while recording ordinary and OFF checkpoint accounting reasons is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "containment-followup",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

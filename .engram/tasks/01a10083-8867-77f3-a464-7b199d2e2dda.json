@@ -1,0 +1,28 @@
+{
+  "id": "01a10083-8867-77f3-a464-7b199d2e2dda",
+  "external_ref": null,
+  "title": "Categories-plan \"outside both forms of the root\" case cannot tell one stray file from a wholly unmatched root on an aliased temp root",
+  "outcome": "In scripts/test-categories-plan.test.mjs, the linked-root test's \"outside both forms of the root\" case names its selected files under `directory` + \"real\", which is the as-given spelling. Now that the fixture sits under testTempDirectory(), `directory` is an alias on macOS (/var -> /private/var) and on Windows hosts whose %TEMP% is an 8.3 short name. On those hosts the files match neither the link base nor the realpath base, so they are reported as outside the plan too, and the case's assertions (one regex plus status \"incomplete\") still pass. The case should name the matched files under the resolved path and assert exactly one problem plus executedFiles [2, 1], so it tells a single stray file apart from an unmatched root on every platform.",
+  "acceptance": [
+    "The case names its matched files under the resolved real path and asserts that the stray file is the only problem and that the per-project executed-file counts are [2, 1].",
+    "On a host whose temp root is reached through an alias, the case fails if the real-path files go unaccounted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

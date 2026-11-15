@@ -1,0 +1,32 @@
+{
+  "id": "01a180ac-c5dc-7672-85c9-8cc0c69bff63",
+  "external_ref": null,
+  "title": "Cover HTTP panic-context sanitization and real outer response-layer preservation",
+  "outcome": "Cover HTTP panic-context sanitization and real outer response-layer preservation",
+  "acceptance": [
+    "Ordinary existing regression tests exercise diagnostic sanitization and actual outer middleware header/status preservation and layer placement without weakening delivery assertions, extra proof runs or inflated timeouts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "deferred",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18073-bc4d-7e21-8d46-a81c8a3f5351",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

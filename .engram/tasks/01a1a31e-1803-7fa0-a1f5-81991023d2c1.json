@@ -1,0 +1,37 @@
+{
+  "id": "01a1a31e-1803-7fa0-a1f5-81991023d2c1",
+  "external_ref": null,
+  "title": "content-v1: accept a directory whose on-disk case differs from Git's listing; refuse only distinct tracked paths that are one file on disk",
+  "outcome": "content-v1 no longer forces on-disk path case to match Git's listing; it refuses only a real collision of distinct tracked paths on one file.",
+  "acceptance": [
+    "On Windows with core.ignoreCase=true, a worktree where Git lists files under one directory in two case spellings (as Phoenix's F# CompilerOptions/Fsc and /fsc) gets a content-v1 revision instead of a refusal, by a test in the repository.",
+    "Two distinct tracked paths that differ only by case and/or NFC/NFD normalization and resolve to one file on disk are refused with an error naming both paths, by a test. Hard links whose names are not equal under the simple Unicode fold plus NFC/NFD are not newly refused; terminal symlinks are treated exactly as today.",
+    "A parent directory that is a link or junction leading elsewhere is still refused, by the existing or a new test.",
+    "The content-v1 value for a worktree without case-spelling differences is byte-identical before and after the change, by a test pinning a known value."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed content-v1 spelling admission in 0bfbb90d; Windows FULL 5/5 green, focused 54/54; all revised criteria linked to observed evidence.",
+    "completed_at": "2026-11-04T01:15:36.974324600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

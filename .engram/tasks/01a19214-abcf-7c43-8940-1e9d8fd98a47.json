@@ -1,0 +1,30 @@
+{
+  "id": "01a19214-abcf-7c43-8940-1e9d8fd98a47",
+  "external_ref": null,
+  "title": "Treat Engram's redaction_refused as a definitive no-write refusal on every TermAl control path",
+  "outcome": "When Engram answers redaction_refused, TermAl classifies it as a definitive pre-write refusal: nothing was recorded, and the same payload is never replayed unchanged. Today such a refusal may come back as storage_error, which TermAl treats as resendable.",
+  "acceptance": [
+    "Every TermAl list or classifier that names Engram pre-write or no-write refusal codes includes redaction_refused. As read at e746c156 these are engram_bind_retention.rs:28-43 (session_bind), ENGRAM_BIND_PRE_WRITE_REFUSALS (engram_verification_bind.rs:301), engram_turn_observations.rs:~886 and engram_unadmitted_delivery.rs:~163, and the classifiers at acceptance_evidence_selection.rs:~413 and engram_host_adapter.rs:~10289 are reviewed. Each site either adds it or records why that path cannot receive it. redaction_refused is never added to a resend list such as ENGRAM_BIND_RESEND_CODES.",
+    "Tests on each affected path show that a redaction_refused answer is final: no resend of the same payload, no retained replay, and a typed refusal that names the code is surfaced. They also show that storage_error keeps its existing resend behaviour. Persisted refusal history survives restarts of builds that carry it; an older build's resave can discard that history, and a record without it retains normal binding behaviour.",
+    "Nothing in this change asserts that Engram has shipped a real redactor; the code is handled as a contract value whether or not any current Engram build emits it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "wire-contract"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

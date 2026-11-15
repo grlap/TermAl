@@ -1,0 +1,33 @@
+{
+  "id": "01a179e5-3c62-7593-bbd3-6ca9928ef8d1",
+  "external_ref": null,
+  "title": "Assert listing metadata on bound local roots and refreshed satellite summaries",
+  "outcome": "Existing bridge fixtures assert display metadata for the real bound-local principal path and the satellite post-admission refreshed-state path.",
+  "acceptance": [
+    "Extend existing fixtures to assert agent/status and nullable metadata on a bound local root and a satellite refreshed-state listing without introducing new HTTP requests or changing routing/wake semantics.",
+    "Relevant focused tests pass and standard review covers the final change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "engram-reported",
+    "federation",
+    "post-p0",
+    "regression",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a178bc-efd3-7c40-9eb7-25199ca6ef59",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

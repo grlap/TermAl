@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c677-7463-9e73-1529059a0109",
+  "external_ref": "tm-nrlj",
+  "title": "Decide whether the refused-binding breaker should fall back to the next bindable held claim",
+  "outcome": "From tm-winf round-10 review (Claude, Low). When Engram refuses the focused claim's binding as stale, the breaker binds without work (up to 5 minutes at a time) even if the session holds another bindable claim; with the omitted>0 keep-current rule in select_engram_held_binding this costs at least one turn without evidence. It self-heals once bound to none. Option: pass the refused binding to select_engram_held_binding as an exclusion so the next candidate is chosen. Caution: binding to a claim the agent is not focused on attributes the turn's evidence to that work item, which is why no-work is the conservative default. At minimum add a test pinning the no-work fallback when another claim has a binding.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

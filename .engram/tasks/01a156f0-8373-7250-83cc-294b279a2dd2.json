@@ -1,0 +1,63 @@
+{
+  "id": "01a156f0-8373-7250-83cc-294b279a2dd2",
+  "external_ref": null,
+  "title": "Focused launcher: interrupting a hung focused run leaves the cargo test binary alive, and nothing detects the stall",
+  "outcome": "Focused launcher: interrupting a hung focused run leaves the cargo test binary alive, and nothing detects the stall",
+  "acceptance": [
+    "OWNED PROCESS TEARDOWN. Interrupting a focused launcher, or an explicit runner timeout/termination that ends that launcher, terminates its owned command and descendant process tree rather than leaving the cargo/test grandchild alive. Teardown is bounded, records the owned PID(s), trigger and observed cleanup outcome, and cannot target another run or unrelated process. A synchronized real child→grandchild regression reproduces the pre-fix leak on Windows and verifies cleanup through the production launcher path; platform-specific containment and failure paths are covered without assuming that a shell wrapper is the test binary.",
+    "BOUNDED STALL VISIBILITY. During focused test execution, no stdout/stderr progress for a documented finite default interval produces a durable stalled observation and a bounded holder/coordinator notice identifying run, stage, active owned PID, elapsed inactivity and log path. Progress resumes/reset behavior is explicit and tested with a controlled clock. A stall notice alone never kills, retries or reruns a command, never marks it passed or terminal, and does not inflate any existing test timeout.",
+    "RESULT INTEGRITY AND CONTROLS. Interrupted, timed-out or incompletely reaped executions retain logs and truthful failed/unknown outcomes and never supply a passing check. Tests include normal successful completion, continued output suppressing a stall, a genuinely quiet run emitting the notice while remaining alive, repeated/crossed shutdown requests, and proof that an unrelated fixture process survives. Existing registration, input-fingerprint, single-execution, completion-idempotency and focused test-count behavior remain intact.",
+    "DOCUMENTATION. docs/test.md describes process-tree ownership, supported interrupt/timeout behavior and its limits, the stall interval and notice fields, how to inspect/interrupt/recover the original run without rerunning it, and any platform limitations. It accurately separates an informational stall from an execution deadline and replaces the obsolete assertion that the standalone focused launcher never owns descendants.",
+    "EXACT-INPUT EVIDENCE. Preserve the fail-first run and its causal diagnosis; the focused launcher regressions and the maintained five-stage full gate pass on the final frozen input. A read-only Codex/Claude review pair has no outstanding in-scope Medium-or-higher findings; previously raised findings are fixed and reviewed again. Host-recorded checks settle before the independent acceptance evaluation is requested."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered focused launcher command-tree ownership, bounded truthful interrupt cleanup/recovery, informational five-minute stall/resume notices, platform helpers and synchronized regressions; documentation updated. Exact frozen tree c02f0506f49b98b3656fd47d095606dfbc7ab08a landed in origin/master commit03a4ca97fb81cf4e1152d7af5ccb447b1000529e, parent8207cc3f, fast-forward pushed15:29:04Z and ls-remote verified by Opus2. No install.",
+    "completed_at": "2026-10-20T15:30:31.987532300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

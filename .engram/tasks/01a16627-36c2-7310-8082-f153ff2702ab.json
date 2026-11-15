@@ -1,0 +1,28 @@
+{
+  "id": "01a16627-36c2-7310-8082-f153ff2702ab",
+  "external_ref": null,
+  "title": "Cover repeated explicit launcher capture after terminal digest retention",
+  "outcome": "A deterministic regression documents repeated capture behavior when the observation already holds the exact artifact's retained terminal digest, including unchanged provenance and verification authority.",
+  "acceptance": [
+    "Cover repeated explicit launcher capture after terminal digest retention is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

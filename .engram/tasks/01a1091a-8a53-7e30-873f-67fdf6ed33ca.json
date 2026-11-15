@@ -1,0 +1,64 @@
+{
+  "id": "01a1091a-8a53-7e30-873f-67fdf6ed33ca",
+  "external_ref": null,
+  "title": "A focused launcher run that passes gets no host credit: the launcher should hand the host its status, test count and fingerprint so no rerun is needed",
+  "outcome": "A focused run through scripts/test-launcher.mjs that passes is recognised and credited by the host. The launcher reports an unambiguous result (status, the number of tests passed and failed, and the input fingerprint) in a form the host recognises, so a holder never has to rerun the same check as a plain `cargo test` just to obtain credit. Failures stay recorded as today. TermAl is primary: host recognition plus the maintained launcher. Engram consumes the resulting evidence, and no Engram implementation is implied.",
+  "acceptance": [
+    "At base 70b22dd3, a passing focused run `node scripts/test-launcher.mjs focused -- cargo test --bin termal …`, run in the one-call pushd form, is not credited by the running host (withheld: its output shows no passing test). A holder note cites the host's record or notice, the run directory and its summary.",
+    "After the change, a host recognition test fed a captured passing focused launcher summary and its run's results.json credits it as a passed test check.",
+    "Controls: a failing focused run is recorded as failed exactly as today. A focused run is NOT credited when its results.json records zero tests passed, any failed test, or no counts; when its results.json is missing, unreadable, on a network path or for another runId; when it claims counts in summary text that its results.json does not back; when it wraps a non-test command or a no-run build. A credited focused run is recorded as the same kind of test check as a plain `cargo test` run, never as a full gate. Full and live recognition is unchanged and their existing tests pass unchanged.",
+    "The launcher records the wrapped runner's passed/failed/ignored counts for a focused run in results.json and prints them with the input fingerprint in its summary. Launcher tests cover cargo libtest output, multiple test binaries summed, and output with no recognisable count (no counts recorded).",
+    "docs/test.md states the focused credit rule beside 'Which stages count as tests' and says it takes effect after a host restart; nothing weakens what full or live runs need.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-approved-2026-10-04",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A passing focused launcher run now earns host credit. The launcher records the cargo libtest counts in results.json and prints them in the summary. The host credits [\"focused\"] only when all of these hold: the run's own results.json backs the pass; the summary's first verdict is PASS for the same run with exit 0; passed > 0 and failed == 0. The stage name `focused` is reserved. Acceptance evaluation a79f326f passed 6/6. Landed as d1d92bbbea1f77788164eda704c2dd4b29345e7f, a fast-forward from 70b22dd3, pushed to origin/master by the integration owner Termal::Opus2 and confirmed by ls-remote (Opus2 mailbox #112; Fable2 #1147). pushed_at is the time of Opus2's landing report, an upper bound on the push time. Installed: target/release/termal.exe sha256 c5cc48cea0a75d87b4ac55ae62eae5f33a7e6160677d4b4acd19bfdc7443ecbf, backup termal.exe.bfb9f5f6.bak. The rule takes effect at the restart that Fable2 batches with w-7224.",
+    "completed_at": "2026-10-05T00:48:34.234631200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

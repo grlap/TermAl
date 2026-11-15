@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c401-72d1-92d3-9ce4b3bc0365",
+  "external_ref": "tm-6mnz",
+  "title": "Wybor motywow: para jasny+ciemny ze slotami, tryb Jasny/Ciemny/Auto ze skrotem i przyciskiem, karty z podgladem i filtrem",
+  "outcome": "GREG REQUEST 2026-08-17: poprawa panelu wyboru motywow + przelaczanie jasny/ciemny. Mockup zatwierdzany: https://claude.ai/code/artifact/b1970fb7-a3d1-422d-993f-0a6b34b0082a\n\nTRZY CZESCI:\n1. TRYB: Jasny / Ciemny / Auto(system). Auto = prefers-color-scheme, live bez reloadu (matchMedia listener). Skrot Cmd+Shift+L + przycisk sun/moon w pasku aplikacji przelaczaja jasny<->ciemny; w trybie Auto przelaczenie reczne nadpisuje do konca sesji z widoczna podpowiedzia powrotu do Auto. Persist: mode w preferencjach.\n2. PARA MOTYWOW: dwa sloty preferencji — lightTheme + darkTheme. Rodzaj motywu wyprowadzany z color-scheme JUZ zadeklarowanego w kazdym pliku motywu (light/dark) — zadnych recznych metadanych; themes.ts moze eksponowac kind wyliczone raz. MIGRACJA: obecny pojedynczy wybor laduje w slocie zgodnym ze swoim rodzajem; drugi slot dostaje domyslny (Warm Light dla jasnego, Darkroom/dark dla ciemnego). Zero utraty obecnego wyboru.\n3. LISTA: karty z mini-podgladem generowanym ze swatches (paper jako tlo + paski akcentow; zero nowych assetow), filtr Wszystkie/Jasne/Ciemne, klik ustawia karte w slocie zgodnym z rodzajem. Sekcja STYLE (Match/Editorial/Studio/Terminal/Blueprint) bez zmian.\n\nUWAGI IMPLEMENTACYJNE: aplikacja motywu = istniejacy mechanizm data-theme; tryb wybiera KTORY id z pary zastosowac. Skrot rejestrowany w pane-keyboard/keybindings zgodnie z konwencja projektu; przycisk sun/moon w shellu (obok istniejacych kontrolek okna) — maly, nie rozpycha paska. Test: przelaczenie trybu podmienia data-theme bez reloadu; Auto reaguje na zmiane matchMedia (test z mockiem); migracja starej preferencji pokryta jednostkowo; filtr i klik-do-slotu pokryte w tescie panelu ustawien.\n\nFail-first, production-shape, zadnych ID beadow w kodzie.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Theme pair and Light/Dark/Auto shipped (README.md:29; docs/themes.md).",
+  "completion": null
+}

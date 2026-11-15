@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6da-90ac-7272-92b1-4116fb43f508",
+  "external_ref": null,
+  "title": "Post-migration cleanup of instruction text overridden by the commit-and-push section and the Beads blocks (CLAUDE.md, AGENTS.md, review-changes.md, fix-bug.md)",
+  "outcome": "Post-migration cleanup of instruction text overridden by the commit-and-push section and the Beads blocks (CLAUDE.md, AGENTS.md, review-changes.md, fix-bug.md)",
+  "acceptance": [
+    "Post-migration cleanup of instruction text overridden by the commit-and-push section and the Beads blocks (CLAUDE.md, AGENTS.md, review-changes.md, fix-bug.md) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "PI-10",
+    "docs",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

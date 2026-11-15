@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a492c33ed4a",
+  "external_ref": "tm-7cu.30",
+  "title": "Preserve message-stack native-scroll ownership across lifecycle boundaries",
+  "outcome": "The shared native-scroll ownership lease can be erased before its landing scroll frame: virtualized-conversation-scroll-events effect cleanup clears it during ordinary dependency-driven re-registration, and markUserScroll clears it before deciding whether the next no-op boundary tick should claim a replacement. A scrollbar drag rerender or a fast downward wheel burst can therefore lose pointer/wheel attribution and fail to reattach at physical bottom. Keep the lease across ordinary effect reruns and no-op same-burst input, clear it only on true node detach/unmount or a superseding owner/direction, and cover lifecycle-separated mousedown/rerender/scroll plus two wheel ticks before the first native scroll.",
+  "acceptance": [
+    "Ownership survives effect re-registration and same-burst no-op ticks; true detach, blur/cancel, expiry, opposite direction, or a superseding owner clears it; lifecycle-separated scrollbar and multi-tick wheel regressions pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

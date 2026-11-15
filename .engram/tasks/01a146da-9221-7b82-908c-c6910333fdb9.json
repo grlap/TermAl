@@ -1,0 +1,29 @@
+{
+  "id": "01a146da-9221-7b82-908c-c6910333fdb9",
+  "external_ref": null,
+  "title": "Host has no sub-second, dated timestamps for turn, queue and approval boundaries, so latency can't be attributed",
+  "outcome": "Every turn, queue, approval and command boundary carries a dated, millisecond, clock-aligned timestamp that an external disk sampler can line up with its own readings.",
+  "acceptance": [
+    "Each boundary listed in the notes (arrival, queue entry and dequeue, approval/elicitation creation and resolution, Codex turn/start dispatch and turn/started, turn end, command start and end) carries an RFC3339 UTC timestamp with at least millisecond precision and a monotonic offset relative to a per-start anchor, both readable through a documented read-only endpoint.",
+    "The per-start anchor (UTC time and monotonic origin) is exported together with serverInstanceId, so an external sampler can align the host's monotonic offsets to its own clock.",
+    "Existing display timestamps and their wire format are unchanged; cargo test --bin termal is green, with tests covering a queued turn, an approval resolved after a delay, and a completed command."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "diagnostics",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

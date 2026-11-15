@@ -1,0 +1,39 @@
+{
+  "id": "01a0fa3e-20dd-7590-b899-6d8be23fd70d",
+  "external_ref": null,
+  "title": "Fence null-stamp captured summaries below a session's admitted paired-read revision",
+  "outcome": "A captured snapshot from before the session's first mutation cannot roll back session metadata after an admitted newer paired body read, without coupling body reads to the global revision ledger.",
+  "acceptance": [
+    "A captured pre-first-mutation null-stamp summary delivered after a newer admitted paired body response has a fail-first regression with ref, store and render assertions and accepted-instance-reset/excluded-session controls.",
+    "An independently concurred per-session revision-floor design preserves global membership and unrelated state while refusing older per-session metadata below the last admitted paired-read revision, including absent or null mutation stamps.",
+    "Focused regressions, a full gate and a fresh complete independent read-only review pair pass on the exact input before completion."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "architecture-follow-up",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-b6e4-7393-be4b-ae2e6a13435a",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

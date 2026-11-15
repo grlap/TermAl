@@ -1,0 +1,27 @@
+{
+  "id": "01a1b4b2-1607-7802-a655-687fc73b9236",
+  "external_ref": null,
+  "title": "Telegram forwarding: an armed assistant-forwarding entry for a session that no longer exists logs 'session not found' and is not cleared",
+  "outcome": "When a session armed for Telegram assistant forwarding (forward_next_assistant_message_session_ids) or holding a forwarding cursor is deleted, the relay drops that entry with a single clear log line. It does not error with 'session not found' on every poll. Forwarding for live sessions is unaffected.",
+  "acceptance": [
+    "Telegram forwarding: an armed assistant-forwarding entry for a session that no longer exists logs 'session not found' and is not cleared is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "telegram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a130b7-436d-7a43-8f29-ed0ad5ebe9ac",
+  "external_ref": null,
+  "title": "Receipted delivery: narrow the impl-wide dead_code allow and say in the host-architecture doc that no producer uses receipts yet",
+  "outcome": "Receipted delivery: narrow the impl-wide dead_code allow and say in the host-architecture doc that no producer uses receipts yet",
+  "acceptance": [
+    "The dead_code allow in prompt_delivery.rs covers only items that are unused outside tests, not the whole impl block",
+    "docs/features/host-architecture.md states that no production producer creates receipted prompts yet and names Claude's lifecycle `queued` as well as `started` and the echo as acknowledgements"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

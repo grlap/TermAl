@@ -1,0 +1,53 @@
+{
+  "id": "01a10505-f554-7d40-b55f-b3f0058feb49",
+  "external_ref": null,
+  "title": "Queued-turn admission reads the Engram budget clock even with Engram never enabled, so tests outside every budget-clock batch run on an undeclared Real clock",
+  "outcome": "The B4b classification diagnostic, a temporary caller-frame print in engram_budget_clock_snapshot run single-threaded at 0789c6cc, found clock reads from AppState::start_next_queued_turn_inner_off_lock and evaluate_engram_turn_off_lock, reached through start_next_queued_turn_off_lock_for_owner and with_queued_engram_admission. They come from tests that never enable Engram, so they read on the default, undeclared Real clock. In src/tests/delegation_followup_admission.rs alone:\n- queued_followup_survives_project_reset_polling_and_dispatches_once (12 reads)\n- followup_wait_commit_failure_retains_idle_parent_wake_for_exactly_once_retry (3)\n- delayed_queued_followup_start_failure_settles_after_reservation_release (2)\n- restored_queued_followup_failure_keeps_compensation_without_runtime_on_all_dispatch_paths (1)\nNone goes through an enable_test_project_engram site, so no budget-clock batch (B1-B5) covers it. The final batch's rejection of an undeclared Real clock would fail them, and very likely many other tests that start a queued turn anywhere in the suite.\n\nNeeded before the final batch:\n(1) A suite-wide inventory of tests that read the budget clock without enabling Engram, by the same diagnostic.\n(2) A decision: either such tests choose a clock (scripted, or Real with a reason), or the admission path stops reading the budget clock when the session has no Engram scope (a production change, which needs its own approval).\nEvidence: .tmp/b4b/after-delegation_followup_admission.txt.summary in the B4b worktree (sha256 22611397…).",
+  "acceptance": [
+    "Scope at da0a3d9: production-only. Four readers take the budget-clock handle only where they use it; every timestamp position stays where it is. (a) start_next_queued_turn_inner_off_lock (turn_dispatch.rs) takes it through inner.engram_budget_clock_snapshot() inside the bind-retry release check, only when next_bind_retry_at is present. (b) record_engram_transport_failure and (c) record_queued_engram_transport_failure (engram_host_adapter.rs) take it under the held lock once the counting branch is decided, before the retry-time assignment. LocalState, an absent session, an owner mismatch, disabled control and a disabling or non-counting error take no clock. (d) recover_prepared_engram_sessions_after_boot returns before taking the clock, or creating workers or channels, when plan.targets is empty. Non-empty plans keep started_at and the deadline where they are. finalize_delivered_source_observations, reconcile_retired_source_observations and evaluate_engram_turn_off_lock are unchanged. Their fixture work is B8. A note reconciles evaluate_engram_turn_off_lock: no never-enabled read through it appears in either diagnostic. No other production code changes, and no existing test is edited; only the witnesses are added.",
+    "Production behaviour is unchanged. Outside cfg(test), engram_budget_clock() stays the constant Real, with no lock added. Every timestamp position, deadline origin, delay formula and eligibility check is unchanged. The one stated change: an empty boot plan emits no overall boot-recovery line; before, it printed outcome=complete with an elapsed time near zero. Non-empty plans are unchanged.",
+    "Fail-first (unbound). One witness per reader (a)-(d) runs its no-use path on a fresh unselected state and asserts engram_budget_clock_snapshots == 0. A holder note shows each witness failing on the unfixed tree, citing the host-recorded failed check and its log path and sha256.",
+    "Every witness passes after the change. Each reader has a positive control proving its eligible branch's exact behaviour: (a) the not-yet-due vs due bind-retry boundary, with a real owner; (b) and (c) next_bind_retry_at = now + the existing delay, and a stale owner left unchanged; (d) an empty plan creates no worker, effect or snapshot, and a non-empty plan keeps its original overall deadline. Controls on a selected clock compare against that selection's own snapshot baseline. No expectation is weakened, no timeout grows, no retry is added, and no real sleep is a correctness premise.",
+    "The step-(1) diagnostic is rerun on the final tree as a temporary change, single-threaded, then reverted, with the source identity after the revert recorded. It shows zero unexplained unselected reads. Each remaining read belongs to a documented group: the deliberate engram_budget_clock_boundary read; B7's 14 tests until B7 lands; B8's 29 retained-reader tests until B8 lands. The summary is under .tmp, with its sha256 in a note.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "budget-clock",
+    "gate-blocker",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Four production readers of the Engram budget clock take it only where they use it. Admission reads it at the bind-retry due check; the two transport-failure recorders read it only for a counting failure, under the lock they hold; boot recovery returns before any clock, worker or channel on an empty plan, the one stated behaviour change being that the empty plan no longer prints the overall line. Timestamp positions, deadline origins, delays and eligibility are unchanged; finalize, reconcile and evaluate keep their deadlines (their tests are B8).\nEvidence: 4 witnesses failed first, host-recorded 23537d04, then passed; controls cover exact now+delay, a stale owner untouched, and due vs not-yet-due with a real owner. The C5 diagnostic leaves only the boundary read and B8's 29.\nCommitted 19564b5f (freeze cf345e72 + 3 files; gate test-0dbe45d7 fingerprint 133c5473, credit 3b596ded; pair Codex 778a73c3 and Claude 2e087193 clean, Low filed as w-ecbd7c18556a; evaluation 90c86676 6/6). Landed by fast-forward of master bf1a2b77..19564b5f.",
+    "completed_at": "2026-10-04T18:54:21.390944200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

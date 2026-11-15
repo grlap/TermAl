@@ -1,0 +1,39 @@
+{
+  "id": "01a12475-f17f-74c0-bdfb-d764ca75c664",
+  "external_ref": null,
+  "title": "Extract the Resume feedback subsystem from session_lifecycle",
+  "outcome": "The self-contained Resume feedback types, reporter and persistence helpers live in a module with an ownership header while session_lifecycle retains caller glue and preserves behavior.",
+  "acceptance": [
+    "The Resume feedback subsystem is extracted into an appropriately named module with its ownership and persistence boundaries documented.",
+    "Existing Resume outcome tests and the maintained full gate pass on the resulting input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "maintainability",
+    "reliability",
+    "resume",
+    "retained-prompt",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12188-9cc9-7b60-9301-b21c5132848c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0f839-cfcb-7480-8f12-a8cc350b11ed",
+  "external_ref": null,
+  "title": "A read-only Codex child's PowerShell read command prints its output but its exec session never completes, even after Ctrl-C (Get-Content | Select-Object -Skip/-First)",
+  "outcome": "A read-only Codex child's PowerShell read command prints its output but its exec session never completes, even after Ctrl-C (Get-Content | Select-Object -Skip/-First)",
+  "acceptance": [
+    "A read-only Codex child's PowerShell read command prints its output but its exec session never completes, even after Ctrl-C (Get-Content | Select-Object -Skip/-First) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegations",
+    "read-only-profile",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a102e9-9a98-7fa1-b503-0a5b170ffb4d",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate. A read-only Codex child's PowerShell read never settles; covered by w-0a5b170ffb4d. Its two sightings contradict this item's hypothesis; the wording to carry over is in note b80d766c.",
+  "completion": null
+}

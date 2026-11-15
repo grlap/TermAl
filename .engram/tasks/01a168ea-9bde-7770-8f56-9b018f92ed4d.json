@@ -1,0 +1,28 @@
+{
+  "id": "01a168ea-9bde-7770-8f56-9b018f92ed4d",
+  "external_ref": null,
+  "title": "rustfmt drift in the engram test modules: keep format-only reflows out of feature diffs",
+  "outcome": "src/tests/engram_turn_checks.rs, src/tests/engram_lost_shell_overlap.rs and src/tests/engram_one_call_checks.rs are rustfmt-clean on master, so a later change that runs rustfmt over them adds no format-only hunks unrelated to its subject.",
+  "acceptance": [
+    "`rustfmt --edition 2024 --check` reports no diff for src/tests/engram_turn_checks.rs, src/tests/engram_lost_shell_overlap.rs and src/tests/engram_one_call_checks.rs on master, landed as a format-only change.",
+    "The full gate passes on the landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "formatting",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

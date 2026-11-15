@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c43b-7712-acaf-89962c872a3b",
+  "external_ref": "tm-a1j0",
+  "title": "Codex reviewers under cmd.exe can get a silent false 'not found' from a quoted rg pattern",
+  "outcome": "Relayed by Engram::Opus (session-7284) in mailbox messages to Termal::Opus, most recently #183 on 2026-09-25.\n\nEvidence: Codex reviewer session-7606 (delegation-873fe7b3), cwd C:\\github\\Personal\\Engram, exec_command with shell=cmd.exe:\n  rg -n -A35 -B25 \"obligation_page:.work_obligation_page\" src/work_service/update.rs\nIt exited 1 with no output (chunk 083124). The same command with the quotes removed found both expected matches, at lines 362 and 1094 (chunk a6b639). Other quoted patterns also found nothing, and earlier reports showed quoted patterns containing spaces being split.\n\nImpact on TermAl: the Codex /review-code child that /review-changes starts can wrongly conclude that code does not exist, which weakens the review.\n\nUntested cause: Codex's exec_command may escape the inner quotes as \\\" when it builds the cmd /c line. cmd.exe does not treat \\\" as grouping, and rg's own argument parser turns it into a literal quote, so the pattern would include quote characters. That would explain both the split and the silent no-match. To test it, check whether the quoted form matches a file that contains the literal text \"obligation_page:.\n\nEarlier judgement: this is Codex's own quoting, not something TermAl adds. Next step: confirm the cause, then decide on the TermAl side. Options include telling Codex reviewer children to pass rg patterns unquoted or with separate -e arguments, or choosing a different shell for Codex children if TermAl controls that. Workaround until then: unquoted patterns without spaces, or separate -e arguments.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,43 @@
+{
+  "id": "01a15bc9-e276-75c1-af03-1855c1ca87ae",
+  "external_ref": null,
+  "title": "K4: live automatic remote-gate admission proofs on the Mac and Windows B",
+  "outcome": "One input is gated on a real MacBookPro and on Windows B, each by a root session on that host, and each result is admitted automatically on the integration host with no manual step.",
+  "acceptance": [
+    "A real MacBookPro full gate and a real Windows B full gate, each launched by a root session on that host on the judged input's tree, are each admitted automatically on the integration host as test evidence, with no import, registration or additional agent turn. Each records its observed platform and toolchain as provenance, and the bound item's test-bound acceptance evaluation passes on each.",
+    "A non-matching live case (a different tree, or a focused run against a full-gate criterion) stays visible on the integration host with its named reason and grants no credit.",
+    "The full gate passes on the exact final input that lands, with an independent review pair and no outstanding in-scope Medium-or-higher finding on that input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "live-proof",
+    "multi-machine",
+    "pilot",
+    "remote"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15218-5b21-7971-ba0a-c3f102d77999",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

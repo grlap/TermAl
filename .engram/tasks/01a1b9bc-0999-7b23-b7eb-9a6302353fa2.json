@@ -1,0 +1,31 @@
+{
+  "id": "01a1b9bc-0999-7b23-b7eb-9a6302353fa2",
+  "external_ref": null,
+  "title": "Cover Codex and ACP missing-environment notice delivery through real writers",
+  "outcome": "Behavioral provider fixtures verify names-only notice delivery and configured-value suppression in actual Codex and ACP prompt payloads.",
+  "acceptance": [
+    "Drive the real shared Codex start-turn writer after thread setup and assert missing environment adds names-only environment_missing:NAME to turn/start, while configured selection suppresses notice.",
+    "Drive the ACP prompt handler and assert equivalent missing/configured notice behavior without leaking values or altering native commands.",
+    "Reuse deterministic provider fixtures, original runtime selection/fencing and declared binding owners; do not require services or repository instruction/Markdown tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "low",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

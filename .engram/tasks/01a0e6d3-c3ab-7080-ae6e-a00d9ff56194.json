@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3ab-7080-ae6e-a00d9ff56194",
+  "external_ref": "tm-0j1t",
+  "title": "Spawn-time slash-command resolution returns the raw prompt when cwd is the project root",
+  "outcome": "Observed 2026-09-26 by Termal::Opus (session-7304), while running /review-changes for the combined card/wait changeset.\n\ntermal_spawn_session with prompt '/review-code' and mode reviewer:\n- cwd C:\\github\\Personal\\TermAl\\.tmp\\wt-waits (a worktree inside the project), earlier the same day: resolved. Delegation delegation-4c2cea43-5939-4460-820a-32a8f14e2369 carried the full body of .claude/commands/review-code.md as its prompt.\n- no cwd (defaults to the project root): NOT resolved. Delegation delegation-4c69b9d2-09cf-48dd-8ec4-5656cbedc02c had prompt '/review-code' and the child task was literally '/review-code'.\n- cwd C:\\github\\Personal\\TermAl, set explicitly: NOT resolved (delegation-da1b1881-29bc-4539-88f6-d3ef7940e736).\n.claude/commands/review-code.md exists and is tracked in both the root and the worktree. Both reviewer sessions show agentCommandsRevision 0.\n\nImpact: a Codex child gets the bare '/review-code' and has no slash-command mechanism to expand it, so the review contract is not delivered. Workaround used: pass the command body (without frontmatter) as the prompt.\n\nExpected: resolution works for cwd = project root, as the tool description promises ('Single-line prompts matching a known slash command are resolved before spawning; cwd scopes command resolution'). Investigate the resolver's command lookup for the project root. A stale per-project command cache, keyed differently from the worktree cwd, is one hypothesis.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

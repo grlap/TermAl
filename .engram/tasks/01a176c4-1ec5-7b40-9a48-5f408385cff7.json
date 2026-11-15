@@ -1,0 +1,30 @@
+{
+  "id": "01a176c4-1ec5-7b40-9a48-5f408385cff7",
+  "external_ref": null,
+  "title": "Preserve full watchdog recovery with real-hook regression coverage",
+  "outcome": "Keep full watchdog recovery exactly as on master; land only real-hook regression tests carried to 8d838f90 and passing against unchanged production; record why safe trimming cannot be established with the existing proof. Coordinator's exact narrowed outcome from Fable #597 / mailbox-message-becd1236-d910-4881-8b09-1658b5999d41.",
+  "acceptance": [
+    "Keep full watchdog recovery exactly as on master.",
+    "Land ONLY the real-hook regression test(s), carried to 8d838f90, provided they pass against unchanged production code.",
+    "Record on the item that no safe trimming exists with the existing proof, quoting the same-revision counterexample."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-directive",
+    "performance",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

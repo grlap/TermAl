@@ -1,0 +1,31 @@
+{
+  "id": "01a1c36f-dd20-73a3-b435-1ad052c046ed",
+  "external_ref": null,
+  "title": "Integrate combo35 on 146764d4: six read-only reviewers (w-5962), full-gate wording after fmt (w-6cbc)",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560; the w-6cbc authority-text audit (c) naming the gated fingerprint is recorded before the landing.",
+  "acceptance": [
+    "Integrate combo35 on 146764d4: six read-only reviewers (w-5962), full-gate wording after fmt (w-6cbc) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo35 a6978c03 landed on master as a fast-forward from 146764d4. It holds w-5962, six read-only reviewers with refusal guidance, and w-6cbc, the count-free full-gate wording in AGENTS.md, CLAUDE.md, the README and five briefs, whose authority (c) PASS names this freeze. Gated by DL560 FULL test-bedc8b43 on tree 23623fbb: eligible, source_id before equals after, six stages passed. The Windows B gate was lost to a rustc 0xc0000005 environment crash, tracked as w-1d9aea727864. Pushed at 04:11:23Z; test ref deleted. Installed on Central (120a0d5a) and DL560 (0b251bf3). Composite pair clean; the Low and the pre-existing Note are filed as w-a5f9d865a684 and w-df5e8c360cd8. No acceptance evaluation exists; this is self-asserted under TermAl's evaluation-off policy.",
+    "completed_at": "2026-11-10T04:19:19.514288400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "id": "01a128c4-9929-7cc0-b7fe-12808c002fd6",
+  "external_ref": null,
+  "title": "An acceptance evaluator child ran without termal_submit_acceptance_evaluation, so its verdict could not be recorded",
+  "outcome": "An evaluator delegation spawned by termal_evaluate_acceptance always has termal_submit_acceptance_evaluation available before it starts judging. If the host cannot provide the tool (an MCP server that failed to start, a tool listing that timed out, a missing registration), the attempt fails as a host-side error before any judging, names the cause, and leaves the request retryable. It is not reported as an \"insufficient-evidence\" verdict by the evaluator. A test covers the missing-tool path, and the root cause of this field occurrence is diagnosed and recorded.",
+  "acceptance": [
+    "A test drives a Codex evaluator child whose termal-delegation MCP server reports starting when its turn would begin. On unchanged master the turn starts without any readiness check (RED). After the fix the host re-polls readiness within the same budget as reviewers and starts the turn only once the server is connected and lists termal_submit_acceptance_evaluation.",
+    "If the server is not ready within the budget, or is connected without the submit tool, the evaluator attempt fails host-side before any model work, with a typed, recorded cause that is not an evaluator verdict and not the child's summary. A new termal_evaluate_acceptance request for the same work is then admitted. Tests show both cases.",
+    "An evaluator attempt that finishes with no recorded submission carries a host-assigned reason (no submission recorded) instead of presenting the child's own summary as its verdict. A test shows it.",
+    "Reviewer-mode readiness behaviour is unchanged; the existing reviewer MCP startup tests pass.",
+    "The root cause of the 02:17Z occurrence is recorded on this item with its evidence (the Codex log line and the transcript showing no termal-delegation tools).",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "codex",
+    "cross-project",
+    "field-report"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Evaluator MCP readiness and truthful submission lifecycle landed in combo38 master25454797, composite review/no Medium+, exact-tree six-stage FULL passed. Central registered focused run passed76/0/0 and actual Testverification2b1045f1 acknowledged, satisfying all blocking acceptance bindings.",
+    "completed_at": "2026-11-10T07:56:39.759708700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

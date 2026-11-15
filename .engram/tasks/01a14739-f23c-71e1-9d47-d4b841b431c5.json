@@ -1,0 +1,29 @@
+{
+  "id": "01a14739-f23c-71e1-9d47-d4b841b431c5",
+  "external_ref": null,
+  "title": "Align AutoApprove recovery consent with the UI's incidental settings payload",
+  "outcome": "Reconcile explicit selection/reselection-only MCP recovery with the production UI payload that includes approvalPolicy on every Codex settings edit; use full UI-shaped payload tests and preserve current-host-policy routing and recovery guards.",
+  "acceptance": [
+    "Align AutoApprove recovery consent with the UI's incidental settings payload is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "approvals",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

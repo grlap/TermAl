@@ -1,0 +1,30 @@
+{
+  "id": "01a1a588-8aa5-74b2-bb7c-4c0e2500b010",
+  "external_ref": null,
+  "title": "A first closing with no baseline reports an assumed source change although the measured content never changed, so Engram refuses the evaluation of a clean check",
+  "outcome": "A registered clean check in a newly named or recovered root can be evaluated without an unobserved source change being attributed to it, and a real source change after the check is still refused.",
+  "acceptance": [
+    "Evaluation of a clean registered check on a first closing in a named root is admitted when the measured content is unchanged, either through a genuine baseline established before the check or through a documented supported order; the choice and its reason are agreed with Engram's coordinator and recorded here",
+    "A deterministic test shows a real source change after the check is still refused with source_moved_after_check, and Engram's refusal isn't loosened",
+    "A pinned disposable join of the failing sequence on the installed Engram passes on the changed input"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

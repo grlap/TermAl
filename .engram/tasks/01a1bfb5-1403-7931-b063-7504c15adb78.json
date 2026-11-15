@@ -1,0 +1,31 @@
+{
+  "id": "01a1bfb5-1403-7931-b063-7504c15adb78",
+  "external_ref": null,
+  "title": "Keep in-memory mailbox diagnostics available when the pending-wake count fails",
+  "outcome": "A pending-wake store error is reported for that section while process-local refusal, 5xx, durability and link histories remain readable.",
+  "acceptance": [
+    "The diagnostics endpoint returns the in-memory sections when the pending-wake count fails, with an explicit unavailable count section.",
+    "A controlled store failure test discriminates partial diagnostics from a whole-endpoint error."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "diagnostics",
+    "federation",
+    "mailbox",
+    "needs-triage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bef1-e409-7fd1-bc50-ae58cd9cf533",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e993-5da2-72c3-80ce-7f0074e76119",
+  "external_ref": null,
+  "title": "Follow a leading absolute cd/pushd whose own segment ends at &&, even when a later segment is a pipeline (`pushd DIR && test | tail`)",
+  "outcome": "engram_shell_move marks a line as grouped when any `|` appears on it, so the common Claude shape `pushd \"DIR\" && cargo test 2>&1 | tail -5` loses the shell, although in bash `&&` binds looser than `|` and the leading pushd runs in the shell itself and persists. With the bounded lost shell, each such line adds DIR to lost_among. A long session touching more than 32 distinct places reverts to anywhere, the old mark-every-worktree behaviour, until a plain `cd /abs` re-anchors it. Following a leading absolute cd or pushd whose own segment ends at `&&` (with no other change on the line), even when a later segment is a pipeline, would keep such shells followed. It needs care: in PowerShell and cmd the pipeline and operator rules differ, and the line's other commands must not change directory.",
+  "acceptance": [
+    "A line that starts with `cd`/`pushd` to a literal absolute directory, whose own segment ends at `&&`, and that changes directory nowhere else, is followed like a lone `cd` even when a later segment is a pipeline, in the shells where that holds; lines where it does not hold stay lost; tests cover bash, PowerShell and cmd readings"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

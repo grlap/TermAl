@@ -1,0 +1,28 @@
+{
+  "id": "01a1b720-457f-74c2-a223-354244414773",
+  "external_ref": null,
+  "title": "Remove non-test dead-code warnings from federation process helpers",
+  "outcome": "Production builds no longer warn about federation process helpers retained solely for tests, while the behavioral test fixtures remain usable.",
+  "acceptance": [
+    "FederationSshProcess::from_child and the inherent consuming shutdown helper are either test-only or removed where unused; production ownership and cleanup behavior are unchanged.",
+    "A relevant production compile and focused behavioral checks pass on the changed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

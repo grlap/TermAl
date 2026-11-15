@@ -1,0 +1,32 @@
+{
+  "id": "01a199eb-7d8e-7af2-9d2d-967925cc8a3c",
+  "external_ref": "engram:w-2dcb59152502",
+  "title": "Remote test runs are visible in the local TermAl UI, and coordination of a remote run can resume from another remote session",
+  "outcome": "Remote test runs are visible in the local TermAl UI, and coordination of a remote run can resume from another remote session",
+  "acceptance": [
+    "A test run executed by a remote session appears in the local TermAl session and test-run UI with its run id, host, input, stage progress and terminal result, read from the remote session's notifications without a Central-side wait or index",
+    "If the coordinating remote session ends or becomes unavailable, coordination of an existing or finished remote run can resume from another remote session using the run's durable record; no running process is assumed to migrate between hosts",
+    "Tests cover the local projection of a remote run and the resume from another remote session",
+    "The change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "later",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

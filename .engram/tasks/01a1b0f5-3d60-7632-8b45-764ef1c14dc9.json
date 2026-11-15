@@ -1,0 +1,29 @@
+{
+  "id": "01a1b0f5-3d60-7632-8b45-764ef1c14dc9",
+  "external_ref": null,
+  "title": "A remote native Codex session receives relay-mailbox wake prompts but cannot read the message bodies, and the relay status shows delivered for hours",
+  "outcome": "Every remote native session that TermAl wakes for relay mail can read that mail's body through a supported tool, or the sender is told plainly that the recipient cannot. The relay status never reads as delivered while the recipient is unable to act.",
+  "acceptance": [
+    "A remote native session created through the supported API (the Codex case included) can read the bodies of relay mailbox messages addressed to it, or the send and status calls report that the recipient has no mailbox read capability.",
+    "When a recipient has been woken but has not acknowledged a relay message for a bounded time, the sender's status surfaces that (stale or unread), instead of only providerHandoffRecorded=true.",
+    "A regression test covers an API-created remote Codex session receiving and reading a relay message body."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

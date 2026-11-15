@@ -1,0 +1,31 @@
+{
+  "id": "01a1a586-33f7-7021-b838-c8435ca9c449",
+  "external_ref": null,
+  "title": "Remove stale committed-input argument helper or test the live production arguments",
+  "outcome": "The unused commitInputGitArgs helper and its misleading test/comment are removed or replaced with assertions on the actual committedInputV1Args and committedInputStatusArgs production path.",
+  "acceptance": [
+    "Remove stale committed-input argument helper or test the live production arguments is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "commit-input",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

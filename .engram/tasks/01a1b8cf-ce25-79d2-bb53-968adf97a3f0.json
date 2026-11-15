@@ -1,0 +1,32 @@
+{
+  "id": "01a1b8cf-ce25-79d2-bb53-968adf97a3f0",
+  "external_ref": null,
+  "title": "Coalesce duplicate exact wait-status reads across visible UI surfaces",
+  "outcome": "Simultaneously mounted visible wait surfaces reuse their bounded exact-status reads without creating background history scans or a durable run index, and without changing wait settlement.",
+  "acceptance": [
+    "With multiple visible consumers for the same wait, controlled API observations show exact-status reads are coalesced while distinct wait identities and server revisions remain correctly isolated.",
+    "Closing or hiding consumers cancels unused demand; no global history scan, stale reply adoption, or change to backend wait semantics is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "review-follow-up",
+    "state-flood",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14b89-c82a-7330-b1db-5f17deb1e060",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

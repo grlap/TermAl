@@ -1,0 +1,32 @@
+{
+  "id": "01a1a4f5-c220-7ab2-a0c2-63e3841bac0b",
+  "external_ref": null,
+  "title": "Reduce historical test-run snapshot reconciliation cost measured at 17–19 ms per large update",
+  "outcome": "Use the recorded large-state profiling baseline to reduce unnecessary historical test-run reconciliation work while preserving summary identity, diagnostics invalidation and all wire-field changes.",
+  "acceptance": [
+    "The 9293-run rich-summary snapshot path is reproduced with deterministic work-count regression coverage and the existing synthetic profiling setup; the original cost is recorded before changes.",
+    "A measured improvement preserves test-run ordering, conservative legacy/detail invalidation and every relevant wire-field change; detailVersion alone is not assumed to certify the whole summary, and the same setup is measured before and after.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the exact candidate passes the full gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "profile-measured",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

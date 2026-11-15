@@ -1,0 +1,58 @@
+{
+  "id": "01a0ee3c-f506-7163-9414-82ef2b9d3e8c",
+  "external_ref": "engram:w-d353c681b9ac#E4",
+  "title": "One evaluator for items delivered together, with per-item attempts and receipts",
+  "outcome": "A requester can have one evaluator judge several items that were delivered together; each item keeps its own attempt, its own record and its own receipt, and the evaluator can address only the items the host allowlisted for it.",
+  "acceptance": [
+    "A requester can have one evaluator session judge several items it lists; for each item the host checks eligibility on its own and keeps its own attempt key, bases, source, policy, task pin and receipt; a test shows two items judged by one evaluator with two records.",
+    "An evaluator's submission names exactly one item, and only an item on the list the host gave that evaluator; a submission for any other item is refused; a test shows the refusal.",
+    "One item's result never satisfies another: an item that was refused, or whose newest record does not pass, is reported to the requester by itself and the others are unaffected; a test shows a mixed outcome.",
+    "TermAl's specification of the host's acceptance-evaluation procedure describes this and links Engram's section 'Evaluation unit and re-evaluation'.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The host bounds the number of items one evaluator session may serve, states the number in its specification, and spawns a further evaluator beyond it; a test shows the bound."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "engram-host",
+    "paired-engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

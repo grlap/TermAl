@@ -1,0 +1,36 @@
+{
+  "id": "01a1a3f9-6e6c-76a0-b4ad-a74b771babbf",
+  "external_ref": null,
+  "title": "Session list shows a needless horizontal scrollbar",
+  "outcome": "The session list fits its panel at any panel width with no horizontal scrolling; long session names truncate or wrap inside their cards.",
+  "acceptance": [
+    "The overflow is reproduced with long session names and its cause identified in code",
+    "The session list has no horizontal overflow at the panel's minimum and default widths, grouped and ungrouped, proved by a test that fails before the fix",
+    "The review pair has no outstanding finding of Medium or higher and the full gate is green on the exact candidate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed session-list horizontal overflow through scoped wrapping/capped title and metadata sizing, retaining short names. Actual App geometry RED→GREEN and324-case CSS browser guard pass; independent pair has no Medium+, Low filed separately. Reviewed hunks carried unchanged with disjoint upstream CSS; exact-tree Windows B FULL passed and N4 landed on master/origin2fdbb2e1.",
+    "completed_at": "2026-11-04T04:47:50.778976900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

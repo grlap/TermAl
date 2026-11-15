@@ -1,0 +1,30 @@
+{
+  "id": "01a17712-cf40-7550-bb2d-c1f6676d3f81",
+  "external_ref": null,
+  "title": "Publish the unreported adopted-turn notice in each non-result terminal delta",
+  "outcome": "Terminal scope-failure diagnostics use the existing message-created publication owner without transcript placement gaps or forced client resync.",
+  "acceptance": [
+    "Production terminal-path tests for runtime exit, reader failure and missing runtime include the exact not-reported message in the published message-created delta and preserve transcript order.",
+    "The maintained full gate passes on the exact repaired input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "SSE",
+    "engram-host",
+    "host-recording",
+    "review-inventory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12858-a1c2-7f71-8e92-e12abe9f8cbe",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

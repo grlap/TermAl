@@ -1,0 +1,37 @@
+{
+  "id": "01a1361e-025f-7420-9ade-88f866359adb",
+  "external_ref": null,
+  "title": "Add the Apache-2.0 license to TermAl, matching Engram",
+  "outcome": "TermAl is licensed under Apache-2.0, as Engram is. The repository has the canonical license text, the package metadata declares it, and the README states it.",
+  "acceptance": [
+    "LICENSE at the repository root contains the canonical Apache License 2.0 text, byte-identical to Engram's LICENSE (the same sha256, recorded in a holder note).",
+    "Cargo.toml's [package] declares license = \"Apache-2.0\"; ui/package.json declares \"license\": \"Apache-2.0\" (\"private\": true is kept); README.md gains a License section stating that TermAl's code and documentation are licensed under the Apache License 2.0 (linked to LICENSE) unless stated otherwise, and that third-party components keep their own licenses. No other file changes.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "docs",
+    "greg-direction",
+    "licensing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Added the canonical Apache-2.0 license, package metadata, and README license notice in commit 67a42eba2000c86fdf058700b8e4fbfdf87a05be. Independent acceptance evaluation ccbd97df6b644c409ffcac423aec79ac passed 3/3; exact-tree full gate test-65edb6ef passed 5/5. Opus2 verified the fast-forward push and origin/master at the commit; no install was performed.",
+    "completed_at": "2026-10-13T18:46:19.673256200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

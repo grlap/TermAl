@@ -1,0 +1,28 @@
+{
+  "id": "01a13920-cd79-7291-bc94-364f0c58863e",
+  "external_ref": null,
+  "title": "Preserve narrow viewport layout and themed colours for the global test-run warning",
+  "outcome": "ui/src/panels/test-runs-panel.css:38 overrides the max-width900 workspace-shell height:auto rule with its more specific height100% selector, and uses fixed #d49b36 instead of theme tokens. Scope fixed-height grid rules to wide layout and use existing warning tokens, with narrow/wide verification. No visual proof was produced by the static reviewer.",
+  "acceptance": [
+    "Preserve narrow viewport layout and themed colours for the global test-run warning is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "stage-1-registry",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1046e-20c0-7762-b3bd-19e4e2de38aa",
+  "external_ref": null,
+  "title": "Give the four run-wait delivery tests an explicit scripted Engram budget clock before their first admission snapshot",
+  "outcome": "The four delivery tests added with the run-wait classifier fix (src/tests/test_run_waits/run_wait_evidence.rs around :172, built on settled_delivery_fixture) reach start_next_queued_turn_inner_off_lock through completion, idle registration and Resume. That function unconditionally snapshots self.engram_budget_clock(), so the default Real clock is read even though Engram is disabled for these sessions. This misses slice 1's explicit clock choice and leaves the fixture unable to choose a clock afterwards. Wanted: settled_delivery_fixture selects the state's scripted clock (select_test_scripted_engram_budget_clock) before registration or completion. These are positive delivery witnesses, not real-time expiry tests. No assertion changes.",
+  "acceptance": [
+    "Give the four run-wait delivery tests an explicit scripted Engram budget clock before their first admission snapshot is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "budget-clock",
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

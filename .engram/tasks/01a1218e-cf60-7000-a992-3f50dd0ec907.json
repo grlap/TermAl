@@ -1,0 +1,27 @@
+{
+  "id": "01a1218e-cf60-7000-a992-3f50dd0ec907",
+  "external_ref": null,
+  "title": "Unattributed exit 101 in `cargo test --bin termal carried` under heavy load (failure lines lost to truncation)",
+  "outcome": "The failing test or tests behind the exit 101 are named from a run with full logs and classified (product defect, test or runner defect, or environment and resource), then fixed or explained.",
+  "acceptance": [
+    "Unattributed exit 101 in `cargo test --bin termal carried` under heavy load (failure lines lost to truncation) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "load",
+    "test-reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

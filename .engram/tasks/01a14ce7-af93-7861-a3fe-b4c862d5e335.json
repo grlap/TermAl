@@ -1,0 +1,34 @@
+{
+  "id": "01a14ce7-af93-7861-a3fe-b4c862d5e335",
+  "external_ref": null,
+  "title": "Publish a durable federation link within the exact image-confirmation lock",
+  "outcome": "Avoid a fail-closed reconnect retry when an unrelated federation mutation starts after exact durability confirmation but before the runtime link UUID publication.",
+  "acceptance": [
+    "A successful exact-image federation connection confirmation and runtime UUID publication occur under one state-lock cut without IO under that lock.",
+    "A controlled concurrent mutation regression demonstrates that publication cannot be lost in the former second-lock gap; stale basis still refuses and admission/reservations/quarantine semantics remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a14bba-5237-7013-b829-8e1fd94e3924",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a14d7d-d46c-7292-8eb8-f264edd50095",
+  "disposal_reason": "Continue independently after completed L1, batched with its other four Low follow-ups per Fable2 mailbox #117/message a45d0bce-d735-47c8-afe3-d1525b6823d8.",
+  "completion": null
+}

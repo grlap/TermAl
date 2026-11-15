@@ -1,0 +1,31 @@
+{
+  "id": "01a1d37e-b139-71f3-898b-4231ab558954",
+  "external_ref": null,
+  "title": "Cover terminal retention registration map keys differing from stored run ids",
+  "outcome": "Cover terminal retention registration map keys differing from stored run ids",
+  "acceptance": [
+    "A deterministic behavioral regression covers a registration whose map key differs from its stored run id and confirms terminal candidate selection agrees with the original exact matching predicates and entry ordering.",
+    "The registration candidate accessor contract documents any required summary.run_id equals disk.run_id invariant, without source-text or Markdown phrase tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-followup",
+    "state-lock",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a174e7-5ac8-7712-82c0-eca76d70bca9",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

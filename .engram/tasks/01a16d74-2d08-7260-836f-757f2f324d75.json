@@ -1,0 +1,30 @@
+{
+  "id": "01a16d74-2d08-7260-836f-757f2f324d75",
+  "external_ref": null,
+  "title": "Diagnose source-file watcher credit refusals despite unchanged endpoint hashes and mtimes",
+  "outcome": "Diagnose source-file watcher credit refusals despite unchanged endpoint hashes and mtimes",
+  "acceptance": [
+    "Record an evidence-based trace for source-file watcher refusals 2, 3 and 5 through raw notification ingress, workspace/root routing and check settlement. Distinguish observed facts from hypotheses; name any unavailable raw kind, timing or writer attribution explicitly, and do not claim historical causation from endpoint hash/mtime equality.",
+    "Add bounded provenance sufficient to diagnose future source-file refusals (raw event kind and available attributes, observation/processing ordering, routed root and exact affected check identity), without file contents, unbounded retention, filesystem I/O under StateInner or invented process attribution. Coordinate shared watcher changes with the directory-only fix.",
+    "Demonstrate any proposed credit-behavior correction with a deterministic RED-first watcher-to-settlement regression and negative controls for real edits, write-then-restore, replacement and unresolved/late events. Genuine or uncertain source-file writes remain fail-closed; endpoint hash equality alone never waives credit. If the evidence establishes no safe behavioral correction, deliver the diagnostic improvement and explicitly retain the unresolved cause instead of suppressing events.",
+    "Deliver a frozen patch with focused watcher/carried-check regressions passing on the exact source and an independent read-only Codex/Claude review pair with no outstanding Medium-or-higher finding. Full landing gate and integration remain Merger's responsibility."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

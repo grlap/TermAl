@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c686-7433-9a3a-8e1b3985f27c",
+  "external_ref": "tm-onbw",
+  "title": "Split transcript scroll keyboard tests from oversized SessionPaneView suite",
+  "outcome": "SessionPaneView.scroll.test.ts is now over 7,000 lines and the reviewed diff grows its body-keyboard and selection-ownership coverage. Extract that coherent family into a sibling test module with the repository split header. While moving it, guard history-demand cleanup so an earlier assertion failure cannot pass undefined and obscure the primary error.",
+  "acceptance": [
+    "Body-keyboard and selection-ownership tests live in a focused sibling module, retain all assertions, use unwind-safe guarded cleanup, and the full Vitest suite remains green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

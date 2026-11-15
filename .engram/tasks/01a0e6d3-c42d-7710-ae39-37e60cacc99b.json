@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c42d-7710-ae39-37e60cacc99b",
+  "external_ref": "tm-91c",
+  "title": "Codex thread discovery can re-import an orphaned thread from a failed thread/start",
+  "outcome": "A Codex thread/start that errors or times out can leave a thread on disk that startup discovery re-imports as a phantom, unlinked top-level session (no parentDelegationId). Remaining windows: thread/start timeout (id never learned) and persist failure (suppression needs the commit_locked that just failed). Fix: record the pending thread/start for kill/detach reconciliation, or give reviewer children a Codex home outside the discovery scopes. Ref import_discovered_codex_threads.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

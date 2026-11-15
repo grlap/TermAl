@@ -1,0 +1,29 @@
+{
+  "id": "01a14b6c-55d4-77c1-80ec-275bb8cb7277",
+  "external_ref": null,
+  "title": "Keep a newly opened retained child across snapshots before workspace render commits",
+  "outcome": "An accepted retained-child open is not lost if a snapshot arrives before React commits the workspace update; retained card-open also synchronizes project selection consistently.",
+  "acceptance": [
+    "A deterministic test opens a retained child, applies a snapshot before the workspace render, and verifies the resulting transcript tab remains open.",
+    "The retained-child card-open path synchronizes project selection consistently with the live-session path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "session-projection",
+    "ui",
+    "workspace"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7a3-7663-b51c-5b3902065358",
+  "external_ref": "tm-vct",
+  "title": "Scope the unspoofable peer-attribution comment in delegation_mcp.rs",
+  "outcome": "delegation_mcp.rs tool_send_to_session (around line 493) says using our own session id is what keeps the attribution unspoofable. That holds for the MCP tool: the calling agent cannot choose the source because the tool hardcodes self.parent_session_id, and the receiving backend resolves it to our display NAME. But the underlying POST /api/sessions/ID/messages route accepts a caller-supplied sourceSessionId, so any local client can set an arbitrary source and spoof attribution. Under the single-user local-only model there is no real attack, but the word unspoofable overstates it system-wide, which is the tm-mdx trap where wrong security-adjacent comments get over-trusted. Fix: scope the wording to unspoofable by the calling agent, or note the raw route trusts sourceSessionId. One-line comment change whenever this file is next touched. Surfaced by review-with-delegate (Claude reviewer); the residual was previously only in the closed tm-5tu reason. The docs under review are correct - they say backend-authoritative.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

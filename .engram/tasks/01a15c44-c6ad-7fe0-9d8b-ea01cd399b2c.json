@@ -1,0 +1,35 @@
+{
+  "id": "01a15c44-c6ad-7fe0-9d8b-ea01cd399b2c",
+  "external_ref": null,
+  "title": "Align test-ref refusal status codes and error bodies with the local API",
+  "outcome": "Test-ref route responses preserve parser HTTP statuses and include a standard error message beside the stable code; internal join failures remain distinct from post-enqueue durability uncertainty.",
+  "acceptance": [
+    "Tests verify malformed/oversized/content-type errors preserve their intended 4xx statuses and standard error field, owner refusals use the agreed authority status, and worker join failure does not assert an enqueue occurred.",
+    "Existing unconfirmed-write retry and same-row durability semantics remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a15bc9-b220-7451-bf78-d2f3c6199d27",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the automatic remote-result design (Greg, Advisor #2639; Fable2 #4079): no operator owner key, REGISTER TEST REF or registration registry.",
+  "completion": null
+}

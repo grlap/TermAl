@@ -1,0 +1,35 @@
+{
+  "id": "01a0fa65-3253-71e0-975e-e76cf056a514",
+  "external_ref": null,
+  "title": "Duration report: pin the Node per-file summary and the Vitest 4 JSON artifact shape with real-runner tests",
+  "outcome": "Three things the duration report's docs claim are tested only on synthetic artifacts:\n- the real Node runner emits per-file test:summary events with `file` set under process isolation (real-run tests assert test entries but never files);\n- Vitest 4 accepts `--reporter=default --reporter=json --outputFile.json=...` and writes the testResults / startTime / endTime / assertionResults shape;\n- Vitest's per-test duration includes per-test hooks (confirmed in source; only the Node hook inclusion has a real-runner test).\nA regression in any of them silently empties the slow-file list or turns the report unreadable. The fix adds a real-run assertion that a Node fixture yields a per-file entry under a zero file budget. It pins the Vitest JSON shape with a minimal real Vitest invocation where the suite can run Vitest, or documents the reliance. Optionally it drops the `m` flag from the Vitest timeout regex, per the reviewer's Note.",
+  "acceptance": [
+    "A real-runner test shows a Node fixture yields a per-file duration entry, and the Vitest 4 JSON artifact shape is pinned by a real invocation or its reliance is documented."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "test-coverage",
+    "test-durations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

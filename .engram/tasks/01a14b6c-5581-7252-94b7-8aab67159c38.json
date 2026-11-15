@@ -1,0 +1,28 @@
+{
+  "id": "01a14b6c-5581-7252-94b7-8aab67159c38",
+  "external_ref": null,
+  "title": "Exclude retained open remote transcripts from live sidebar entries and counts",
+  "outcome": "A retained remote transcript can remain open without appearing in live sidebar/search/project/status counts after source omission.",
+  "acceptance": [
+    "A regression with an open localized remote proxy whose parentDelegationId is null verifies live omission removes sidebar/search/count membership while its transcript tab remains usable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "remote",
+    "session-projection",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

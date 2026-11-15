@@ -1,0 +1,38 @@
+{
+  "id": "01a0f320-78fb-7523-8e12-9e2b7694fd3d",
+  "external_ref": null,
+  "title": "Carried-gate fence: remaining test gaps, a fixture for Claude's background result, and whether a watcher error should fence",
+  "outcome": "The other-session fence causes that have no test get one, the ground for the Claude background-launch rule is pinned by a fixture, and the question whether a workspace-watcher error should fence every carried check is decided and recorded.",
+  "acceptance": [
+    "A decision is recorded on this item, with its reason, on whether an error of the workspace watcher fences every carried check as the 256-directory rule does; if yes, it is implemented with a test.",
+    "A fixture or test pins the Claude Bash tool's background result text that the shell rule rests on ('directory changes made by the backgrounded command do not apply to subsequent commands'), with the Claude Code version it was captured from, so a change in the tool's behaviour is noticed.",
+    "Tests cover: another session's command whose line was not told; the 'could not place' causes for a reported edit and for a command whose start was never reported (a session whose workdir worktree is unresolved); and a background launch written as `cd DIR && …` rather than `pushd \"DIR\" && …`.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

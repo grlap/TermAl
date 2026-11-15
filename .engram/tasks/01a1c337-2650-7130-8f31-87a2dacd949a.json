@@ -1,0 +1,37 @@
+{
+  "id": "01a1c337-2650-7130-8f31-87a2dacd949a",
+  "external_ref": null,
+  "title": "After a host restart, a session whose turn was interrupted stays idle with no wake, so cross-session work stalls until someone prompts it",
+  "outcome": "After a TermAl host restart, a session whose turn the restart interrupted is either resumed with one bounded, explicit recovery turn, or its interruption is surfaced to the sessions waiting on it, so no work silently stalls until someone happens to prompt it.",
+  "acceptance": [
+    "After a host restart, each root session whose turn was interrupted (status Active, Approval or Stopping at shutdown) receives exactly one host-authored recovery wake carrying the existing recovery notice, the restart time and its queued-prompt count, unless the session is paused, stopped or explicitly opted out; the wake is idempotent across repeated restarts of the same interruption.",
+    "The recovery wake grants no authority and starts no tool by itself: it is an ordinary prompt the session handles under its own instructions, and an approval that expired in the restart stays expired.",
+    "Regression coverage restarts a host with an interrupted Active session and an idle session, and shows that only the interrupted one gets one recovery wake, that a second restart without a new interruption sends none, and that a paused session gets none."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed durable, once-per-interruption restart recovery for eligible local roots. Independent evaluation 80a7494d4f904ff69726d8a490a756d2 passed all three criteria at evidence cut443 on clean 5be407c3/tree17024e9a; read in full and confirmed fresh. Live Central restart delivered one recovery to each of two interrupted roots, none to the 66 Idle controls or Opus2 (Idle at shutdown), without manual resume or duplicates. Paused/Approval/Stopping and repeated-restart evidence is persisted-regression only. Optional Low follow-ups w-c4bd3e839a99 and w-34f5db24819c remain open. The evaluator's passes are judgment-based; registered TSC Build is admission evidence, not Rust Test credit. Full-gate report was no longer present for evaluator re-read; its prior attributed evidence and hash are quoted in holder note9524500ec1ba49a3a8a654b99a45f303.",
+    "completed_at": "2026-11-11T01:22:41.773478100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1060f-acd3-7f32-a913-68b836212a8f",
+  "external_ref": null,
+  "title": "The Engram reset's workdir_worktree carry-through has no discriminating test (the queue drain after the reset re-resolves it)",
+  "outcome": "The Engram reset's workdir_worktree carry-through has no discriminating test (the queue drain after the reset re-resolves it)",
+  "acceptance": [
+    "Either a test that fails when the carry-through is removed shows that an in-turn session keeps its resolved worktree between the reset and the following queue drain, or the carry-through is removed with a recorded reason that the drain always re-resolves it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

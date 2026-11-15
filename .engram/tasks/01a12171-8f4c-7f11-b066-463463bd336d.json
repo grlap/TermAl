@@ -1,0 +1,28 @@
+{
+  "id": "01a12171-8f4c-7f11-b066-463463bd336d",
+  "external_ref": null,
+  "title": "delegation_process_cleanup production ACP tests fail when the fixture process misses the 60 s readiness guard under host load",
+  "outcome": "delegation_process_cleanup_production_acp_stop_race and delegation_process_cleanup_production_acp_stale_waiter_owner are deterministic under host load. Their spawned runtime fixture's readiness is synchronized, or its startup made bounded, so that it no longer races the 60 s PollGuard in ProcessPeer::accept (src/tests/delegation_process_cleanup.rs:791).",
+  "acceptance": [
+    "delegation_process_cleanup production ACP tests fail when the fixture process misses the 60 s readiness guard under host load is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation-process-cleanup",
+    "test-defect",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6d9-79a0-b3b8-9813d959fee6",
+  "external_ref": "tm-t9op",
+  "title": "Recognise 'cd <dir> && <test>' as a check and show which checks a checkpoint recognised",
+  "outcome": "Reported by Engram::Opus (session-7284, mailbox #192, 2026-09-25). It ran `cd /c/github/Personal/Engram && cargo test --lib 2>&1 | tail -n 3` through the Bash tool (1019 passed). Nothing was recorded. engram_check_command (engram_check_recognition.rs:39-64) reads only the line's first command, which was `cd`, so no check existed. That is by design from tm-winf step 2, but agents very often put a cd in front of their commands, and the miss is silent: the obligation just stays open, and it took a mailbox round trip to explain.\n\nProposed:\n(1) Recognise `cd <literal dir> && <one test command>` as a check run in that directory. The directory must be a literal, resolved through the existing crediting rules (engram_literal_directory, network guard, leads-out rejection). Anything after the test still makes it non-simple, which means unknown.\n(2) Make recognition visible: the checkpoint control card, or the turn's Engram card, lists the checks it recognised and each one's outcome (passed / unknown with a reason: masked exit, overlapped, outside the worktree, not finished). An agent can then see why a run didn't count without asking.\n\nNot a bug in the evidence rules: a piped run like `| tail` is still correctly reported as unknown. See also tm-29gv (the PowerShell tool is not observed at all).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Greg's \"support little, but correctly\" became the one-call `pushd \"DIR\" && TEST` form with not-reported notices (src/engram_check_recognition.rs:46-66).",
+  "completion": null
+}

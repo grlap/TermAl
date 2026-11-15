@@ -1,0 +1,28 @@
+{
+  "id": "01a1b6bd-9b63-7351-af3a-9ada491e0cf2",
+  "external_ref": null,
+  "title": "Cover native opening refusal when the held claim fence differs from the named root fence",
+  "outcome": "A native S0 regression proves current held-claim fence disagreement with the named root withholds publication through the existing authority read.",
+  "acceptance": [
+    "Through existing native-opening seams, a held claim whose fence exceeds the selected root fence produces authority refusal and no published S0.",
+    "The test verifies observable refusal without real sleeps, string-pinning repository instructions, new product conditions or duplicated source policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1bcb5-7f31-72d1-b7cb-72e02d90c0b6",
+  "external_ref": null,
+  "title": "Create the launcher test repository seed under testTempDirectory instead of the checkout's .tmp",
+  "outcome": "The seed shares the fixtures' filesystem, stale sweep and run-root accounting.",
+  "acceptance": [
+    "Create the launcher test repository seed under testTempDirectory instead of the checkout's .tmp is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

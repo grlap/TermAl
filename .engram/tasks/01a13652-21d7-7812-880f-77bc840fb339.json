@@ -1,0 +1,29 @@
+{
+  "id": "01a13652-21d7-7812-880f-77bc840fb339",
+  "external_ref": null,
+  "title": "A turn failure's Ambiguous settlement retires a receipted head before abandoning its pending Engram dispatch, clearing the successor's prepared evaluate",
+  "outcome": "A turn failure's Ambiguous settlement retires a receipted head before abandoning its pending Engram dispatch, clearing the successor's prepared evaluate",
+  "acceptance": [
+    "In fail_turn_if_runtime_matches_and_report (src/turn_lifecycle.rs), abandoning the pending Engram dispatch of a receipted, Engram-retained head no longer compares its fingerprint against the successor that the Ambiguous retirement (retire_queued_prompt) moved to the front: the dispatch is detached for its own head before, or independently of, the receipt's retirement, or abandon_engram_pending_dispatch leaves the front alone when the head it was captured for is gone. Ambiguous still wins over a removal's Rejected.",
+    "A test with a queued successor holding a prepared engram_evaluate shows the successor's evaluation survives the failed turn."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

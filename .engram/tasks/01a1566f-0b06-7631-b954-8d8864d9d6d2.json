@@ -1,0 +1,28 @@
+{
+  "id": "01a1566f-0b06-7631-b954-8d8864d9d6d2",
+  "external_ref": null,
+  "title": "After a detached full gate's host check is recorded PASSED, GET /api/test-runs/{id} still shows verificationRecordIds [] and restartWouldVoidEvidence true",
+  "outcome": "After a detached full gate's host check is recorded PASSED, GET /api/test-runs/{id} still shows verificationRecordIds [] and restartWouldVoidEvidence true",
+  "acceptance": [
+    "After a detached full gate's host check is recorded PASSED, GET /api/test-runs/{id} still shows verificationRecordIds [] and restartWouldVoidEvidence true is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

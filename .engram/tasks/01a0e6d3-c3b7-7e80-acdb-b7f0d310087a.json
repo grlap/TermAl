@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3b7-7e80-acdb-b7f0d310087a",
+  "external_ref": "tm-1ekr",
+  "title": "Preserve empty-diff 400 when diagnostic probes fail",
+  "outcome": "The auxiliary git status/summary/numstat probes used to explain an empty diff can fail transiently and replace the normal no-diff 400 with a 500. Fall back to the generic empty-diff bad-request explanation when auxiliary inspection fails, and add a regression test.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

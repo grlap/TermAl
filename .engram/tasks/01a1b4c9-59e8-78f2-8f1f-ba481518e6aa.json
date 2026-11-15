@@ -1,0 +1,31 @@
+{
+  "id": "01a1b4c9-59e8-78f2-8f1f-ba481518e6aa",
+  "external_ref": null,
+  "title": "Name the selected host in the session list empty state",
+  "outcome": "An empty host-filtered list does not incorrectly imply that the project has no sessions on any host.",
+  "acceptance": [
+    "With selectedhost+project containing sessions onotherhosts, an empty result names the host and project scope.",
+    "Search/status/host combinations retain accurate accessible empty-result wording."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "review-low",
+    "session-panel",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b4ac-b691-77a3-9373-2050f215638d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

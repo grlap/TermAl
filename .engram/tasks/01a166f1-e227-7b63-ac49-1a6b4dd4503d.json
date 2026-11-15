@@ -1,0 +1,29 @@
+{
+  "id": "01a166f1-e227-7b63-ac49-1a6b4dd4503d",
+  "external_ref": null,
+  "title": "Document admission trace blind spots and unscoped latency",
+  "outcome": "Admission timing documentation explicitly describes when a terminal trace or mutex span is absent and which durability latency remains outside scoped phase totals, so missing output or a remainder is not misread as proof of no wait.",
+  "acceptance": [
+    "The admission timing documentation states that a never-returning admission emits no terminal trace and a failed try_lock_now acquisition emits no mutex span.",
+    "The documentation states that persistence and durability fence time remains included in totalUs but may appear as unscoped remainder rather than its own phase."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "observability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

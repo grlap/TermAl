@@ -1,0 +1,39 @@
+{
+  "id": "01a1bef1-e409-7fd1-bc50-ae58cd9cf533",
+  "external_ref": null,
+  "title": "Record bounded federation durability, refusal and link-failure diagnostics",
+  "outcome": "The existing diagnostics surface retains bounded metadata for durability transitions, directory/admission refusals and static per-peer terminal/install failures, across later authentication, without changing authority, transport or retry behavior.",
+  "acceptance": [
+    "In the existing diagnostics surface, retain a bounded metadata-only record of each federation_durable false and true transition, including the causing site and the duration it was false, with existing reset-on-restart behavior.",
+    "Record the 409 directory and 423 admission refusals with stage and timestamp; do not retain secrets or full payloads, add store tables, retry, or change refusal/hold behavior.",
+    "Behavior tests check observable transition/refusal records, bounded retention and restart reset, and that a healthy path stays quiet; focused validation and a fresh review pair have no outstanding Medium or higher before normal integration.",
+    "Retain the bounded static terminal metadata and install-failure stage and reason per peer, with timestamp and generation, so the next authenticated attempt doesn't overwrite it. No transport behaviour change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "needs-triage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1be59-4295-7790-8c3d-ea62eb7ebd60",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Bounded federation durability, refusal and link-failure recorder landed on master/origin in combo26 a06f2c92. All four implementation criteria met with linked source, focused Windows validation, no-Medium review pairs and exact-tree Windows/DL560 FULL evidence. Optional diagnostic/test Lows remain separately tracked.",
+    "completed_at": "2026-11-09T12:54:24.148136200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-7f90a2ff942f",
+  "external_ref": "tm-5fsy.15",
+  "title": "Freeze checker: accept a manifest in a linked worktree's own git directory",
+  "outcome": "Reported by Engram::Opus (2026-09-25 ~03:37 UTC, delegations 15194846/session-7591 Codex and 3ba1c514/session-7592 Claude, cwd C:\\github\\Personal\\Engram\\.worktrees\\engram-family). termal_review_freeze_check refused the manifest at the path 'git rev-parse --path-format=absolute --git-path engram-review-freeze.json' prints for that linked worktree (C:\\github\\Personal\\Engram\\.git\\worktrees\\engram-family1\\engram-review-freeze.json), with 'manifest must be inside the review worktree' (src/review_freeze.rs:385, check_review_freeze requires manifest_path.starts_with(git.root)). In a linked worktree the per-worktree git dir lives under the main repository's .git/worktrees/<name> (whose name may differ from the folder), not under the worktree root, so the location Engram's /review-changes skill prescribes can never pass; the Codex reviewer failed and the Claude reviewer stayed unverified. Fix direction: also accept a manifest inside this worktree's own git dir, as 'git rev-parse --git-dir' reports it for the review root (canonicalized, the per-worktree dir only, not the common dir or another worktree's), keeping the parent-traversal and canonical-prefix checks; add a linked-worktree test. Workaround meanwhile: <worktree>/.review/engram-review-freeze.json excluded via .git/info/exclude.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

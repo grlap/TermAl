@@ -1,0 +1,29 @@
+{
+  "id": "01a1b83f-a728-7971-8e5d-8360249043f8",
+  "external_ref": null,
+  "title": "Align federation status facade label handling with utilization source bounds",
+  "outcome": "A utilization label accepted by its existing source does not unnecessarily remove resource observations for unrelated hosts from the agent facade, while the facade retains its path-redaction and size guarantees.",
+  "acceptance": [
+    "Reconcile utilization architecture label acceptance with the source's 256-byte non-control label contract; preserve the read-only scope and path/credential redaction requirements.",
+    "Fixture-only behavioral tests cover a valid 129–256-byte architecture and the chosen slash/path treatment, including unaffected hosts and observable availability. No new sampler, network/process tests or source-text tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "agent-api",
+    "federation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

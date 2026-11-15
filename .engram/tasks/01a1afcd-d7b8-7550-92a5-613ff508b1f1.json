@@ -1,0 +1,31 @@
+{
+  "id": "01a1afcd-d7b8-7550-92a5-613ff508b1f1",
+  "external_ref": null,
+  "title": "Exercise CRLF suppression and residual Git stderr refusal on every supported platform",
+  "outcome": "Real-Git integration coverage checks the all-platform safecrlf override and residual-stderr refusal on macOS and Linux as well as Windows.",
+  "acceptance": [
+    "An integration test using autocrlf=true, safecrlf=warn and a real LF-only change proves the warning exists, the normal command suppresses it, residual stderr refuses, clean measurement succeeds, and config bytes stay unchanged on Windows/macOS/Linux."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-platform",
+    "review-low",
+    "source-revision",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1af65-1815-71b3-8f6b-43ba19db0403",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

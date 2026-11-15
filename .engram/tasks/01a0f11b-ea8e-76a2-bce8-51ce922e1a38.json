@@ -1,0 +1,31 @@
+{
+  "id": "01a0f11b-ea8e-76a2-bce8-51ce922e1a38",
+  "external_ref": null,
+  "title": "Exercise native Windows bounded-read deadline and output-limit teardown directly",
+  "outcome": "Exercise native Windows bounded-read deadline and output-limit teardown directly",
+  "acceptance": [
+    "Freeze observer tests either exercise the production native transport on Windows or accurately identify their legacy fixture transport in their comments.",
+    "Native run_bounded_read_windows_with_setup regressions cover deadline expiry after a descendant readiness barrier and stdout beyond the configured limit, using retained handles and creation times to establish teardown."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "terminal",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

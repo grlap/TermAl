@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c80f-74c1-ae41-291fb97bcc21",
+  "external_ref": "tm-zxgc",
+  "title": "Bind coordination CLI and MCP bridge callers to a per-session capability",
+  "outcome": "The Phase 1 loopback HTTP API is intentionally unauthenticated: the delegation MCP bridge asserts its identity through --parent-session-id and the coordination CLI through --as-session, and both apply the root-session guard as a misuse guard, not as an authenticated containment boundary. Any process with shell access to the machine can list root sessions (ids, names, previews, workdirs) and claim a root id. Follow-up: issue a per-session capability token at runtime spawn (delivered only to that session's MCP child / CLI environment), require it on the mailbox, board and inventory routes, and reject asserted identities without it. Raised by the Claude reviewer during the tm-d272 dual review; documented as a limitation in docs/features/coordination-cli.md until implemented.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

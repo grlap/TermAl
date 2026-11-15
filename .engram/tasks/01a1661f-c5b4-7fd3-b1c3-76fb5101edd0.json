@@ -1,0 +1,32 @@
+{
+  "id": "01a1661f-c5b4-7fd3-b1c3-76fb5101edd0",
+  "external_ref": null,
+  "title": "Exercise automatic reconnect qualification through the production monitor with concurrent verify and cancellation",
+  "outcome": "Production monitor-driven reconnect tests cover ownership and availability during concurrent explicit verification, stop/cancellation, and persistence settling, without live hosts or providers.",
+  "acceptance": [
+    "A deterministic test drives the real central monitor or runtime path through fresh reconnect qualification, including first-probe timing and a stop during an in-flight qualification, and asserts owned cleanup without granting an old lease.",
+    "Concurrent explicit verify and automatic qualification and a temporary durability hold are exercised with phase controls; existing identity, key, enrollment and quarantine fences remain enforced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

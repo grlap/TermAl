@@ -1,0 +1,31 @@
+{
+  "id": "01a13c85-7f5e-7373-b22e-cc347a8b9734",
+  "external_ref": null,
+  "title": "After an owned bottom landing during partial regrowth, later content growth does not repin to the bottom",
+  "outcome": "Investigate a pre-existing later-growth repin failure under the scroll-return test harness: after owned pointer/touch bottom landing at678 during partial regrowth, pane shouldStick/liveTailPinned are true but later height1000 leaves678 instead of bottom800. First confirm behavior through the real virtualizer path, distinguishing a genuine product defect from incomplete harness event/measurement delivery. Preserve and run the existing fail-first witness before any correction.",
+  "acceptance": [
+    "Confirm or falsify the harness witness through the real virtualizer path with causal evidence; distinguish input ownership, cooldown, measurement delivery and bottom repin.",
+    "If product failure is confirmed, later content growth follows an explicit owned bottom landing while newer upward navigation still stays detached; focused regression reproduces before and passes after the correction."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "needs-reproduction",
+    "scroll",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c4de-7140-8847-940234534ed8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

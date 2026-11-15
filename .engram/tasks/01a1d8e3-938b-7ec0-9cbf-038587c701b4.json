@@ -1,0 +1,28 @@
+{
+  "id": "01a1d8e3-938b-7ec0-9cbf-038587c701b4",
+  "external_ref": null,
+  "title": "Restore deferred source selection after failed direct or adopted opening commits",
+  "outcome": "Direct-dispatch and adopted-Claude failed opening commits do not leave an uncommitted deferred binding/root/witness transition installed in memory.",
+  "acceptance": [
+    "A forced direct or adopted opening commit failure verifies prior binding/root, unapplied selection and witness state remain consistent, and a later successful opening applies the deferred selection once."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1c3fa-f29e-7020-95e5-75b4efa54b40",
+  "external_ref": null,
+  "title": "Make Auto evaluator expiry tests independent of host monotonic uptime",
+  "outcome": "Expiry and duplicate-window tests demonstrate the same behavior without relying on subtracting five minutes from a platform Instant close to its representable origin.",
+  "acceptance": [
+    "Verify the supported-platform Instant subtraction concern, then construct the expired observation deterministically without a possible representational underflow or real-time wait.",
+    "Existing expiry and duplicate-refusal behavioral assertions still discriminate fresh versus expired windows on the real selection path; no product timeout inflation or weakened assertion is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

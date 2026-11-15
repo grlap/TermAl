@@ -1,0 +1,65 @@
+{
+  "id": "01a0ecc8-95c6-71d0-8c58-9def7c74fc6b",
+  "external_ref": "engram:w-004927a1fe2a",
+  "title": "Pair Engram's carried-failure rule (w-004927a1fe2a): parse acceptance_evaluation.carried_failure and evaluation.revised_by/supersedes, brief the evaluator on the retired failed verdict and the criteria before/after, and pass --supersedes RECORD_ID host-side",
+  "outcome": "Pair Engram's carried-failure rule (w-004927a1fe2a): parse acceptance_evaluation.carried_failure and evaluation.revised_by/supersedes, brief the evaluator on the retired failed verdict and the criteria before/after, and pass --supersedes RECORD_ID host-side",
+  "acceptance": [
+    "Engram's refusals carried_failure_unacknowledged, carried_failure_self_acknowledged and nothing_to_supersede reach the requester with Engram's remedy text unchanged; a test shows it.",
+    "TermAl's feature documentation of acceptance evaluation describes the carried failure, who may name it, and what the evaluator is shown, and links Engram's R11.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The host reads acceptance_evaluation.carried_failure from show --json (evaluation, revised_by, judged_revision, failing, supersedes_required) and work.evaluation.carried_failure from show --full (judged_criteria, blocking, judged_bindings, newest_judged_bindings) leniently: with the fields absent, as from an Engram older than e450eb0, a request behaves as it does today; a test shows both.",
+    "When a failure is carried, the evaluator's brief states the original failure's non-passing verdicts with their rationale, and the criteria and bindings it judged, those of a later failing evaluation that named it when there is one, and the current ones; a test shows the brief with and without the middle contract.",
+    "When a failure is carried, the evaluator's submission passes the carried record's id as supersedes; for an item with no carried failure it passes none; a test shows both.",
+    "When supersedes_required is true the host never selects same_session, nor a sub_agent under a session that holds, held or executes the run, and the request's answer says why; a test shows it."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance",
+    "engram-host",
+    "paired-engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

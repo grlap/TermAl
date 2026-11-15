@@ -1,0 +1,29 @@
+{
+  "id": "01a11ccb-74db-7a40-8c0a-03cbd18c09b0",
+  "external_ref": null,
+  "title": "A session bound to one Engram project cannot name a source root for its claim in another project: termal_name_source_root returns 409 \"this session holds no live claim\"",
+  "outcome": "A session that legitimately holds a claim in another project (here a Phoenix-bound session holding a TermAl item) can name that project's worktree as its source root and earn credit there, or the refusal names the cross-project binding as the cause and the supported route.",
+  "acceptance": [
+    "The cause is classified with evidence: which binding the source-root naming path uses to look up the claim.",
+    "Either a session can name a source root for a live claim it holds in another project and earn credit there, or the refusal states the cross-project binding mismatch and the supported route instead of \"no live claim\"; a test covers the case."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "source-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

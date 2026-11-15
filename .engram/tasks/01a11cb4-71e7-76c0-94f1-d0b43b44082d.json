@@ -1,0 +1,29 @@
+{
+  "id": "01a11cb4-71e7-76c0-94f1-d0b43b44082d",
+  "external_ref": null,
+  "title": "Retire the external C:\\github\\Personal\\TermAl-wt-* worktree roots; TermAl worktrees live only inside the repository",
+  "outcome": "No TermAl worktree root exists outside the repository. Clean roots for landed work are removed by the machine-safety procedure with their evidence archived, and dirty roots are kept, or recreated as Git-managed worktrees under .tmp, until their owners decide.",
+  "acceptance": [
+    "Each removed root was clean, its HEAD was in master, no session had it as cwd, its review-runs were archived to .evidence/<wt>/ with a verified count and hashes, its ui/node_modules link was unlinked without being followed, master's ui/node_modules was verified intact, and it was removed with `git worktree remove` without --force; each removal is recorded with names, counts and bytes.",
+    "Every dirty root is either kept with its owner and reason recorded, or recreated as a verified Git-managed worktree under .tmp before its old root is removed; no directory is raw-moved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "safety",
+    "worktrees"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

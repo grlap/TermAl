@@ -1,0 +1,28 @@
+{
+  "id": "01a19802-65b6-77c0-9e78-3119cf9cb9b3",
+  "external_ref": null,
+  "title": "Scope synchronous remote persistence rejection to the proxy rows owned by the operation",
+  "outcome": "A rejected proxy retains retry duty without making another saved proxy's synchronous create, localization or delta operation report failure.",
+  "acceptance": [
+    "A disposable two-proxy regression rejects one row and proves the healthy owned proxy succeeds after its own row and metadata commit.",
+    "Remote persistence owners attribute rejection to the rows they own and retain retry duty for rejected rows; local siblings and metadata remain successful."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8f5-8f89-7bb0-9aaf-e75178b44df1",
+  "external_ref": null,
+  "title": "Clarify canonical item identity requirements on retired-check note acknowledgements",
+  "outcome": "The disposition note acknowledgement contract explicitly binds the canonical work identity when supported and documents or tests any compatible response shape that omits it, with no wrong-item admission.",
+  "acceptance": [
+    "Confirm the producing Engram note receipt contract without guessing, then require canonical work identity where available or define the explicit compatible fallback.",
+    "Behavioral acknowledgement tests cover absent, mismatched and correct canonical IDs while retaining unknown/unacknowledged write refusal and no-credit behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d595-9e1d-76d0-9955-2ecb0cb4d6e6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

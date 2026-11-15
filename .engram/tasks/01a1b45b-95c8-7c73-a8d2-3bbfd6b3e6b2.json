@@ -1,0 +1,30 @@
+{
+  "id": "01a1b45b-95c8-7c73-a8d2-3bbfd6b3e6b2",
+  "external_ref": null,
+  "title": "Align remaining JavaScript and Rust source-id grammar edge cases",
+  "outcome": "The automatic JS validator and shared Rust source-id validator agree on duplicate change keys, carriage returns in paths and Windows path components, without changing the producer contract independently.",
+  "acceptance": [
+    "Align remaining JavaScript and Rust source-id grammar edge cases is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "review-follow-up",
+    "source-id",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae54-d2e6-7803-9e56-8f4c5e2e071c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

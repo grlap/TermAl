@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6bd-7db0-a094-3f8840f60fe0",
+  "external_ref": "tm-rgmm",
+  "title": "Add configurable OpenCode Ask and Auto-approve policies",
+  "outcome": "User requested OpenCode auto-approve and configuration like other agents. Add explicit default-Ask session policy, session settings and app default configuration, persisted/remote/clone propagation and orchestrator mapping. ACP replies must select exact allow_once only; missing safe options remain manual. Keep questions interactive and readOnly OpenCode delegation rejected. Test protocol, API/persistence, UI and orchestrator paths.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. OpenCode approval policies landed in 272965d (ancestor of master f7db2c58).",
+  "completion": null
+}

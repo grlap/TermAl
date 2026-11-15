@@ -1,0 +1,50 @@
+{
+  "id": "01a0fcdc-8cce-7d61-b79c-6b09d2362fe4",
+  "external_ref": null,
+  "title": "Acceptance-evaluation fixtures bet a real 2 s wall-clock authority budget on a synchronous SQLite persist, so the full gate fails intermittently on master d705038",
+  "outcome": "The acknowledge_fixture_work fixture and any other test that drives named-root authority acknowledgement no longer depend on wall-clock time to succeed. They use a scripted clock or a test path whose budget does not include its own synchronous persist. The full gate therefore can't fail on that budget under load, and a witness that stalls the persist past the budget fails before the fix and passes after it. The timeout is not increased.",
+  "acceptance": [
+    "Deterministic witnesses preserve the prior budget failure and show that manual persistence, delta/lock waits and worker scheduling do not consume a positive fixture's scripted authority budget; the affected acceptance-evaluation and turn-observation fixtures pass on the corrected input.",
+    "One explicit state-scoped monotonic clock governs fixture authority/admission deadlines through prepare, canonical read, durable acknowledgement, publication, remaining RPC checks and boot coordinator/workers; scripted advancement exercises expiry and clock-aware waits. Actual persistence and owner checks remain real. Production and explicit real/default/connected deadline coverage retain one end-to-end budget, late-commit withholding and existing timeout values; no timeout is enlarged.",
+    "The maintained full five-stage gate passes on the exact final input, and independent read-only Codex and Claude reviews leave no outstanding in-scope Medium or higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "gate-nondeterminism",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Shared state-scoped scripted clock removes positive authority fixture dependence on wall-clock SQLite/lock/worker delays; real/default/connected budgets and actual durability/owner checks retained. Final normal/recovery publication fails closed under the final ownership lock after the original deadline, retaining exact Candidate. Current full five-stage gate b95e4774 and complete18 independent pair9869/9870 have no Medium+. Independent evaluation bf465ad124c546c3b65a869222426155 is fresh 3/3 and supersedes prior C2 failure. Native precompletion all18 raw length/SHA/index pins match review2 freeze; write-tree360da27f exact reviewed/gated tree. Optional Lows retained in their own items. Author commit and integration-owner handoff follow under standing rule; no push/install/restart asserted.",
+    "completed_at": "2026-10-02T18:40:47.706124600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

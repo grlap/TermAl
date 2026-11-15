@@ -1,0 +1,29 @@
+{
+  "id": "01a14ade-4e13-7362-9b7a-a192f24fb0e3",
+  "external_ref": null,
+  "title": "Handoff ledger: tick from an in-memory mirror and offer the primary again when it unblocks while the recovery owner is blocked",
+  "outcome": "Handoff ledger: tick from an in-memory mirror and offer the primary again when it unblocks while the recovery owner is blocked",
+  "acceptance": [
+    "Handoff ledger: tick from an in-memory mirror and offer the primary again when it unblocks while the recovery owner is blocked is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "greg-directed",
+    "reliability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14a88-8e97-7391-a2a5-d9f93ea08fd2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

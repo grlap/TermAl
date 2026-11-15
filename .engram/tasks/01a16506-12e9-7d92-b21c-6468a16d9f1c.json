@@ -1,0 +1,31 @@
+{
+  "id": "01a16506-12e9-7d92-b21c-6468a16d9f1c",
+  "external_ref": null,
+  "title": "A session bound to another project cannot name a TermAl source root or register launcher runs, so a cross-project implementer has no credited route; document or support the carrier route",
+  "outcome": "When Greg assigns an implementer from another project's session (2026-10-22: Engram::Architect1, session-9550, told \"to ty to napraw, jedyna sesja ktora chodzi\"), the host either lets that session hold a TermAl claim fence, name a TermAl source root and register launcher runs for TermAl items under its own identity, or the documented carrier route (a TermAl-project session holds the claim, names the root, applies the author's patch and runs the credited checks, with the author recorded as implementer) is written in docs/test.md and docs/features so nobody has to rediscover it during an incident.",
+  "acceptance": [
+    "A note records the two refusals with their exact texts and code paths: termal_name_source_root answering 409 'this session holds no live claim' for an Engram-bound session that holds the TermAl claim through the CLI, and the focused launcher answering HTTP 400 'test run directory is outside this project's run directories' for a run directory under .git/worktrees of the TermAl checkout, and states which project binding each check uses.",
+    "Either the host supports cross-project attribution (a session may bind and run for an item of a project it does not belong to, under its own identity, with tests), or docs/test.md and the relevant feature brief describe the carrier route (claim, root naming, patch hand-off under .tmp/patches, credited focused check and full gate by the TermAl session, review pair, evaluation, author recorded as implementer) with the limitation stated; the chosen option is concurred by the coordinator.",
+    "cargo test --bin termal is green on the exact committed tree, and where source changed, the full five-stage gate passes with an independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "named-roots",
+    "p0-profiling-2026-10-22"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

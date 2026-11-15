@@ -1,0 +1,36 @@
+{
+  "id": "01a1a859-8fb3-7291-b97d-b00c98406bf0",
+  "external_ref": null,
+  "title": "Align Rust and Node committed tree-listing entry limits",
+  "outcome": "Both committed-input producers enforce the same explicit bound for ls-tree listings and name a bound refusal while preserving existing pin and object checks.",
+  "acceptance": [
+    "Align Rust and Node committed tree-listing entry limits is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "automatic-input",
+    "check-credit",
+    "commit-input-v1",
+    "default-flip-prerequisite",
+    "greg-directed",
+    "performance",
+    "review-low",
+    "source-revision",
+    "team-pilot",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a663-90d1-7771-8db5-83d4e75fef4f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

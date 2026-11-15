@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7fb-7183-b3fb-8a1d92293d52",
+  "external_ref": "tm-ysum",
+  "title": "Deliver ACP host guidance through an advertised instruction channel when an agent offers one",
+  "outcome": "Follow-up from the tm-uvsv review (2026-09-06): today the host guidance travels as a text block in session/prompt because ACP prompt blocks carry no role separation; the fix pass moves it after the task and stops re-teaching on external-session resume. This task investigates, per ACP agent (Gemini, Cursor, OpenCode), whether session/new, _meta or a settings/instructions channel exists for host-owned instructions, gates delivery on a capability probe when one is advertised, and keeps the after-task text block as the fallback for agents without one. Acceptance: for each agent a documented decision with wire evidence; tests pin the chosen channel per agent; the shared body text is unchanged.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

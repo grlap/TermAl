@@ -1,0 +1,28 @@
+{
+  "id": "01a194a8-1c2c-75d1-af91-95affa0af585",
+  "external_ref": null,
+  "title": "Windows review-file replace fails with \"Access is denied (os error 5)\" on Windows B (replace_review_document_file_replaces_existing_target_on_windows)",
+  "outcome": "The cause of the Windows B review-file replacement failure is classified as product or environment with evidence; if product, replacing an existing review document on Windows succeeds reliably.",
+  "acceptance": [
+    "Windows review-file replace fails with \"Access is denied (os error 5)\" on Windows B (replace_review_document_file_replaces_existing_target_on_windows) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "found-by-gate",
+    "review",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

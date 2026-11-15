@@ -1,0 +1,24 @@
+{
+  "id": "01a1bf5b-5892-73b0-b1ed-58545675ee36",
+  "external_ref": null,
+  "title": "Decide whether a non-namer launcher with no work target stays unbound or refuses in a worktree another session named",
+  "outcome": "One decided behaviour, with the comment at src/test_run_named_root.rs:227-240 and docs/test.md agreeing and a test for that branch: base disabled, project reset, or delegation inventory not ready while another session has named the worktree. Found by review of combo25.",
+  "acceptance": [
+    "Decide whether a non-namer launcher with no work target stays unbound or refuses in a worktree another session named is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

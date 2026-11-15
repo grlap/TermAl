@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c693-7ff0-b041-99f8e72da688",
+  "external_ref": "tm-p9p",
+  "title": "Detect missing app_state metadata when persisted sessions survive",
+  "outcome": "If the monolithic app_state metadata row disappears while normalized session rows survive, boot silently defaults ignored_discovered_codex_thread_ids to an empty set and can mass-import months of previously suppressed Codex threads as phantom sessions. Treat this mixed state as data loss rather than a fresh install.",
+  "acceptance": [
+    "Boot cannot silently interpret missing metadata plus existing sessions as a fresh empty ignore set; recovery behavior is explicit and tested; mass discovery import has a deterministic safety policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

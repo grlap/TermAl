@@ -1,0 +1,28 @@
+{
+  "id": "01a16b69-ea45-7241-9883-259b9956d5bb",
+  "external_ref": null,
+  "title": "Fault-injection fixture for a failed save in release_engram_begin_preparation_hold_for_resume, and a rollback test for the expired-pending Resume",
+  "outcome": "Tests can make the Resume release's commit_locked fail. A test shows that a Resume releasing an expired, never-sent pending begin, whose save fails, restores the head's evaluate (with its prepared begin), bind, dispatch generation, rebind flag and lineage, including pending_grant_id, and returns the 'could not be released' error with nothing sent.",
+  "acceptance": [
+    "Fault-injection fixture for a failed save in release_engram_begin_preparation_hold_for_resume, and a rollback test for the expired-pending Resume is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "admission",
+    "engram-host-adapter",
+    "test-infra"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

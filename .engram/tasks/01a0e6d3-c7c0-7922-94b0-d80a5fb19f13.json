@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c7c0-7922-94b0-d80a5fb19f13",
+  "external_ref": "tm-wh6h.2",
+  "title": "Ordinary mailbox coalescing: refresh same-ID queued prompt projections",
+  "outcome": "Confirmed Medium defect from Final16 Claude review session-7261, independently source-checked by supervisor. queue_projection_hash in src/state_accessors.rs hashes only pause, ordered IDs and retained/interrupted flags. Mailbox coalescing in src/turn_dispatch.rs changes text, expanded text, source and timestamp in place without changing the ID, count or pause. The SSE state hydration gate therefore sees an unchanged hash and retains stale prompt content. Cover the authoritative public queue fields using a canonical borrowed projection; avoid deep-cloning full payloads solely to hash them. Preserve identity, FIFO, local-empty embedded fallback and remote authoritative hash. Already assigned within Final17 to Termal::Coder/session-7223.",
+  "acceptance": [
+    "Backend same-ID coalescing changes the hash; actual state-event adoption triggers targeted hydration and replaces stale body/source. Cover attachments, flags, removal and order changes. True no-ops/private replay keep a stable hash and cause no unrelated hydration storm. Summary payloads remain body-free; no new queue ID or caching framework as a workaround."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated",
+    "gating-removal-audited"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c7be-7e73-a63a-cb1b5e3be628",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

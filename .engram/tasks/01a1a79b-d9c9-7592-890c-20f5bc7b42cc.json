@@ -1,0 +1,32 @@
+{
+  "id": "01a1a79b-d9c9-7592-890c-20f5bc7b42cc",
+  "external_ref": null,
+  "title": "Preserve typed filter refusal for non-UTF8 child filter driver keys",
+  "outcome": "Rust child preflight classifies filter prefix and suffix before UTF-8 decoding so a non-UTF8 driver name retains ConfiguredGitFilters rather than becoming an untyped retryable error.",
+  "acceptance": [
+    "Preserve typed filter refusal for non-UTF8 child filter driver keys is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "commit-input-v1",
+    "greg-directed",
+    "low",
+    "review-followup",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

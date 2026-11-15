@@ -1,0 +1,29 @@
+{
+  "id": "01a1db36-5c52-7453-ae06-c676cb80420f",
+  "external_ref": null,
+  "title": "A retryable 423 on a mailbox send lets a sender's later message overtake the refused earlier one, with no gap visible to the recipient",
+  "outcome": "While mailbox persistence is settling, a sender's messages to a recipient are never stored out of the order the sender issued them. Either the host keeps refusing every later send from that sender to that recipient until the refused one is retried, or the recipient can see that an earlier message from that sender is still missing.",
+  "acceptance": [
+    "When a send from a sender to a recipient is refused with a retryable 423 (persistence settling), a later send with a different key from the same sender to the same recipient is not stored ahead of it: either it is refused too until the refused message has been retried or abandoned, or the recipient's read shows that an earlier message from that sender is missing.",
+    "A test reproduces the 2026-11-14 order: END refused with 423, RELEASE sent next with a different key, then the END retried with its original key. With the fix, the recipient cannot read RELEASE as if no earlier message from that sender were missing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "federation-mailbox",
+    "ordering"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a15766-a7df-7a83-b1df-7893921a7e06",
+  "external_ref": null,
+  "title": "Host credit watcher voids a passing gate when Cargo atomically creates a fresh worktree's target directory (transient target<random> sibling)",
+  "outcome": "A check whose own build creates the worktree's Cargo build directory for the first time keeps its credit. The watcher does not count Cargo's transient atomic-create sibling (a \"target\" directory name plus random suffix, created with CACHEDIR.TAG and renamed to target) as a source write. Real source changes during a run still void credit. A regression test reproduces the rename pattern.",
+  "acceptance": [
+    "Host credit watcher voids a passing gate when Cargo atomically creates a fresh worktree's target directory (transient target<random> sibling) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

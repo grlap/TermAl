@@ -1,0 +1,30 @@
+{
+  "id": "01a179cc-7346-77c1-b51f-8700e28a5963",
+  "external_ref": null,
+  "title": "Use existing targeted tail repair for stale-session watchdog recovery",
+  "outcome": "Implement approved Option T from Fable627: stale-session-only watchdog recovery uses the existing per-session tail repair for every stale id, retaining the15s cooldown; drift/gap/shared-snapshot/late-join paths retain full recovery. This optional companion is a separate producer input so the parent’s already accepted test-only handoff and Merger claim remain untouched.",
+  "acceptance": [
+    "For stale-session-only watchdog ticks, repair every stale local non-detached session through existing startSessionHydration(id, {forceTailRepair: true, queueAfterCurrent: true}) when the existing lastFullStateServerInstanceIdRef equals the non-null lastSeenServerInstanceId and reconnect recovery is confirmed; retain the existing 15s attempt cooldown and first-reply/stalled/never-hydrated hidden-session recovery.",
+    "Keep full recovery for drift (including drift plus stale), gap, sharedSnapshotRequired, late join, unknown or unmatched full-state instance, unconfirmed reconnect, and remote or detached stale sessions; retain the tail owner’s existing adoption/fallback/coalescing behavior. Production changes only in ui/src/app-live-state-transport.ts, one thin existing-ref caller change in ui/src/app-live-state.ts, and the docs/architecture.md paragraph; no new endpoint, timer, poller, cache, ledger or revision change.",
+    "Run one combined focused UI check covering the changed stale-session schedules and existing full-recovery/tail boundaries, run tsc, obtain the standard independent Codex/Claude review pair with no outstanding in-scope Medium+, and send one complete exact-input READY to the integration owner."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-directive",
+    "performance",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a176c4-1ec5-7b40-9a48-5f408385cff7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

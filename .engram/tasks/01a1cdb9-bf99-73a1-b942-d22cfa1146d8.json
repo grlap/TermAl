@@ -1,0 +1,31 @@
+{
+  "id": "01a1cdb9-bf99-73a1-b942-d22cfa1146d8",
+  "external_ref": null,
+  "title": "Avoid wasted late source-owner version probes beyond the caller's admission window",
+  "outcome": "A late-admitted metadata version probe does not hold source-owner capacity past the deadline at which its result must be refused, while issued operations retain Greg's minimum and the approved finite version cap.",
+  "acceptance": [
+    "A controlled-clock regression reaches a version probe issued late in an existing admitted plan and discriminates its actual completion/refusal deadline and source-owner custody; no real-minute wait is added.",
+    "Admission or existing owner logic avoids useless late work without shortening an issued call below the existing 60 s minimum, widening other source/request/client windows, refreshing the caller plan or introducing a new resource owner. Any change requiring new timing authority carries Greg's recorded word.",
+    "Original success/refusal classification, binary pin and source identity checks remain; review and targeted validation cover the changed production path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-adapter",
+    "follow-up",
+    "limits",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0ee17-32e4-7cb2-93a7-864d0ccba7e6",
+  "external_ref": null,
+  "title": "Engram project settings badge \"Declared · operator vetoed\" reads as a refusal by someone else and gives no next step",
+  "outcome": "Engram project settings badge \"Declared · operator vetoed\" reads as a refusal by someone else and gives no next step",
+  "acceptance": [
+    "The badge and the post-Disable verification detail no longer say \"operator vetoed\"; a declared project that is turned off in TermAl's settings says so in plain words and names the next step (Verify, then Save)",
+    "When Save is unavailable the panel says why",
+    "cd ui && npx tsc --noEmit is clean and cd ui && npx vitest run is green on the landed input"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

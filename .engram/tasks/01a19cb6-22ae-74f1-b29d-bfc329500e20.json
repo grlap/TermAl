@@ -1,0 +1,39 @@
+{
+  "id": "01a19cb6-22ae-74f1-b29d-bfc329500e20",
+  "external_ref": null,
+  "title": "w-3fe8 turn_checks test-port repairs (T1–T6) for the gating removal",
+  "outcome": "The turn_checks failures classified as test-port defects in the C2 diagnostic (test-5f8ebb30, tree 92a1830d) are repaired in tests only. Each changed assertion asserts the current Execution Observability equivalent of what master asserted, with no assertion dropped without an equivalent, no raised timeouts or budgets, and no retries.",
+  "acceptance": [
+    "Only test files change: tests/engram_unadmitted_runtime_reporting.rs, engram_reported_ends.rs, engram_carried_checks.rs, engram_turn_checks.rs, engram_checkpoint_result_recovery.rs, engram_claude_runtime_turns.rs, engram_claude_outstanding_work.rs (and any U2/U3 test proven T)",
+    "Every changed assertion carries a rationale naming what master asserted there and the current EO equivalent asserted instead; no assertion is dropped without an equivalent, and no timeout, budget or retry is added",
+    "The fake observation producer validates source_sighting receipts with from_sighting_result",
+    "The T1–T6 tests listed in the C2 classification pass on the compile owner's run, except the claim_deferral relabel test, which waits on the naming-association decision"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 T1-T6 ports + EOFixtureHost exactly-once Drop present; final ec83ef0a supersedes strong_count-racy draft. Ledger/compile-owner test mapping remains.",
+    "completed_at": "2026-11-08T19:22:56.257561200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

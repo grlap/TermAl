@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c403-7691-9d9f-8a1b1eab1988",
+  "external_ref": "tm-6zc",
+  "title": "Avoid quadratic UTF-8 recounts during streamed text deltas",
+  "outcome": "ui/src/live-updates.ts recomputes the UTF-8 byte length of the entire accumulated message for every textDelta when validating textStartByte. Long streamed replies therefore perform O(n^2) encoding work on the SSE hot path.",
+  "acceptance": [
+    "Track or derive the current UTF-8 byte offset incrementally without rescanning the full accumulated prefix on each delta. Preserve mismatch/resync behavior and add multibyte plus long-stream regression coverage demonstrating linear work."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

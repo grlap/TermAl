@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-5669714d40b3",
+  "external_ref": "tm-m6r1.4",
+  "title": "Work source discovery: report unsupported Windows Engram shims as unavailable",
+  "outcome": "Round-1 Claude Low, work_visualizer_process.rs:32: .cmd/.bat are safely rejected only at command launch, after source readiness was computed, and return client 400 for an unsupported host configuration. Detect the restriction during metadata/source validation, surface an unavailable state and an appropriate conflict/upstream status on detail or continuation. Keep argv safety; never execute untrusted filters through cmd /C.",
+  "acceptance": [
+    "Tests for .cmd/.bat source discovery and direct detail behavior prove no process launch; user gets explicit configuration diagnostic; limitation documented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

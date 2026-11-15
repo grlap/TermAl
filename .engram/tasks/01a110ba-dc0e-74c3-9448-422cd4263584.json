@@ -1,0 +1,29 @@
+{
+  "id": "01a110ba-dc0e-74c3-9448-422cd4263584",
+  "external_ref": null,
+  "title": "Recover cargo test credit from a Claude-persisted full output (bounded, host-verified tool-results path) instead of refusing",
+  "outcome": "A passing cargo test whose output Claude persisted to a file earns credit from the persisted file's bounded tail, read only from a host-derived and verified location, so agents need not rerun with -q.",
+  "acceptance": [
+    "A design note agreed by the coordinator fixes: the host-derived canonical expected directory for the runtime's session tool-results, regular-file and no-reparse-escape checks, exact result ownership (tool_use id to path), bounded bytes, size and truncation validation against persistedOutputSize, and which summaries a bounded tail can and cannot vouch for.",
+    "Credit is granted only when the verified tail contains the passing summary and every safety check passes; any failed check falls back to the explicit output-cut refusal. Tests cover a valid persisted file, a path outside the expected directory, a reparse escape, a size mismatch, a missing file and a tail without a summary."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "design",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

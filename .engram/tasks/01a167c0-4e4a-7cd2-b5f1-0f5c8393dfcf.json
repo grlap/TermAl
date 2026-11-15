@@ -1,0 +1,33 @@
+{
+  "id": "01a167c0-4e4a-7cd2-b5f1-0f5c8393dfcf",
+  "external_ref": null,
+  "title": "Assert original-error preservation and missing-parent acceptance in Windows state-path controls",
+  "outcome": "Strengthen the existing Windows state-path guard regression controls so preserving the original io::Error and accepting independently observed missing-parent error3 are discriminated, without weakening fail-closed path policy.",
+  "acceptance": [
+    "Unresolved namespace-observation and unrelated primary-error controls assert the original io::Error raw code survives as the error-chain cause, with independent-observation context where applicable.",
+    "A real missing-parent spelling exercises native error3 through the guard and remains distinct from unresolved denial; relevant focused controls pass without retries, waits or timeout inflation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "gate-failure",
+    "pre-existing",
+    "review-follow-up",
+    "test-runner",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16534-0d24-7881-8ebe-11f5eab5c235",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

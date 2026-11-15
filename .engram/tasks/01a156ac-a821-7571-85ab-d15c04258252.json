@@ -1,0 +1,28 @@
+{
+  "id": "01a156ac-a821-7571-85ab-d15c04258252",
+  "external_ref": null,
+  "title": "Mark the test-only mailbox receipt acknowledgement wrapper explicitly",
+  "outcome": "The mailbox receipt acknowledgement wrapper used only by tests no longer produces a production dead-code warning, with receipt and authority behavior preserved.",
+  "acceptance": [
+    "Attribute the new acknowledge_page dead-code warning and restrict or remove the production-unused wrapper without weakening receipt, declaration or authority validation.",
+    "Run the appropriate check/test selection and confirm production cargo-check no longer reports acknowledge_page as unused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "warning-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

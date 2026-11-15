@@ -1,0 +1,40 @@
+{
+  "id": "01a19336-6946-7502-b7b6-2e2e7001a9cf",
+  "external_ref": null,
+  "title": "Test-run UI pages history through the existing GET /api/test-runs and exact-id routes instead of the snapshot",
+  "outcome": "The Test Runs panel retrieves paged history and exact-id evidence through the existing read-only routes, while preserving live status, badges, waits and safe recorded-path fallback. Backend snapshot reduction and retention remain owned by the parent.",
+  "acceptance": [
+    "The Test Runs panel reads history through the existing paged GET /api/test-runs route, loads a first page on open or project change, fetches further pages only through explicit Load older, and aborts or ignores stale project/unmount responses; session and state filters apply to loaded history.",
+    "A transcript card whose run is absent from the live snapshot and loaded pages can read its evidence through the existing exact-id GET route; its recorded literal path and fixed RUN_DIRECTORY shell template remain available while that read is pending or fails, and the UI starts, retries or cancels no test execution.",
+    "Newer revision-gated live summaries take precedence over older page replies, loaded history survives later snapshot omission, canonical aliases are deduplicated and explicit live restoration remains possible; existing badges, waits and live-stream behavior remain unchanged, without merging complete history into global app state.",
+    "Focused UI regressions and TypeScript checking pass on the exact candidate; an independent Codex/Claude review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree before landing. This child makes no backend snapshot-size, retention-policy or live performance improvement claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "state-flood",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14b89-c82a-7330-b1db-5f17deb1e060",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed the already-landed paged Test Runs UI on its own evidence, with fresh TypeScript and 23/23 panel tests passing on clean current master; no new source changes.",
+    "completed_at": "2026-11-08T04:37:45.006230700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

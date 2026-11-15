@@ -1,0 +1,26 @@
+{
+  "id": "01a0eb79-da55-7e30-8177-2c8441ff4d27",
+  "external_ref": null,
+  "title": "Verify whether Claude Code and Kimi end an MCP tool call before TermAl's longest delegation bridge allowance",
+  "outcome": "Raised by the Kimi /review-code child in the w-33bee3bec3f0 review round 3 (delegation-3b289ad7-409e-4a5c-9833-eb33f29fb9a3, session-8468). TermAl now gives Codex the delegation server's tool_timeout_sec (about 226 s in production), because Codex ends an MCP tool call after 60 s by default. Claude and Kimi sessions also call the delegation tools: reviewer children call termal_review_freeze_check (75 s allowance), and roots call naming (112 s) and termal_evaluate_acceptance (about 220 s). If either harness ends a tool call earlier by default, the caller sees a failure while the server may still keep the result. That is the same failure mode the Codex setting fixes. The acceptance-evaluation allowance already exceeded 60 s before the doubling, so the question predates it. Nothing in the repository shows such a limit either way. Claude Code has an MCP_TOOL_TIMEOUT environment setting whose default is not checked here; Kimi's is unknown.",
+  "acceptance": [
+    "The default MCP tool-call timeout of the Claude Code and Kimi versions TermAl launches is established from their documentation or source; where it is shorter than the longest TermAl delegation bridge allowance, TermAl sets the equivalent per-server or environment timeout when it launches that agent, with a test on the launch configuration"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

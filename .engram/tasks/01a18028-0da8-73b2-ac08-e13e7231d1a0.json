@@ -1,0 +1,29 @@
+{
+  "id": "01a18028-0da8-73b2-ac08-e13e7231d1a0",
+  "external_ref": null,
+  "title": "Clarify or fix 'durableButNotWoken' disposition for a review result submitted while the parent holds a registered delegation wait",
+  "outcome": "When a review child's structured result is reported 'durableButNotWoken' while its parent is parked on a registered fan-in delegation wait, that disposition is either documented as expected, with the wait delivering the wake, or fixed if a wake is actually owed. The leaf's message no longer suggests a possible loss when none occurs.",
+  "acceptance": [
+    "A note states, from source, which component wakes a parent in a registered delegation wait when a child submits, and whether 'durableButNotWoken' on the child's submission is expected in that case.",
+    "If expected, the leaf-facing wording no longer implies the parent may need manual recovery when a registered wait covers it, or docs explain the case. If not expected, a fix with a test lands under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "mailbox",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

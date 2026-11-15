@@ -1,0 +1,37 @@
+{
+  "id": "01a16d12-ec1a-7ba3-87f0-001e3dde7f84",
+  "external_ref": null,
+  "title": "Engram-project sessions stopped dispatching queued prompts since ~06:50Z (idle, unpaused, wakes queued 1h45m+) after gated control was re-enabled",
+  "outcome": "Engram-project sessions stopped dispatching queued prompts since ~06:50Z (idle, unpaused, wakes queued 1h45m+) after gated control was re-enabled",
+  "acceptance": [
+    "The incident's most likely mechanism is identified with source evidence and the runtime evidence that survives (a project-reset fence makes the queue drain return without dispatch or reason, and the release drains serially), the part that cannot be established from surviving evidence (which step held the fence) is stated as unproven and instrumented so the next occurrence names it, and Engram-project sessions that are idle with queuePaused=false and queued prompts start their next turn or show an explicit, actionable waiting reason in their preview instead of stalling silently.",
+    "A regression test reproduces the stall shape (gated project, queued mailbox wake, idle and unpaused session) and passes after the fix; focused tests pass on the exact input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "dispatch",
+    "engram-control",
+    "greg-reported",
+    "incident"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed on master in cb9f00f48871ff63df7f18e53aa6ce61f57d686b (\"fix: expose reset queue waits and batch test lifecycle updates\", parent 477d213b), which is on origin/master (now da6c938b).\n- The landed change is the reviewed input fp 409cb49b / tree dd9e4164. Six of its ten paths have identical blobs. The other four (main.rs, persisted_state.rs, session_crud.rs, state.rs) carry identical +/- change lines, re-based onto the moved master.\n- Delivered: an explicit waiting reason on idle, unpaused sessions whose queue a project-reset fence holds. Every way the fence ends (release, abort, rollback, early release) restores the preview at a newer revision and drains the held queues. Phase timing for each project reset is written to stderr, with the fence claim time.\n- Evidence:\n  - review R7 clean (Codex delegation-f8baa5e6, Claude delegation-3cd20e13);\n  - GREEN-7 test-26724b9e 700/0;\n  - independent evaluation 48d5d11f passed 2/2, after C1 was narrowed on Fable2's concurrence.\n- Follow-ups are filed: w-f4e2528bde03, w-64a786a31fe4, w-8ea5a8af66fc, w-a1e3b28579f2 and w-8bcc589c02fb.",
+    "completed_at": "2026-10-28T04:36:09.496205300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

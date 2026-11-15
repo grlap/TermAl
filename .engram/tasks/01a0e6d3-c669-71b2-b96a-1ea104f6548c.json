@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c669-71b2-b96a-1ea104f6548c",
+  "external_ref": "tm-nrao.26",
+  "title": "Extract acceptance policy recovery state and label form groups",
+  "outcome": "Claude7077 final Low/Note: AcceptanceEvaluationSettingsBody combines defaults, policy display, and CAS/sessionStorage recovery. Extract a focused hook/reducer without changing unknown-write, exact-key, unmount ownership, late-response, or stale-read invariants. Retain DOM regressions and add transition tests where useful. Give both fieldsets accessible legends/group names. Behavior-preserving follow-up to tm-nrao.23, not required for C/H/M review threshold.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c668-7032-a387-eb4b41f2d431",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

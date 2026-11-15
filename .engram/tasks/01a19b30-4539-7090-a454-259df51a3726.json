@@ -1,0 +1,41 @@
+{
+  "id": "01a19b30-4539-7090-a454-259df51a3726",
+  "external_ref": null,
+  "title": "Adapt the assigned source-observation test closure to ordinary Execution Observability",
+  "outcome": "Source-only six-path contribution assigned by Fable2#2261, integrating through Sol-03d4. Baseline tree8169ddb9bb9be44af1a08f7c9cae205edf020516,74 original tests. Tracker child is optional only because parent is held by the integrator; assigned delivery scope remains required by coordinator.",
+  "acceptance": [
+    "Only the six assigned test files change relative to frozen baseline8169, using ordinary fixtures/APIs and no product, mount, turn-observation, drift, generic adapter, turn-check or naming edits.",
+    "All74 original tests have individual dispositions, including substantive current-owner controls for applicable receipt/custody/idempotency/scope/authority/durability/removal races; no recreated gates or ordinary baseline writer.",
+    "Scoped patch, immutable tree/full blob IDs, disposition ledger and genuine gaps returned to Sol-03d4 with source-only limits and summary to Fable2; no Cargo/parser/formatter/agents/commits/gates/review/READY. Honor normal tracker claim and own-root naming requirements; do not name or edit the parent source root."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gated-control",
+    "greg-directed",
+    "oracle-migration",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered assigned SOURCE-ONLY six-file closure to Sol-03d4 with coordinator summary: immutable TREEa69009f2bfb42a2ec983b845625765a0a4919a57 vs BASE TREE8169ddb9bb9be44af1a08f7c9cae205edf020516; exact6-path patch/full blobs/74-entry disposition ledger and explicit limits.46 current source tests include ordinary report/receipt/CAS/worker/removal/fence/SQLite-WAL and actual public kill/prepare owner controls. No Cargo/compiler/source parser/formatter/tests/agents/commits/review/gate/READY or runtime verification. Native Git source boundaries and whitespace only observed; compilation/discovery/runtime remain integration-owner work. Child/source delivery complete, parent implementation/integration remains open. Source root and a690/6dee artifacts retained frozen under parent evidence002b1ab0022e4a08b2045faba166d82a, final child evidencec85fa7907f474142abea082b1c1904fb. No acceptance evaluation requested under current Greg OFF policy.",
+    "completed_at": "2026-11-02T08:16:26.800198900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

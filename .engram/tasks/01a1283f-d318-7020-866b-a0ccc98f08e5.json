@@ -1,0 +1,42 @@
+{
+  "id": "01a1283f-d318-7020-866b-a0ccc98f08e5",
+  "external_ref": null,
+  "title": "termal_acknowledge_mailbox rejects a receipt that the same participant's read just returned (\"mailbox receipt was not issued to this participant and mailbox\")",
+  "outcome": "A receipt returned by termal_read_mailbox to a participant can be used by that same participant to acknowledge the page; when it cannot, the refusal says why (no persisted page row, a different session identity, or an expired page) instead of a generic \"not issued\".",
+  "acceptance": [
+    "The holder's note classifies, with file:line, why src/mailboxes.rs:2459-2468 found no mailbox_read_pages row for (receipt, mailbox_id, session_id) in the occurrence below. Where the live evidence needed to decide is unavailable (no host request log, no live-store read), it instead shows the miss irreproducible from source, with each candidate (session identity drift in the MCP bridge or the CLI, a receipt quoted from a message body, an uncommitted or rolled-back issuance, a page-row deletion, a host restart) ruled out with file:line evidence or left open with what would decide it.",
+    "A test fails on unchanged code and passes after the fix, showing that a receipt refusal names which binding failed: a receipt never issued (unknown), a receipt issued to the mailbox's other participant (without disclosing that session), or a receipt issued for a different mailbox. It also shows that no refused receipt moves the cursor, and that the receipt from the participant's own read still acknowledges.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

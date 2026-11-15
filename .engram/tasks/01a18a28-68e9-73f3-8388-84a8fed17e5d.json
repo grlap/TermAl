@@ -1,0 +1,28 @@
+{
+  "id": "01a18a28-68e9-73f3-8388-84a8fed17e5d",
+  "external_ref": null,
+  "title": "Control cleanup remains permanently pending after its worker exits with failed termination or wait",
+  "outcome": "The retained exact control child has a safe completion path after cleanup failure and remains admission-blocking until actual reap is confirmed.",
+  "acceptance": [
+    "A deterministic worker-ended cleanup failure followed by successful termination/reap clears only that exact child's pending hold.",
+    "A failed or unconfirmed reap never admits a successor or fabricates cleanup completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

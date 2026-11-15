@@ -1,0 +1,45 @@
+{
+  "id": "01a128d1-5d6a-7e73-89e5-43aea73d0c17",
+  "external_ref": null,
+  "title": "Capture Engram's per-request phase trace (ENGRAM_MCP_PHASE_TRACE) for control incidents and show it as an expandable card diagnostic (Greg 2026-10-11)",
+  "outcome": "Per Greg's direction via Engram::Advisor (TermAl mailbox b9d13887 #589, 2026-10-11 02:34Z): Engram already offers ENGRAM_MCP_PHASE_TRACE=1, bounded JSON-line phase events on stderr correlated by request id, but TermAl's cards don't retain or attach them, so a 20 s control incident can't say whether process creation, begin, the response wait or the acknowledgement stalled. Deliver: (1) a bounded per-request capture plan: phase, elapsed time, classification/code, correlation id, retained only for the incident's request or in a bounded ring (no unbounded logging); (2) a UI diagnostic plan: normal UI stays concise, and the detail is expandable on the control card (coordinated with w-5b823829eb80's expandable section and w-cfcf10b68c9b's C11(c) host phase split); (3) the exact config decision it needs (how the trace is enabled for the host's Engram control processes), named for Greg, NOT enabled globally by this item. A plan first, then implementation after the decision.",
+  "acceptance": [
+    "The coordinator/Advisor receives this capture/UI/config plan with exact producer correlation, bounds, peer contracts and unresolved configuration choice; no code/config is changed before the decision.",
+    "After recorded scope/config decision, capture is bounded and independently drained, correlates exact process/frame/request/card across timeout/replacement/late lines, retains only permitted normalized incident data, and diagnostics never decide authority/retry/credit (test-bound at implementation).",
+    "Cards retain concise normal/recovered presentation, show optional expandable host/Engram phase diagnostics with honest partial/loss/disabled status, and older cards remain compatible (test-bound at implementation).",
+    "Exact-input full gate and independent Codex/Claude pair pass before an implementation landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "control-plane",
+    "diagnostics",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

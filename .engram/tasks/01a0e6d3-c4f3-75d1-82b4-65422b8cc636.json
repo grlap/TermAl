@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4f3-75d1-82b4-65422b8cc636",
+  "external_ref": "tm-dy69",
+  "title": "Split src/delegation_mcp.rs below 3,000 lines",
+  "outcome": "Found by the Claude /review-code of tm-5gi4 phase 2, round 9 (freeze 96039977), Low.\n\ntm-5gi4 phase 2 adds the termal_name_source_root tool (tool_name_source_root plus source_root_tool_definition, about 57 lines) to src/delegation_mcp.rs, which takes the file from under 3,000 lines to 3,039. That is past the ~3,000-line threshold for Rust modules.\n\nFix direction: move the root-only tool definitions and bodies into a split module, or put the source-root tool beside engram_source_roots.rs. Per CLAUDE.md, a split commit is a pure code move, and each new file gets a header naming what it owns, what it does not own and the file it came from.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "file-size",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

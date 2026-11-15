@@ -1,0 +1,28 @@
+{
+  "id": "01a1d1b6-9cd6-7e41-8612-7b4c7f9a9cfb",
+  "external_ref": null,
+  "title": "Refresh the sidebar clock snapshot before a first or remount paint",
+  "outcome": "Avoid showing an old shared-clock instant on first render after all subscribers have unmounted, preserving one minute timer and hidden-page suspension.",
+  "acceptance": [
+    "A controlled rendering check distinguishes the first committed clock content from the later subscription correction after a long unmounted interval.",
+    "The clock first render shows the current minute and retains one shared timer, StrictMode cleanup and no hidden-page update scheduling."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

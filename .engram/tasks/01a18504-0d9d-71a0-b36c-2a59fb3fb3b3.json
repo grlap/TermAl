@@ -1,0 +1,27 @@
+{
+  "id": "01a18504-0d9d-71a0-b36c-2a59fb3fb3b3",
+  "external_ref": null,
+  "title": "Read-only Bash refusal explainer (claude_bash_refusal_rule) does not know the bash quoted-separator mode or the new refusals, so it names the wrong reason",
+  "outcome": "claude_bash_refusal_rule receives the separator mode and follows the checker's real order. It names the refusals that are new since Group B:\n- a quoted separator outside a pattern reader;\n- the word-bounded 2>/dev/null strip;\n- --%;\n- typographic quotes;\n- an escaped quote combined with a quoted separator.",
+  "acceptance": [
+    "Read-only Bash refusal explainer (claude_bash_refusal_rule) does not know the bash quoted-separator mode or the new refusals, so it names the wrong reason is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "read-only-checker",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c42c-76a0-8c5c-6d53caaf275e",
+  "external_ref": "tm-8t7e",
+  "title": "Resend an UNKNOWN Engram turn outcome once, with the same idempotency key, before showing Waiting/Unknown",
+  "outcome": "Turn-gate simplification Greg adopted 25 Sep (Engram::Opus relay, mailbox #200). On an UNKNOWN outcome (timeout or transport loss) TermAl resends the byte-identical request once, automatically, with the same idempotency key. Engram answers a repeated key with the decision it already made. Only a second UNKNOWN reaches the user as Waiting/Unknown with Resume. A real refusal still goes straight to the user, with no resend. Related: tm-8b7y (durable uncertain turn-begin on child cancel/fail). Acceptance: tests for one resend on timeout and one on transport loss, no resend after a refusal or a grant, the same key and body on the resend, and Waiting/Unknown after the second UNKNOWN.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f8cd-723c-7580-a8ae-7224e6317e55",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DUP. Same-key automatic replay is criterion 2 of w-7224e6317e55.",
+  "completion": null
+}

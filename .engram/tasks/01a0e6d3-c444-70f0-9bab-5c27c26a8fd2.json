@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c444-70f0-9bab-5c27c26a8fd2",
+  "external_ref": "tm-7cu.19.3",
+  "title": "Response Board tabs, project routing, and persistent staging tray",
+  "outcome": "Extend the existing singleton Response Board into one global durable card collection partitioned by lightweight tabs. Each workspace pane remembers its active Response Board tab and per-tab camera state. Pinning creates an immutable staged card in the selected tab; staged cards can be previewed, placed on the spatial canvas, returned to staging, moved between tabs, or deleted. Add project-default tabs and optional routing by the source session project while preserving custom cross-project tabs and the existing legacy API behavior.",
+  "acceptance": [
+    "Existing cards migrate verbatim into the default Response Board tab as placed cards; tabs can be created, selected, renamed, ordered, and safely deleted; each pane independently persists active tab and per-tab view state; staged cards persist across restart and are displayed as an accessible compact tray; drag or keyboard placement transitions staged cards to placed without copying their immutable snapshot; placed cards can return to staging or move tabs; pin is idempotent per tab and routes to last-active tab in V1 and optionally to a project-default tab in V2; the legacy /api/response-board contract remains compatible and returns default-tab placed cards; mobile/bot compatibility and full migration/API/UI regressions pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c408-7451-8bb4-89b57508b77e",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

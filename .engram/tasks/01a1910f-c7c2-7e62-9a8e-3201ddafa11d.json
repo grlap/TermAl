@@ -1,0 +1,30 @@
+{
+  "id": "01a1910f-c7c2-7e62-9a8e-3201ddafa11d",
+  "external_ref": null,
+  "title": "Put committed review identities and boundary results in authoritative structured results",
+  "outcome": "A reviewer reports BASE, COMMIT, TREE and start/end boundary outcomes in structured summary or notes so parent validation does not rely only on prose.",
+  "acceptance": [
+    "review-code directs committed-input reviewers to place identities and both boundary results in the authoritative structured summary or notes, and parent validation can use those fields."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "committed-input-review",
+    "follow-up",
+    "instructions",
+    "review",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18fb2-aa68-7ae1-833d-2637c793f4c2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

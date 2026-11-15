@@ -1,0 +1,38 @@
+{
+  "id": "01a1db75-1ac1-7621-a529-5e86783c69a4",
+  "external_ref": null,
+  "title": "Avoid redecoding settled causal completion history on every scan cycle",
+  "outcome": "Settled originals can be skipped cheaply during periodic scans while boot and pending-row validation preserve the original private custody and receipt invariants.",
+  "acceptance": [
+    "Behavioral or instrumented evidence shows a settled multi-target original is skipped without repeated full settlement/request reconstruction during periodic scans.",
+    "Pending recovery and boot validation remain complete, malformed rows do not grant credit, and no parallel completion registry or unsupported schema field is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "remote-verification",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d3bf-d356-70b1-985a-c82b845900a5",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,68 @@
+{
+  "id": "01a1229a-5b39-72e0-a709-d3e97ac8a353",
+  "external_ref": null,
+  "title": "Refusal healing re-evaluates on a possibly stale binding, so a grant_scope_mismatch after a long park fails once by construction with stale_fence",
+  "outcome": "When Begin-refusal healing re-evaluates and the binding it reuses has been re-fenced (for example, after a long park), the host rebinds once and re-evaluates within the same remaining budget, or refreshes the binding before reuse. The head is then delivered without a Resume, and a definite refusal still ends in a durable, actionable hold.",
+  "acceptance": [
+    "Fail-first: a production-path test with a scripted transport and clock and no synthetic load. A Begin is refused grant_scope_mismatch after the session's binding was re-fenced; on unchanged code the healing re-evaluate is refused stale_fence, the head is terminal, and a Resume is needed. After the fix, the same sequence delivers the head exactly once without Resume: after the healing re-evaluate is refused stale_fence, the host rebinds once and re-evaluates once more, within the remaining admission budget.",
+    "A second stale_fence after the fresh rebind, or an exhausted budget, ends in a durable, actionable hold naming the code. There is never more than one healing rebind per admission, and no retry loop. Tests cover both.",
+    "The existing stale_fence-first path (engram_host_adapter.rs:5320) and the other healable codes keep their behaviour; existing tests stay green.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host",
+    "engram-host-adapter",
+    "host-recovery",
+    "pilot",
+    "reliability",
+    "retained-prompt",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a10c85-3888-7713-8bc7-58cf44d04f2c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Acceptance evaluation 78f9795d1d804f2e830b13b50731573e passed 4/4. Corrected commit 6bf0f68ea82fe5450d75a5ed28de4a3a70601656 is pinned at refs/heads/merger/d3e9-landing with tree 6691d2f4695a1fbcdac0e980e846fbebc0748825, parent 765a9a5a42d11558d05de1cfa782f61882a2b0dc, and exact gated LF blobs. Defective CRLF commit 76e1819d85977a40c7d1aefe2c036bcc1baba4c4 is superseded and must not land. Handing corrected commit and gate/review evidence to integration owner Opus2; not pushed here.",
+    "completed_at": "2026-10-11T05:29:59.571572Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

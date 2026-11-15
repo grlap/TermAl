@@ -1,0 +1,29 @@
+{
+  "id": "01a14c0e-6f1c-72b1-9b5a-9ccd13ab0028",
+  "external_ref": null,
+  "title": "Acceptance evaluator brief lists a non-holder note as citable evidence without a context-only mark, so a passing verdict is refused for citing it",
+  "outcome": "Acceptance evaluator brief lists a non-holder note as citable evidence without a context-only mark, so a passing verdict is refused for citing it",
+  "acceptance": [
+    "The failing path is identified with file:line: where the host-prepared evaluator brief assembles its evidence list and why a non-holder / pre-claim observation (not selected by the requester) appears in it without being marked context-only.",
+    "A regression: a brief built for an item whose notes include non-holder observations lists only current-run holder notes and gates as citable, and marks every other note it shows as context-only (or omits it); an evaluator following the brief can no longer produce a verdict the tracker refuses for citing ineligible evidence.",
+    "The citable set the brief presents agrees with the tracker's submission eligibility rule (the same predicate or a shared definition), proven by a test that feeds both the same item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

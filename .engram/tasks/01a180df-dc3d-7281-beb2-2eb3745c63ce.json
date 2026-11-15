@@ -1,0 +1,29 @@
+{
+  "id": "01a180df-dc3d-7281-beb2-2eb3745c63ce",
+  "external_ref": null,
+  "title": "Document the read-only reviewer input-identity contract (manifest, last-check rule, refusal codes, inputIdentity, boot fail-closed, non-root cwd)",
+  "outcome": "docs/features/review-freeze-verification.md describes the reviewer input-identity contract that w-228b introduces, and docs/features/agent-delegation-sessions.md links to it. The description covers:\n- the admitted manifest at .git/termal-review-input-<id>-<n>.json;\n- the rule that the last check must be Verified;\n- the identity-* refusal codes and the 429 publication and observation in-flight refusals;\n- the inputIdentity envelope field;\n- the boot fail-closed drift;\n- what happens when the reviewer's cwd is not a Git worktree root, is not Git, or has configured filters: it can then submit only status failed without findings.\nThe coordinator confirms that the non-root behaviour is the intended scope, or the change admits at the enclosing worktree root instead.",
+  "acceptance": [
+    "docs/features/review-freeze-verification.md documents each element of the outcome in words consistent with src/delegation_review_input.rs, and docs/features/agent-delegation-sessions.md cross-links it.",
+    "The non-root and non-Git cwd behaviour is either confirmed as intended in a coordinator note and documented, or changed to admit at the enclosing worktree root with a test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

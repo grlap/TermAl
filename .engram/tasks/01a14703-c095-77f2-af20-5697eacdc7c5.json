@@ -1,0 +1,29 @@
+{
+  "id": "01a14703-c095-77f2-af20-5697eacdc7c5",
+  "external_ref": null,
+  "title": "Cover remaining routine MCP approval fences and manual-response ownership races",
+  "outcome": "Production-route tests cover read-only authenticated control-plane exemptions, unavailable/cancel decisions, stale manual pending requests returning409 without send, and replaced runtime/thread recovery fences.",
+  "acceptance": [
+    "Cover remaining routine MCP approval fences and manual-response ownership races is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "approvals",
+    "codex",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

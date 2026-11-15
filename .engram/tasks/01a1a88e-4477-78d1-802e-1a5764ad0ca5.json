@@ -1,0 +1,30 @@
+{
+  "id": "01a1a88e-4477-78d1-802e-1a5764ad0ca5",
+  "external_ref": null,
+  "title": "Assert successful canonical outcomes in the scheduler parity witness",
+  "outcome": "The scaled scheduler parity test requires successful canonical retention for every selected root, so Source transport failures cannot satisfy the positive row merely by recording attempted reads.",
+  "acceptance": [
+    "After the real scheduled pass completes, every expected root has a recorded reclamation attempt whose refusal is None; the existing reference-plan, exact-read, flight, authority and deadlock-guard assertions remain intact.",
+    "Focused scheduler coverage passes on the corrected input without a wall-clock performance assertion, timeout increase or retry-as-fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "reclamation",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

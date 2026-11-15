@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-a4ea-7850-ba7c-62d29e9956f2",
+  "external_ref": null,
+  "title": "Release passive hydration read tokens on missing-session early return",
+  "outcome": "Release passive hydration read tokens on missing-session early return",
+  "acceptance": [
+    "Release passive hydration read tokens on missing-session early return is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

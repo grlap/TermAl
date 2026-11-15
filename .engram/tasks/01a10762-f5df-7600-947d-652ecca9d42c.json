@@ -1,0 +1,28 @@
+{
+  "id": "01a10762-f5df-7600-947d-652ecca9d42c",
+  "external_ref": null,
+  "title": "Test the automatic retry tick's concurrent branch with two attempts that both succeed",
+  "outcome": "Test the automatic retry tick's concurrent branch with two attempts that both succeed",
+  "acceptance": [
+    "Test the automatic retry tick's concurrent branch with two attempts that both succeed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host-adapter",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

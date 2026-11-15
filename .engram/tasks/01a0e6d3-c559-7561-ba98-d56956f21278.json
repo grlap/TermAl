@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c559-7561-ba98-d56956f21278",
+  "external_ref": "tm-lcn3",
+  "title": "Send to a removed session's id fails 404 with no hint that a same-named session replaced it",
+  "outcome": "Reported by Termal::Fable (session-7883, mailbox-2108dbf6 #7). At about 01:24Z on 2026-09-27, Engram::Fable (session-5135) sent to Termal::Fable by the id session-4983, which it had from an earlier mailbox, and got 404 'target session not found'. Termal::Opus's send to session-4983 at about 01:25Z got the same 404. The role now lives in session-7883, under the same name 'Termal::Fable'. The existing mailbox does record the departure: in Termal::Opus's list, mailbox-12c2813b shows participant session-4983 with leftAt 2026-09-26T23:37:20Z. But the 404 names neither that nor a live session with the same name, so each agent had to call termal_list_sessions to recover. Not decided: whether the error should name a live session with the same display name, whether an agent should resolve by name instead, or whether this is docs-only. Id sends staying strict is correct, so a send must never be silently rerouted to a different session.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

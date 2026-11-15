@@ -1,0 +1,28 @@
+{
+  "id": "01a1caef-5aee-7b63-986f-52a4b9bbb284",
+  "external_ref": null,
+  "title": "Clear unused evaluation comparison endpoints when their active trace is dropped",
+  "outcome": "Dropping an active observation trace without an ordinary close clears its now-unusable persisted evaluation endpoint.",
+  "acceptance": [
+    "Restart recovery and generation-mismatch/drop paths are inspected; a behavioral fixture demonstrates appropriate endpoint retirement without admitting a later turn or changing immutable queued reports."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "execution-observability",
+    "persistence",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca5f-4ff3-7d92-a00e-ab5d3352bbc0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a15a40-ddf3-77f3-aaca-17ade46b971b",
+  "external_ref": null,
+  "title": "Cover withheld-Resume classifier exclusions and the automatic capacity-nonce bypass explicitly",
+  "outcome": "Targeted negative tests discriminate the withheld-Resume classifier's existing exclusion and automatic-retry boundaries.",
+  "acceptance": [
+    "Tests prove retained bind/evaluate intent, active or uncertain grants, retry records, recovered admission and delivery receipts do not take the new local withheld-Resume refusal path.",
+    "Tests discriminate nonmatching operation/code/remote-application cases and the automatic capacity-nonce bypass, without real provider calls or timing sleeps.",
+    "The tests and maintained gate pass on the exact landing input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

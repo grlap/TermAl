@@ -1,0 +1,28 @@
+{
+  "id": "01a11f54-bbd5-7750-8735-5fb2c3a4b986",
+  "external_ref": null,
+  "title": "declared-test-commands.md still says the live proof is pending",
+  "outcome": "docs/features/declared-test-commands.md no longer says the live proof is pending. It states that the declared dotnet runner was proven live on 2026-10-09 (PASS credited, FAIL published, a non-matching command is not a check, a missing artifact is UNKNOWN withheld with its reason), citing w-529b31db8e07, and no other text changes.",
+  "acceptance": [
+    "Line 3 of docs/features/declared-test-commands.md (the pending-live-proof sentence) is replaced by a statement of the completed live proof that names its four outcomes; the rest of the file is unchanged.",
+    "The landing passes the repository's full gate on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "declared-tests",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

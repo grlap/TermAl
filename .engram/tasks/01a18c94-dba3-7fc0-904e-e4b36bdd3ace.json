@@ -1,0 +1,32 @@
+{
+  "id": "01a18c94-dba3-7fc0-904e-e4b36bdd3ace",
+  "external_ref": null,
+  "title": "Harden utilization configuration retention, invalid-snapshot diagnostics and refresh-cap fixture isolation",
+  "outcome": "Address the three nonblocking utilization findings from the batch-2 v2 Sonnet review while preserving the cached observation-only contract.",
+  "acceptance": [
+    "Sampler retains the last valid configuration when StateInner is temporarily busy rather than skipping every native metric sample.",
+    "Peer snapshot validation failures use an appropriate bounded diagnostic distinct from host identity mismatch.",
+    "The refresh-cap test uses an inert scripted sampler and continues to verify the authenticated concurrency cap."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-directed",
+    "observability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18ac3-0c9b-7e60-9738-24c75af616ab",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

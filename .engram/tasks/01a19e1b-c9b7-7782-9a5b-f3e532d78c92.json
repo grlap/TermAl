@@ -1,0 +1,29 @@
+{
+  "id": "01a19e1b-c9b7-7782-9a5b-f3e532d78c92",
+  "external_ref": null,
+  "title": "Remove the five redundant post-restart default capture installs in the EO reporting tests",
+  "outcome": "Remove the five redundant post-restart default capture installs in the EO reporting tests",
+  "acceptance": [
+    "The five `install_reporting_source_capture(&restarted);` calls made redundant by restart_reporting_state's pre-listen install are removed: engram_unadmitted_runtime_reporting.rs in restart_before_reply_replays_the_same_report_from_real_session_storage, an_identity_collision_is_terminal_disclosed_and_not_sent_again and a_collision_whose_settlement_is_not_stored_is_never_resent_live_and_replays_identically_after_restart; engram_unadmitted_reporting_repairs.rs in restored_closing_delete_retry_preserves_the_paused_successor_without_provider_replay and restored_closing_capture_uses_its_pinned_work_without_a_control_rebind",
+    "The custom slow capture hook in restored_closing_capture_survives_a_source_measurement_longer_than_the_rpc_cap stays installed between read.wait() and read.release()",
+    "The affected tests pass unchanged otherwise"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "execution-observability",
+    "test-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c68f-7871-9163-b632b2fd4e9f",
+  "external_ref": "tm-p8d9",
+  "title": "Both review children are the same instrument: nothing in the pair ever runs the product",
+  "outcome": "PROPOSAL, needs Greg's decision because it changes the reviewer contract (Fable, 2026-09-08, from a comparison Engram::Fable drew between his review pair and ours).\n\nWHAT WE HAVE. /review-changes spawns two children, both writePolicy readOnly, and per the parent's own report of today's run there was \"no manual browser/runtime validation\". Neither child runs anything - and by tm-i5mx a read-only Claude child cannot call any MCP tool either. So the pair is two instances of ONE instrument: reading.\n\nWHY THAT MATTERS MORE THAN A COVERAGE GAP. There is a class of defect that reading cannot reach in principle rather than by inattention: one where the behaviour arises in a dependency or a runtime rather than in our source. The code reads as correct and IS correct; the composition is wrong. Engram's instance today: a reviewer ran a CLI and saw it print help and exit successfully instead of returning the requested detail, because option parsing was not closed. No amount of reading their source produces that, because the behaviour is not in their source.\n\nBOTH OF TODAY'S MOST SERIOUS FINDINGS SIT IN THAT CLASS.\n- The bottom-alignment rule gated behind :has(): a browser lacking support discards the whole selector. The behaviour lives in the browser.\n- The visibility handler rejoining a healthy shared stream unconditionally: the behaviour lives in the tab lifecycle and the transport.\nBoth were found by reading, which means they were found by working AROUND the instrument's limit - so we will catch such things when somebody happens to look in the right place, not systematically. Nobody has ever observed the effect of the second one.\n\nWHAT ALSO FOLLOWS ABOUT AGREEMENT. The command file says that when both reviewers report the same issue we merge it and note that both caught it, and I have described a double find to Greg as the strongest signal this arrangement produces. That is too strong for a pair of identical instruments. Agreement between two readers is evidence against one reader's individual mistake - real, worth keeping - but it is NOT evidence of coverage, and it feels like confirmation, which is what makes it misleading. Zero overlap between two DIFFERENT instruments is not a disagreement about quality; it is two disjoint classes being sampled.\n\nTHE PROPOSAL, deliberately small: at the next pair spawn, give ONE child the ability to run the product and leave the other read-only. The point is not more agreement; it is that the two stop being the same device. Cost is roughly a line of policy plus whatever guardrails running needs; the purchase is a defect class we currently do not sample at all.\n\nOPEN QUESTIONS FOR THAT DECISION, not to be waved through: what \"may run\" means precisely against the existing prohibition on reviewer mutation (running is not writing, but a run can write); whether the running child needs the tracker/MCP access that tm-i5mx currently denies; and how a run is kept off the shared machine window without turning every review into a scheduling negotiation.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

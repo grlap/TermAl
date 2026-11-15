@@ -1,0 +1,57 @@
+{
+  "id": "01a15218-5b21-7971-ba0a-c3f102d77999",
+  "external_ref": null,
+  "title": "Automatic admission of a remote host's qualified gate result on the integration host",
+  "outcome": "A gate run by a satellite root session is qualified on its own host and admitted automatically on the integration host as test evidence bound to the tested Git tree, with named non-qualifying reasons, no manual import or registration and no new transport (K1, K3, K4; Engram w-180d6f507470 for remote-producer admission).",
+  "acceptance": [
+    "Tests show a qualified result from a satellite root session's run on the exact tree is admitted automatically through the existing automatic checkpoint or carried-settlement backend when a valid current target basis exists. It is admitted as test evidence with GitTree applicability, with remote execution facts kept distinct from the local association, and with full provenance (origin host and build, run, plan, commit, tree, platform, toolchain, results SHA-256). Test-bound acceptance criteria then pass at the judged revision.",
+    "Tests show every non-qualifying case named in K3 remains visible with its reason and grants no verification credit. Mail is only a wake hint; neither mail, raw result files nor caller declarations alone can create or change a qualified result. No manual import, evidence bundle, registration or additional agent turn is required.",
+    "One live proof each on the MacBookPro and Windows B passes through the automatic path. The full five-stage TermAl gate, the named TermAl landing plan and not a universal remote-qualification count, passes on the exact input with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14afa-6944-7c20-b915-e2b36ee2360e",
+  "child_requirement": "optional",
+  "prerequisites": [
+    "01a14cac-c6b9-77b3-ad29-ab6cc520ffb4",
+    "01a15217-f3ac-7a91-bafe-edb79ddbf033"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

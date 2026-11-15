@@ -1,0 +1,31 @@
+{
+  "id": "01a1b4c9-59a5-7630-bd33-dd461771c100",
+  "external_ref": null,
+  "title": "Keep sessions on removed or unconfigured remotes selectable in the Host filter",
+  "outcome": "Users can choose a host still referenced by session data when its remote configuration is gone, and disabled choices are understandable.",
+  "acceptance": [
+    "A session resolving to an unconfigured remote remains selectable by that host, or the UI applies a documented safe selection fallback when a selected host disappears.",
+    "Removing/changing remote configuration while its host is selected leaves a usable selection and clear label; existing sessions remain accessible."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "review-low",
+    "session-panel",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b4ac-b691-77a3-9373-2050f215638d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

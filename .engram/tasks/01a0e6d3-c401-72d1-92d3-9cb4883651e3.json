@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c401-72d1-92d3-9cb4883651e3",
+  "external_ref": "tm-6dph",
+  "title": "Count long-running TermAl terminal commands as writers for Engram test checks",
+  "outcome": "TermAl terminal commands (run and stream) mark open Engram checks only as they start and as they end, so a check that starts and finishes while a long-running user terminal command (a watcher, a dev server) is in flight is never marked overlapped. Keep an in-flight host-writer count per worktree key (incremented at the first note_engram_host_write, decremented at the second) and treat a non-zero count as another writer when a check starts and finishes. Documented as a limitation. Raised by the Claude round-6 /review-code of tm-winf steps 2+3.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

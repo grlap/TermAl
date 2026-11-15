@@ -1,0 +1,30 @@
+{
+  "id": "01a1d64f-08fe-7c00-bd6b-75f41acfe1a2",
+  "external_ref": null,
+  "title": "Gemini/agy harness cleanups after the Antigravity switch: dead as_cli_value, ungated agy probe tests, live-probe scratch dir, stale docs",
+  "outcome": "The Antigravity harness change leaves no dead code, its deterministic probe tests run in a gate, the live probe cleans up, and docs describe agy acp.",
+  "acceptance": [
+    "GeminiApprovalMode::as_cli_value (src/wire.rs:1248) is removed or used, so cargo check reports no dead_code warning for it.",
+    "The deterministic tests in scripts/agy-acp-contract.test.mjs run in the helper gate (helperTestFiles and the review-freeze workflow) while the live case stays opt-in.",
+    "The opt-in live probe removes its .tmp/agy-acp-contract-* scratch directory after recording its diagnostic.",
+    "docs/architecture.md (~1275), docs/features/agent-integration-comparison.md (~194) and README.md (~306) describe the native `agy acp` harness instead of `gemini --acp`."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gemini",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

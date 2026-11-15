@@ -1,0 +1,29 @@
+{
+  "id": "01a0fe99-cee2-79e3-8ae7-b47c2ea3c221",
+  "external_ref": null,
+  "title": "Record the Stopped delegation hold reason for pre-preparation bind-retry Stop",
+  "outcome": "Record the Stopped delegation hold reason for pre-preparation bind-retry Stop",
+  "acceptance": [
+    "Record the Stopped delegation hold reason for pre-preparation bind-retry Stop is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0fd60-b810-7a23-93df-ab4130110f9e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1410b-5f41-7f40-a19e-4d160f636a09",
+  "disposal_reason": "The parent is completed. Continue as independent work in Sol-a7bb's candidate list; Termal::Opus3 handles it under the TermAl coordinator (Termal::Fable2).",
+  "completion": null
+}

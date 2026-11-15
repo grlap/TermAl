@@ -1,0 +1,30 @@
+{
+  "id": "01a1a41d-e248-7531-9744-1863b2a2868f",
+  "external_ref": null,
+  "title": "Keep an unfinished check open when a nonterminal launcher reply reuses its key for a different command",
+  "outcome": "A mismatched Running plus NotFinished reply cannot silently end the different command still open under that key.",
+  "acceptance": [
+    "A regression drives the real recorder with an open command and a different focused launcher Running/NotFinished reply under its key, and preserves the original unfinished check and honest terminal notice.",
+    "Existing matching launcher handling and non-launcher Success/NotFinished launch acknowledgements retain their intended behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a01f-522e-7d00-9d49-96480bbbe221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a17a59-6a37-7e50-9e8a-db2b1d0eaf52",
+  "external_ref": null,
+  "title": "Withhold satellite outgoing RPC until the central has installed the authenticated context",
+  "outcome": "Withhold satellite outgoing RPC until the central has installed the authenticated context",
+  "acceptance": [
+    "A satellite does not send application RPCs before the first authenticated central heartbeat; local readiness refusal preserves the installed context and all existing enrollment, MAC and replay fences.",
+    "One focused regression covers an attempted pre-central-install RPC followed by authenticated heartbeat readiness and successful RPC without link replacement; the landing candidate passes the standard independent review pair and full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-reported",
+    "post-restart",
+    "startup-race"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1796a-82e5-7763-be05-b0a159b49c7a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 7d5116e3; heartbeat-readiness regression, pair/FULL744d6dee + install55beb66b; closure only, no new handshake or retry owner.",
+    "completed_at": "2026-11-08T19:21:46.515209200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

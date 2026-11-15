@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c694-7920-972c-783063e837a4",
+  "external_ref": "tm-pavt.1",
+  "title": "Keep boxed Work IDs and titles readable in narrow nested rows",
+  "outcome": "Confirmed by Codex session-7088 and parent source inspection; current work-panel.css gives work-row-ref flex:none and white-space:nowrap inside a nonwrapping work-node-main. At narrow split-pane widths or deep hierarchy indentation, the ID overflows and the title shrinks toward zero width. Add a responsive wrap or stack fallback. Preserve approved normal-width priority then bold boxed ID then title, labels aligned with ID, and priority vertically centered with ID. Preserve accessible full ID/title name and selection/reveal behavior.",
+  "acceptance": [
+    "Browser-check long IDs and wrapped titles in narrow nested rows: no ID overflow or collapsed title. Normal-width alignment and six-pixel item spacing remain unchanged. Add focused regression coverage for reading order and label grouping without fragile child-index assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

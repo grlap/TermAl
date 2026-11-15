@@ -1,0 +1,62 @@
+{
+  "id": "01a14698-3fae-71a3-8322-866009b52612",
+  "external_ref": null,
+  "title": "Host does not consume Engram's control_store_busy refusal explicitly; a busy refusal is treated as a generic unknown remote error",
+  "outcome": "Consume Engram's exact control_store_busy contract as a typed retryable current-invocation no-commit refusal, preserving exact retained requests, binding/grant/report, prior uncertainty and existing ownership/durability/budget fences; do not extend that certainty to generic storage failures or add a fresh-key/rebind/busy-loop escape.",
+  "acceptance": [
+    "Only a valid host-private Remote error with exact code control_store_busy for session_bind, turn_evaluate, turn_begin or turn_checkpoint is classified as a typed transient refusal certifying no new commit by that invocation. The code, safe operation/attempt attribution and current-attempt guarantee are retained; process_never_started is not asserted.",
+    "A busy refusal retains the exact original request, payload, idempotency key, control connection and still-valid binding. Bind keeps its unbound/bound intent; Evaluate keeps its intent; Begin keeps its prepared grant and delivery tokens; checkpoint keeps its complete cached report and key. Busy alone never arms a rebind, rotates authority, drops or substitutes the report, or permits provider handoff.",
+    "A fresh Begin refused busy does not acquire new possibly-begun uncertainty merely from that response. Busy on an exact replay does not clear any pre-existing possibly-applied/begun or delivery uncertainty. Generic storage_error, commit/rollback failures, unknown codes, invalid envelopes, transport loss and deadlines retain their existing conservative certainty and operation-specific reconciliation behavior.",
+    "Busy retries use the existing owned, durably acknowledged retained-operation and bounded admission/operation-budget mechanisms, with the same prompt, generation, grant and authority fences. Repeated busy cannot create an unbounded immediate resend loop, a fresh key or budget, or bypass Stop, Cancel, operator pause, expiry, reset, replacement, revocation or a superseded owner; exhausted or invalid authority stays visibly held.",
+    "Permanent regression tests cover real error-envelope decoding, busy-then-exact-success for bind/Evaluate/Begin/checkpoint, earlier-applied replay followed by busy, nonempty checkpoint-report retention, generic-error negatives and owner/budget controls. Documentation cites the pinned producer guarantee and limitations. The exact final input passes the maintained full five-stage gate compiled in this item's named root and the required independent review pair with no outstanding in-scope Medium or higher; failures and unavailable live-store proof remain explicit."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "control-plane",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7d7-73e3-9079-2e77be1495a9",
+  "external_ref": "tm-x9fz",
+  "title": "Bound Engram check snapshots when the enclosing worktree is far above the workdir (home dotfiles repo)",
+  "outcome": "From tm-winf round-7 review (Claude, Low). engram_worktree_root_path uses the nearest ancestor holding .git, so a session in a non-repo folder under a dotfiles repository at the home directory (non-bare ~/.git) snapshots the whole home worktree: every mediated turn close and every recognised check start and end runs a review-freeze of it, bounded only by REVIEW_FREEZE_TIMEOUT (20 s) and the freeze input budgets. Each check start/end also spawns a detached capture thread (EngramCapture::spawn) with no cap on concurrent captures when an agent runs tests in a loop. Options: cap concurrent captures per session; skip or refuse the basis when the root is an ancestor far above the workdir or is the home directory; at minimum keep the documented caveat (docs/features/engram-host-adapter.md, Freshness). Accept: a session under a home-level repository does not freeze the whole home on each check, and concurrent captures are bounded.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

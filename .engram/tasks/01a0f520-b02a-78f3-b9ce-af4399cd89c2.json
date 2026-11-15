@@ -1,0 +1,27 @@
+{
+  "id": "01a0f520-b02a-78f3-b9ce-af4399cd89c2",
+  "external_ref": null,
+  "title": "Make the two-profile one-request-per-action witness deterministic",
+  "outcome": "Replace immediate merged-channel try_recv uniqueness checks with synchronous forwarding acknowledgement or direct wire inspection. Forwarder threads can leave an already-issued extra request in the source channel when the merged receiver looks empty, hiding the defect or attributing it to the following action.",
+  "acceptance": [
+    "A deliberately duplicated request is deterministically detected in the action that issued it without timing waits."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "codex",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f435-1ebc-7890-82b9-53ab42df726c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

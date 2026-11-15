@@ -1,0 +1,45 @@
+{
+  "id": "01a16271-6311-7ee0-a4e2-cbe3ab4b5267",
+  "external_ref": null,
+  "title": "Remove active-session proxy refusals from gate credit while retaining exact evidence and real heavy-run serialization",
+  "outcome": "Implement Greg's directive to eliminate active/inactive-session ceremony and false gate-credit refusals. Serialize actual heavy runs and preserve exact-input evidence; ordinary session activity must not waste an otherwise valid completed gate.",
+  "acceptance": [
+    "Gate eligibility and completed-run credit do not depend on whether a session is active or inactive, its presence, its worktree name, ordinary mail, idle turns or unrelated activity. No replacement session/worktree proxy is introduced.",
+    "Exact-input fingerprint, source/evidence integrity and actual heavy-run serialization remain enforced; contention refusal requires demonstrated resource conflict affecting the gate rather than assumed conflict from session activity.",
+    "Deterministic regression tests reproduce the reported false refusal and cover harmless activity at launch and during settlement alongside true input/evidence changes and actual conflicting heavy runs. The first refused run and unchanged successful retry retain honest provenance.",
+    "The final exact input passes applicable focused checks and the maintained full gate, has the required independent vendor review pair with no outstanding in-scope Medium-or-higher finding, and receives fresh independent acceptance."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "gate-credit",
+    "greg-directed",
+    "host-recording"
+  ],
+  "assigned_to": "Termal::Coder",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

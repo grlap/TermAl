@@ -1,0 +1,30 @@
+{
+  "id": "01a1082b-8556-7341-aac6-2d4800677ed0",
+  "external_ref": null,
+  "title": "Refuse a stale checkpoint-wake owner instead of reporting it as the current duplicate",
+  "outcome": "A checkpoint registration cannot report an older owner registration as the current turn's duplicate; stale identity is named and disposed or explicitly refused without migration.",
+  "acceptance": [
+    "Refuse a stale checkpoint-wake owner instead of reporting it as the current duplicate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-followup",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1d2cc-59e4-73d3-84ae-66f5d575ce89",
+  "external_ref": null,
+  "title": "Name the current source-owner reference in source identity conformance case 6",
+  "outcome": "Name the current source-owner reference in source identity conformance case 6",
+  "acceptance": [
+    "Conformance case 6 explicitly compares later consumer captures against the configured Engram owner's complete source_id capture on the same fixtures, with no suggestion to execute the retired content producer; no Markdown phrase-pinning test is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "legacy",
+    "review-follow-up",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d251-e4eb-7492-809a-93b7ddac4528",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

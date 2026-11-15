@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3d4-73a3-ac9d-ce10a9b39f8f",
+  "external_ref": "tm-46yu",
+  "title": "Bound or parallelize project-wide Engram MCP revocation teardown",
+  "outcome": "Immediate grant clear, Engram disable, and project deletion atomically capture the affected runtime batch, then synchronously checkpoint and stop each session one by one. Each dedicated target can consume a project control deadline plus two bounded shutdown attempts, so request latency grows with every parent/delegation descendant and can appear hung. Preserve atomic fencing while capping total request wall time or running independent target teardown concurrently; add a multi-session deadline regression and document the API bound. Found as a Low performance issue in the fourth tm-uw7j delegated review.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

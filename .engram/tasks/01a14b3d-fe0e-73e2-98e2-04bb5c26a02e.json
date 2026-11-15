@@ -1,0 +1,29 @@
+{
+  "id": "01a14b3d-fe0e-73e2-98e2-04bb5c26a02e",
+  "external_ref": null,
+  "title": "Preserve the first-start boundary for later own-command placement descriptions",
+  "outcome": "A repeated start or later runs-there description cannot hide a command that began before a check's terminal by using the later description tick as its execution start.",
+  "acceptance": [
+    "A deterministic regression covers a write-capable command first placed outside a check's worktree, then placed into it after the check's terminal while its closing capture is pending; evidence stays conservative for actual overlap.",
+    "Repeated starts and runs-there descriptions use a defensible first-start boundary or an equivalent conservative rule, while ordinary strictly serial command completion descriptions retain credit.",
+    "The exact changed input has a passing full gate and clean independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

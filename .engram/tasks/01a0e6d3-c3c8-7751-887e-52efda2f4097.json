@@ -1,0 +1,62 @@
+{
+  "id": "01a0e6d3-c3c8-7751-887e-52efda2f4097",
+  "external_ref": "tm-35gk",
+  "title": "Adopt one uniform workspace-layout conflict rule that cannot corrupt a layout",
+  "outcome": "Greg decided the policy on 2026-09-08, verbatim: \"wazne aby bylo jednolite i nie powodowalo korupcji / moze byc, ze starszy wygrywa / naprawde wazne aby nie powodowalo korupcji\". Binding: ONE rule everywhere, and no path may ever produce a layout that mixes two writers. Age order is negotiable - he explicitly allowed the older copy to win.\n\nVerified current state (three sites, two different rules, none age-based):\n1. Server: put_workspace_layout has no revision precondition and replaces the same-id layout with an incremented revision - last write wins (see the doc-comment correction task).\n2. Browser storage: one entry per workspace view id, shared by every same-origin tab on that view - last write wins, and the loser tab keeps a pendingSaveId that no longer matches the stored content.\n3. Client adoption: a tab holding a pending/paused marker refuses the fetched server layout regardless of which copy is newer, so here the local copy always wins.\n\nNot decided by Greg and not to be recorded as his words: whether the rule is enforced client-side or by a server revision precondition; whether a rejected write is surfaced to the user; whether any prompt appears. Those are open design questions for this task.\n\nScope note: the storage-failure pause/retry work is a different concern and does not implement this rule.",
+  "acceptance": [
+    "(test, focused cargo) A PUT of a workspace layout whose baseLayoutRevision is not the stored layout revision, or a create when one exists, is refused with 409 and the stored document unchanged. A matching base stores the layout with layoutRevision + 1. A label edit does not change layoutRevision.",
+    "(test, focused vitest) A save refused with 409 is never merged: the tab adopts the returned document whole, clears its pending marker, and shows a non-blocking notice; no prompt appears.",
+    "(test, focused vitest) Two tabs on one workspace view: after tab A's save lands, tab B's pending edit based on the earlier revision is refused, both live and after B reloads. The stored layout and both tabs then show exactly A's document, with no field from B.",
+    "(test, focused vitest) No path combines two writers: with a local edit made during hydration, the tab ends with either its own layout saved through the check or the fetched layout whole, never the local tree with fetched preferences.",
+    "(full gate) The full gate is green on the exact tree; the put_workspace_layout doc comment and the workspace feature doc state this rule as implemented."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

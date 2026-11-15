@@ -1,0 +1,32 @@
+{
+  "id": "01a1c833-bcfb-72e1-8411-8b483a924f84",
+  "external_ref": null,
+  "title": "Retain rejected restart recovery through the synchronous Stop successor path",
+  "outcome": "When an internal synchronous Stop uses dispatch_queued_prompts_on_success=true and pause_automatic_resumes_on_success=false, a restart recovery selected as successor survives a provably unsent runtime rejection with its durable marker remapped; accepted or ambiguous sends are not replayed. Current production callers leave this drain option disabled.",
+  "acceptance": [
+    "The synchronous Stop successor retains the selected QueuedPromptRecord and uses the shared recovery-aware delivery/requeue owner; no paused Stop or accepted/ambiguous-delivery behavior is changed.",
+    "An observable synchronous-rejection regression through the actual Stop successor path persists and reboots, proving the original recovery remains available exactly once with its marker pointing to the retained replacement."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "restart",
+    "restart-recovery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

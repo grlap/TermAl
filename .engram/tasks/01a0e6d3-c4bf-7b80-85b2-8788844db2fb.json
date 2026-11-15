@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4bf-7b80-85b2-8788844db2fb",
+  "external_ref": "tm-b8cw",
+  "title": "Prove a follow-up after a released boot-recovery binding binds lazily with child-shaped authority",
+  "outcome": "tm-cr0i releases the stale binding of a finished delegation child at boot (routing_token=None, rebind_required=false). The docs promise that a later follow-up then binds lazily at admission like a never-used session, with child-shaped authority. The release leaves the child in exactly the never-bound shape the existing child-admission tests cover, so tm-cr0i pins only the state transition. Add an explicit end-to-end test (delegation_followup_admission or engram_boot_recovery_targets): finish a child, boot once so its binding is released, then follow it up (rearm_terminal_delegation_for_followup_locked / dispatch_turn_with_followup) and assert a fresh session_bind with external_ref termal:delegation:<id> and no session_status against a stale token. Raised by Claude /review-code on tm-cr0i round 2.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1668a-94d1-7cc2-9763-7bcc4942f271",
+  "external_ref": null,
+  "title": "The park's spent-window hold calls a window ended by Stop, pause or control disabled \"spent\" before its deadline",
+  "outcome": "The park in src/engram_queued_admission.rs (about :950) treats lineage.ended as a spent window and writes \"Automatic recovery ended: the admission window from X to Y is spent after N attempts\". A window can also be ended by a Stop, an operator pause or control disabled before its deadline. If a park lands after such an end (for example an in-flight attempt finishing after a Stop), the hold would call a still-open window spent. It is probably rare, since those states normally take the interrupted or held paths first. The wording should follow the cause, or the park's spent check should be limited to exhausted_at(now), leaving ended heads to the existing held paths.",
+  "acceptance": [
+    "A park that lands after the head's window was ended by Stop, operator pause or control disabled, before its deadline, does not describe the window as spent; a test drives that sequence and asserts the hold's wording or path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

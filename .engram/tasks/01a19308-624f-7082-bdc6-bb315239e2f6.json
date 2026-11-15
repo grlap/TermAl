@@ -1,0 +1,31 @@
+{
+  "id": "01a19308-624f-7082-bdc6-bb315239e2f6",
+  "external_ref": null,
+  "title": "Render Engram checkpoint and similar Engram status cards as a compact single row by default, like ENGRAM DISPATCH",
+  "outcome": "ENGRAM CHECKPOINT (\"Turn checkpointed\") cards, and every other Engram status card that follows the same pattern, render by default as one compact row in the same style as the existing ENGRAM DISPATCH \"Turn admitted\" row, with their full details available by expanding the row.",
+  "acceptance": [
+    "ENGRAM CHECKPOINT ('Turn checkpointed') cards render collapsed by default as a single compact row matching the existing ENGRAM DISPATCH 'Turn admitted' presentation, and expanding the row shows the same details the card shows today; no detail is lost.",
+    "An inventory note lists every Engram status card kind in the transcript UI and states, for each, whether it follows the same pattern and was converted or why it was left as is; converted kinds behave the same way, with tests.",
+    "Component tests cover the collapsed default, expansion, and that error or attention-needing states are not hidden behind a collapsed row (they stay visible or are visibly flagged in the compact row).",
+    "TypeScript and the affected UI suites pass, the independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by 87f49ed0 (\"w-3fe8: Remove turn-gated control physically\"). That commit deleted ui/src/engram-control-routine.ts and the compact-row rendering in message-cards.tsx, along with 262 lines of its tests. \"Turn checkpointed\" / \"Turn admitted\" cards now render in full and appear only for legacy gated records. The independent evaluation (delegation-3e0efd3a) judged C1-C3 fail and C4 insufficient-evidence; its submission was refused, so no verdict is recorded. The finding is verified in my note on this item. Cancelled on Fable2's instruction (TermAl mailbox 03723eab #5243).",
+  "completion": null
+}

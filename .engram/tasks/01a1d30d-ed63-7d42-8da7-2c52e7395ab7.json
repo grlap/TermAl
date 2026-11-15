@@ -1,0 +1,31 @@
+{
+  "id": "01a1d30d-ed63-7d42-8da7-2c52e7395ab7",
+  "external_ref": null,
+  "title": "A visible session's transcript tail stays uncertified on a healthy stream, so the UI re-reads it every ~3 s",
+  "outcome": "A visible session's tail becomes certified after a successful tail read on a healthy stream, so the tail backstop goes quiet. When it can't certify, the reason is named.",
+  "acceptance": [
+    "The cause is diagnosed live on the running build: which visible session's tail stays uncertified, why needsTailRead keeps holding for it while /api/events?stateDiff=1 is open and confirmed, and whether its reads fail, return stale data, or succeed without certifying. It is recorded in a note with the evidence.",
+    "If it is a defect, the fix makes that tail certify, and a Vitest test reproduces the stuck case and shows the backstop going quiet after the fix. The fix lands under the standing rule.",
+    "A post-restart observation on the installed build shows no repeating GET /api/sessions/{id}?tail=N for a visible, settled session while the stream is open."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "sse",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

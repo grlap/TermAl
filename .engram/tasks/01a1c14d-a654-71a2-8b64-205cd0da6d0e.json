@@ -1,0 +1,31 @@
+{
+  "id": "01a1c14d-a654-71a2-8b64-205cd0da6d0e",
+  "external_ref": null,
+  "title": "Preserve acceptance paging stop reasons when a continuation has no unread count",
+  "outcome": "Preserve acceptance paging stop reasons when a continuation has no unread count",
+  "acceptance": [
+    "When a captured continuation remains after bounded paging stops but older/notes_omitted is absent, request metadata and brief distinguish an unknown unread count from zero and preserve the host stop reason; a request-path regression covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

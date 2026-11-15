@@ -1,0 +1,31 @@
+{
+  "id": "01a17542-417b-7bb1-94f3-f37e96b4c31f",
+  "external_ref": null,
+  "title": "Cover canonical MCP list fallback for unsafe native ids and satellite list-to-send flow",
+  "outcome": "Tests distinguish unsafe native-id fallback from display-name handling and cover the satellite MCP directory list-to-send contract.",
+  "acceptance": [
+    "A participant with native id outside copyable HostNative syntax advertises its canonical sessionId as name and list-copy-send appends to that exact principal.",
+    "A satellite-side MCP list/remote-target send control uses existing authenticated transport and asserts the retained destination without inventing authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "federation",
+    "pre-existing",
+    "review-follow-up",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a174c9-ea52-79e1-a235-8837ca2accca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

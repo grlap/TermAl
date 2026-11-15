@@ -1,0 +1,28 @@
+{
+  "id": "01a14825-dd03-7ad1-a406-8e99106d5af4",
+  "external_ref": null,
+  "title": "Distinguish Worker base validation errors from environmental Git failures",
+  "outcome": "Keep safe fail-closed Worker base resolution while distinguishing invalid or ambiguous input from environmental Git failure; document the supported Git requirement and never expose unbounded raw Git stderr.",
+  "acceptance": [
+    "Distinguish Worker base validation errors from environmental Git failures is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,43 @@
+{
+  "id": "01a1d8bc-ff1a-7ce0-8fc9-b23917aa170c",
+  "external_ref": null,
+  "title": "UI tests take paths from process.cwd(), so they fail under a root-cwd launcher run",
+  "outcome": "Every UI test that takes its root or file paths from process.cwd() resolves them from its own file instead, so the credited direct Vitest form `node ui/node_modules/vitest/vitest.mjs run --root ui`, run from the repository root, passes the whole UI suite, and the full gate's cwd=ui Vitest stage still passes. Test files only; no behaviour change.",
+  "acceptance": [
+    "Every UI test that took its root or a file path from process.cwd() (AgentSessionPanel.virtualization, AgentSessionPanel, plain-text-wrapping, workspace-shell-controls, test-runs-context and test-categories tests) resolves it from its own file location instead, and no ui test source uses process.cwd(); only test files change, with no product behaviour change.",
+    "A registered `node scripts/test-launcher.mjs focused --input commit -- node ui/node_modules/vitest/vitest.mjs run --root ui` run from the repository root passes the whole UI suite.",
+    "The full gate, whose Vitest stage runs with cwd ui, passes on the landing input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The six UI tests that took paths from process.cwd() now resolve them from their own file location via import.meta.url. Only test files changed. The whole UI suite passes as a registered root-cwd run (verification 3dc1948c, 296 files / 5158 tests, at master 7317711656696fa95c0ef9663b33489d708b8b21), and the landing FULL test-08b6afb0 passed at the same tree 1695119e. Post-landing re-evaluation delegation-0d1728de (session-18031) passed all 3 criteria.",
+    "completed_at": "2026-11-14T10:10:13.235127500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

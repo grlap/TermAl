@@ -1,0 +1,30 @@
+{
+  "id": "01a18d7e-c8c9-79a2-b515-827d76f3a41d",
+  "external_ref": null,
+  "title": "A full gate on one integration root shared by several bound items credits only one item; the others are told to rerun the same test",
+  "outcome": "A full gate on one integration root shared by several bound items credits only one item; the others are told to rerun the same test",
+  "acceptance": [
+    "When several items held under one claim name the same integration root and one recognised test runs there, the host either credits every bound item whose named root matches at that test's evidence basis, or exposes one documented supported way to attribute that existing result to the companion items without rerunning the test",
+    "The refusal or report line for a companion item names that supported route rather than 'run its test in the next turn', and a deterministic test covers a three-item shared root receiving credit from one run",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "engram-host",
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a130fa-3f5c-7382-9965-8f5203b361e1",
+  "external_ref": null,
+  "title": "Receipted delivery: clear message_id and attempt_key on return to pending, and bound the persisted retry entry",
+  "outcome": "Receipted delivery: clear message_id and attempt_key on return to pending, and bound the persisted retry entry",
+  "acceptance": [
+    "Every path that returns a receipt to pending clears its message_id and attempt_key, and a test asserts it",
+    "The persisted retry entry of settled receipts is bounded in size or count beyond the receipt limit, with a test showing the bound"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

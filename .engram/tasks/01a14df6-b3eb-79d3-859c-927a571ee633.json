@@ -1,0 +1,30 @@
+{
+  "id": "01a14df6-b3eb-79d3-859c-927a571ee633",
+  "external_ref": null,
+  "title": "Remote forward port allocator starts at a fixed 47000 and never reserves or probes, so tests and concurrent hosts collide with a live tunnel",
+  "outcome": "Remote forward port allocator starts at a fixed 47000 and never reserves or probes, so tests and concurrent hosts collide with a live tunnel",
+  "acceptance": [
+    "Remote forward port selection reserves or probes a free loopback port (or uses an OS-assigned port) instead of incrementing from a fixed 47000 without checking, and a busy port leads to another choice or a typed error, never a silent masked failure.",
+    "Tests that start fake or real forwards never collide with a live TermAl host's tunnels on the same machine; a regression test holds 47000 (and the next ports) open and shows allocation still succeeds.",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "remote",
+    "test-isolation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

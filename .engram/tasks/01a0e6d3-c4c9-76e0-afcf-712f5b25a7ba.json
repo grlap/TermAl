@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4c9-76e0-afcf-712f5b25a7ba",
+  "external_ref": "tm-d22",
+  "title": "Shared-Codex guard layer is process-scoped by default: four fail paths, thread/started, detach, and api.rs all still bypass the attachment",
+  "outcome": "Round-10 review. THE SYSTEMIC FINDING — the individual sites are symptoms.\n\nEvery per-session guard in the shared-Codex layer keys on the app-server PROCESS, and the process outlives any one attachment. The epoch (tm-c7l) introduced CodexAttachment and converted the sites reviewers named in rounds 8-9. Round 10 named FOUR MORE. Point-fixing is not converging.\n\nSTILL PROCESS-SCOPED (verified):\n- codex.rs:1250, 1383, 1658, 1733 — RuntimeToken::Codex(...) on waiter/turn-start failure paths. A dead attachment can still fail its replacement's turn (the [deleted:tm-t78] class, which I only half-fixed).\n- codex_events.rs:269 + :413 — thread/started guards on the PROCESS and then calls the UNCONDITIONAL set_external_session_id. The tm-c7l identity clobber, still open. (tm-c7l REOPENED.)\n- session_runtime.rs:148/155/206 — SharedCodexSessionHandle has no generation; remove_locked_session removes unconditionally; detach_async runs it later. A deferred detach wipes the LIVE attachment. ([deleted:tm-92r], upgraded to P1.)\n- api.rs — attachment check, lock released, then unconditional clear_runtime + fail_turn. Check-then-act; tm-0og survives in a narrower window.\n\nWHY THIS IS ONE BEAD, NOT FIVE: the defect is that the attachment is OPTIONAL. Every guard that forgets it silently degrades to 'any attachment on this process', which always matches. Fixing named sites one round at a time has produced a HALF-APPLIED epoch — some paths attachment-guarded, some process-guarded — and inconsistent guards are precisely how [deleted:tm-dpa] happened.\n\nCONVERGENT FIX — make the attachment unavoidable rather than hunting for places that forgot it:\n1. SharedCodexSessionHandle gains attachment_generation; remove_locked_session becomes compare-and-remove. (closes [deleted:tm-92r])\n2. SharedCodexSessionState carries its CodexAttachment, so the EVENT dispatcher can guard identity writes by attachment instead of process. (closes tm-c7l's second door)\n3. Sweep the remaining RuntimeToken::Codex(..) on per-session paths to RuntimeToken::CodexAttachment. Leave it ONLY on runtime-exit fan-out, which legitimately must match every attachment on a dead process.\n4. api.rs: one atomic attachment-guarded teardown instead of check-then-act.\n\nAfter (1)-(4) there is no process-level guard left on any per-session path, so there is nothing further of this class to find.",
+  "acceptance": [
+    "grep shows RuntimeToken::Codex( remaining ONLY on runtime-exit fan-out; every per-session write and removal in the shared-Codex layer is attachment-guarded; tests cover the deferred-detach wipe and the stale thread/started clobber."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

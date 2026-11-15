@@ -1,0 +1,28 @@
+{
+  "id": "01a1a65d-962e-7a11-99a7-5823f12fbe14",
+  "external_ref": null,
+  "title": "Named-root stale-fence follow-ups: abandoned-write route test, a clear with no bound generation, mismatch at the same fence",
+  "outcome": "The remaining Low gaps from the w-02cbd6009066 reviews are covered or decided.",
+  "acceptance": [
+    "A test covers settling a superseded-fence Bound on the abandoned-write route (engram_root_authority.rs), including its retirement state",
+    "A clear refused with no recorded bound generation either settles or its refusal text no longer offers release as the way out",
+    "A work_claim_mismatch whose read shows the same fence has a sequence test: it stays pending and the text says to retry"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

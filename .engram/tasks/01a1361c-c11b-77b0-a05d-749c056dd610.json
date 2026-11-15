@@ -1,0 +1,28 @@
+{
+  "id": "01a1361c-c11b-77b0-a05d-749c056dd610",
+  "external_ref": null,
+  "title": "host-architecture receipt row omits Claude's command lifecycle 'queued' as an acceptance",
+  "outcome": "host-architecture receipt row omits Claude's command lifecycle 'queued' as an acceptance",
+  "acceptance": [
+    "docs/features/host-architecture.md's prompt-delivery row lists Claude's acknowledgement as the command lifecycle queued or started for the attempt uuid, or the unique prompt echo, matching claude_lifecycle_receipt_uuid (src/prompt_delivery.rs) and the test claude_accepts_the_prompt_with_its_command_lifecycle_queued_by_uuid."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "delivery",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a0fec5-9edd-70e0-9f09-c5175075afff",
+  "external_ref": null,
+  "title": "Remove repeated DOM-geometry scans and abandoned async timer continuations from virtualizer fixtures",
+  "outcome": "Remove repeated DOM-geometry scans and abandoned async timer continuations from virtualizer fixtures",
+  "acceptance": [
+    "Remove repeated DOM-geometry scans and abandoned async timer continuations from virtualizer fixtures is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "testing",
+    "virtualization"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a18a32-ae7c-7201-8d19-bd3381269647",
+  "external_ref": null,
+  "title": "Central does not show sessions started locally on a remote host",
+  "outcome": "Central lists the sessions a remote host started locally, under the remote project bound to them, so Greg can see the sessions and work on that host from the UI.",
+  "acceptance": [
+    "A session started locally on a remote host, in a project that Central has bound as a remote project, appears in Central's state under that remote project, and its status follows the host's state.",
+    "A remote host's local session that ends or is removed there leaves Central's list, and sessions in projects Central has not bound are not imported.",
+    "Tests cover import, update and removal of remote-local sessions without changing how Central-created proxy sessions behave."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "remotes"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

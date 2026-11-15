@@ -1,0 +1,38 @@
+{
+  "id": "01a1ac9e-b876-7f93-a62e-d57f7ec79343",
+  "external_ref": null,
+  "title": "Two observed_terminal tests from w-814b spin forever on Windows after their fixture root is deleted",
+  "outcome": "observed_terminal_exact_failure_does_not_resurrect_after_worktree_loss_or_boot and observed_terminal_exact_pass_does_not_resurrect_after_worktree_loss_or_boot finish on Windows as they do on Linux, and a Windows run of the Rust suite no longer hangs on them.",
+  "acceptance": [
+    "The cause is established from source and a discriminating observation, separating what was read or run from what is inferred, and it is stated whether the production path (not only the fixture) can resolve a Git directory outside the lost worktree, such as the real repository's .git. If production can, that is fixed as a product defect, not only in the test.",
+    "Nothing in the original or the repaired run writes to the real repository's .git or working tree; this is checked and recorded.",
+    "The repair passes both tests on Windows and Linux without a retry, a larger timeout, a skipped or weakened assertion, and the original hung runs (test-604e9116, test-202a8385) stay on record.",
+    "The required review pair and the exact-input full gate pass, including a Windows run of the affected Rust tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "landing-gate",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed missing-root identity repair ed2b5e4d after clear review pair, Windows affected coverage and exact-tree five-stage FULL. Original terminal-loss tests now pass on Windows and Linux; failed originals and bounded write-audit limits preserved.",
+    "completed_at": "2026-11-05T20:07:11.000155200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

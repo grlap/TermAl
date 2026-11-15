@@ -1,0 +1,27 @@
+{
+  "id": "01a1b50a-80f7-7580-b7bd-ad97c6ac0165",
+  "external_ref": null,
+  "title": "Windows owned-stage cleanup reservation (~786 KB) can refuse plain focused runs in heavily dirty worktrees",
+  "outcome": "Windows owned-stage cleanup reservation (~786 KB) can refuse plain focused runs in heavily dirty worktrees",
+  "acceptance": [
+    "Windows owned-stage cleanup reservation (~786 KB) can refuse plain focused runs in heavily dirty worktrees is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "eo-followup",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

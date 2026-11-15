@@ -1,0 +1,25 @@
+{
+  "id": "01a17a48-2aa1-7c40-91b1-c582bfe097f9",
+  "external_ref": null,
+  "title": "Federation install durability fence returns an untyped 500 and a global 423 hold when the state writer is congested",
+  "outcome": "Federation install durability fence returns an untyped 500 and a global 423 hold when the state writer is congested",
+  "acceptance": [
+    "When the federation install's durability fence cannot resolve within its budget because the state writer is busy, the outcome is a typed pending result that the caller retries under the same identity, not an untyped 500, consistent with the typed outcomes given to registration, evaluation and named-root.",
+    "A focused regression covers federation install under a delayed writer collect and shows that the link and the peers' admission recover without operator action."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

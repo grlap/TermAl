@@ -1,0 +1,36 @@
+{
+  "id": "01a11050-ee7e-74e1-a593-31e1f6db7661",
+  "external_ref": null,
+  "title": "Evidence-selection refusal \"not returned whole as a citable record of this task\" does not say which cause applies, per locator",
+  "outcome": "Evidence-selection refusal \"not returned whole as a citable record of this task\" does not say which cause applies, per locator",
+  "acceptance": [
+    "Each refusal raised by acceptance evidence selection names the locator and the specific cause: a locator mismatch, an omitted body, a truncated summary, or a non-holder record (with the remedy to re-record it as the holder); the shared generic sentence is no longer the whole message.",
+    "Tests drive each cause and assert the locator and the cause-specific text; the accept/refuse outcomes themselves are unchanged."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10a99-3247-7c23-8ee0-e16e68f70aad",
+  "disposal_reason": "Subsumed (Termal::Fable2, 2026-10-08, on Architect2's dedup intake, TermAl mailbox 3d06f738 #574). w-e16e68f70aad (P1) covers the same refusal \"not returned whole as a citable record of this task\" with a strict superset of this item's criteria: per-locator cause and remedy for a wrong locator, an omitted body, a truncated summary and a non-holder record, plus multi-record reporting, the other validation failures and unchanged semantics. Its occurrences, including the Engram ones recorded here, carry over by reference.",
+  "completion": null
+}

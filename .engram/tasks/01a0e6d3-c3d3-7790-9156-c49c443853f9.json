@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3d3-7790-9156-c49c443853f9",
+  "external_ref": "tm-3yzj",
+  "title": "Reduce long-session cold-open and live refresh cost",
+  "outcome": "Chrome profiling on the production UI found a 430ms cold-open INP for a 3,549-message transcript, dominated by 368ms presentation delay and 136ms forced reflow. Routine live refreshes also transfer a 2.19MB decoded /api/state summary plus a 487KB decoded tail. Implement focused frontend changes that reduce cold transcript layout work and avoid redundant refresh work without weakening SSE revision recovery.",
+  "acceptance": [
+    "Cold long-session open avoids the identified synchronous layout hotspot; routine live events do not trigger redundant overview/tail/state reads; composer behavior remains correct; targeted tests, TypeScript, Vitest, production build, and relevant Rust gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

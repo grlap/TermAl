@@ -1,0 +1,27 @@
+{
+  "id": "01a169ad-4930-7b22-be04-7eb833aec1db",
+  "external_ref": null,
+  "title": "Add an order-sensitive pinned/unpinned case proving the carried-binding matching reassigns (a first-free greedy would wrongly refuse)",
+  "outcome": "Add an order-sensitive pinned/unpinned case proving the carried-binding matching reassigns (a first-free greedy would wrongly refuse)",
+  "acceptance": [
+    "Add an order-sensitive pinned/unpinned case proving the carried-binding matching reassigns (a first-free greedy would wrongly refuse) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

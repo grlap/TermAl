@@ -1,0 +1,32 @@
+{
+  "id": "01a1668d-d833-7112-bf02-0ca0b71ff00a",
+  "external_ref": null,
+  "title": "Reconcile federation settling status across plural snapshots and admission helpers",
+  "outcome": "The documented settling contract accurately describes singular/plural snapshot and new-admission helpers, with intentional client retry semantics.",
+  "acceptance": [
+    "Either helpers consistently classify an intact-authority temporary durability hold as 423, or documentation explicitly describes and justifies the remaining 409 split.",
+    "Tests cover plural snapshots and admission during a hold and continuity loss, preserving all stale-authority and admission fences and existing client recovery semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "api",
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1002c-f04c-7781-9ad7-3c14be6b3bf9",
+  "external_ref": null,
+  "title": "A long passing `cargo test --bin termal` run is refused credit as \"output shows no passing test\" when its output is large",
+  "outcome": "A recognised test command that passes is credited, or refused for a stated cause, whatever the size of its output. The host does not read \"no passing test\" off a truncated window of a large output.",
+  "acceptance": [
+    "A long passing `cargo test --bin termal` run is refused credit as \"output shows no passing test\" when its output is large is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

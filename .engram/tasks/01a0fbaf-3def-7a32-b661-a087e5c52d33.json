@@ -1,0 +1,60 @@
+{
+  "id": "01a0fbaf-3def-7a32-b661-a087e5c52d33",
+  "external_ref": null,
+  "title": "Preserve master retry action when an owner timer occupies the shared hydration retry slot",
+  "outcome": "The shared hydration retry-timer slot follows independently agreed owner/master collision semantics without silently substituting an owner-only demand check for a master unloaded restart.",
+  "acceptance": [
+    "Preserved fail-first evidence shows the master restart missing on unmodified d705038. An actual-source revert of the owed-bit behavior makes the new collision witness fail again, and restoring the source returns it to passing without a runtime fault switch or weakened assertions/timeouts. The full five-stage gate passes on the exact independently reviewed resulting input, with no outstanding in-scope Medium-or-higher finding in the Codex/Claude read-only review pair.",
+    "Real-hook fake-timer witnesses reproduce an owner-read rejection followed by a master older-prefetch rejection inside its back-off. The existing timer performs exactly one optionless master restart and invokes the requester exactly once. A control closing owner demand before firing still performs the unloaded master restart without issuing an owner read; a control making the session fully loaded performs no master restart. Existing W1-W15/W5c, generated-model and proof-boundary checks continue to pass.",
+    "The existing per-session hydration retry-timer entry records one master-retry-owed bit. A master-originated ending requesting retry while the session is unloaded sets it whether creating a timer or finding one pending. On firing, an owed master restart runs first only if the session remains unloaded, without hydration options; the shared requester then runs once. Absorbed retry requests consume no retry attempt. Owner retry demand/cap behavior, base master retry eligibility, the existing shared timer slot and the Q7 backstop remain unchanged; no per-origin timers or additional registry are introduced."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "architecture-disposition",
+    "conversation-view",
+    "regression-suspect",
+    "retry-parity",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Preserved the optionless unloaded master retry action in the existing shared timer entry with one owed bit; master runs before the single requester, absorbed requests charge no attempt. Three real-hook collision controls plus second-delay budget witness, genuine unmodified-d705 and actual-source revert RED, restored source, recognized106PASS and full five-stage4552PASS on exact893fb/index9131a8a5. Independent Codex/Claude complete two-path structured pair has no actionable findings. Independent Claude acceptance361486fc1eaf45e5b32113c756a53e0a recorded3/3pass/currentsource209ee2b0 read in full. This closes only the optional follow-up; original P0 installed/user confirmations and affected-session capture remain outside scope. Exact tree not yet committed/pushed/installed; detached commit and Opus2 integration handoff next under standing rule.",
+    "completed_at": "2026-10-02T15:12:38.126721100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

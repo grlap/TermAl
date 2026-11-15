@@ -1,0 +1,32 @@
+{
+  "id": "01a170ed-80cb-77a2-9d79-a272102b4945",
+  "external_ref": null,
+  "title": "Recover a Base-only pending source-root intent after restart with token but no work binding",
+  "outcome": "A Base-only session can safely settle its exact pending or orphaned source-root naming intent after restart without requiring turn-gated control or fabricating a grant.",
+  "acceptance": [
+    "A regression loses a named_root_bind reply, persists and reloads the same store, and demonstrates recovery of the exact pending or orphaned intent with turnGatedControl=false, routing_token present and runtime work_binding absent.",
+    "Recovery revalidates exact held claim/store/run/fence and existing owner/runtime/durability boundaries; it does not publish an unproven outcome, create a grant, or weaken admission guards."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "greg-reported",
+    "host-recording",
+    "review-followup",
+    "source-root",
+    "source-root-naming"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1708c-a60a-7781-b45a-c7b546116c5a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

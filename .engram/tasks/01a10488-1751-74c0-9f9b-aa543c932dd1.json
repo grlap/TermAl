@@ -1,0 +1,27 @@
+{
+  "id": "01a10488-1751-74c0-9f9b-aa543c932dd1",
+  "external_ref": null,
+  "title": "Launcher save() follow-ups from train 31's Claude Notes: label a budget-exhausted results replace, and cross-reference it in test-runs.md",
+  "outcome": "These are optional improvements from the train-31 integration Claude reviewer (delegation-c7bcf70b-dc4f-4ba2-870e-18b3084ad5b0), relayed by Termal::Opus2. They concern the landed launcher save() sharing-violation handling (master 38b659bd).\n(1) When replaceAtomically() exhausts its 2 s budget, the thrown EPERM could carry a label such as \"environment: results replace blocked by an open handle\", so the failure classifies itself as environment rather than product.\n(2) docs/features/test-runs.md could get a one-line cross-reference to the bounded Windows wait described in docs/test.md.\n(3) A guidance note for future edits, not a change: the Windows-only tests rely on libuv's EPERM-on-held-target rename. If Node's behaviour changes, drive them through the injected sleep and now hooks instead.\nThese are Notes, not findings, and are filed only so they aren't lost.",
+  "acceptance": [
+    "Launcher save() follow-ups from train 31's Claude Notes: label a budget-exhausted results replace, and cross-reference it in test-runs.md is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "launcher",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

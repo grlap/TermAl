@@ -1,0 +1,27 @@
+{
+  "id": "01a10193-6518-7032-8f4d-b1e5b554b62c",
+  "external_ref": null,
+  "title": "Show the agent a host line when its Engram work binding changes at a turn's admission (next-admission binding notice)",
+  "outcome": "Show the agent a host line when its Engram work binding changes at a turn's admission (next-admission binding notice)",
+  "acceptance": [
+    "Show the agent a host line when its Engram work binding changes at a turn's admission (next-admission binding notice) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,43 @@
+{
+  "id": "01a1815e-71bb-73d2-b90e-1865e127024c",
+  "external_ref": null,
+  "title": "Print the test-only UNADMITTED_CAPTURE_DIAGNOSTIC line only for failed or over-budget capture attempts",
+  "outcome": "The closing-capture diagnostic keeps its proven value (per-attempt elapsed time against the budget) without printing on every capture in every test run.",
+  "acceptance": [
+    "C1: The #[cfg(test)] UNADMITTED_CAPTURE_DIAGNOSTIC line in src/engram_unadmitted_closing.rs no longer prints on every capture. It prints only when an attempt fails or exceeds its budget, and keeps the attempt number, the elapsed time and the budget fields. Nothing else in the capture path changes, and no production behaviour changes.",
+    "C2: A test shows that a capture within budget emits no diagnostic line and an over-budget or failed attempt emits one with those fields.",
+    "C3: A focused run of unadmitted_runtime_reporting plus serial restored_closing_ passes on the exact input, the review pair has no outstanding finding of Medium or higher, and the full gate passes on the landed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "review-note",
+    "unadmitted-reporting"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

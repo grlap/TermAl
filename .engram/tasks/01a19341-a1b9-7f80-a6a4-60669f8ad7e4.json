@@ -1,0 +1,32 @@
+{
+  "id": "01a19341-a1b9-7f80-a6a4-60669f8ad7e4",
+  "external_ref": null,
+  "title": "Keep previously paged test-run aliases after live restoration and later snapshot omission",
+  "outcome": "A previously loaded alias restored by live updates remains in panel-local loaded history when the live snapshot later omits it; live-only identities do not become unbounded global history.",
+  "acceptance": [
+    "A deterministic UI regression loads alias B, supersedes it with canonical C, restores B without fetching B again, then omits B from live data and proves B remains visible in loaded history.",
+    "The fix preserves canonical deduplication, explicit restoration, project/unmount stale guards and panel-local ownership without automatically loading or accumulating all history."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "review-low",
+    "state-flood",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19336-6946-7502-b7b6-2e2e7001a9cf",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

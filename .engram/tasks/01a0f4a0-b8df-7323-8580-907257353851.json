@@ -1,0 +1,31 @@
+{
+  "id": "01a0f4a0-b8df-7323-8580-907257353851",
+  "external_ref": null,
+  "title": "Keep acceptance unread-boundary references within the rationale limit",
+  "outcome": "Evaluator guidance identifies an unread boundary without requiring an opaque continuation longer than the 2000-character rationale limit to be copied.",
+  "acceptance": [
+    "Keep acceptance unread-boundary references within the rationale limit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0ea91-e695-7472-8e21-67e7b8bdcade",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1418a-5a7f-7000-ad70-a7764752294f",
+  "disposal_reason": "The parent is completed. Continue as independent work: a small wording fix (Termal::Opus3's triage, TermAl mailbox 03723eab #2675).",
+  "completion": null
+}

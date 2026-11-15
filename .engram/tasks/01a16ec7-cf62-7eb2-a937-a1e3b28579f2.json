@@ -1,0 +1,63 @@
+{
+  "id": "01a16ec7-cf62-7eb2-a937-a1e3b28579f2",
+  "external_ref": null,
+  "title": "Test engram_enabled_settings_default_blank_home_and_reject_relative_home races a real fixture launch against the 20 s production readiness deadline",
+  "outcome": "The test proves blank-home default resolution and relative-home rejection without depending on a real process finishing inside a wall-clock budget, so host load can't fail it.",
+  "acceptance": [
+    "The test's Save no longer launches a real Engram readiness process against ENGRAM_READINESS_TIMEOUT: its scoped default home is registered with the existing readiness seam (stage_test_engram_readiness_without_launch, src/engram_readiness_test_seam.rs), or an equivalent deterministic seam. Any other real launch the Save makes is named, and either staged or shown to have no wall-clock dependency.",
+    "The test still asserts that the blank home resolves to the scoped USERPROFILE/HOME default and that the store lands under it, and that a relative home is rejected with 400 'non-empty absolute path'.",
+    "With the seam's expired-launch half held, a stray real launch fails the test at once (not after 20 s), shown by a focused run.",
+    "Focused credited run of the test green; ENGRAM_READINESS_TIMEOUT unchanged (load_sensitive_limits.rs still pins 20 s).",
+    "The exact final input has the required independent read-only review pair with no outstanding in-scope Medium-or-higher finding, and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-readiness",
+    "gate-load",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-8a5ccae7d4b7",
+  "external_ref": "tm-ncc6.4",
+  "title": "Agent tool API: termal_start_test_run / get / list / cancel in the delegation MCP; the requester may wait on its own run",
+  "outcome": "HOW\n- src/delegation_mcp.rs: add tool schemas next to termal_resume_after_delegations (~line 2432) and dispatch arms next to ~line 902 (`\"termal_start_test_run\" => self.tool_start_test_run(arguments)` etc.). Handlers call AppState methods in src/test_runs.rs through the existing HTTP client the bridge uses for other tools (same as delegation waits), never the launcher directly.\n- termal_start_test_run { preset: \"full\"|\"focused\"|\"live\", args?: string[] (focused only, argument array, no shell strings), cwd?: string (repository-relative, must stay inside the project root), title?: string, notify?: \"self\"|\"none\"|SESSION_ID (default \"self\") } -> { runId, runDir, expectedFingerprint, waitId?, instruction: \"End your turn; TermAl resumes you when the run completes.\" }\n- termal_get_test_run { runId } -> bounded status: state, stages[{name,state,code,startedAt,endedAt,durationMs}], firstFailure {stage, diagnostics (bounded text)}, runDir, expectedFingerprint, drift, wakeState.\n- termal_list_test_runs { projectId?, state? } -> summaries. termal_cancel_test_run { runId } -> new state.\n- Validation: preset allowlist; args must be an array of strings; cwd rejects absolute paths and '..'; live requires absolute --engram-binary + sha256 passed through untouched; refuse for read-only delegation children (reuse ensure_read_only_delegation_allows_session_write_action as terminal commands do).\n- The CLI's no-self-notify rule does not apply: the host owns the wake, so notify=self creates a run wait for the calling session (tm-ncc6.5).\n\nDEPENDS ON: tm-ncc6.3, tm-ncc6.5 (for notify=self). BLOCKS: tm-ncc6.10.\n\nREVIEW FIXES (F6, F7, F10, F16)\n- Drop cwd (the launcher has no --cwd; focused stages run at the repository root, launcher:29, 165, 497). live takes engramBinary (absolute) + engramSha256 and passes them through untouched (launcher:832). Commands must be native executables (.cmd/.bat rejected on Windows, launcher:141-144).\n- start returns known fields after a bounded wait for the receipt: {runId (host), launcherRunId?, runDir?, expectedFingerprint?, waitId?, instruction}; the rest arrives via delta/get.\n- Remote: refuse remote-proxy sessions and non-local projects with 501 (delegations.rs:505-510 pattern).\n- Gating: start/cancel for root sessions and writable delegation children (backend refuses read-only children via ensure_read_only_delegation_allows_session_write_action, delegations.rs:1840, as terminal.rs:20/159); get/list for all callers; children may cancel only their own runs. Tool visibility via tool_requires_root_session / tools_list_for_caller (delegation_mcp.rs:849-872, 1783-1805, 2272-2289).",
+  "acceptance": [
+    "- Tool schemas listed by the bridge and validated (delegation_mcp_tests: schema snapshot for start/get/list/cancel; tools_list_for_caller shows get/list to read-only reviewers and hides start/cancel).\n- start refuses a shell string (\"cargo test && rm -rf\"), a .cmd command on Windows, and any cwd field with typed errors; accepts an argument array.\n- start returns before any stage runs with the host runId; with notify=self a wait record exists for the caller.\n- start while a run is active for the root -> refusal naming the active runId; remote-proxy session or non-local project -> 501.\n- get never reports passed unless results.json is terminal and passed; unknown/canceled report their reason.\n- A read-only reviewer child calling start is refused; a child cancel of another session's run is refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c650-7483-bed9-d21550608f47",
+  "external_ref": "tm-n9ar",
+  "title": "Record the holder in the test launcher's recovery.lock so a stale lock can be diagnosed or cleared",
+  "outcome": "From tm-uex8 review round 3 (Claude reviewer, Low). recovery.lock is created empty, so a lock left by a killed 'recover' blocks later recovers until someone deletes it by hand (docs/test.md documents that step). Fix direction: write the recovering process's pid and a start time into the lock, name that pid in the 'another recovery in progress' error, and optionally treat a lock whose holder is proven dead (processMayBeAlive/ESRCH) as stale. Keep the policy that only proof of exit counts.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

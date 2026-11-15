@@ -1,0 +1,55 @@
+{
+  "id": "01a16a14-4957-7df3-a196-3618ce77a855",
+  "external_ref": null,
+  "title": "Carried-binding refusal text: empty \"()\" for a repeated-words criterion with nothing compared, and only the first copy of duplicated words named",
+  "outcome": "Two cosmetic fixes to the pre-spawn carried-binding refusal text in src/acceptance_evaluation_carried_binding.rs. The refusal itself is correct in both cases. (1) In the repeated-words branch (judged_count > 1), the compared list can be empty: for example judged [\"X\",\"X\",\"Z\"] with bindings 1 and 2, and current [\"Z\"]. The text then ends \"...is left to keep that binding ()\". Leave out the parenthetical when nothing is compared, as the words-gone branch already does, and add a test. (2) In the words-present branch (judged_count == 1), when the revision duplicated the judged words, only occurrences.first() is described. \"the current criteria have it unbound\" can then hide another copy that is bound, for example to a different kind or pin. Name every occurrence with its binding when there is more than one.",
+  "acceptance": [
+    "When a judged binding whose words other judged criteria shared has no current criterion to compare, the carried-binding refusal names no empty list.",
+    "When the revision left a judged criterion's words on more than one current criterion and none keeps its binding, the refusal names each of those criteria with its current binding.",
+    "The existing carried-binding refusals and their tests are unchanged.",
+    "Focused tests covering the change, the full gate on the frozen input, and an independent Codex + Claude review pair with no outstanding Medium-or-higher finding cover the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

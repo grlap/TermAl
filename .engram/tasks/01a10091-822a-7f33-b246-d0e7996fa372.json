@@ -1,0 +1,30 @@
+{
+  "id": "01a10091-822a-7f33-b246-d0e7996fa372",
+  "external_ref": null,
+  "title": "Budget-clock migration B5: classify and migrate the remaining direct deadline_ms sites",
+  "outcome": "The direct deadline_ms settings sites outside the shared helper, in engram_compaction.rs, evaluator_tool_access.rs and read_only_orientation.rs. Each is first classified: is it a budget fixture at all, or a legitimate settings value? Those that are fixtures are then migrated through the state-owned clock boundary from slice 1. Each migration lists the test's time sources and assertions and adds focused boundary controls, with transitive callers inventoried. A full run validates the batch; it does not classify it. No production change. The decomposition is note 7c38dafc37c5410391ab42881615461a on the parent, with f842da36050949b3ba884f5884c64766. Criteria are to be agreed before this batch starts.",
+  "acceptance": [
+    "Budget-clock migration B5: classify and migrate the remaining direct deadline_ms sites is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a10069-95fe-7623-a4e5-8f9988de4cb3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a102f1-da34-7b71-a82c-c3cb873dd97d",
+  "disposal_reason": "Parent w-8f9988de4cb3 (budget-clock slice 1) completed after landing in 98ff008; the remaining batches continue as independent work (coordinator decision, Termal::Fable2).",
+  "completion": null
+}

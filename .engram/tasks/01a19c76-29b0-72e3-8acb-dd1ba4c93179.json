@@ -1,0 +1,40 @@
+{
+  "id": "01a19c76-29b0-72e3-8acb-dd1ba4c93179",
+  "external_ref": null,
+  "title": "Repair the approved root_dispatch C1 test-port failures in exactly eleven test files",
+  "outcome": "Apply Fable2062's exact11-file source-only repairs on C1 TREE0c00cea3, with a per-test reason ledger and preserved out-of-scope new test, for central integration.",
+  "acceptance": [
+    "The approved twenty-one T failures are repaired only in the eleven test files named in Fable2062, preserving current intended behaviour and assertion strength; known K product-first-panic assertions remain untouched.",
+    "The exact new content-bearing mailbox test is preserved under .evidence/ for w-a2ceaa6bceb6 before removal from the C2 test port; no product edit, timeout inflation or ignore is introduced.",
+    "A per-test reason ledger, exact source identity and scoped diff are returned to Sol-03d4 with Fable2 copied; execution remains unrun until separately authorized."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "test-port"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered and independently accepted the authorized exact11 source-only test repair: staged TREE855c14f70be3f1bcc9fb90cb1550d5e095e95359 on C1 base0c00cea3, +143/-52, all21 T cases repaired, K8 unchanged. Complete per-test ledger/native identities returned Sol-03d4 #298, Fable #2065; independent source acceptance Fable2066 and complete-hunk intake Sol-03d4299 recorded in cc1e89238951408785b295019d9fbf34. Exact seq94 regression archived for separate w-a2ceaa6bceb6 before removal; 128→127 declarations with2 renames, no ignore/timeout/product edit. No Cargo/compiler/test/review/fullgate/landing/pass claimed; execution remains unrun by design. Coordinator explicitly closed source lane and directed standby. Parent C2 composition must preserve independent reset witness, with root/evidence retained for open parent integration.",
+    "completed_at": "2026-11-02T13:47:51.979015100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

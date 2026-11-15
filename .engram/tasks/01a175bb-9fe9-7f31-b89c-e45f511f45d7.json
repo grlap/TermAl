@@ -1,0 +1,44 @@
+{
+  "id": "01a175bb-9fe9-7f31-b89c-e45f511f45d7",
+  "external_ref": null,
+  "title": "Stop a hung full-gate launcher run from its owner session (focused-only stop does not cover full gates)",
+  "outcome": "Stop a hung full-gate launcher run from its owner session (focused-only stop does not cover full gates)",
+  "acceptance": [
+    "A RED/GREEN deterministic test: `stop` ends a hung full-gate stage and its descendants; the run ends failed and interrupted with later stages unrun; an unrelated process and a concurrent run survive.",
+    "Stages that are not stopped are unchanged: exit codes, logs, duration reports, UI test accounting and Windows environment passing all show parity, proven by the helper suites plus ONE green maintained full gate on the exact change. Any stage descendant reaped at job close is disclosed in the docs as a deliberate behavior change.",
+    "A clean review pair, then one complete READY to Merger2."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "launcher",
+    "resource",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a175b8-4bae-7200-be5a-85d171add561",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

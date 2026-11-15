@@ -1,0 +1,30 @@
+{
+  "id": "01a17611-3ea4-7032-9953-33987ba29e3b",
+  "external_ref": null,
+  "title": "Keep ordinary terminal commits independent of the observation shutdown fence",
+  "outcome": "Narrow observation shutdown fencing without dropping ordinary terminal/Stop commits or blocking asynchronous shutdown on observation replay.",
+  "acceptance": [
+    "Ordinary terminal and Stop state commits remain truthful during shutdown while observation installs cannot mutate a retired AppState; deterministic controls cover both.",
+    "Observation shutdown joins do not block a Tokio worker on replay RPCs, or an explicit measured bounded policy is documented and tested."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "review-low",
+    "unadmitted-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6c9-9c20-7ad3-8066-df1ef323efe9",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

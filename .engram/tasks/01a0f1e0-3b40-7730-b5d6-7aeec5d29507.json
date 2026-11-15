@@ -1,0 +1,31 @@
+{
+  "id": "01a0f1e0-3b40-7730-b5d6-7aeec5d29507",
+  "external_ref": null,
+  "title": "Validate canonical native-launch fixture scratch ownership before creation",
+  "outcome": "Validate canonical native-launch fixture scratch ownership before creation",
+  "acceptance": [
+    "A discriminating fixture rejects a redirected scratch ancestor before an outside write, while ordinary watcher-ignored repository-local scratch and evidence retention remain correct.",
+    "Scratch creation validates canonical existing ancestors remain within the repository before writing fixture files or creating descendants."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "review-follow-up",
+    "terminal",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

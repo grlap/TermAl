@@ -1,0 +1,28 @@
+{
+  "id": "01a19f0a-fff5-7990-ada5-f3e86b22c1e3",
+  "external_ref": null,
+  "title": "Unhandled runtime notifications 'turn/moderationMetadata' and 'skills/changed' (missing thread id) logged repeatedly",
+  "outcome": "Known Codex app-server notifications such as turn/moderationMetadata and skills/changed are either handled correctly, including notifications that legitimately have no thread id, or ignored deliberately at debug level. They no longer repeat as unhandled warnings in the console, and any real handling defect is fixed rather than hidden.",
+  "acceptance": [
+    "Unhandled runtime notifications 'turn/moderationMetadata' and 'skills/changed' (missing thread id) logged repeatedly is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "logging",
+    "runtime"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a14ae3-a369-76b0-8f21-00ad6ac15790",
+  "external_ref": null,
+  "title": "Verify disk-capacity measurements through Windows output-directory junctions",
+  "outcome": "The actual Windows/libuv capacity observation through cross-volume junctions or symlinks is established, and any limitation is covered by a safe measurement or clear documentation.",
+  "acceptance": [
+    "A contained fixture or primary implementation inspection determines which filesystem native statfs measures for an existing cross-volume output junction and a missing descendant.",
+    "If the current measurement can report the link volume instead of the output volume, a guarded realpath-based remedy or explicit documented limitation is implemented and verified.",
+    "No cleanup follows reparse points and no fixture writes outside the repository's authorized locations."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

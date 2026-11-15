@@ -1,0 +1,24 @@
+{
+  "id": "01a19ce2-95a0-7d51-9e5d-647cd063fdad",
+  "external_ref": null,
+  "title": "Remove fields of engram_build_checks.rs diagnostics that only tests read (dead-code warnings in non-test builds)",
+  "outcome": "A non-test cargo check emits no dead-field warnings from src/engram_build_checks.rs. The diagnostic fields are either consumed by production or removed together with their test-only readers, and the meaningful diagnostic oracles stay in tests.",
+  "acceptance": [
+    "Remove fields of engram_build_checks.rs diagnostics that only tests read (dead-code warnings in non-test builds) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

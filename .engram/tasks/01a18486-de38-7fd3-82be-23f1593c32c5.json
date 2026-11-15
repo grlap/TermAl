@@ -1,0 +1,29 @@
+{
+  "id": "01a18486-de38-7fd3-82be-23f1593c32c5",
+  "external_ref": null,
+  "title": "Pin that the real-clock registration deadline is taken before the capture lock at the call site",
+  "outcome": "Pin that the real-clock registration deadline is taken before the capture lock at the call site",
+  "acceptance": [
+    "A deterministic witness shows that, on the real budget clock, register_test_run measures its 5 s durability deadline from an instant taken before diagnostics.lock(&self.inner), so a capture-lock wait still counts against the budget (for example, StateInner held across the capture point by an explicit schedule hook, with the deadline or fenceRemainingMs accounting asserted), or the existing helper test's name and header are narrowed to claim only the helper's selection logic.",
+    "The review pair finds no Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "registration",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

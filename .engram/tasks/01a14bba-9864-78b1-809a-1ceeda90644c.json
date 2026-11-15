@@ -1,0 +1,42 @@
+{
+  "id": "01a14bba-9864-78b1-809a-1ceeda90644c",
+  "external_ref": null,
+  "title": "Remote foundations M2: central mailbox routing, participant directory and protocol conformance (list/read/ACK always served by the central host)",
+  "outcome": "Remote foundations M2: central mailbox routing, participant directory and protocol conformance (list/read/ACK always served by the central host)",
+  "acceptance": [
+    "Every local and remote participant mailbox operation (get-or-create, send, list, read page, read message, receipt-only acknowledge) is served by the central host; a satellite's bridge and CLI relay to it over L1 and hold no mailbox state (tests).",
+    "Simultaneous A->B and B->A first sends yield exactly one mailbox and one membership record at the central host (test).",
+    "With the central host unreachable, remote list/read/ACK fail visibly with a retryable unavailable error; there is no cache-served read, alternate ownership or local mailbox-authority write; sender intents stay separately visible (tests).",
+    "Revocation and session recreation cannot inherit access; protocol version, schema and size negotiation are explicit and existing limits (body 256 KiB etc.) apply unchanged (tests).",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14b98-032e-7f70-922a-93105e5592c0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered central mailbox routing, participant directory and protocol conformance; landed by Opus2 as bbcf964078d0b1eaf0de8689743cef3f063034fc on origin/master, independently verified remote and exact gated tree072baa4543884c94663d8b88b261b326dc946858. Full five-stage gate PASS, independent acceptance5/5 fresh, R3 full/R4 confirmation pairs no Medium+, byte-exact carries. Disabled by default; no local mailbox fallback or sender queue. Closed only after confirmed push.",
+    "completed_at": "2026-10-18T09:51:41.169253600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

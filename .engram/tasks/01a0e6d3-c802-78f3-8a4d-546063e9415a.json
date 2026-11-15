@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c802-78f3-8a4d-546063e9415a",
+  "external_ref": "tm-ze9b",
+  "title": "Establish Windows native picker test environment prerequisites",
+  "outcome": "Claude7199 notes non-showing FileOpenDialog COM creation test may depend on shell availability on service/session-0/container Windows runners. Verify the supported runner behavior before adding ignore/env gating; do not disable a passing regression based solely on an assumed interactive-desktop requirement. Document prerequisites and explicit environment diagnostics. Visible focus and mixed-monitor smoke remains separate in tm-i1q7.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

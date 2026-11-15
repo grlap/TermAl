@@ -1,0 +1,49 @@
+{
+  "id": "01a122f5-4008-7971-9ac3-c2422f97c77d",
+  "external_ref": null,
+  "title": "An acceptance-evaluation request fails with 500 when the first-brief durable acknowledgement misses its 5 s persist-fence deadline, burning the spawned evaluator",
+  "outcome": "A request for an acceptance evaluation no longer fails outright because the persist writer is slow to acknowledge the evaluator's first-brief PersistFence. The wait either fits real persist latency, or the request returns a retryable, typed refusal naming the persist phase (w-0e3b338ac4a4's F1 phase names) before an evaluator is spawned, never a 500 with an evaluator spawned and left to finish without a result packet.",
+  "acceptance": [
+    "The holder's note traces, with file:line, the path from the evaluation request through delegations.rs:792-795 to confirm_acceptance_evaluation_submission_durable (acceptance_evaluation_api.rs:2236 onward, ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT = 5 s at :167), and states whether the evaluator child is spawned before the acknowledgement is confirmed.",
+    "A fail-first test with a gated persist writer that resolves the first-brief fence with PersistFenceError::Deadline (no wall-clock wait, no load) shows, on unchanged code, a 500 'evaluator retained but first brief withheld until durable acknowledgement … Deadline' with an evaluator delegation left to fail without a result packet. After the fix, the request either succeeds once the writer acknowledges within the shared budget, or returns a typed retryable refusal naming the persist phase, with no evaluator turn started.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "host-persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "An acceptance-evaluation request no longer fails with 500 and strands a Running evaluator when the first brief's durable acknowledgement misses its persist-fence deadline.\n- create_delegation_with_evaluation_target now calls retire_unacknowledged_acceptance_evaluator. Under the state lock it cancels an evaluator still exactly as spawned, before any turn: untainted, nothing in flight, and a child with no runtime, messages or queue.\n- The retirement settles waits like cancel_delegation, and still hands them off when its own save fails.\n- The request gets a typed retryable 503 (ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged) naming the persist phase from the fence's own progress, for example \"Deadline: queued for the writer\". An evaluator a requester took over keeps running and the request gets a 409.\n- Four deterministic tests in src/tests/acceptance_evaluation_spawn_ack.rs hold the first-brief fence: the retryable refusal and a repeated request, a takeover, a wait registered meanwhile, and a failed retirement save.\n- Landed as 7f6281da: gate test-66187fcb (record 1023bf76) passed; five review rounds ended clean; evaluation 4d7a71ab passed 3/3 on work revision 2.\n- Follow-ups filed: w-1ae6fd799628, w-470f02762fe0, w-2e89b0895ad7, w-9c6e34b4f00e, and the pre-existing w-36976e30e86a.",
+    "completed_at": "2026-10-10T05:52:48.571697700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

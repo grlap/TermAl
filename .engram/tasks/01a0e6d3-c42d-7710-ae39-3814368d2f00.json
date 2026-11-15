@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c42d-7710-ae39-3814368d2f00",
+  "external_ref": "tm-9240",
+  "title": "Claude Bash test output over ~30,000 characters loses its result line: read persistedOutputPath",
+  "outcome": "Reported by Engram::Opus (session-7284, mailbox #195, 2026-09-25). A plain `cargo test --lib` (about 115 KB of output, 1022 passed) run through the Claude Bash tool left no passing evidence. The obligation \"tests have not run since your last source change\" stayed open.\n\nCause, checked against a real transcript entry: for large output Claude Code's structured result (tool_use_result / toolUseResult) carries `stdout` cut to the first ~30,000 characters, plus `persistedOutputPath` and `persistedOutputSize` for the full file under ~/.claude/projects/<project>/<session>/tool-results/. handle_claude_bash_result (src/claude.rs:2030) reads only stdout/stderr, so the final \"test result:\" line never reaches engram_check_result_lines. Without it, engram_check_showed_passing_tests is false and the check can be at most Unknown.\n\nFix: when persistedOutputPath is present on a recognised check's result, read the result lines from that file instead. Size-bound the read (persistedOutputSize and a hard cap), accept only a regular file under the runtime's own tool-results directory (no links out), and fall back to the truncated stdout when the file is missing. Tests: a persisted large output whose passing line is only in the file makes the check pass; an out-of-bounds path or a symlink is ignored.\n\nWorkaround: keep output under ~30,000 characters, for example `cargo test -q`. Part of tm-winf step 2 (5fee74f). The same truncation probably affects the command output TermAl shows in the transcript; check that separately.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a1a1e0-eb76-72d2-b95d-c752e99e378b",
+  "external_ref": null,
+  "title": "Expose remote mailbox wake progress and prevent newer mailbox wakes overtaking older queued work",
+  "outcome": "A durable native relay message has an accurate observed wake/hold state and supported recovery; its queued notification is not starved by newer mailbox arrivals, without bypassing user or provider holds.",
+  "acceptance": [
+    "A source- and runtime-cited chronology distinguishes append, target queue admission, provider handoff, read and acknowledgement for the reported session-4, session-5 and busy session-3 cases, explicitly marking unavailable historical facts.",
+    "An exact remote-message status read reports observed relay progress and any current target hold or unavailable state without equating durable append or target queue admission with provider delivery, or acknowledgement with execution; it names the supported recovery while preserving immutable send receipts.",
+    "Deterministic tests show that, within the leading run of runnable mailbox entries, an older native mailbox notification is not overtaken by later mailbox arrivals or ordinary coalescing at successive dispatch opportunities; that apart from recovery of a failed or rejected delivery, no entry crosses a queued non-mailbox prompt, so the order of mailbox wakes relative to queued non-mailbox prompts is unchanged, including the case where a non-mailbox prompt already precedes an older mailbox wake, in which the new wake keeps its current position; that recovery of a failed or rejected delivery keeps its existing behaviour of returning that wake ahead of its successors; and that active-turn, approval, Stop, pause, capacity, enrollment and durability protections still hold; the exact candidate has a clean required review pair and passes the applicable gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "mailbox",
+    "remote-runner",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered in N9: truthful read-only native relay progress and FIFO admission/redrive using existing dispatch owners, with historical chronology, exact caller/target identity fences and guarded local-head activation. All21 reviewed donor blobs identical on landed master; independent Codex+Claude pair no Medium+, M1–M4 fixed/re-reviewed; fully audited Linux focused84PASS plus integration-owned exact-tree Windows B FULL all5stagesPASS/Rust7087P0F28ignored/Vitest5018P0F. Six optional Low follow-ups retain deferred diagnostics/coverage/pre-existing limitations. No production restart or new live-send observation claimed.",
+    "completed_at": "2026-11-04T12:10:14.606660700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a1cab5-7c8e-7282-8729-ee28bebebad9",
+  "external_ref": null,
+  "title": "Source-owner metadata probe (--version) inherits the whole remaining evaluation deadline and can starve the mandatory closing tail",
+  "outcome": "Source-owner metadata probe (--version) inherits the whole remaining evaluation deadline and can starve the mandatory closing tail",
+  "acceptance": [
+    "The source-owner metadata probe (--version, run by engram_source_owner_observe_with before the source schema probe) has an explicit, finite, separately funded window of at least 60 s with the 10 s non-aborting warning. A slow probe can no longer consume the time funded for the mandatory evaluation tail (closing, policy and evidence reads). A behavioural test with a scripted slow probe shows the evaluation's mandatory tail still completes.",
+    "No effective limit becomes shorter than it is today without Greg's recorded word. If the chosen window is shorter than the window the probe can reach today (the remaining request deadline, up to the previous 780 s request maximum), Greg's decision is recorded on this item, verbatim with its source, before the change lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "limits"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the approved finite 62-second source-owner --version window with the existing non-aborting 10-second warning; longer source and request plans remain unchanged. Landed e3970152 through completed integration w-c7fc44c1f106. Independent evaluation 4eff757eb5f84c879911496a4ce7c8ec recorded fresh PASS2/2 at cut195 on this exact clean source, after native registered Test add175276e854e91b399df836a6e35f3 passed13/0. Full original evaluator output and recorded verdict ingested, separate parent END clean, END+RELEASE sent before completion. Earlier refused attempts preserved as diagnostic history, not verdicts. Three filed Low followups remain open with shared raw review retention; no runtime restart is claimed.",
+    "completed_at": "2026-11-12T07:10:07.575130800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

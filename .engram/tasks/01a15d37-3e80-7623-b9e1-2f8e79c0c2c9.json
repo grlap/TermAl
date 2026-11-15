@@ -1,0 +1,43 @@
+{
+  "id": "01a15d37-3e80-7623-b9e1-2f8e79c0c2c9",
+  "external_ref": null,
+  "title": "Diagnose Windows fingerprint stability refusals with precise metadata and byte-count evidence",
+  "outcome": "Explain and repair the confirmed cause of Windows B's two pre-stage fingerprint refusals without weakening source-change detection; first add precise bounded refusal diagnostics if original evidence cannot resolve the cause.",
+  "acceptance": [
+    "Original Windows B failure artifacts and controlled probe results are preserved with locators and hashes; the outcome distinguishes observed facts from hypotheses and records the demonstrated failure cause or explicitly unresolved limits.",
+    "Fingerprint refusal diagnostics identify the failing phase and relevant metadata differences or expected/actual byte counts without removing any existing source-change detection checks, and targeted regressions verify the diagnostics and retained mutation rejection.",
+    "An independent cross-vendor review pair has no outstanding in-scope Medium-or-higher findings and the maintained full gate passes on the exact final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "diagnostics",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

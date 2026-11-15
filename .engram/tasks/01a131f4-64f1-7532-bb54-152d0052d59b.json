@@ -1,0 +1,50 @@
+{
+  "id": "01a131f4-64f1-7532-bb54-152d0052d59b",
+  "external_ref": null,
+  "title": "An evaluation of a carried item is refused because the evaluator cites a bound criterion's earlier passing test from the pre-carry source revision",
+  "outcome": "For an item whose tree was carried onto a new base after its producer's tests ran, an independent evaluation judged at the committed revision cites, for each test-bound criterion, only verification records at that revision. Engram records it, rather than refusing the whole evaluation because a stale record from the pre-carry revision was cited too. The fix belongs where the evaluator learns which records are citable: the brief, the obligation's satisfying record, or the evaluator's instructions.",
+  "acceptance": [
+    "In the evaluator brief, a verification record whose source revision differs from the revision being judged is marked as context only and not citable for a bound criterion, naming both revisions; the binding rule names the judged revision.",
+    "A test builds a brief for a task with a bound test criterion that has one passing verification at an earlier source revision and one at the judged revision, and shows that only the current record is presented as citable for that criterion. The test fails without the fix.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "landing-blocker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed already-landed c6216f31 acceptance-brief fix after own-root full gate and fresh independent acceptance3/3. No new implementation, commit or push.",
+    "completed_at": "2026-10-14T10:07:25.968708400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

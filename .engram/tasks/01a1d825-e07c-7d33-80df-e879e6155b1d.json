@@ -1,0 +1,31 @@
+{
+  "id": "01a1d825-e07c-7d33-80df-e879e6155b1d",
+  "external_ref": null,
+  "title": "TermAl rejects a valid `engram source` result when Engram prints its slow-operation warning on stderr (launcher and host source capture)",
+  "outcome": "When `engram source --root <root> --json` succeeds with a valid JSON v1 envelope but its stderr carries only Engram's own slow-operation warning lines (\"warning: <operation> is still running after 10 seconds; attempt=…/…; elapsed_ms=…\"), TermAl's test launcher and its host source capture accept the result. They keep the warning text as a bounded diagnostic and do not drop it. Any other stderr content, oversized stderr, or a malformed or inconsistent envelope is still refused as today. source_id validation is unchanged, and Engram's warning itself is not suppressed or lowered.",
+  "acceptance": [
+    "A behavioural test of scripts/test-launcher-input.mjs captureCommitInputStatus: a successful source envelope whose stderr holds only well-formed Engram slow-operation warning lines is accepted, with the warning lines preserved in the captured result or diagnostics; stderr with any other line, or above a fixed byte bound, is still refused with ENGRAM_SOURCE_UNAVAILABLE",
+    "A behavioural test of the Rust host source measurement (src/engram_source_owner.rs, today 'Engram source measurement emitted stderr'): the same accept and refuse split, with source_id checks unchanged; the version and schema probes keep refusing any stderr unless the same exact warning shape is proven to occur there",
+    "No test pins prose beyond the warning's parse shape; existing source-id, envelope and refusal tests stay green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "greg-directed",
+    "source-identity",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

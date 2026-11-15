@@ -1,0 +1,42 @@
+{
+  "id": "01a19cb7-3e74-7b50-9530-fbd10118c0e1",
+  "external_ref": null,
+  "title": "Restore master Resume check order for idempotent unpaused Human retry",
+  "outcome": "Fable2353/message6a382cfc-40ac-4092-bd09-12414487d53a and2355/message515ca87d-2009-4a42-a7cb-c0cc653f302f explicitly retain master's two Resume route contracts; source-only P plus one plain-session regression in named g2579 on92a. Separate Human T retains OrdinaryRoot and second busy409 under recorded port contract.",
+  "acceptance": [
+    "Claim/name own fresh source root in a separate turn onTREE92a1830d. Read master5dd local/OFF Resume paths and a04cc298 containment assertions; record the two route contracts and coordinator disposition before source edits.",
+    "Per Fable2353/2355 preserve master OFF busy-first contract for local Base Engram roots and local identity-before-unpaused-idempotence for plain sessions. Scope guard using master control_mode14–23 route predicate adapted only for physically deleted control switch; keep H3 root assertions and existing Human Held branch unchanged. Add one focused plain-session unpaused/no-work idempotence test with a paused or Stop refusal control.",
+    "Return separate immutable tree, before/after blobs, scoped patch and rationale to Sol-03d4 cc Fable2. No Cargo/compiler/tests/parser/formatter/linter/live/agents/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "regression-fix",
+    "resume",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Separate source-only P TREEf8a9ee6b restores distinct master Resume route contracts with one plain/Stop regression; handed integrator cc Fable, UNRUN.",
+    "completed_at": "2026-11-02T14:54:48.082695500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

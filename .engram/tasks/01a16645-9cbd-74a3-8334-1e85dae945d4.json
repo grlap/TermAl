@@ -1,0 +1,44 @@
+{
+  "id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "external_ref": null,
+  "title": "Container: ordinary SQLite and launcher follow-ups after gated-control removal",
+  "outcome": "Retain the three surviving ordinary SQLite/launcher follow-ups and historical B16 provenance after the gated-control containment path was deleted; no gated runtime repair or completion is asserted.",
+  "acceptance": [
+    "For project-control reset failures, the API diagnostics and logs preserve EngramControlErrorBody.code together with the affected session and operation, without exposing credentials or raw private payloads. A rejected PATCH reports the code in its error response; a successfully applied containment reports any unresolved per-session settlement separately and does not describe it as a failed or fully settled project change. An incident note records the observed refusal code and available matching turn_grant_read and session_status evidence for session-13254, including observation times and identity; unavailable historical evidence is explicitly identified and is not replaced by an inferred grant state.",
+    "For an operator transition from turnGatedControl:true to false that retains the same Engram authority store and connection configuration, a session checkpoint refusal or remote availability failure cannot alone veto the project setting change. The host durably applies the setting together with all necessary per-session recovery identities and dispatch exclusions. A retained local grant is cleared without another checkpoint only when authoritative, identity-matched evidence proves that exact grant is terminal and the final local owner/generation fence still matches; GrantScopeMismatch or 'not begun' alone is insufficient. An issued grant is retired only when never-sent Begin is positively established and the supported distinct-key SessionBind retirement protocol is satisfied, including whole-control-session exclusion, exact replay and durable confirmation; GrantNotBegun alone does not erase possibly-sent Begin uncertainty. A genuinely begun grant, possibly-sent Begin, unknown/mismatched grant state, failed retirement or unsettled checkpoint remains a separate durable per-session recovery obligation with its original identity and truthful reason. Unresolved obligations continue to exclude Engram-mediated binding, admission and replay. As a narrow exception, an explicitly OFF/disabled session may start a fresh unmediated local turn when all of its unresolved obligations are inactive, unowned original-checkpoint report debt, the original provider is confirmed quiescent, and no independent execution or accounting duty remains. Original debt and identity remain durable, immutable and reported; local turn lifecycle events cannot settle, reuse or overwrite them. Re-enabling control does not release that exclusion: before any new Bind/Evaluate/Begin, supported reconciliation must settle the original debt. Possibly-sent Begin, live execution, live receipt/flight/status ownership and independent duties do not qualify. Any still-running affected provider is handled by the existing interruption/quiescence lifecycle; unconfirmed interruption remains explicitly unresolved, never reported as stopped or settled. Other sessions with no such obligation may continue under the new setting. Settings and recovery persistence failures, ownership races and unsupported configuration changes retain their existing refusal semantics. The response identifies the applied setting and unresolved sessions with supported next actions. Deterministic tests cover healthy settlement, each refusal code, a mismatch with a still-begun or successor grant, proven terminal cleanup, issued-but-never-sent retirement, possibly-sent Begin, timeout/lost reply, concurrent owner replacement, failed persistence, and restart/Resume with gating off; they verify both progress for unaffected sessions and no duplicate dispatch or loss of unresolved authority.",
+    "The full five-stage gate passes on the exact tree submitted for landing, and the required independent review pair has no outstanding in-scope finding of Medium or higher on that input. The committed tree is that reviewed and gated tree; the item carries the evidence required by the standing landing rule."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "container",
+    "control-plane",
+    "engram-control",
+    "gating-removal-audited"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,43 @@
+{
+  "id": "01a1221d-bf02-73c1-84cb-3a054120e004",
+  "external_ref": null,
+  "title": "A focused launcher run of `cargo test` that failed with failing counts is recorded unknown/indeterminate instead of failed",
+  "outcome": "A focused launcher run wrapping `cargo test`, whose own results record a failure with failing counts and a nonzero native exit, is recorded as a FAILED verification that keeps its exit status and counts. A run whose evidence is genuinely missing or inconsistent stays unknown, with a line naming why.",
+  "acceptance": [
+    "The holder's note identifies, with file:line, the path that turns a focused cargo run's failed result (launcher FAIL, nonzero exit, counts with failed > 0) into producer_outcome unknown and an indeterminate result, and shows it from the retained run records.",
+    "A fail-first test with focused launcher records for a failed `cargo test` run (nonzero exit, failed > 0) shows unknown on unchanged code and a failed verification with the exit status and counts after the fix. Tests show that a passed focused cargo run still records passed, and that missing or inconsistent evidence still records unknown with its reason.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

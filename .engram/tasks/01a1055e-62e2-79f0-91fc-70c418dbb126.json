@@ -1,0 +1,26 @@
+{
+  "id": "01a1055e-62e2-79f0-91fc-70c418dbb126",
+  "external_ref": null,
+  "title": "Switch CheckedTurn::start_with_opening to the shared select_scripted_engram_budget_clock_before_enable helper once B4b and B4c have landed",
+  "outcome": "B4c (w-2d34f1721b6d) adds an inline guard to CheckedTurn::start_with_opening in src/tests/engram_turn_checks.rs: it asserts engram_budget_clock_snapshots == 0, then calls select_test_scripted_engram_budget_clock(). It does this because B4b's shared helper select_scripted_engram_budget_clock_before_enable (src/tests/engram_host_adapter.rs, commit fc94d2bd, train 34) was not on master when B4c started. Once both have landed, replace the inline guard with that helper call so the guard lives in one place. Test-only; there is no behaviour change.",
+  "acceptance": [
+    "Switch CheckedTurn::start_with_opening to the shared select_scripted_engram_budget_clock_before_enable helper once B4b and B4c have landed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

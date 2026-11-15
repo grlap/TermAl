@@ -1,0 +1,49 @@
+{
+  "id": "01a12e50-50df-7b91-8936-d7ee4a41e2f1",
+  "external_ref": null,
+  "title": "Full-gate credit refused for a SQLite sidecar (journal/WAL) directly in a termal-test-state-* fixture root under the gate worktree's own .tmp/; the cause is unattributed and the fence line lacks the exemption's inputs",
+  "outcome": "A carried full gate is never fenced by a test fixture's own files under the `.tmp/` of the gate's worktree. When a `.tmp`-naming path does fence a gate, the holder-visible fence cause carries the scratch exemption's inputs (the fresh exact root and key, whether the directory existed, and the routing key used), so each occurrence explains itself without host stderr.",
+  "acceptance": [
+    "A diagnostic change makes the fence cause for a `.tmp`-naming path include the exemption's inputs (routing root, fresh exact root and key, directory existence at evaluation), with a test showing the extended line.",
+    "The holder's note identifies, with file:line and evidence from at least one occurrence carrying the new diagnostic (or a reproduction), why a change under `<worktree>/.tmp/termal-test-state-*/termal.sqlite-{journal,wal}` fenced the gate, and a fail-first test reproduces it and shows it unfenced after the fix.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

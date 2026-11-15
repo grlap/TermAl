@@ -1,0 +1,27 @@
+{
+  "id": "01a1c4a2-013a-7253-9ad4-fccd1fc7a7d2",
+  "external_ref": null,
+  "title": "Commit-and-push section says \"subject to the integration and migration restrictions below\", but no migration restriction follows",
+  "outcome": "Commit-and-push section says \"subject to the integration and migration restrictions below\", but no migration restriction follows",
+  "acceptance": [
+    "Commit-and-push section says \"subject to the integration and migration restrictions below\", but no migration restriction follows is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

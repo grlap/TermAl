@@ -1,0 +1,37 @@
+{
+  "id": "01a1c973-fe29-7283-80e6-71e95318ea03",
+  "external_ref": null,
+  "title": "Supported replay of a retained unconfirmed acceptance-evaluation submission after its evaluator has ended",
+  "outcome": "A retained unconfirmed evaluation write can be resent once, unchanged, under its original evaluator actor and attempt key, through a supported host route, so that an unknown outcome is settled without a new judgment.",
+  "acceptance": [
+    "A supported host route resends a retained Unconfirmed acceptance-evaluation submission whose evaluator has ended, with its original payload bytes, actor and attempt key unchanged, and settles it to Recorded or to a typed refusal; it never creates a new judgment or a parent-authored verdict.",
+    "The route refuses when the stored payload digest differs, when another submission or follow-up for the same evaluator is in flight, or when the submission is already Recorded, and it is idempotent: a repeat after Recorded changes nothing.",
+    "Behavioural tests with an Engram fixture cover: a timed-out submission replayed to Recorded, a replay that times out again staying Unconfirmed with the same key, and the refusals above."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance",
+    "engram-adapter",
+    "recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered and landed owning-parent recovery for retained Unconfirmed evaluator submissions. Exact original actor, attempt, payload and source are preserved; refusals/duplicate/flight and persistence boundaries are guarded, receipt result and MCP pending projection repairs reviewed. Fresh independent evaluation830e8e9ba60b44a3a2f7ec0442ef7deb passed all3criteria at exact28687c03/tree9ea5. Originalauthor71/0 plus exact-treeFULL passed; registeredBuildbc79/record0f185settled. RemainingLows filed separately; no futurecombo56 or live-host replay claim.",
+    "completed_at": "2026-11-11T13:12:57.734858400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

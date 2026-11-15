@@ -1,0 +1,32 @@
+{
+  "id": "01a1658b-ae05-7653-ab61-53cf0f61c8e0",
+  "external_ref": null,
+  "title": "Tests for the v3 Resume repair gaps: Releasable arm end to end, ReconcileRetained commit-failure rollback, settings-reset skip for a bind-only head, remote issued/ready branches",
+  "outcome": "Tests for the v3 Resume repair gaps: Releasable arm end to end, ReconcileRetained commit-failure rollback, settings-reset skip for a bind-only head, remote issued/ready branches",
+  "acceptance": [
+    "A test drives a public Resume on an interrupted head with no wire intent and begins recorded (the Releasable arm) and asserts that the dispatch generation is bumped and the head is admitted afresh.",
+    "A test makes the commit of the ReconcileRetained transition fail and asserts that recovered_admission and routing_token are restored.",
+    "A test shows the session_crud settings-reset skip applies to a bind-only head with no evaluate, and that a later cancel leaves the session able to bind again.",
+    "The remote 'issued' and 'ready' status branches of the reconcile step each have a test of their own, not only the lost-bind and lost-evaluate replay test.",
+    "cargo test --bin termal passes with the new tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

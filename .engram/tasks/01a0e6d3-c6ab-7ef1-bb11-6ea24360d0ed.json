@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6ab-7ef1-bb11-6ea24360d0ed",
+  "external_ref": "tm-qtxx",
+  "title": "Verify side effects of project startup commands allowed to reviewer leaves",
+  "outcome": "Follow-up from context-cost review, tm-3nt1: required read-only startup recovery is now allowed without granting tracker mutation or finding reconciliation. Verify installed bd prime and Engram next --peek side effects under actual reviewer execution (including automatic database startup/locks), document the boundary or use neutral examples if needed. This is an external-tool behavior audit, not a confirmed defect in the permission wording; do not install/update tools or mutate live stores for the audit without authorization.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

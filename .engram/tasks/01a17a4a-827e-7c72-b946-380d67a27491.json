@@ -1,0 +1,31 @@
+{
+  "id": "01a17a4a-827e-7c72-b946-380d67a27491",
+  "external_ref": null,
+  "title": "Clarify the missing-root error for self-host-qualified local mailbox targets",
+  "outcome": "Clarify the missing-root error for self-host-qualified local mailbox targets",
+  "acceptance": [
+    "A refused self-host-qualified native locator for a missing local root reports a local-root error rather than suggesting the qualified spelling already supplied; bare-id guidance and refusal/no-append behavior remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-reported",
+    "federation",
+    "follow-up",
+    "mailbox",
+    "regression-candidate",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17986-c6ba-7830-b904-623c0e4ca176",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

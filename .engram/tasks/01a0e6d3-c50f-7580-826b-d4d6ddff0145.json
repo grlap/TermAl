@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c50f-7580-826b-d4d6ddff0145",
+  "external_ref": "tm-gkn",
+  "title": "TermAl sqlite has grown to 915MB with no session retention",
+  "outcome": "~/.termal/termal.sqlite is 915MB (plus a 52MB WAL) on a real user machine. 674 session records hold 480MB of value_json; the largest single session is 132MB and the next is 65MB, i.e. full transcripts (including tool output and diffs) are stored inline in the session blob with no cap.\n\nContributing factors:\n- 530 of the 674 sessions are delegation children. They are correctly hidden from the list and correctly cascade-deleted with their parent, but nothing removes them when the DELEGATION ITSELF completes, so every /review-with-delegate run leaves 2 permanent records for as long as the parent session lives.\n- No retention/pruning of sessions or transcripts anywhere (state_inner.rs has retain_sessions but only delete paths call it).\n\nWhole-blob-per-session storage also means any touch of a 132MB session rewrites 132MB.\n\nDecide a retention policy: cap/offload transcripts, and/or reap completed delegation children after some window (they are inspectable while the review is being read, then disposable).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

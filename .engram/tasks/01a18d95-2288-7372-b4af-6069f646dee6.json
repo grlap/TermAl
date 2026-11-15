@@ -1,0 +1,24 @@
+{
+  "id": "01a18d95-2288-7372-b4af-6069f646dee6",
+  "external_ref": null,
+  "title": "Raw results route reports Windows transient access-denied/sharing errors during the launcher's atomic replace as permanent 500",
+  "outcome": "A transient Windows open failure (ERROR_ACCESS_DENIED delete-pending or a sharing violation, raw OS 32/33) on results.json during a live run is classified as retryable (e.g. 409 test_run_results_changed), consistent with test_run_read_json, or the 500 is documented as possibly transient.",
+  "acceptance": [
+    "Raw results route reports Windows transient access-denied/sharing errors during the launcher's atomic replace as permanent 500 is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

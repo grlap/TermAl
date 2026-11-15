@@ -1,0 +1,32 @@
+{
+  "id": "01a17681-5857-7270-81d0-6d91ecdf2bc5",
+  "external_ref": null,
+  "title": "Make the deep metadata release-probe witness exercise its claimed layout",
+  "outcome": "The release-probe regression clearly distinguishes a layout arithmetic witness from execution with a deep metadata directory.",
+  "acceptance": [
+    "Either drive the release probe with the representative deep metadata directory and discriminate a depth-dependent regression, or name/document it explicitly as an arithmetic layout witness with an appropriate independent behavior control.",
+    "Preserve existing successful handle-release, startup-error, short-scratch and short Windows checkout controls without increasing timeouts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-coverage",
+    "test-defect",
+    "test-launcher",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1753e-f9c5-7e03-8cf8-ca860b187033",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

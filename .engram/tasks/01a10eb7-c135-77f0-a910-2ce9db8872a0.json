@@ -1,0 +1,46 @@
+{
+  "id": "01a10eb7-c135-77f0-a910-2ce9db8872a0",
+  "external_ref": null,
+  "title": "Kimi (ACP) test runs record indeterminate: the host reads a shell call's exit status and output only from rawOutput, which Kimi's tool updates do not carry",
+  "outcome": "Kimi (ACP) test runs record indeterminate: the host reads a shell call's exit status and output only from rawOutput, which Kimi's tool updates do not carry",
+  "acceptance": [
+    "A real Kimi shell tool_call / tool_call_update sequence for a completed test command, captured from a live Kimi session, is kept as a test fixture, and the item notes say where in it Kimi carries the command's output and whether and where it carries an exit status or a failure signal",
+    "For a completed Kimi shell call, the host takes the command's output from where the captured shape carries it, so runner result lines such as 'test result: ok. 1 passed' reach the check summary",
+    "The host claims a succeeded or failed outcome for a Kimi shell call only from a signal the captured shape shows Kimi gives for the command's own exit; where Kimi gives none, the record stays indeterminate (fail closed), and ACP status completed alone is not read as exit 0 unless the notes show Kimi uses it that way",
+    "cargo test --bin termal passes with tests over the captured shapes, including a failing command and a command with no exit signal",
+    "After the fix is live, a Kimi session's `pushd \"DIR\" && cargo test --bin termal live_proof` in a named root is recorded by the host as passed"
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acp",
+    "host-recording",
+    "kimi"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The host now records Kimi (ACP) shell test runs from Kimi's own output and exit signals. Product change: train 50, master 99768769, which merges Kimi's ef9c9753. Output comes from the bare-string rawOutput or the content text. Exit 0 comes from status completed unless the output is a background start; a failed call's code comes from its closing \"Command failed with exit code: N.\" line after Kimi's spill and per-line suffixes are peeled off; anything else stays indeterminate. Criterion 1 follow-up: 61e02a38 (fast-forward on 4d9d84b2) adds the verbatim live capture of a completed, passing Kimi 2.1.1 `cargo test --bin termal live_proof` (sha256 41e88f29…), with a test that drives all 16 frames through the host's ACP path. Evidence:\n- Evaluation f9adbfe4: 5/5 pass.\n- Credited gates: 785d01e5 (the product change) and 823b47af (test-6a37f367, the fixture).\n- Live proof: b3269e5e, Kimi's run recorded as PASSED on the restarted host.\n- Review: the product pairs clean; the fixture's round 2 clean.\nThe fixture landing changes no product code. Its install is deferred until after the CORE Freeze2 gate, per Fable2; the binary differs at most in its embedded revision.",
+    "completed_at": "2026-10-06T06:43:38.466810Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

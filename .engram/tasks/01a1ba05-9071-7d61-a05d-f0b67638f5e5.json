@@ -1,0 +1,32 @@
+{
+  "id": "01a1ba05-9071-7d61-a05d-f0b67638f5e5",
+  "external_ref": null,
+  "title": "Keep the retained registration-pending recovery guidance visible in the launcher failure text",
+  "outcome": "An unconfirmed recovery that retains a validated pending registration also tells the operator to retry the unchanged original request, while preserving the latest recovery diagnostic.",
+  "acceptance": [
+    "When an earlier validated pending registration is retained after an unconfirmed recovery, the launcher failure text explicitly says durability remains pending and directs the operator to the unchanged original request; keep the latest error diagnostic first and retain bounded output.",
+    "A behavioral HTTP-fixture case observes that guidance for an unconfirmed recovery while preserving the typed pending identity/stateLock, exactly two identical POSTs, no receipt and no stage execution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "launcher",
+    "persistence",
+    "registration",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b8a0-dcfe-73c3-a992-7c7ce88f419a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

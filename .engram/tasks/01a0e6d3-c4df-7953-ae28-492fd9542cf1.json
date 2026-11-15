@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4df-7953-ae28-492fd9542cf1",
+  "external_ref": "tm-d8v",
+  "title": "Keep live command cards collapsed from first render",
+  "outcome": "Agent turns can emit many command cards, so running, successful, and failed commands must render as compact summaries from their first frame. Details open only by explicit user action or active conversation search, and remain stable across running-to-success/error updates. Remove the automatic height-collapse animation that fights live bottom-follow, and add component plus scroll regression coverage.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

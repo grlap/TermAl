@@ -1,0 +1,28 @@
+{
+  "id": "01a111c3-ebe6-77f0-8410-45b6ea80ad16",
+  "external_ref": null,
+  "title": "Adapt Codex command-length notice file guidance to the session project and shell",
+  "outcome": "The exec206 notice gives a usable file-based route for the session's repository and available Windows shell without assuming TermAl's .tmp convention.",
+  "acceptance": [
+    "Adapt Codex command-length notice file guidance to the session project and shell is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex-runtime",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

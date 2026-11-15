@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c68a-7050-970c-9a45497cc332",
+  "external_ref": "tm-oyek",
+  "title": "Make OpenCode ACP config test synchronization deterministic",
+  "outcome": "Required scripts/test-rust.sh gate failed under the normal four-thread full suite at tests::opencode_config::opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready: take_pending_acp_request exhausted its fixed 1-second polling deadline ('ACP request should arrive before timeout'). The exact test immediately passed in isolation in 0.11 seconds. Classify as a test defect caused by load-sensitive polling/thread scheduling, not a product failure and not 'flaky'. Replace the arbitrary polling deadline with deterministic request publication synchronization or a suite-budgeted helper that reports which protocol stage timed out; retain ordering assertions and prove stability under the full Rust wrapper.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

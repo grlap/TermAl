@@ -1,0 +1,26 @@
+{
+  "id": "01a189f2-9ef4-7222-86af-6b242977ffd5",
+  "external_ref": null,
+  "title": "Closing turn_checkpoint failures before the send produce no checkpoint control card",
+  "outcome": "Every closing checkpoint that fails, including one stopped before its request is handed to the control transport, leaves a durable checkpoint control card naming the cause, so a held grant is never silent.",
+  "acceptance": [
+    "Closing turn_checkpoint failures before the send produce no checkpoint control card is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

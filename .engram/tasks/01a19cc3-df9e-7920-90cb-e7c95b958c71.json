@@ -1,0 +1,27 @@
+{
+  "id": "01a19cc3-df9e-7920-90cb-e7c95b958c71",
+  "external_ref": null,
+  "title": "Stranded carried-check line says 'replaced' only through a direct call; the runtime clear always says 'cleared'",
+  "outcome": "The stranded carried-check notice states truthfully whether the runtime was replaced or cleared, or the unreachable 'replaced' branch is removed.",
+  "acceptance": [
+    "Stranded carried-check line says 'replaced' only through a direct call; the runtime clear always says 'cleared' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

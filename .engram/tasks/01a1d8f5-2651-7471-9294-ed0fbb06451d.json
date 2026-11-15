@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8f5-2651-7471-9294-ed0fbb06451d",
+  "external_ref": null,
+  "title": "Retired-check disposition audit notes should distinguish attempted exclusion from completed admission",
+  "outcome": "A refused post-note evaluation attempt leaves an audit entry that accurately says it was attempted or pending, or is rejected by a dry admission preflight before writing; retries do not imply that an evaluator actually started.",
+  "acceptance": [
+    "A behavioral case in which excluding admission or current-root sighting refuses after disposition selection does not leave a misleading completed-exclusion claim.",
+    "Successful disposition admission keeps the original check, requester attribution, note evidence and no-credit semantics, and all existing refusal controls remain meaningful."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d595-9e1d-76d0-9955-2ecb0cb4d6e6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

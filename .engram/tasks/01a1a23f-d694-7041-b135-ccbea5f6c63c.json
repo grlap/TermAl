@@ -1,0 +1,38 @@
+{
+  "id": "01a1a23f-d694-7041-b135-ccbea5f6c63c",
+  "external_ref": null,
+  "title": "Specify the shared source_id v1 capture and verification contract",
+  "outcome": "A docs-only candidate at docs/features/source-identity.md defining one capture_source/verify_source contract, byte-compatible content-v1 without gitlinks, pinned submodule eligibility and refusals, and phased consumer migration, sent to TermAl::Fable2, Engram::Fable and Kimi::Consultant for wording review.",
+  "acceptance": [
+    "The document defines one capture_source/verify_source contract and ordered consumers: test credit now, TermAl review_freeze/review_identity next, Engram Node tooling later.",
+    "The document preserves existing content-v1 hash inputs and values for no-gitlink content admitted both before and after the change, allows differing on-disk directory case spelling, and specifies the distinct-tracked-path case/NFC/NFD collision refusal as the only new refusal, without changing terminal-symlink or distinct-name-hard-link treatment. It defines the general git-commit:<full commit id> lane, with the tree recorded separately, and commit-input v1 eligibility for repositories with or without gitlinks: every child is initialized at its recorded pin; Git status is empty in the root and every child, with no exception list; uninitialized, wrong-pin, dirty and nested children are ineligible; the committed lane adds no on-disk case or filesystem collision check. It specifies supported object formats and explicit refusals, Git-ignored output outside the cleanliness judgment, canonical content-v1 ordering, path independence, read-only capture, retained guards and before/after eligibility checks, the adopted different-blob, identical-blob and dirty-child Git observations, and that no source-identity change rewrites, recomputes, relabels, invalidates, deletes or re-runs a stored evaluation, verification or seal.",
+    "The document explains migration and authority consequences and is sent to Fable2, Engram::Fable and Kimi::Consultant for wording review; this task changes documentation only."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "architecture",
+    "cross-project",
+    "docs-only",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source identity specification delivered in C3 master0bfbb90d72a513e52110ceaee6abab443db4435b, unchanged from reviewed d705b0f7. Three exact-wording concurrences and independent Codex/Claude pair with no Medium-or-higher; optional Lows retained. Opus2 reports exact combined Windows FULL test-fcad2bfc5/5 green with stable fingerprintd54475c6. Parent verified landed blob equality, master and local origin/master refs and reread entire document; all three docs criteria mapped in holder evidence note. Asserted completion under Greg's current evaluation-disabled/non-blocking direction, not an independent verdict or runtime implementation claim.",
+    "completed_at": "2026-11-04T01:12:07.961158600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a18b0e-0354-77a3-b407-2dabfec52caa",
+  "external_ref": null,
+  "title": "Add regression coverage for the checkpoint-settlement AdmissionRetry: coalescing, restart rebuild and charging of declined attempts",
+  "outcome": "Add regression coverage for the checkpoint-settlement AdmissionRetry: coalescing, restart rebuild and charging of declined attempts",
+  "acceptance": [
+    "Add regression coverage for the checkpoint-settlement AdmissionRetry: coalescing, restart rebuild and charging of declined attempts is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "test-coverage",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,50 @@
+{
+  "id": "01a0f984-6ff2-75b3-9216-d84de9d66b59",
+  "external_ref": null,
+  "title": "Announce broadcaster mailbox overflow and recover through the lagged stream contract",
+  "outcome": "Broadcaster mailbox eviction is counted and announced without blocking the commit lock, and the existing lagged stream recovery restores missed state.",
+  "acceptance": [
+    "1. A deterministic production-broadcaster test forces repeated mailbox overflow and verifies a retained loss announcement, the exact eviction count and revision range, and recovery through the actual HTTP lagged-marker and snapshot path.",
+    "2. Overflow never blocks a producer holding StateInner; the loss announcement survives further eviction and precedes retained work, while the P0 stream sequence and client recovery contracts remain intact.",
+    "3. The server contract documentation describes bounded overflow and recovery, and the full five-stage gate passes on the exact reviewed stacked input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "architecture",
+    "brief-step-4",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f442-0123-79c2-a09f-71036a828182",
+  "child_requirement": "optional",
+  "prerequisites": [
+    "01a0eeb3-2b65-7c22-8b19-1b692f268123"
+  ],
+  "blockers": [
+    {
+      "blocker_id": "01a0f985-1a4b-7233-b8c9-a1e494b8e0ea",
+      "kind": "manual",
+      "detail": "Wait for Coder's P0 stream-contract commit and completion/landing of ordering parent before stacked implementation. The attempted explicit after-parent dependency was refused as work_dependency_cycle; preserve the optional hierarchy and this coordination blocker instead.",
+      "created_by": {
+        "actor_id": "greg/codex",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-01T22:10:44.934598800Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

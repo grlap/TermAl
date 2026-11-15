@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c41d-7342-9047-f1478b4305f6",
+  "external_ref": "tm-7kgj",
+  "title": "Remove scheduler-sensitive Engram recovery test deadline",
+  "outcome": "During the 2026-08-28 Engram A0/MCP gate, unbounded default-parallel cargo test tests::engram_host_adapter produced 85/86: disable_preserves_uncheckpointed_authority_and_reenable_repairs_the_same_session recorded recovery session_bind + turn_evaluate but omitted turn_begin. The exact test passed in isolation (1/1) and the full suite passed with --test-threads=1 (86/86), proving environment/resource contention against the production wall-clock dispatch budget rather than an adapter semantic failure. Next action: make this recovery assertion deterministic under scheduler contention (or explicitly execute the suite through the bounded scripts/test-rust.sh contract) without weakening the expected operation sequence.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

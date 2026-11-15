@@ -1,0 +1,27 @@
+{
+  "id": "01a174e8-b53d-7461-b6e6-c73a18509adf",
+  "external_ref": null,
+  "title": "Federation supervisor logs the expected boot-window durability-settling 423 as \"peer unavailable\"",
+  "outcome": "Federation supervisor logs the expected boot-window durability-settling 423 as \"peer unavailable\"",
+  "acceptance": [
+    "Federation supervisor logs the expected boot-window durability-settling 423 as \"peer unavailable\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "diagnostics",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

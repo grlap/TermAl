@@ -1,0 +1,27 @@
+{
+  "id": "01a0fa42-b7c3-7752-b058-02b5ac5a4856",
+  "external_ref": null,
+  "title": "Reword the acknowledged-wake test comments that describe pre-change master and cite acceptance criteria by number",
+  "outcome": "Reword the acknowledged-wake test comments that describe pre-change master and cite acceptance criteria by number",
+  "acceptance": [
+    "Reword the acknowledged-wake test comments that describe pre-change master and cite acceptance criteria by number is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailboxes",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

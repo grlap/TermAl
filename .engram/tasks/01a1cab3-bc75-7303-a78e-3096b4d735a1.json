@@ -1,0 +1,33 @@
+{
+  "id": "01a1cab3-bc75-7303-a78e-3096b4d735a1",
+  "external_ref": null,
+  "title": "Integrate combo56 on 28687c03: d50d 210f6518 (w-e75b boot state-load timings), direct child of combo55",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 210f651872ff100704f323a90ab7a58e6403176f (tree 6d890c22035a2b7ceae31294e7962c6ebcfbf66d) is on origin/master, where master was moved to it by a fast-forward from 28687c03cd6581f95d938ee8774b2b120aa9141a.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 6d890c22 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the R2 pair on 788d0cd7 (Codex session 17418, Claude session 17419), which 210f6518 adopts because its contribution against 28687c03 is byte-identical to 788d0cd7's against cff10811 (raw diff sha256 0ce2a450).",
+    "The release binary built from tree 6d890c22 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo56 landed: master fast-forwarded 28687c03..210f6518 (d50d boot state-load timings, byte-identical to reviewed 788d0cd7) and pushed at 13:53:48Z after the DL560 FULL test-49ecf97a passed every stage (Rust 7632/0/114, vitest 5093/5093). The test ref is deleted. Installed on Central (0ac66fb0, backup 9874d02c) and DL560 (709858fc, backup 18f27c6b) with no restart. The independent evaluation (Codex 17474) passed 3/3.",
+    "completed_at": "2026-11-11T14:02:20.618643900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

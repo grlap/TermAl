@@ -1,0 +1,38 @@
+{
+  "id": "01a0fa22-1959-76e3-98b2-135f211d5c54",
+  "external_ref": null,
+  "title": "Preserve conservative mutation reporting when the begin source basis is missing",
+  "outcome": "A missing begin comparison cannot suppress a mutation obligation solely because a debounced watcher missed an edit; unconfirmed source remains uncredited.",
+  "acceptance": [
+    "The mutation-grant missing-begin/successful-close path reports conservatively without assigning an unconfirmed credited source basis, or adopts an independently concurred explicit policy with equivalent evidence safety.",
+    "A regression covers missing begin basis and no watcher event under mutation and observation-only grants, keeping credited source attribution withheld."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

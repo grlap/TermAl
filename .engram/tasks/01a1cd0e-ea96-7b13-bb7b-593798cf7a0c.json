@@ -1,0 +1,35 @@
+{
+  "id": "01a1cd0e-ea96-7b13-bb7b-593798cf7a0c",
+  "external_ref": null,
+  "title": "Integrate combo68 on 9cba6226: edfd 046951e8 (w-410a held-item turn attribution across focus changes, carry), direct child of combo67",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 046951e88541ff27efd13705d8444d9ed5b649c4 (tree 64dd33deaf5893ee7cad58f6ef8f4f9ba461fcc5) is on origin/master, where master was moved to it by a fast-forward from 9cba6226cf6e39e26734ff4f1e2a09a20cb4b144.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 64dd33de passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 9cba6226 is byte-identical (same 7 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 0f2d3c7f's contribution against e81c9787, whose 6 source rows the whole-7 pair Codex session 17551 and Claude session 17552 reviewed on cc7f3ed2 and whose docs/features/engram-host-adapter.md row the scoped docs pair Codex session 17569 and Claude session 17570 reviewed, each with no Medium or higher finding, and the candidate adopts both pairs.",
+    "The release binary built from tree 64dd33de was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo68 integrated. 046951e88541ff27efd13705d8444d9ed5b649c4 (tree 64dd33de) is on origin/master by a fast-forward from 9cba6226, and the full launcher gate passed on the exact tree. It is installed on DL560 (ddb31157) and on Central (faaeb2ea), with the previous binaries kept aside. An independent evaluation (Codex session 17592, delegation-006ec6b5) passed all 3 criteria.",
+    "completed_at": "2026-11-12T01:30:27.507358700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

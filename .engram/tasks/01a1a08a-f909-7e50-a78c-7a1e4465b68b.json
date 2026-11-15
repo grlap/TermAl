@@ -1,0 +1,29 @@
+{
+  "id": "01a1a08a-f909-7e50-a78c-7a1e4465b68b",
+  "external_ref": null,
+  "title": "Cancel a pending SQLite writer-admission ticket if a wait callback panics",
+  "outcome": "A panic in a writer-admission wait callback releases its pending FIFO ticket so later writers on that database path can still make progress.",
+  "acceptance": [
+    "A pending ticket is cancelled and the FIFO advances if wait_budget or interval_elapsed unwinds before admission is transferred to the writer guard.",
+    "A deterministic panic/unwind regression demonstrates that a later writer is admitted after either callback panics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "panic-safety",
+    "persistence",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

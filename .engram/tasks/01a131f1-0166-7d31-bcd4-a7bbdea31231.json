@@ -1,0 +1,50 @@
+{
+  "id": "01a131f1-0166-7d31-bcd4-a7bbdea31231",
+  "external_ref": null,
+  "title": "A gate's own cargo, recreating target/ through a temporary target<random> sibling in the worktree root, fences the gate's credit as an outside worktree write",
+  "outcome": "A gate whose own cargo process creates target/ (after a `cargo clean` or in a fresh worktree) is not fenced by cargo's temporary sibling directory, target<random>, in the worktree root. The workspace watcher treats that sibling as build output, the same as target/, so the gate earns its credit. A genuine outside write in the worktree still fences it.",
+  "acceptance": [
+    "The workspace watcher treats cargo's temporary target-directory sibling at a worktree root (the name `target` followed by cargo's random suffix, created while cargo makes target/) as build output that does not fence a carried check, matching only cargo's exact naming so that other user files whose names start with 'target' still fence.",
+    "A fail-first test shows a carried check is not fenced by a change under such a sibling at the worktree root, while it is still fenced by a change to an ordinary file named like 'targets.txt' or 'target-notes.md' in the same worktree.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "cross-project"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed and landed as f53516e701eede291625dace56fc6f3058448cb3 on origin/master. Parent 53d8117f93448461b80ebbf1f5875dea57b6a349; tree 288df0408be08ecd88909f84867f06f360470860. Full gate test-f2a9d84c-f584-49ee-bf47-93d088d706fe passed 5/5 stages on the exact tree, host verification 74865e8a84a5487b99f382298c07285f. Review pair Codex 89bda092-d3bb-42f4-96b4-28113330911c and Claude bb55f29c-9678-4b01-ab17-e7d5a8492d53 found no Medium+ issues. Independent evaluation 6a228f59431c48ae861b1d5b90a33125 passed all 3 criteria. Integration owner verified fast-forward and remote. Install deferred by coordinator.",
+    "completed_at": "2026-10-14T04:42:56.288009Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

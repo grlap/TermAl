@@ -1,0 +1,29 @@
+{
+  "id": "01a10061-32cf-74b1-a18d-7e4b1fdd5b05",
+  "external_ref": null,
+  "title": "The first launch of a freshly linked large executable is slow and holds the process-wide INHERITANCE_LOCK, so every other launch in the process waits behind it",
+  "outcome": "It is known whether, on Windows, the CreateProcess of a freshly linked executable (antivirus first scan) runs under host_command's INHERITANCE_LOCK long enough to stall other launches in the same process past their wall-clock budgets, and what to change if it does: for tests, avoiding first launches of fresh binaries under the lock; for the product, whether any host launch can meet a first-scanned binary.",
+  "acceptance": [
+    "The first launch of a freshly linked large executable is slow and holds the process-wide INHERITANCE_LOCK, so every other launch in the process waits behind it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "load-sensitive",
+    "process-launch",
+    "test-design",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

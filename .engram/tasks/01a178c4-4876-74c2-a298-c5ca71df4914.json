@@ -1,0 +1,30 @@
+{
+  "id": "01a178c4-4876-74c2-a298-c5ca71df4914",
+  "external_ref": null,
+  "title": "Avoid short Retry-After polling hints for permanently failed delegation inventory",
+  "outcome": "Align unavailable inventory HTTP retry guidance with the permanent-until-restart Failed witness, preserving typed refusal and the starting-state retry hint.",
+  "acceptance": [
+    "Avoid short Retry-After polling hints for permanently failed delegation inventory is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "review-followup",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c77e-7f62-b6ba-645deb2f7129",
+  "external_ref": "tm-uw7j.7",
+  "title": "Keep Engram revocation retries independent from unrelated settings edits",
+  "outcome": "Any Engram settings mutation may opportunistically retry an older unconfirmed authority revocation. If that retry fails, even a deadline-only edit can return 500 after the edit was durably committed and can contend on the project reset fence. Separate best-effort backlog repair from failures caused by the current mutation.",
+  "acceptance": [
+    "An unrelated settings edit is not failed or conflicted solely by an older retryable tombstone; the edit has an unambiguous response matching its durable outcome; retirement initiated by the current request still reports degradation; deterministic retry-failure coverage exists."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

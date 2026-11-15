@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7dc-7311-8dee-7ce57a599af0",
+  "external_ref": "tm-xeb1",
+  "title": "Kimi effort UI follow-ups: clone helper, unavailable option and rendered slash routing",
+  "outcome": "Deduplicated residual Low/Note follow-ups from effort review round 3 (Claude session-7163): extract agent-specific clone-setting preservation from oversized app-session-actions handler; render the saved-but-unavailable combobox effort as explicitly non-selectable rather than dropping its callback; add rendered AgentSessionPanelFooter Kimi /effort routing/selection coverage. Existing state/palette unit tests and status hint remain. Related feature tm-ynk9 owns blocking races, runtime fencing and timeout fixes. Do not weaken exact provider ACK admission.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,42 @@
+{
+  "id": "01a19c69-90d2-72a2-bb75-fbbaf325c491",
+  "external_ref": null,
+  "title": "Preserve known provider failure outcome when closing runtime observations",
+  "outcome": "Fable2326/messagead55f03e-93da-4242-ab6b-eb93cd031e7c assigns product source fix on TREE0c00 before-image. Runtime exit must close observation as Failed for Some(error_message), otherwise Unknown, preserving master classification and existing one-shot terminal outcome against later clean exit/cleanup. Fresh named root; no Cargo.",
+  "acceptance": [
+    "Claim and name a fresh root in a separate naming turn; relative to TREE0c00 edit turn_lifecycle.rs and engram_unadmitted_lifecycle.rs only if needed. Restore master's Failed-for-Some(error_message), otherwise Unknown classification via queue_runtime_observation_close_with_outcome_locked at guarded runtime exit.",
+    "Check other close callers, dedicated initialize-failure and cleanup paths for the same outcome loss; preserve existing recorded Failed against a later clean root exit or cleanup, without new semantics. Obtain integrator provenance within the ten-minute rule and record source rationale and expected EO tests.",
+    "Return immutable tree, before/after blobs, scoped patch and rationale/expected tests to Sol-03d4 cc Fable2. Source-only: no Cargo/compiler/tests/parser/formatter/linter/live/agents/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gated-control",
+    "greg-directed",
+    "runtime-outcome",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered source-onlyTREE392640a0 exact1 turn_lifecycle.rs +52/-1: restore master knownFailed/otherwiseUnknown classification and dedicated first-claim close before cleanup callbacks. Caller audit/provenance recorded; handoff has scoped patch, blobs, rationale and six expected EO tests. No Cargo/validation/READY.",
+    "completed_at": "2026-11-02T13:23:53.231006900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

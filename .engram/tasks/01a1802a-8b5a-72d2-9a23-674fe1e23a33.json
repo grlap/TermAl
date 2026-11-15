@@ -1,0 +1,29 @@
+{
+  "id": "01a1802a-8b5a-72d2-9a23-674fe1e23a33",
+  "external_ref": null,
+  "title": "Cover Windows owner bootstrap archive failure and scratch retention",
+  "outcome": "A deterministic owner-level regression covers bootstrap archival failure, proving a nonzero owner exit, failed launcher stage and retained original short bootstrap evidence.",
+  "acceptance": [
+    "An owned fixture deterministically makes the short bootstrap unavailable to archival after shell execution and exercises the existing production guardian archive-error branch.",
+    "The regression asserts nonzero owner exit, failed launcher result and retained scratch/evidence, without retries, timeout inflation, changing successful archival semantics or touching unrelated directories."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-gap",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

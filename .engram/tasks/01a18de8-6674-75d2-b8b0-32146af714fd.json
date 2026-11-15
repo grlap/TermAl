@@ -1,0 +1,32 @@
+{
+  "id": "01a18de8-6674-75d2-b8b0-32146af714fd",
+  "external_ref": null,
+  "title": "Conformance: settle a real Engram-shaped checkpoint receipt carrying 32-hex ids, one validator per id kind",
+  "outcome": "Conformance: settle a real Engram-shaped checkpoint receipt carrying 32-hex ids, one validator per id kind",
+  "acceptance": [
+    "A TermAl test settles a checkpoint receipt produced by real Engram producer code or provenance-preserved Engram wire (ids generated at test time, current 32-hex and legacy 64-hex, no pinned hashes) through the real TermAl consumer and asserts the persisted association and GET projection",
+    "Each id kind crossing that path is validated by exactly one owner validator per side (record ids by is_engram_record_id, fingerprints by the SHA-256 validator), with the w-fec83085cff0 narrow fix as the first slice",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "conformance",
+    "cross-project",
+    "id-contract"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c6aa-7340-8ae6-a08b0320448f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

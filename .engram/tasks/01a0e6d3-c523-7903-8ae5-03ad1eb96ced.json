@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c523-7903-8ae5-03ad1eb96ced",
+  "external_ref": "tm-h9wj",
+  "title": "Separate follow-up admission formatting-only changes at landing",
+  "outcome": "R10 Claude Low, session-6870: rustfmt-only reflows are interleaved with follow-up admission behavior in turn_dispatch.rs, delegations.rs and codex_thread_actions.rs. At landing, isolate formatting-only changes in a separate commit or remove unrelated churn without changing reviewed behavior. No formatter failure or functional defect is claimed. Current snapshot passed cargo check, full Rust and UI suites; revalidate any changed source snapshot.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Landing hygiene for a change that landed in September (0026c33, 2026-09-13); nothing is left to separate.",
+  "completion": null
+}

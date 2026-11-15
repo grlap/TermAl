@@ -1,0 +1,28 @@
+{
+  "id": "01a16bf0-e0a2-7bb3-88a9-a0248c18275b",
+  "external_ref": null,
+  "title": "The .tmp folder has grown to 774 top-level directories (532 worktrees, 58 with target/), so an audited post-w-cce8 cleanup is needed",
+  "outcome": ".tmp holds only active or cited roots plus recent artifacts. Stale worktrees, stale target dirs and retired branches are removed through an audited, recorded cleanup that touched nothing outside .tmp/ and no active root.",
+  "acceptance": [
+    "The .tmp folder has grown to 774 top-level directories (532 worktrees, 58 with target/), so an audited post-w-cce8 cleanup is needed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "disk",
+    "post-w-cce8",
+    "retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

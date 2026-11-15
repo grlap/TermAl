@@ -1,0 +1,30 @@
+{
+  "id": "01a1d7f0-386d-7fe2-a95a-b45098c5a927",
+  "external_ref": null,
+  "title": "After an Engram handoff, the named source root stays bound to the session that handed off: the new holder can't register runs and the old session can neither release nor clear it",
+  "outcome": "When an Engram handoff of a claimed item is accepted (same claim id, new holder session), TermAl no longer treats the handing-off session as holding that claim's named-root binding: either the binding moves to the accepting session, or the old session can release or clear its name. A run registered from the root by the current holder is not refused as \"held claim unavailable or ambiguous\". No binding is ever silently shared by two sessions.",
+  "acceptance": [
+    "A behavioural test: session S1 names a root for claim C, hands C off through Engram, and session S2 accepts (same claim id). A committed-input run registered from that root by S2 is not refused with 'named run's exact held claim is unavailable or ambiguous', or S2 can name the root itself and then register; the chosen contract is stated on the item",
+    "A behavioural test: after the accepted handoff, S1 can release or clear its stale name for C (termal_release_named_root or termal_name_source_root without a path succeeds), or the binding has already moved, so S1 holds no current binding for C",
+    "Existing protections stay: a live claim's root held by its current holder is still never released by another session, and the existing named-root binding and release tests stay green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "handoff",
+    "named-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

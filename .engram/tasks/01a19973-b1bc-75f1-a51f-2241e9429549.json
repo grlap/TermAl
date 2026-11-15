@@ -1,0 +1,38 @@
+{
+  "id": "01a19973-b1bc-75f1-a51f-2241e9429549",
+  "external_ref": null,
+  "title": "Explicit Human Send at Base/OFF should activate the older runnable User FIFO head",
+  "outcome": "Preserve the pre-adapter explicit-Send activation of a dormant runnable User head at Base/OFF without changing FIFO or granting authority to unknown retained history.",
+  "acceptance": [
+    "An explicit Human Send in the ordinary dispatch lane activates the older positively runnable User FIFO head through its exact existing queue owner before the newly submitted Human envelope, while unknown or already-handed-off retained history remains passive and later queue order is preserved.",
+    "The behavioural regression human_prompt_old_obligation_does_not_allow_skipping_unrelated_user_fifo and related queue/owner controls have recorded passing repair evidence; independent Codex and Claude review and the exact repaired-input full-gate/landing evidence are cited without treating source inspection as a new test or live observation.",
+    "The landed repair is traced into current master, including the ordinary-owner translation after physical gated-control removal; closure does not assert that the old OFF-switch live experiment or any retained user's prompts were executed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1981d-73dd-7db2-bef1-ba8d28acb0fd",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed the already landed explicit Human Send/FIFO repair by auditing existing evidence; no new implementation or test run. Exact4133967c passed the named regression and all five FULL stages, independent retained Codex/Claude attempt5 reviewed the repair, original landing is recorded, and current2e03 preserves the exact ordinary-owner translation.",
+    "completed_at": "2026-11-09T00:42:09.324354900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

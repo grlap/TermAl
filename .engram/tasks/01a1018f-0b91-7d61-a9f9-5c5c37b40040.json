@@ -1,0 +1,28 @@
+{
+  "id": "01a1018f-0b91-7d61-a9f9-5c5c37b40040",
+  "external_ref": null,
+  "title": "A PowerShell child that TermAl terminates during startup leaves its __PSScriptPolicyTest_* probe files in the user's %TEMP%",
+  "outcome": "It is decided whether TermAl should keep PowerShell probe leftovers out of the user's %TEMP% when it terminates a PowerShell child (an Engram .ps1 shim or another script) during startup, for example by giving such children a TermAl-owned temp directory that TermAl cleans, and that is implemented or recorded as accepted.",
+  "acceptance": [
+    "A PowerShell child that TermAl terminates during startup leaves its __PSScriptPolicyTest_* probe files in the user's %TEMP% is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "process-launch",
+    "production",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

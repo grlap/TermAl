@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6da-5e22-7633-8370-63ad45613ff4",
+  "external_ref": null,
+  "title": "Evaluator result packet records no commands or files that its own output shows it ran",
+  "outcome": "Evaluator result packet records no commands or files that its own output shows it ran",
+  "acceptance": [
+    "Evaluator result packet records no commands or files that its own output shows it ran is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-15",
+    "delegations",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

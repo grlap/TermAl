@@ -1,0 +1,27 @@
+{
+  "id": "01a1863c-cb33-7ad3-9d6f-97a251aba260",
+  "external_ref": null,
+  "title": "Work panel: after the Urgent strip opens an item's details, the view row's first press re-selects instead of closing",
+  "outcome": "Pressing an expanded Work row (aria-expanded=true) always closes its details, whether the details were opened from the row or from the Urgent strip, and a strip press closes details the view row opened; toggle-to-close is keyed on the selected item (and label group), not on which trigger opened it.",
+  "acceptance": [
+    "Work panel: after the Urgent strip opens an item's details, the view row's first press re-selects instead of closing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "work-panel"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

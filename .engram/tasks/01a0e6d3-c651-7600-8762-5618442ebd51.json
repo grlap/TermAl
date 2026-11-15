@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c651-7600-8762-5618442ebd51",
+  "external_ref": "tm-nae8",
+  "title": "Extract MCP tool schema table from delegation_mcp.rs",
+  "outcome": "Nonblocking architecture follow-up from compact-response review: delegation_mcp.rs is around 3000 lines. Move mcp_tools_list_result static schema definitions into a cohesive include fragment when next refactoring this boundary, preserving tool names/order/schema and tests. Coordinate with phase-2 termal_name_source_root additions; do not fold into the current frozen/validated compact-response change just for line count.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

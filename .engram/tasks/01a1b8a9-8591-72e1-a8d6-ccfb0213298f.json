@@ -1,0 +1,29 @@
+{
+  "id": "01a1b8a9-8591-72e1-a8d6-ccfb0213298f",
+  "external_ref": null,
+  "title": "Keep an observed execution alias retained while its completion wait is pending",
+  "outcome": "A wait naming an observed execution id retains access to its canonical terminal observation while a launcher run compacts that observation as an associated row; an in-flight non-durable compaction does not prematurely settle the wait as unavailable.",
+  "acceptance": [
+    "Pending observation waits cover aliases absorbed into a launcher compaction entry, or otherwise stay pending while the corresponding compacted entry is not yet installed; unknown or foreign execution ids remain refused.",
+    "A deterministic test places compaction before wait refresh and controls its durability acknowledgement, showing that the wait delivers the real terminal result once without an intermediate unavailable result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "compaction",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

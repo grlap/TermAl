@@ -1,0 +1,61 @@
+{
+  "id": "01a1229b-8a68-7a51-af70-c60e6f4258a2",
+  "external_ref": null,
+  "title": "A Begin known not to have been sent (NotStarted, e.g. the root-authority persist fence failed first) parks as Waiting/Unknown instead of replaying",
+  "outcome": "A turn_begin that failed before transmission (remote application NotStarted) is replayed exactly: same idempotency key, intent and grant, because it never reached Engram. This happens only while 1a's durable prepared begin stands acknowledged, the admission owner is current and control is not disabled, and the head is then delivered once without a Resume. 1a's own preparation-fence failure (begin_preparation_unacknowledged) still remains a hold, per the Option B ruling.",
+  "acceptance": [
+    "Regression witness: a production-path test with a gated persist writer on the scripted budget clock and no synthetic load reproduces the original occurrence's shape. The named-root guard's authority persistence fence before turn_begin misses its deadline, so Begin is not transmitted and the cause records remote application not_started. On master the head is not interrupted, the begin_unknown replay is scheduled without Resume, and when it is due exactly one turn_begin is sent with the prepared begin's key, grant and delivery tokens, no fresh evaluate is sent, and the head is delivered exactly once. Fail-first is not possible because 1b already resolves this shape: the guard's code-less failure parks with a retry code, and the admission schedule turns an ordinary retry on a replay-pending head into the exact begin replay. The holder's run on unchanged a1f54018 (test-dfd3a557) records this.",
+    "The replay's conditions stay covered by existing tests: the begin_replay and begin_unknown_recovery modules (the acknowledged prepared begin, the replay's settlement and cadence, Stop, Cancel, pause and stale-reply fencing); a_fatal_disabled_control_keeps_its_hold (disabled control holds); and begin_unknown_recovery_unacknowledged_preparation_withholds_the_send (a begin whose prepared-begin acknowledgement failed stays a hold). A begin of unknown remote application keeps 1b's replay path unchanged, since this item changes no product code.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host",
+    "engram-host-adapter",
+    "host-recovery",
+    "pilot",
+    "reliability",
+    "retained-prompt",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a10c85-3888-7713-8bc7-58cf44d04f2c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Test-only regression witness (scope ruling option A, Fable2 #1779): a turn_begin the named-root guard stops before transmission (its authority persistence fence misses its deadline, cause remote application not_started) is settled by the exact begin replay without Resume. 1b already resolves this on master: the guard's code-less failure parks with the retry code control_unavailable, and the admission schedule turns an ordinary retry on a replay-pending head into the begin_unknown replay. The holder's run test-dfd3a557 on unchanged a1f54018 showed it; the product change was dropped. New src/tests/engram_root_begin_unsent.rs uses the ClaimedRoot scripted-clock fixture with a test-served gated persist writer and no synthetic load. It asserts the head is not interrupted, the replay is scheduled, and when due exactly one turn_begin goes out with the prepared key, grant and tokens, with no fresh evaluate, and the prompt is delivered once. Gate test-5c5c2120 passed (host record d6a15def at f8dd0722). Evaluation 9ac8e5e88c574a7a93dfa0f0a70b4c1c passed 3/3 (Codex delegation-097eebd4, held open until submission; one 502 reader timeout before spawn, re-requested once). Landed as 36a0ca7f (fast-forward from 7f6281da); no install, since this is test-only. Follow-up Low: w-8a3d771d5e9e.",
+    "completed_at": "2026-10-10T15:27:17.602443100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

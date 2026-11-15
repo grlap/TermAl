@@ -1,0 +1,28 @@
+{
+  "id": "01a128b3-e2b9-7232-958b-7f4bb6693b2c",
+  "external_ref": null,
+  "title": "A Begin answered with a lost-binding code after a host-side control reconnect is held for Resume",
+  "outcome": "A Begin answered with a code that invalidates the routing token (engram_begin_replay.rs:64-71 at be2ed177: control_session_token_mismatch, control_connection_superseded and others) ends in an explicit interrupted hold. Check whether a transient host-side control-process restart or reconnect produces these codes for a begin that may not have been applied, and whether status can prove the grant's state, so recovery can run without Resume.",
+  "acceptance": [
+    "A Begin answered with a lost-binding code after a host-side control reconnect is held for Resume is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "resume-only-hold-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1d133-4ba1-7b03-b0b1-bebbae70639c",
+  "external_ref": null,
+  "title": "Operator-gated drain waited 1.5 h for a cutover Greg never started: no readiness acknowledgement, single relay route, no watchdog",
+  "outcome": "An operator-gated hold (a drain ahead of a restart or cutover that only Greg can perform) never leaves every lane idle without an end. Agents drain only after Greg has confirmed he's ready, through a route he reads. Operator instructions go by every live route. A named coordinator checks for evidence that the operator act started by a stated time, and lifts the hold if there's none.",
+  "acceptance": [
+    "The cause is recorded from evidence:\n- the times of the restart notice, its Advisor acknowledgement, the drain and the first sign of idleness;\n- whether Advisor relayed the notice to Greg, as Advisor itself reports it;\n- why no session acted between 17:45Z and 19:12Z.\nThe note says which links in the hand-off failed.",
+    "The coordination procedure is changed and recorded as a project memory that both coordinators concur on (TermAl and Engram), with these rules:\n(1) a drain for an operator act starts only after Greg's own explicit readiness reply through Asistant;\n(2) the operator instructions go through BOTH Asistant and Advisor;\n(3) the coordinator sets a one-time check for the planned start plus 10 minutes. If there's no evidence then (a backup or log, or Greg's reply), it lifts the drain and tells every lane, without waiting for a message.",
+    "The next operator-gated cutover or restart follows the procedure, and the item records that it did: the readiness reply, the two routes, and the watchdog check with its outcome."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "coordination",
+    "greg-reported",
+    "process"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

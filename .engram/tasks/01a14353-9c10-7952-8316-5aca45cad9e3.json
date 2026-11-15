@@ -1,0 +1,29 @@
+{
+  "id": "01a14353-9c10-7952-8316-5aca45cad9e3",
+  "external_ref": null,
+  "title": "Work window regression tests: guard stable table layout and inherited end position",
+  "outcome": "Add lasting executable coverage for the table layout half of the window-convergence repair and end-position liveness, beyond the existing hook geometry witness.",
+  "acceptance": [
+    "A maintained test discriminates removal of the stable table column layout across different mounted row subsets, rather than only testing hook convergence under synthetic auto-layout geometry.",
+    "The inherited scrolled-tree to table witness requires useful end-range rows and scroll/anchor position in addition to bounded commits and mounted-row count."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "testing",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

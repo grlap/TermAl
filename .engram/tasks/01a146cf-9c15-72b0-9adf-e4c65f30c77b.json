@@ -1,0 +1,28 @@
+{
+  "id": "01a146cf-9c15-72b0-9adf-e4c65f30c77b",
+  "external_ref": null,
+  "title": "After a turn is stopped and the queue resumed, the next turn carried on the stopped turn's old plan (a BUILD START and a cargo build from a superseded GO)",
+  "outcome": "After a turn is stopped and the queue resumed, the next turn carried on the stopped turn's old plan (a BUILD START and a cargo build from a superseded GO)",
+  "acceptance": [
+    "After a turn is stopped and the queue resumed, the next turn carried on the stopped turn's old plan (a BUILD START and a cargo build from a superseded GO) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "session-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

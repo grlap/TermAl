@@ -1,0 +1,27 @@
+{
+  "id": "01a16ce7-2b7e-78a1-8df8-979f5f9af437",
+  "external_ref": null,
+  "title": "claude_bash_top_level_segments doc claims cross-shell separator placement but ignores PowerShell typographic quotes",
+  "outcome": "claude_bash_top_level_segments doc claims cross-shell separator placement but ignores PowerShell typographic quotes",
+  "acceptance": [
+    "claude_bash_top_level_segments doc claims cross-shell separator placement but ignores PowerShell typographic quotes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "read-only-delegation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

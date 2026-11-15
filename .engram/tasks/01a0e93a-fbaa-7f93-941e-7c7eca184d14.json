@@ -1,0 +1,27 @@
+{
+  "id": "01a0e93a-fbaa-7f93-941e-7c7eca184d14",
+  "external_ref": null,
+  "title": "A worktree's identity can change after TermAl resolved a shell's place in it (a .git removed or added, a link swapped), and overlap keys stay stale",
+  "outcome": "TermAl resolves where a shell is, and which worktree that place belongs to (engram_worktree_root, cached for 30 s, and the session's remembered workdir_worktree), when a command starts. A later command can change that identity: `rm -rf sub/.git` moves sub into the parent worktree, `git init` or `git worktree add` makes a new one, and a link or junction swap retargets a path. After that, overlap marking may use a key that no longer names where writes land. On one line with the change, the lost-shell reader of PI-26a now treats such lines as anywhere, and an in-line path change was the Claude reviewer's round-3 Note. Across commands, for followed and lost shells alike, the pre-existing staleness remains.",
+  "acceptance": [
+    "Overlap marking cannot miss a write because a worktree's identity changed after its key was taken: either keys are re-taken when a command that may change paths ends, or such a command marks the session's places as anywhere for the rest of the turn; a regression test covers `rm -rf sub/.git` in one command and a write in sub in the next"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

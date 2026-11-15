@@ -1,0 +1,28 @@
+{
+  "id": "01a1b5d3-6e35-7393-8748-d55ffe54d6d5",
+  "external_ref": null,
+  "title": "Expired-deadline ignore test should use a repository whose policy would ignore the paths",
+  "outcome": "The delivery half of watcher_expired_ignore_read_keeps_bounded_conservative_delivery fails if the expired-deadline seam stops being applied.",
+  "acceptance": [
+    "Expired-deadline ignore test should use a repository whose policy would ignore the paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "test-gap",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a14825-dd26-7553-89c1-858691dc4675",
+  "external_ref": null,
+  "title": "Seed non-worker defaults in the Worker profile regression test",
+  "outcome": "Make every Worker profile assignment regression-sensitive by starting Cursor, Kimi mode and Codex sandbox from differing values before configuring; prove deleting each assignment fails its assertion.",
+  "acceptance": [
+    "Seed non-worker defaults in the Worker profile regression test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

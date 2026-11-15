@@ -1,0 +1,30 @@
+{
+  "id": "01a19377-a012-7011-83fc-5800b5d4b46c",
+  "external_ref": null,
+  "title": "Acceptance evaluation cannot select a coordinator's concurrence or notice record as evidence; the holder must re-quote it",
+  "outcome": "An authority-text item's evaluation can cite the legitimate (a) concurrence and (b) Greg-notice records written by coordinators, who are by nature non-holders, without the holder copying their proofs into a holder note. Alternatively, it is recorded that the quote-in-holder-note remedy is the intended permanent contract, and that is documented where evaluators and holders will find it.",
+  "acceptance": [
+    "Either termal_evaluate_acceptance accepts a selected non-holder record when it is a coordinator concurrence or notice record on the same item, keeping every existing provenance check; or the decision to keep the quote-in-holder-note remedy is recorded, with its rationale, and documented in docs/ next to the evaluation endpoints.",
+    "If the behaviour changes, a test shows a coordinator concurrence record on the item being selected directly and accepted, while an arbitrary non-holder note is still refused with the existing remedy text.",
+    "No widening of who may evaluate or what counts as acceptance; the change only concerns how already-legitimate evidence is cited."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "authority-text",
+    "cross-project"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

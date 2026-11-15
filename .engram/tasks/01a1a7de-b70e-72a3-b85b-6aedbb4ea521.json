@@ -1,0 +1,28 @@
+{
+  "id": "01a1a7de-b70e-72a3-b85b-6aedbb4ea521",
+  "external_ref": null,
+  "title": "Mailbox send docs don't say an idempotency key is unique across all of a sender's recipients",
+  "outcome": "A sender who reuses an idempotency key for a different recipient learns from the tool description and the refusal text that the key's scope is the sender across all recipients, and which key to change.",
+  "acceptance": [
+    "The `termal_send_to_session` description and `mailbox send` help say the key is unique per sender across all recipients, so parallel sends to two recipients need two keys.",
+    "The 409 refusal text says the same in plain words and still refuses; idempotency behaviour itself doesn't change, and a test covers the refusal for a second recipient."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1c94c-2864-79b3-b7a4-6adbffa033a9",
+  "external_ref": null,
+  "title": "Strengthen the full-size retirement-history roundtrip test controls",
+  "outcome": "The full-size retirement-history test explicitly exercises a retained journal before compaction and, if storage-scale coverage is needed, one SQLite roundtrip without restoring repeated naming loops.",
+  "acceptance": [
+    "A behavioral positive control establishes the retired journal entry is present before full-history compaction, while preserving custody, capacity and no-redelivery checks.",
+    "Any full-1024 SQLite storage roundtrip remains bounded to a single save/load and preserves exact notice identities without reintroducing LIMIT+1 real naming loops.",
+    "Focused behavioral tests pass without timeout inflation or production retention changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "named-root",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

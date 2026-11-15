@@ -1,0 +1,50 @@
+{
+  "id": "01a0fe88-e929-73b0-872e-e1f2bd92657e",
+  "external_ref": null,
+  "title": "Root-authority restart tests reload StateInner, which drops the scripted clock, then recover on a real 2 s budget",
+  "outcome": "The restart-recovery authority fixtures keep one scripted clock across the reloaded state, so recovery success no longer depends on how fast the machine runs.",
+  "acceptance": [
+    "A deterministic witness first fails on the unmodified fixture: after a restart-recovery fixture restores its state from disk, that state's Engram budget clock is no longer the fixture's scripted clock (an explicit advance of the fixture's clock does not move it), so recovery runs on a real 2 s budget.",
+    "The fix changes only test fixtures: both restart-recovery fixtures carry the fixture's scripted clock across the restore before recovery runs, so the 2 s recovery budget is logical; production clocks, budgets and defaults, and the tests' recovery and publication assertions, are unchanged.",
+    "The full five-stage gate passes on the combined input; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "gate-nondeterminism",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Both restart-recovery authority fixtures install the fixture's scripted Engram budget clock after restoring state, with an in-test witness, so the 2 s recovery budget is logical. The change is test-only. Landed in 7f10cfb + c5a1f2978a337f62e9644f431d281b84e9342f9c via train-18 merge 5c6f6dd42c5c00511b280ff14db2c53f4560a1e0. The independent evaluation passed 3/3.",
+    "completed_at": "2026-10-03T03:08:19.337899300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "01a199b4-22d0-7cb2-80f2-9069b909df8c",
+  "external_ref": null,
+  "title": "w-3fe8 slice A: delete project containment, settlement and held-claim gating code and its tests",
+  "outcome": "w-3fe8 slice A: delete project containment, settlement and held-claim gating code and its tests",
+  "acceptance": [
+    "The containment, settlement, held-claim, session-obligation and project-reset-wait gating code in this slice's paths is deleted, not disabled; no setting can reactivate it",
+    "Tests that only exercised the deleted gating are deleted; tests that cover ordinary behaviour, Stop, exact delivery, queued user content or historical-record reading are kept or migrated",
+    "The slice compiles and its focused tests pass on the integrator's base, as a host-recorded focused run",
+    "The slice is handed to the w-3fe8 integrator (Sol-03d4) as one reviewed-ready diff against the agreed base"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "zero-legacy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the w-3fe8 integrator's split: containment and recovery are now required child w-14df8701db1f (Sol-8e1f), and dispatch is w-f7dbe7cef863 (Sol-1cee). Sol-1cee's containment deletions and 3 migrated ordinary regressions are kept as staged tree ca3a2accd863b99f8536361c59415853f4f8b326 for reuse.",
+  "completion": null
+}

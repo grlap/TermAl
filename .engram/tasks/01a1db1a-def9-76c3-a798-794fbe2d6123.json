@@ -1,0 +1,36 @@
+{
+  "id": "01a1db1a-def9-76c3-a798-794fbe2d6123",
+  "external_ref": null,
+  "title": "Use mimalloc 0.1.48 (feature v3) as TermAl's global allocator, per Greg",
+  "outcome": "TermAl builds and runs with mimalloc as its global allocator on Windows, Linux and macOS, with before/after memory measurements recorded; it is not presented as a proven fix for the 17:08Z crash, whose cause is investigated separately (w-e938ef8d73be).",
+  "acceptance": [
+    "Cargo.toml adds exactly `mimalloc = { version = \"0.1.48\", features = [\"v3\"] }` and the binary declares it as `#[global_allocator]`; Cargo.lock is updated only for mimalloc and its own dependencies.",
+    "The change lands the normal way: a clean review pair and the full gate green on the landing input (which builds and tests it on Linux/DL560); Windows and macOS builds come from the next joint restart's cargo run on Central and the Mac, recorded at attestation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "allocator",
+    "greg-directed",
+    "memory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Mimalloc0.1.48 v3 global allocator landed at bca419c7 with exact3file contribution, clean independent pair, identical-tree DL560 trainFULL, MSVCfocused243PASS and all3hostrestartattestations. Read original18088 attempt1 fullrecord a4045184c6c94426a082f9a1cec99eb5: both judgmentcriteriaPASS,stale:null,rev4. Done FIRST nextturn before rootcommands; no repeated test/evaluation. Evaluator independently inspected exactdiff, tree equality, ancestry and archives; combo record direct reads were refused, so it relied on full quoted current-holder proof94c785 as disclosed. NativeNode9PASSa3aed admission only,notallocatorcoverage. No measuredmemoryimprovement or exhaustion-fix claim. Ownservedroot/rawcleanup follows seal; remoteC6originals release after closure and Lowbaseline retained ifneeded.",
+    "completed_at": "2026-11-14T21:21:57.422380Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

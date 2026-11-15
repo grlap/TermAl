@@ -1,0 +1,29 @@
+{
+  "id": "01a10fce-7e7d-7d62-ad1b-c93fe664eb06",
+  "external_ref": null,
+  "title": "Settle dormant recovery serde casing and original-head typing before persistence integration",
+  "outcome": "Before persistence integration freezes recovery representation, choose explicit casing and typed original-head contract or document retained schema choices.",
+  "acceptance": [
+    "Settle dormant recovery serde casing and original-head typing before persistence integration is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "begin-recovery",
+    "dormant",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

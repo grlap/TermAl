@@ -1,0 +1,29 @@
+{
+  "id": "01a17c68-dde3-76e0-a527-be3fb213ac02",
+  "external_ref": null,
+  "title": "Clean up formatting in owned-directory test fixtures",
+  "outcome": "Remove trailing whitespace on the seven new evaluator fixture let-bindings and wrap the two readiness-cache initializers consistently, without changing fixture behavior.",
+  "acceptance": [
+    "The seven evaluator let-binding lines have no trailing whitespace, and the readiness-cache initializers in tests/mod.rs and tests/persist.rs use the same wrapped style as tests/session_settings.rs.",
+    "The cleanup preserves directory ownership, request values and all assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "formatting",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

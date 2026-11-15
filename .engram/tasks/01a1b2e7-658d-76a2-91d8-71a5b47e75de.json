@@ -1,0 +1,32 @@
+{
+  "id": "01a1b2e7-658d-76a2-91d8-71a5b47e75de",
+  "external_ref": null,
+  "title": "Cover Rust and JavaScript registration identity parity for sourceOwner requests",
+  "outcome": "The existing host Rust and launcher JavaScript registration identity implementations are tested against one shared sourceOwner-bearing request, preserving exact cross-language request correlation and unchanged legacy identities before consumer cutover.",
+  "acceptance": [
+    "A shared conformance request containing all sourceOwner fields is evaluated by the actual Rust host and JavaScript launcher identity implementations, and both produce the same canonical identity/digest; fixture provenance and normalization rules are explicit without duplicating production judgment.",
+    "The same suites retain an absent-sourceOwner legacy control and discriminate identity changes when an owner pin field changes; no registration wire change, request replay weakening, hardcoded stored record id, source predicate or new execution gate is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "conformance",
+    "cross-project",
+    "greg-reported",
+    "registration",
+    "review-followup",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

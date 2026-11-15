@@ -1,0 +1,27 @@
+{
+  "id": "01a17528-bc51-7b11-824c-dfcf24e51906",
+  "external_ref": null,
+  "title": "Reference durability test fails with Access is denied inspecting its own termal.sqlite-shm under concurrent load",
+  "outcome": "federation_reference_authority_link_lost_at_commit_cannot_publish_after_fence is deterministic on Windows: the cause of the os error 5 on the state path's -shm file is diagnosed and fixed, in the test or the product.",
+  "acceptance": [
+    "Reference durability test fails with Access is denied inspecting its own termal.sqlite-shm under concurrent load is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a17420-fe6f-7633-ba4d-9394d34f867e",
+  "disposal_reason": "Fable2 concurrence mailbox #772 / mailbox-message-accf7d5a-ed9b-41ca-bb9e-4453be298141: fixed by existing w-9394 on5b10b2a3. Independent immutable-source and original-run diagnosis9452cdebe5c24a23af8788d6df30ff3d confirms the exact publish.path_before_open -shm OS5 path now uses the shared bounded Windows sidecar inspection owner for -wal/-shm/-journal; original failed b873 input predates fix (HEADd1a50105). Existing exact landing full-gate9dcc Rust log passes the original link-lost-at-commit test and all4 sidecar regressions. No new patch/test/retry layer. Native OS cause/duration remain unproved; persistent denial still fails safely. Supersession is coordinator-directed deduplication, not acceptance evaluation or a new live proof.",
+  "completion": null
+}

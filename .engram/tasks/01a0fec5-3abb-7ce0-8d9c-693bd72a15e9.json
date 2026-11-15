@@ -1,0 +1,39 @@
+{
+  "id": "01a0fec5-3abb-7ce0-8d9c-693bd72a15e9",
+  "external_ref": null,
+  "title": "Coalesce SSE lag markers under sustained state-broadcast mailbox overflow",
+  "outcome": "Sustained producer overflow preserves correctness without multiplying redundant authoritative snapshots, transcript invalidations and tail fetches for losses already covered by the last recovery.",
+  "acceptance": [
+    "An end-to-end test through AppState's real mailbox and broadcaster demonstrates bounded redundant recovery snapshots during sustained overflow and authoritative recovery of the newest covered state.",
+    "Coalesce or skip loss markers already covered by the connection's authoritative recovery snapshot without losing repair for later uncovered loss or changing monotonic SSE recovery."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "performance",
+    "regression-suspect",
+    "review-followup",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

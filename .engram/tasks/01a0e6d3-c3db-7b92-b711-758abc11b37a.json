@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3db-7b92-b711-758abc11b37a",
+  "external_ref": "tm-4okc",
+  "title": "Clear stale prepend gap after shrink-to-bottom clamp",
+  "outcome": "Broadening bottom-landing clamp classification to include content shrink also skips pendingPrependedBottomGapRef clearing and user-scroll-kind classification. After an upward escape, a shrink can clamp the reader to bottom while retaining a stale pre-shrink gap; the next older-history prepend may replay that gap and jump the viewport. Preserve the correct side effects independently of passive-tail-follow classification and update the stale isBottomLandingClamp contract comment.",
+  "acceptance": [
+    "A handler-level regression arms a prepend gap, applies a shrink-to-bottom clamp, and proves no stale gap is replayed on the next prepend. Tail-follow remains correct and the parameter documentation matches shrink-inclusive behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

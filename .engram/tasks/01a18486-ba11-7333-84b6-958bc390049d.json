@@ -1,0 +1,29 @@
+{
+  "id": "01a18486-ba11-7333-84b6-958bc390049d",
+  "external_ref": null,
+  "title": "Registration diagnostics report fenceBudgetMs as a literal \"5000\" instead of the enforced budget constant",
+  "outcome": "Registration diagnostics report fenceBudgetMs as a literal \"5000\" instead of the enforced budget constant",
+  "acceptance": [
+    "The test-run registration diagnostics derive fenceBudgetMs from TEST_RUN_REGISTRATION_DURABILITY_BUDGET (src/test_run_registration.rs), so the reported budget always equals the enforced one; the POST text stays byte-identical for the current 5 s budget and non-POST methods keep not_applicable.",
+    "A regression pins the reported fenceBudgetMs to the constant, and the review pair finds no Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "registration",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

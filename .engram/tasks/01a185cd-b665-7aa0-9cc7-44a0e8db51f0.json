@@ -1,0 +1,32 @@
+{
+  "id": "01a185cd-b665-7aa0-9cc7-44a0e8db51f0",
+  "external_ref": null,
+  "title": "B16 integration carrier: publish the exact test ref for tree 66f6b65b and route its remote landing gate",
+  "outcome": "B16 integration carrier: publish the exact test ref for tree 66f6b65b and route its remote landing gate",
+  "acceptance": [
+    "The integration owner records the complete tree id 66f6b65bfcc68fb13d7c065942ec770b6d013fca on this item while the freeze verifies, creates the detached test-ref commit on parent 8e438fbf26e9ae56454bd30adee589665ecc7b68 per the CLAUDE.md test-ref bullet, pushes only refs/heads/test/<item>-<fp8>, and reports the commit, tree and ref.",
+    "The remote full gate on that exact test ref is routed by the coordinator and its returned evidence (Git identity before and after, the automatic launcher fingerprint before = after, results, and one archive SHA-256) is verified and recorded under joint record r4; the test ref is deleted after its evidence is recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "b16",
+    "control-plane",
+    "engram-control",
+    "gated-control",
+    "integration",
+    "remote-gate"
+  ],
+  "assigned_to": "Termal::Merger2",
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 message953/52ef9c0d explicitly withdraws remote test-ref publication and routes B16's exact-input landing full gate to central Windows. Publication stopped at pre-push read: only unattached local commit2a89f459 exists; no local branch adoption, remote test ref absent, no push or remote gate. Full disposition/evidence15cc240ee3ce4833a2fa6a369ef5f32c. Optional carrier is obsolete; no claim that its publish/remote-gate criteria passed. Parent w-1e85dae945d4 remains open and Sol-owned for live/load/full gate before native integration handoff. Evidence retained for open parent.",
+  "completion": null
+}

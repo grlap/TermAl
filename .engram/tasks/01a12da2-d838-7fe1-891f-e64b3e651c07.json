@@ -1,0 +1,43 @@
+{
+  "id": "01a12da2-d838-7fe1-891f-e64b3e651c07",
+  "external_ref": null,
+  "title": "A Markdown-only changeset has no credited check route: its prescribed landing checks (doc-link checker, AGENTS.md/CLAUDE.md byte comparison) can never earn a host record",
+  "outcome": "A repository can name its Markdown-only landing checks (for example `node scripts/check-doc-links.mjs` and `git diff --no-index --exit-code AGENTS.md CLAUDE.md`) so that TermAl records them as typed verification of a suitable kind (lint or a docs check, not a test), run either bare or through the focused launcher. A docs-only changeset's source change can then be recorded as checked rather than untested. Test credit stays reserved for real test runners.",
+  "acceptance": [
+    "A design note, agreed with the Engram project, chooses the route (a declared non-test check kind, a lint-kind recognition of named commands, or another) and the kind the result is recorded as, with the reasons; it does not widen Test credit.",
+    "Tests show a declared or recognised docs check producing a typed verification record on pass and a failing record on a non-zero exit, and an unrelated non-test focused command still producing no record.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

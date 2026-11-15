@@ -1,0 +1,27 @@
+{
+  "id": "01a10709-bddd-7912-9bab-1801d255afa5",
+  "external_ref": null,
+  "title": "a_turn_that_changed_source_under_a_read_only_grant_reports_nothing fails when the test temp root lies inside a git worktree: the checkpoint's source basis points at the enclosing checkout",
+  "outcome": "a_turn_that_changed_source_under_a_read_only_grant_reports_nothing fails when the test temp root lies inside a git worktree: the checkpoint's source basis points at the enclosing checkout",
+  "acceptance": [
+    "a_turn_that_changed_source_under_a_read_only_grant_reports_nothing fails when the test temp root lies inside a git worktree: the checkpoint's source basis points at the enclosing checkout is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a188b6-4742-71b3-9767-0edb57b7810c",
+  "external_ref": null,
+  "title": "Legacy SSH remote MacBookPro fails 'Host key verification failed' (exit 255) after its host changed to the .local hostname",
+  "outcome": "When a legacy SSH remote's host is changed (for example to a hostname), host-key trust either carries over safely for the same verified key, or TermAl reports a typed 'unknown host key for <host>' diagnosis with the exact remediation. It never reports an opaque 502 RemoteConnectionUnavailable, and host-key checking is never weakened.",
+  "acceptance": [
+    "A cause note with evidence shows, for the 2026-10-29 occurrence, whether the failing host-key check was an unknown-host entry for the new hostname or a real key mismatch, comparing stored and live key fingerprints without changing trust.",
+    "TermAl reports a host-key verification failure on a legacy SSH remote as a typed diagnosis naming the host, the alias and the presented key fingerprint, plus the one safe remediation, instead of only 502 RemoteConnectionUnavailable; covered by a deterministic test.",
+    "Changing a legacy remote's host to a name whose presented key equals an already trusted key for that remote does not silently fail; it is either carried over safely under existing pin rules or surfaced as above; no path weakens StrictHostKeyChecking."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "mac",
+    "remote",
+    "ssh"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6b0-77f3-8e61-15d4dc9a71c3",
+  "external_ref": "tm-r4xp",
+  "title": "Trim duplicated fixtures in split DiffPanel and AgentSessionPanel suites",
+  "outcome": "Consolidated Claude7436 follow-up to tm-ownn and tm-5sou. Newly split UI suites copied roughly 290-line DiffPanel and 390-line AgentSessionPanel preambles including unused helpers. Remove unused copies and extract only genuinely reused fixture builders into small support modules; retain Vitest mock-hoisting semantics, suite-local state and setup/cleanup isolation. Do not create a giant mock module or alter assertions. Preserve test inventory and validate affected suites independently and together using maintained launcher when implemented. No correctness regression demonstrated; low-priority maintainability.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

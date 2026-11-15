@@ -1,0 +1,36 @@
+{
+  "id": "01a0f42e-bdb1-7702-9e74-d54edf2e7a46",
+  "external_ref": null,
+  "title": "Record state-broadcast mailbox overflow loss with a counter and bounded diagnostic",
+  "outcome": "Producer mailbox loss is observable without adding overload-proportional logging or weakening lagged recovery.",
+  "acceptance": [
+    "A deterministic mailbox overflow test verifies loss count and diagnostic admission without changing the non-evictable lagged marker or queue ordering.",
+    "Mailbox overflow increments an attributable loss counter and emits a bounded diagnostic consistent with the host architecture contract; ordinary queue operation does neither."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-40d5-7142-bd37-9876390efab9",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

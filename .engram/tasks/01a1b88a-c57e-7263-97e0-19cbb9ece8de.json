@@ -1,0 +1,35 @@
+{
+  "id": "01a1b88a-c57e-7263-97e0-19cbb9ece8de",
+  "external_ref": null,
+  "title": "termal_list_sessions from a domain-bound session (Engram::Merger) refused with 409 \"federation authority changed; refresh enrollment and retry\"; session discovery blocked",
+  "outcome": "A domain-bound session can discover sessions with termal_list_sessions. If its federation authority is genuinely stale, the refusal names the actual stale binding and a recovery that the session itself, or its operator, can perform without a host restart.\n\nObserved at 2026-11-08 00:23:34Z: Engram::Merger (Central session-11859, a domain session) called termal_list_sessions({}) and got `TermAl delegation API returned 409 Conflict: federation authority changed; refresh enrollment and retry`. Discovery was blocked; no fallback or retry was attempted.\n\nRelated: w-59e712e2dd9e (closed; landed in ba6c9846) made central-authority refusals name their specific cause, but only for local sends. The running Central host was still on the pre-ba6c build at the time: ba6c was installed about 00:1x and not yet restarted, so this response carried the old generic text. w-009fe89b37b8 concerns relay mailbox reads.",
+  "acceptance": [
+    "The refusal path for termal_list_sessions from a domain-bound caller is identified from code and recorded, together with whether this occurrence is a correct refusal (genuinely stale domain authority) or a defect. The specific cause is observed on a build containing ba6c9846's diagnostics where possible.",
+    "If it is a defect, list_sessions succeeds for that caller, with a deterministic regression test. If the refusal is correct, the error names the stale binding and a recovery that works without a host restart, with a test. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Directory diagnostic and no-restart recovery change landed in combo16 with reviewed source, deterministic author checks and exact-tree landing FULLs. Historical generic refusal cause remains honestly unclassified.",
+    "completed_at": "2026-11-08T21:24:04.486090800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

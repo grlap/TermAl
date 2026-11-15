@@ -1,0 +1,31 @@
+{
+  "id": "01a1a2de-67fe-7b30-a113-2a64ec13cea9",
+  "external_ref": null,
+  "title": "Reconcile approved remote-clone run bindings with the existing K3 verification-credit contract",
+  "outcome": "Resolve the verification-credit boundary for approved independent-clone runs through the existing automatic K3 qualification/association owners and the Engram-owned admission contract. This optional boundary follow-up must not block the parent registration/observability fix and must not create a second credit producer or protocol.",
+  "acceptance": [
+    "Run registration and remote observation alone grant no verification credit. Credit requires the supported Engram remote-admission contract, exact author claim/store/root binding and an acknowledged host-minted record; missing capability or invalid/stale binding yields an explicit uncredited/refused disposition without substituting a Central path or fabricating a verification."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "cross-project",
+    "design-pending",
+    "remote-runner",
+    "test-runs",
+    "verification-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1944c-fbd6-79a3-ae56-5e2f3fba987a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "disposal_reason": "Explicit coordinator disposition: Fable2281/messagece99a7d3-7cbe-4173-8644-d9c39e0b2878 and independent decision c39ec6678b0f448eae6ab3ed44522c7e. The final existing K3 contract (Architect2 0b3df2da + Fable fd32f15e), together with Engram w-f1acdb37a014, owns remote qualification and verification association. This newly filed optional boundary child duplicates those owners; no separate credit item, producer, job binding, registry, import or protocol is kept under w5e2f. No child code, claim or execution occurred. Preserve parent registration/observability scope and current P0/Telegram implementation hold.",
+  "completion": null
+}

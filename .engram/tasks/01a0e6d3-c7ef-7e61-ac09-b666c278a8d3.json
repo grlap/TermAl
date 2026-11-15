@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7ef-7e61-ac09-b666c278a8d3",
+  "external_ref": "tm-y22",
+  "title": "Codex thread created by a timed-out thread/start can never be suppressed (id never learned)",
+  "outcome": "Second half of the duplicate-session leak, NOT fixed by the in-flight guard in tm-7rm.\n\nOrphan suppression (codex.rs suppress_orphaned_new_thread) only runs on the waiter's Ok path — it needs the thread id out of the thread/start RESPONSE. When the app-server times out (SHARED_CODEX_THREAD_SETUP_TIMEOUT = 180s) or the runtime is torn down, the Err path (handle_shared_codex_thread_setup_response_error_if_current) fails the turn but has NO thread id to suppress — while the Codex app-server has ALREADY written the thread to disk.\n\nResult: every failed thread setup leaves exactly one orphan thread that discovery later imports as a phantom top-level 'Ready to continue this Codex thread' session, and it can never be suppressed because TermAl never learned its id.\n\nMeasured: of 8 threads from one delegation, 6 were neither bound nor suppressed. The tm-7rm guard reduces this to at most 1 orphan per failed setup instead of N, but does not eliminate it.\n\nTrigger is the Codex app-server flakiness tracked in tm-ztk.\n\nFix directions: (a) reconcile after a failed setup — a thread created in the failure window for our cwd with no owning session can be suppressed or adopted; (b) ask the Codex app-server for a client-supplied thread id / idempotency key so a retried setup cannot mint a second thread; (c) at minimum, log it so the leak is visible.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a16b53-a8ff-7db1-9a2c-50cdbbcd297c",
+  "external_ref": null,
+  "title": "Retain run ambiguity when an ordinary check is replaced by a full-gate command",
+  "outcome": "A full gate first named by a changed description or repeated start cannot lend its unmatched run to a later gate.",
+  "acceptance": [
+    "Retain run ambiguity when an ordinary check is replaced by a full-gate command is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "association",
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,71 @@
+{
+  "id": "01a18b2f-32ed-7a12-8c16-c7e091c65727",
+  "external_ref": null,
+  "title": "Acceptance evaluation refused \"naming still being settled\" long after a named root's credited runs settled (w-473b, 3 refusals 04:52–05:00Z)",
+  "outcome": "Acceptance evaluation refused \"naming still being settled\" long after a named root's credited runs settled (w-473b, 3 refusals 04:52–05:00Z)",
+  "acceptance": [
+    "At acceptance-request opening, coherent captured authority for the canonically resolved requested work and requested claim is classified using the existing exact same-binding InFlight predicate, unchanged. A current-epoch Prepared/otherwise unpublished maintenance transition with acknowledged proofs, only its owner's retained runs and no pending naming or reconciliation intent returns the existing retryable HTTP 503 without admitting an evaluator, with the existing budget-derived retry hint unless criterion 6 applies. Other unresolved or changed authority is not relabeled transient.",
+    "An exact retained Candidate for the requested work is recovered through recover_engram_authority_candidate_until within the request's existing absolute deadline before the definitive opening snapshot and canonical evidence bracket. With the prior injected publication fault removed, one request durably confirms that same owner/image, recovers publication and continues normal naming admission without a rename or cooldown wait; no new prepare, owner, blanket recovery, loop or timeout increase is introduced.",
+    "Unconfirmed, superseded or budget-exhausted recovery never admits an evaluator or supplies authority from an old evidence bracket. Actual claim/run/epoch/naming drift and pending or reconciliation duties keep their existing refusal semantics; a Prepared image is never force-published. Any preliminary canonical lookup needed to select the target is discarded as evidence, and the definitive naming/history/root capture and canonical reads are coherent and bounded by the same deadline, with the existing subsequent drift and final-owner checks preserved. The separate source-sighting refusal is unchanged.",
+    "Deterministic regressions through the existing acceptance request path discriminate the transient Prepared opening case from the retained Candidate publication-failure case, including exact-image recovery success and unconfirmed/superseded/deadline and genuine-drift refusal controls. The regressions of criteria 5 and 6 pass, including a deferred selection beyond the read limit, a stale or ineligible deferred selection, bounded and pruned diagnostics, and preserved request and submission classification. Relevant focused checks pass on the repaired frozen input, and the change completes the repository-standard independent review pair and maintained full gate without weakening tests, inflating deadlines or requiring a live-store mutation, rename or extra proof campaign.",
+    "The automatic named-root reclamation pass starts a planned root's recovery only while at least the per-root share of its budget (ENGRAM_ROOT_RECLAMATION_BUDGET divided by ENGRAM_ROOT_RECLAMATION_READ_LIMIT) remains before the pass deadline, an exhausted deadline included. This floor is a scheduling policy, not a guaranteed sufficient budget. A root reached below the floor gets no recovery call and no cooldown. The pass records that one exact selection as deferred, at runtime only, and ends; a pass defers at most one root. The next plan puts an eligible deferred selection first, after the ordinary eligibility, route, guard and cooldown checks and before the read-limit cutoff. Other roots keep their order and store rotation, and a replaced, retired or ineligible selection gets no priority. The pass budget, cooldown, read limit, pass spacing, capacity and the authority and publication rules are unchanged. Nothing is promised about a slow first task or a retained Prepared transition. Deterministic tests through the reclamation pass and its planner, with an injected clock, show that: a root reached below the floor gets no transition and no cooldown; a later root in that pass is not attempted; the next plan puts the deferred root first, also when it would fall beyond the read limit; and a deferred root that is now a next generation or cooling down gets no priority.",
+    "When the automatic pass attempts a retained root, the host records one bounded diagnostic for that exact selection at runtime. It holds when the attempt was made and either that it completed with the root kept by canonical authority, or that it was refused, with the refusal's HTTP status and its text cleaned of control characters and bounded to a fixed length. The host keeps at most one entry per retained selection and no more entries than the named-root capacity. An entry whose selection is no longer retained is never shown and is pruned at the next record or pass. The diagnostic is not authority: it changes no eligibility, classification or admission, and it may be absent after a restart. The named-roots status view shows it, with its age, as the root's last automatic pass attempt. When the same-binding root has a recorded attempt, the InFlight refusals of both the acceptance request (criterion 1) and the evaluator's submission add that root's reclamation status as the status view shows it. They keep HTTP 503, the stable prefix, the predicate, the submission retry count, the waits and the deadlines. The request refusal's hint then becomes the cooldown remaining at capture, rounded up, plus the existing budget-derived hint, labelled as a suggested delay and not a promise that the transition settles. The submission keeps its existing wait. With no recorded attempt, both texts are unchanged, and that is not evidence that a pass is running. Deterministic tests show that: through the acceptance request path, with a same-binding Prepared transition in flight whose root an automatic pass attempted and kept, the 503 carries the recorded attempt and the cooldown-derived hint, the status view shows the same attempt, and the classification, the status code and the non-admission are unchanged; the submission refusal carries the same status text with its wait unchanged; and the recorded detail is bounded, cleaned and pruned.",
+    "The cause of the refusals of w-f5f89e7eed42's acceptance evaluation is not confirmed. Shared-budget starvation, which criterion 5 fixes, is inferred from the source, and a re-preparation that keeps failing is not excluded. Neither this item nor its commit claims criterion 5 as that cause. Criterion 6's report is the discriminator at the next occurrence, and the item records that."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "control-plane"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

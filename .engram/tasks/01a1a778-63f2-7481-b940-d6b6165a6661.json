@@ -1,0 +1,29 @@
+{
+  "id": "01a1a778-63f2-7481-b940-d6b6165a6661",
+  "external_ref": null,
+  "title": "A session returning to a held claim, or switching focus between held claims, must get a confirmed opening with no agent action and no Engram wait at opening",
+  "outcome": "After a later claim ends and focus returns to a held claim whose root is still validly named, or focus moves between two held claims, the next turn's source root is confirmed automatically; opening stays local, and genuine mismatches stay unconfirmed.",
+  "acceptance": [
+    "After a later claim ends and focus returns to a held claim whose root is still validly named, or focus moves between two held claims, the session's opening becomes confirmed with no agent action, through a future-only refresh from the closing read. A turn opened before that refresh settles stays unconfirmed; the documentation states that such a turn loses source attribution and its comparison baseline, and that no fixed number of turns is promised. A genuinely different root, stale generation, unresolved authority or other existing refusal remains unconfirmed. Turn opening does not wait on Engram."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

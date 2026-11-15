@@ -1,0 +1,44 @@
+{
+  "id": "01a10eca-ea54-72b0-bdf6-4ffe5fef9438",
+  "external_ref": null,
+  "title": "Reviewer freeze-check wording names no parameter: prompt and tool description say \"SHA-256 literal\", the tool's field is expectedFingerprint, so a reviewer's first call can 422",
+  "outcome": "Reviewer freeze-check wording names no parameter: prompt and tool description say \"SHA-256 literal\", the tool's field is expectedFingerprint, so a reviewer's first call can 422",
+  "acceptance": [
+    "The delegated-child prompt text for Engram schema-1 freeze verification (src/delegations.rs) and TERMAL_REVIEW_FREEZE_TOOL_DESCRIPTION (src/review_freeze_api.rs) name the tool's arguments exactly as `manifestPath` and `expectedFingerprint`, and say the expected fingerprint is the parent's separately recorded 64-hex SHA-256 value",
+    "The tool's input schema is unchanged (no alias field such as expectedSha256 is accepted): additionalProperties stays false",
+    "A test pins that both texts name `expectedFingerprint` and `manifestPath`, and that every argument name they mention is a property of the published input schema",
+    "cargo test --bin termal passes"
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "review",
+    "review-freeze"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

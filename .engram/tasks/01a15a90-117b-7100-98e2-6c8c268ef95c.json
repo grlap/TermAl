@@ -1,0 +1,28 @@
+{
+  "id": "01a15a90-117b-7100-98e2-6c8c268ef95c",
+  "external_ref": null,
+  "title": "A host-observed test run stays \"running\" in /api/test-runs hours after its bound item completed",
+  "outcome": "An observed run row whose process is gone and whose bound work has completed leaves the running state, or carries an explicit stale/unknown status, so lanes and coordinators do not mistake it for a live run.",
+  "acceptance": [
+    "A test reproduces an observed run whose bound work completes and whose process is gone, and shows the row leaving the running state (or being marked stale with a reason) within a bounded time.",
+    "Rows of genuinely live runs are unaffected, and the change is covered by a regression test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

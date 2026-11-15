@@ -1,0 +1,29 @@
+{
+  "id": "01a15d22-4c13-7311-8739-a40846d0ed52",
+  "external_ref": null,
+  "title": "Document retirement exemption for federation placement capacity accounting",
+  "outcome": "Feature documentation distinguishes retained reservation history from capacity accounting after re-enrollment or revocation and preserves runtime authority limits.",
+  "acceptance": [
+    "central-control-plane.md and federation-entrypoints.md state that permanently retired enrollment reservations stop consuming declared capacity while their records remain retained.",
+    "The documentation explicitly preserves current-enrollment reservations through transient links/settings/verification loss and states that accounting retirement grants no runtime ownership, completion or reconciliation authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "federation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

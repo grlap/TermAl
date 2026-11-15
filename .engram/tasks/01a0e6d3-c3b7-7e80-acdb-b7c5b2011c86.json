@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3b7-7e80-acdb-b7c5b2011c86",
+  "external_ref": "tm-1cg3",
+  "title": "Extract transcript keyboard-scroll seams and focused tests",
+  "outcome": "The ArrowUp ownership fix left cohesive keyboard-intent and browser key-target semantics inside already oversized SessionPaneView.scroll.ts, SessionPaneView.tsx, and message-stack-scroll-sync.ts; App.scroll-behavior.test.tsx also crossed the 5,000-line review threshold. Perform pure-move extractions for the session-pane keyboard-intent producer and message-stack key-target semantics, move the new ownership/bounded-history scenarios into focused test modules using shared harness helpers, and keep behavior unchanged.",
+  "acceptance": [
+    "SessionPaneView.scroll.ts and App.scroll-behavior.test.tsx shrink below their current thresholds; the keyboard-intent producer and key-target semantics each have a clear owns/does-not-own header and focused tests; the move-only commits preserve the complete UI test/build result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

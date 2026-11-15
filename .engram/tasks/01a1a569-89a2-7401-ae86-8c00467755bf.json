@@ -1,0 +1,24 @@
+{
+  "id": "01a1a569-89a2-7401-ae86-8c00467755bf",
+  "external_ref": null,
+  "title": "Align the Disable UI test's saved reply with the wire shape",
+  "outcome": "The test \"still shows observations off after Disable\" uses a saved reply with engramOperatorDisabled: true and waits on \"Declared · turned off in TermAl\", which is what a real Disable shows.",
+  "acceptance": [
+    "Align the Disable UI test's saved reply with the wire shape is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6d1-7470-829b-1e7f5d0bd3c5",
+  "external_ref": "tm-sd2l",
+  "title": "Require diagnosis after review quality-gate failures",
+  "outcome": "The review-changes command currently says to stop and present raw gate output, but does not encode the repository rule to investigate. Add a self-contained pre-review failure protocol: stop reviewer spawning, run focused diagnostics, classify the root cause without accepting flaky as a resolution, and require the original gate to pass before review resumes. Pin the contract in agent command tests.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The gate-failure protocol is in .claude/commands/review-changes.md Step 2 on master f7db2c58. Closed by evidence.",
+  "completion": null
+}

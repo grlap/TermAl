@@ -1,0 +1,29 @@
+{
+  "id": "01a1d1b6-9d11-76e2-b432-6a2047adc594",
+  "external_ref": null,
+  "title": "Avoid repeated Intl formatter allocation during sidebar parent renders",
+  "outcome": "Bound clock formatting work to clock or local-zone changes instead of every streaming-driven parent render, preserving browser-local zone and UTC output.",
+  "acceptance": [
+    "A behavioral or focused rendering diagnostic shows unrelated parent rerenders no longer repeat unchanged clock formatting work.",
+    "Clock minute rollover, zone/DST output and visibility lifecycle remain correct."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "performance",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

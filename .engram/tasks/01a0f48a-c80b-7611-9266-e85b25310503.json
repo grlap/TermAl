@@ -1,0 +1,31 @@
+{
+  "id": "01a0f48a-c80b-7611-9266-e85b25310503",
+  "external_ref": null,
+  "title": "Shrink acceptance omission metadata before blaming prompt overflow on criteria",
+  "outcome": "Treat continuation/locator text as shrinkable brief context, or clearly attribute and document its share of the prompt floor, while preserving complete criteria and structured omissions.",
+  "acceptance": [
+    "Shrink acceptance omission metadata before blaming prompt overflow on criteria is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0ea91-e695-7472-8e21-67e7b8bdcade",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1410b-575f-7b72-b956-dce32f8c526d",
+  "disposal_reason": "The parent is completed. Continue as independent work in Sol-a7bb's candidate list; Termal::Opus3 handles it under the TermAl coordinator (Termal::Fable2).",
+  "completion": null
+}

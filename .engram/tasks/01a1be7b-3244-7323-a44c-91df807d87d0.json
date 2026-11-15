@@ -1,0 +1,35 @@
+{
+  "id": "01a1be7b-3244-7323-a44c-91df807d87d0",
+  "external_ref": null,
+  "title": "Shared-source same_session evaluation refusal leaves callers stuck: saved preference refuses with no fallback, remedy text unusable",
+  "outcome": "A caller whose same_session selection comes only from a saved preference gets another admitted mode, and a pin or same-session-only policy gets a refusal with a remedy it can actually follow.",
+  "acceptance": [
+    "Real-request tests cover the preference route reselecting an admitted mode with one capture, a pinned same_session refused despite an admitted independent mode, a same-session-only policy refused, and an unavailable owner keeping the same_session brief; the refusal names a remedy the caller can act on and the tool description matches.",
+    "It is on master through a review pair with no Medium or higher and the normal full gate; the agreed DRAFT 1.2 refusal of new shared same_session preparation and the wire are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed actionable same_session preference fallback with one source capture, explicit pin/policy refusal and unavailable-owner compatibility in master db52491e; real-request regressions and exact-input independent pair/full gates passed.",
+    "completed_at": "2026-11-09T06:14:01.968019200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

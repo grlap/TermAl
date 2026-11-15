@@ -1,0 +1,30 @@
+{
+  "id": "01a17ee3-9c65-7fd3-97f0-10276849daf9",
+  "external_ref": null,
+  "title": "macOS: canonical TestTempRoot (/private/var) is refused by the Engram control fixture's lexical temp-root guard; 135 new Rust failures on master",
+  "outcome": "On macOS, master's Rust tests pass again: the only expected failure is the separately tracked production watcher regression (w-2d9eb34a613a). The Engram control fixture's temp-root guard accepts the canonical TestTempRoot that w-10e7c58fba6a introduced, and keeps refusing every home outside the TermAl test temp root.",
+  "acceptance": [
+    "The fixture scripts' --home guard accepts homes under the canonical (symlink-resolved) TermAl test temp root that the Rust side now creates, including /var to /private/var on macOS. It still refuses any home outside that root and any home with a `..` segment, with exit 4 and the existing message. The ps1 fixture stays consistent with the sh fixture.",
+    "Every one of the 135 non-watcher Rust failures in Mac run test-9fb9a3f0 (master 43a55125) is attributed, by test name, to a root cause, and each cause in scope is fixed. The fixture-guard refusals, TCP-readiness deadlines, startup EOFs and any lexical-versus-canonical alias assertions are covered.",
+    "A standard full gate on a test ref on the Mac shows 0 Rust failures other than the known watcher test, and the standard full gate on Windows stays green. The review pair and the exact-input integration gate are recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "macos",
+    "regression",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

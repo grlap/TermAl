@@ -1,0 +1,27 @@
+{
+  "id": "01a1c465-9a2b-7e80-8ce8-12bfb8d5c0a7",
+  "external_ref": null,
+  "title": "Preserve annotated and extensionless paths in ordinary delegation inspected-file lists",
+  "outcome": "Ordinary delegation results retain legitimate inspected paths such as LICENSE, `LICENSE`, [license](LICENSE), src/state.rs (lines 1-120), and `src/state.rs` — lock path, while excluding no-additional-files explanations, verdict prose and filler; wake counts match the retained evidence.",
+  "acceptance": [
+    "Behavioral parser and result/wake tests retain extensionless and annotated inspected paths without admitting verdict/no-additional-files prose, and preserve ordinary existing path cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation-results",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

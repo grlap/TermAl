@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6bb-7023-bcff-27bdc73fbcb7",
+  "external_ref": "tm-rere",
+  "title": "Preserve Markdown and diagram preferences in workspace layout persistence",
+  "outcome": "Confirmed during parent consolidation of the authoritative tm-7p9z.7 r2 Codex/Claude review on HEAD bb7786192483872f99e2e18ed37c575a060eabb6, frozen diff cbdec5afde9d8d4628ac393d4d5843ef9a936374abb80b96ac2ca1b4026e8c51. Claude identified a real pre-existing client/server contract mismatch: ui/src/api.ts:256-260 and saveWorkspaceLayout:760-765 declare/send markdownThemeId, markdownStyleId, diagramThemeOverrideMode, diagramLook and diagramPalette. src/wire.rs WorkspaceLayoutDocument/PutWorkspaceLayoutRequest have none of those five fields, and src/workspace_queries.rs:70-84 rebuilds the stored document without them. Unknown PUT members are silently ignored; GET cannot return them; app-workspace-layout.ts:601-606 therefore cannot restore those appearance settings from the server in another browser. All five client fields already existed at HEAD, so this is not introduced by the current legacy cleanup and is P2 rather than a new P1 regression. Confirmed by source inspection, not by writing to the live server or opening its database. Deduplicated against all-status workspace/theme/Markdown/appearance titles and exact field-name description searches; no matching issue found. Next action: decide the supported appearance contract, then either persist these five fields across Rust wire/storage/projections and client load/save or explicitly remove unsupported request/response promises and align documentation. Do not reintroduce obsolete themeId or diagramLook neo compatibility.",
+  "acceptance": [
+    "Real route-level PUT then GET (and persisted-state reload) pins the supported Markdown theme/style and diagram override/look/palette values. A second browser loading the same workspace obtains the supported server-owned preferences; client-only mocks are not the sole proof. Client types and docs match the Rust contract, current theme pair/mode and pane layout round-trips remain unchanged, and required Rust/TypeScript/UI gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

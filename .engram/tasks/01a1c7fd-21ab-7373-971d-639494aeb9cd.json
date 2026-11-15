@@ -1,0 +1,28 @@
+{
+  "id": "01a1c7fd-21ab-7373-971d-639494aeb9cd",
+  "external_ref": null,
+  "title": "Integrate combo45 on bcf66e4d: 8e1f d6b83728 (w-6e81, fmt-fixed carry of 509893bb)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit d6b837287fbf9dc9e3f9e5e1d04136ec1f980c0a (tree 4b6df6877ca0c75a2d0947ab132963b28680f1f0) is on origin/master, where master was moved to it by a fast-forward from bcf66e4d34ce886fa00819664f72e9ff1b9c81a2, and its raw no-renames diff against that parent is equal to the reviewed 8e1f 509893bb's diff against 6265bb97 on every path except src/tests/engram_verification_vitest.rs, whose only difference is a rustfmt reformatting cleared by the scoped confirmation pair (Codex 17304, Claude 17305).",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 4b6df687 passed every stage, with equal source ids before and after and an eligible clean input, and the scoped confirmation pair on d6b83728 and the adopted 509893bb pair recorded no finding of Medium or higher.",
+    "The release binary built from tree 4b6df687 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install may since have replaced it, in which case this binary is kept aside there."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c8c5-f429-7461-86d8-5c3515c4e942",
+  "disposal_reason": "combo45's d6b83728 was carried byte-identically onto b3d7dce1 as combo48, w-5c3515c4e942. That carry was gated by DL560 FULL test-ef8d6bf6 (PASS) and landed on master as 225a5335 at 04:47:14Z.",
+  "completion": null
+}

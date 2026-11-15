@@ -1,0 +1,63 @@
+{
+  "id": "01a10def-09bf-7ab3-97d0-61b961afed6c",
+  "external_ref": null,
+  "title": "Source sightings are ordered by wall-clock stamps: a backward clock step or an equal-millisecond tie can lose or duplicate a close, or make an opening unrecordable",
+  "outcome": "A source sighting's place in a scope's history is decided by measurement order, not by its wall-clock stamp. After a backward clock step, or when two sightings of different revisions share a millisecond stamp, no measured change is lost and no opening becomes unrecordable. Where order is uncertain, the change is reported again (a duplicate) rather than dropped.",
+  "acceptance": [
+    "A test: an accepted (reported) close stamped before a later-stamped baseline, followed by a revert to the baseline's revision before the next opening; the change is reported, not read as Equal.",
+    "A test: an opening whose current accounted baseline carries a stamp later than the opening is still recorded and delivered (no from > through refusal), and the next opening at an unchanged revision reads Equal again once that is accounted.",
+    "A test: a retired owed close whose promotion is refused behind a later-stamped baseline, with its revert as the follow-up; after recovery and a subsequent opening stamped after the baseline, the revert is reported.",
+    "A test: two sightings of different revisions with equal millisecond stamps; the later measurement keeps its place, and neither change is lost.",
+    "A test: a stale opening measured before a newer same-scope baseline was accounted never displaces it, including when the clock steps back between that accounting and the opening's promotion."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "clock",
+    "correctness",
+    "source-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

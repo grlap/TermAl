@@ -1,0 +1,31 @@
+{
+  "id": "01a15091-2c02-7e82-be99-df5ad385de47",
+  "external_ref": null,
+  "title": "Show each retained named root's item tracker lifecycle (open/completed/cancelled) in the read-only GET via a bounded, off-lock tracker read; the 409 stays I/O-free",
+  "outcome": "An operator reading GET /api/engram/named-roots sees, for each retained root, its item's tracker lifecycle (open/completed/cancelled), or \"unknown\" when the bounded read fails or times out, beside the run lifecycle as last read canonically. The full-table 409 refusal stays I/O-free and keeps showing only the canonically read run lifecycle.",
+  "acceptance": [
+    "GET /api/engram/named-roots adds each retained root's item tracker lifecycle (open, completed or cancelled), read off the state lock through the existing tracker-read path, at most one read per distinct work id per request, within a stated budget; a failed, refused or timed-out read shows 'unknown' and never fails the request",
+    "The full-table 409 refusal performs no tracker or canonical read (the existing 'the refusal did not spend any lifecycle read budget' assertion still holds) and its rows are unchanged",
+    "Tests cover an open item, a completed item, a timed-out or failed read reported as 'unknown', and the one-read-per-work bound with two roots of the same work",
+    "The full gate plus a clean review pair"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "engram-control",
+    "follow-up",
+    "named-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,42 @@
+{
+  "id": "01a16dc6-6418-7fc1-a418-5df8dd709bb8",
+  "external_ref": null,
+  "title": "Measure and reduce repeated queue-hash work on warm snapshot-cache hits",
+  "outcome": "Warm snapshot-cache validation has a measured cost breakdown and avoids unnecessary repeated queue-hash construction under StateInner where that can be done without weakening exhaustive projection validation or exact-cut ordering.",
+  "acceptance": [
+    "Record a controlled comparison of warm cache-hit validation and fresh summary projection at a documented session count and queued-prompt distribution, separating hash/projection work from lock waiting; fixture timings are not live-host proof.",
+    "Any optimization preserves exhaustive validation against unstamped session mutations, queue and pause changes, body-sequence/instance epochs, exact immutable cuts and publication ordering, with focused regressions on the final source.",
+    "Record the required review and gate evidence for any source change; retain the existing validator if the proposed optimization cannot preserve its correctness contract."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "greg-reported",
+    "host-persistence",
+    "p0-profiling-2026-10-22",
+    "performance",
+    "review-followup",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a164ff-dc1b-71f3-bda3-de6021f4b32f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

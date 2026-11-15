@@ -1,0 +1,30 @@
+{
+  "id": "01a1dacc-c8a9-7ae0-a375-116c0c6ea48f",
+  "external_ref": null,
+  "title": "Cover named-root late events through adopted and Windows early observation close",
+  "outcome": "Named-root file event attribution is covered across the adopted two-step close and the Windows early close, in addition to ordinary completion.",
+  "acceptance": [
+    "A behavioral adopted-turn test closes the actual observation before a separate terminal finish, then delivers a named-root event and asserts the completed turn's FileChanges summary with unchanged ownership.",
+    "A Windows early-close behavioral test covers the same scope retention where platform ownership permits it; any unavailable platform setup is explicitly recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "file-changes",
+    "review-medium",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1d726-809f-7371-9773-54e15402ea0e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1dbfa-1711-73c0-b163-4201aaa45afa",
+  "disposal_reason": "Parent w-54e15402ea0e completed with independent PASS3/3. Continue optional Low coverage follow-up independently; no parent blocker. Historical review packets retained as provenance; no source worktree is needed because reviewed and landed commits remain in Git.",
+  "completion": null
+}

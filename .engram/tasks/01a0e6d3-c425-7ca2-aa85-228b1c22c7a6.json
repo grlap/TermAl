@@ -1,0 +1,40 @@
+{
+  "id": "01a0e6d3-c425-7ca2-aa85-228b1c22c7a6",
+  "external_ref": "tm-8a5",
+  "title": "Read-only delegated reviewer can see a falsely clean worktree",
+  "outcome": "During /review-changes wait delegation-wait-177c68f2-a654-4e0f-a611-cc0fd0937d70, the concurrently spawned read-only Codex reviewer session-4661 ran git status/diff in /Users/greg/GitHub/Personal/termal and reported no staged, unstaged, or untracked changes, while Claude session-4660 saw the expected ~40-file shared worktree and reviewed it. This makes a nominally completed two-reviewer fan-in incomplete and can falsely report a clean review.",
+  "acceptance": [
+    "Concurrent Codex and Claude read-only review sessions spawned against the same dirty shared worktree observe the same HEAD/index/worktree/untracked identity; a mismatch fails explicitly instead of returning a clean review; regression coverage reproduces the shared-worktree reviewer launch path.",
+    "Focused verification and the maintained full gate pass on the final input, and independent reviews find no unresolved in-scope Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

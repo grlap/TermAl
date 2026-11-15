@@ -1,0 +1,60 @@
+{
+  "id": "01a1a235-c460-7fc3-a4db-588c5ec325b9",
+  "external_ref": null,
+  "title": "Declared test commands: judge `dart test` / `flutter test` runs from the Dart JSON file reporter (--file-reporter json:PATH)",
+  "outcome": "An agent working on a Dart or Flutter repository declares its real `dart test` or `flutter test` command in termal-tests.toml with `--file-reporter json:<artifact>`. Running it exactly as declared yields a host-judged PASS, FAIL or UNKNOWN check from that JSON result file, through the same declared route, artifact rules and fences as the TRX reader, so the run can earn test credit.",
+  "acceptance": [
+    "READER: The declared route accepts a second artifact format besides TRX. The artifact is the Dart test JSON reporter's event stream: newline-delimited JSON written by `dart test` or `flutter test` with `--file-reporter json:<path>`; protocol at https://dart.dev/go/test-docs/json_reporter.md. Format is detected from the file content, never from the file name. TRX behaviour is unchanged (frozen differential). Everything else is reused as is: the declaration file, command matching, cwd/artifact placement, start/end artifact image rules, size cap and Unknown reasons.",
+    "OUTCOME RULES: PASS needs all of the following: exit 0; a final `done` event with success=true; at least one testDone event that is non-hidden and non-skipped with result \"success\"; and zero testDone events with result \"failure\" or \"error\". FAIL is a nonzero exit (today's rule), or any testDone result failure/error, or an `error` event, or `done` success=false even at exit 0. UNKNOWN covers: no `done` event (truncated or killed run), unparsable or unknown-protocol lines, zero executed non-hidden tests, all tests skipped, or an inconsistent stream (a testDone with no matching testStart). The reader is bounded, takes one image, and never reads console text.",
+    "FIXTURES: Real captured artifacts from the installed Flutter SDK, for both `dart test` (a pure Dart package) and `flutter test` (a Flutter package): a passing run, a failing run, a run where every test is skipped or none match, and a truncated file. Each is classified correctly by unit tests, which run in the normal suite.",
+    "DOCS: docs/features/declared-test-commands.md documents the Dart/Flutter route with a working example entry for each of `dart test` and `flutter test`, the outcome rules above and the limits, and its stale 'live proof pending' sentence is corrected.",
+    "LIVE PROOF (after install and restart, in a disposable .tmp scratch repository with .termal-results/ git-ignored): a declared `flutter test --file-reporter json:...` run in the pushd form is judged by the host as (a) PASS for a passing run, reported as a passed declared check with the reader's counts in its internal diagnostics, (b) FAIL published for a failing run, and (c) UNKNOWN withheld with its reason when an ordinary declared wrapper runs the real passing Flutter reporter command, waits for completion, deletes its closed artifact and exits 0 before host resolve; no native verification or new public count field is created."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "dart",
+    "declared-tests",
+    "flutter",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Dart/Flutter JSON declared reader landed with bounded outcome rules, real fixtures and docs; disposable live host proof published passed/failed/indeterminate with coordinator-accepted limits. Native registered Dart-reader check passed and matched all required test obligations.",
+    "completed_at": "2026-11-04T17:04:17.063881900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

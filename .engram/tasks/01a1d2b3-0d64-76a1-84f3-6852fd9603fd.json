@@ -1,0 +1,27 @@
+{
+  "id": "01a1d2b3-0d64-76a1-84f3-6852fd9603fd",
+  "external_ref": null,
+  "title": "Launcher own-run registration timed out after 9.2 s and left the stage unrun, although four earlier registrations from the same root worked",
+  "outcome": "A focused launcher run whose own-run registration is slow or unconfirmed either completes registration within its budget, or reports a clear, recoverable state. It never leaves the agent unable to tell whether to retry the registration POST.",
+  "acceptance": [
+    "Launcher own-run registration timed out after 9.2 s and left the stage unrun, although four earlier registrations from the same root worked is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

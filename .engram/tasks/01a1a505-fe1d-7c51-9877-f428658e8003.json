@@ -1,0 +1,24 @@
+{
+  "id": "01a1a505-fe1d-7c51-9877-f428658e8003",
+  "external_ref": null,
+  "title": "expect_sse_stream_end fails on a keep-alive frame after about 15 s instead of reporting a hang",
+  "outcome": "A stream that doesn't end is reported as a stream that didn't end, at the helper's limit, not as an unexpected keep-alive chunk at 15 s.",
+  "acceptance": [
+    "expect_sse_stream_end skips comment-only keep-alive frames, and a recorded failing run shows a stream that never ends reporting the helper's own message"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1a586-31ca-7a42-afb4-82dd2d841176",
+  "external_ref": null,
+  "title": "Map committed-input v1 conformance gaps to exact tests and explicit follow-ups",
+  "outcome": "The implementation review maps every required committed-input conformance case to exact test evidence or an explicitly unverified follow-up. Required runtime boundedness regressions remain part of the blocking producer fix.",
+  "acceptance": [
+    "Map committed-input v1 conformance gaps to exact tests and explicit follow-ups is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "commit-input",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

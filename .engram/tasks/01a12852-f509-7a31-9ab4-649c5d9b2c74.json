@@ -1,0 +1,41 @@
+{
+  "id": "01a12852-f509-7a31-9ab4-649c5d9b2c74",
+  "external_ref": null,
+  "title": "A Codex web search, which names no command line, still fences an open check when the session's workdir is the check's root",
+  "outcome": "A Codex web search, which names no command line, still fences an open check when the session's workdir is the check's root",
+  "acceptance": [
+    "A Codex webSearch item started while a check is open in the session's own workdir root leaves the check unmarked, and a test covers it.",
+    "A Codex command item with no reported line still counts as a possible writer where it runs.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

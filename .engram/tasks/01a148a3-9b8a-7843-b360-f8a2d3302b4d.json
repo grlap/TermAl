@@ -1,0 +1,30 @@
+{
+  "id": "01a148a3-9b8a-7843-b360-f8a2d3302b4d",
+  "external_ref": null,
+  "title": "Extend certified control retry coverage through durable reload and checkpoint uncertainty",
+  "outcome": "Extend certified control retry coverage through durable reload and checkpoint uncertainty",
+  "acceptance": [
+    "Add durable save/reload witnesses for both certified admission retry codes using the existing retry owner/fence model.",
+    "Exercise closing checkpoint storage_error and local timeout after a certified failure, proving unchanged report-refusal behavior and uncertainty reconciliation without inventing a new application certificate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "reliability",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14882-9853-72f2-8565-339b57a1d89d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

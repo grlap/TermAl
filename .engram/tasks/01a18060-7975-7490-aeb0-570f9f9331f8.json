@@ -1,0 +1,34 @@
+{
+  "id": "01a18060-7975-7490-aeb0-570f9f9331f8",
+  "external_ref": null,
+  "title": "Budget mailbox read pages by encoded bytes while preserving receipt boundaries",
+  "outcome": "Local and federated mailbox reads select bounded FIFO pages before issuing receipts and expose complete continuation metadata.",
+  "acceptance": [
+    "Local mailbox read enforces an encoded-byte page budget in addition to the 200-message limit, before large materialization, and uses the existing mailbox reader/receipt owner.",
+    "Receipts cover exactly the returned message boundary; no skipped, acknowledged-but-omitted or reordered message, including escaped 256 KiB bodies and mixed own-message headers.",
+    "Reuse or factor the existing federation 2 MiB page-budget mechanism without changing participant authorization, cursor or retry semantics; clients accept short pages and preserve continuity.",
+    "Boundary, replay and continuation tests plus independent review and full gate pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "design-pending",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "panic",
+    "response-size"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18052-8b84-7e10-8213-9af00ebbaa71",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1c313-a560-7d62-9d7c-c82b51a27e90",
+  "external_ref": null,
+  "title": "Refuse signature-verifying format and sort atoms in read-only Git branch listings",
+  "outcome": "Read-only Git branch listing formats and sort keys cannot invoke the configured signature verifier.",
+  "acceptance": [
+    "The read-only classifier refuses git branch format and sort arguments that evaluate signature-verifying ref-filter atoms.",
+    "Ordinary branch listings and safe data formats and sort keys remain admitted, with behavioral classifier coverage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "read-only-gate",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

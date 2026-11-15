@@ -1,0 +1,35 @@
+{
+  "id": "01a0fa65-18e0-7502-b00d-c46bb57b80cb",
+  "external_ref": null,
+  "title": "Duration report wording is incomplete for the Node runner: a file-level before() and a parent test's subtests land in a test's time",
+  "outcome": "The duration summary header and docs/test.md say a test's time includes its own per-test hooks but not import or environment. That holds for Vitest 4 and for Node's per-test hooks, but the Node runner adds two cases (reviewer's reading of Node internals; marked plausible, not verified against installed source):\n- a file-level before() or a t.before() lands in the first child test's duration;\n- a test with t.test subtests is reported as kind \"test\", and its duration includes its children, so it can be listed beside its slow child.\nNo maintained helper test uses either pattern today, so the effect is latent. The fix verifies against the installed Node source, then either qualifies the wording for Node or excludes parent tests whose events show children.",
+  "acceptance": [
+    "The duration report's wording in the summary header and docs/test.md is accurate for the Node runner's file-level before hooks and parent tests with subtests, or parent tests are excluded from the report; a real-runner test pins the chosen behaviour."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "launcher",
+    "test-durations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

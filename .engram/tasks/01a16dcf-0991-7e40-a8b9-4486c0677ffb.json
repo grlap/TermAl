@@ -1,0 +1,29 @@
+{
+  "id": "01a16dcf-0991-7e40-a8b9-4486c0677ffb",
+  "external_ref": null,
+  "title": "Extend watcher metadata regression matrix for production paths and scoped events",
+  "outcome": "Extend watcher metadata regression matrix for production paths and scoped events",
+  "acceptance": [
+    "Extend watcher metadata regression matrix for production paths and scoped events is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "review-follow-up",
+    "tests",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

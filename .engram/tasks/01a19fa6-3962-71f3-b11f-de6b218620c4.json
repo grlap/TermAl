@@ -1,0 +1,29 @@
+{
+  "id": "01a19fa6-3962-71f3-b11f-de6b218620c4",
+  "external_ref": null,
+  "title": "Retained Windows capture-job drainer can wait forever for a job notification that is not guaranteed",
+  "outcome": "A capture job held in pending custody is certified complete once its members have actually exited, even if the job completion port never delivers the final notification, so pending_jobs and the root lease do not outlive the processes.",
+  "acceptance": [
+    "the retained-job drainer re-checks the positive completion certificate without depending on a job notification arriving",
+    "a regression in which the final notification is suppressed still releases the pending job once its members have exited, and never releases it before"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capture-lifetime",
+    "review-low",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

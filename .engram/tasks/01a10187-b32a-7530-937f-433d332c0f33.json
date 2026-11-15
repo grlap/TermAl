@@ -1,0 +1,50 @@
+{
+  "id": "01a10187-b32a-7530-937f-433d332c0f33",
+  "external_ref": null,
+  "title": "A full gate's temp guard failed on a stray __PSScriptPolicyTest_*.ps1 left in the test run root, suspect a test that terminates a real PowerShell child during startup",
+  "outcome": "A full gate's temp guard failed on a stray __PSScriptPolicyTest_*.ps1 left in the test run root, suspect a test that terminates a real PowerShell child during startup",
+  "acceptance": [
+    "A deterministic witness first fails on the unmodified code: a test launches the control fixture through a production Engram launch path in a mode that prints the child's TEMP, and the child's TEMP is the test process's TEMP (the run root), not a directory inside its Engram home.",
+    "Under test, every Engram fixture launch path (diagnostic, authority revoke, control process, CLI command, context nudge, bounded read) gives its child TEMP and TMP inside its Engram home, so a PowerShell child terminated during startup leaves its __PSScriptPolicyTest_* files there, where the test's temp root removes them, and not in the run root; tests show the placement through the diagnostic launch path and through apply_engram_connection_environment, and show that nothing is created or redirected for a home outside the test temp root. Production launches are unchanged, and the temp guard is not widened.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "gate-blocker",
+    "test-temp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Under test, every Engram fixture launch path gives its child TEMP, TMP and TMPDIR in <home>/child-temp, plus TERMAL_TEST_USER_TEMP. A PowerShell child killed during startup now leaves its __PSScriptPolicyTest_* probe in the home, removed with the test's root, instead of in the shared run root. Nothing is created or redirected for a home outside the test temp root or for a child-temp linked out of its home. Production and the temp guard are unchanged. Fail-first verified (49c0e7ff); round-3 gate test-3eeae695 passed (fingerprint cfadac69…02ac); three review rounds, all Mediums fixed; evaluation passed 3/3. Landed 646d250, installed b7388781.",
+    "completed_at": "2026-10-03T13:08:29.255852800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

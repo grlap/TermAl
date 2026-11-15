@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c794-7393-bbc3-742365dde545",
+  "external_ref": "tm-v34z.2",
+  "title": "Exclude hidden rendered layers from copied quotes",
+  "outcome": "Blockquote copy uses innerText, which can include both KaTeX's visually hidden MathML and visible HTML representations, producing duplicated clipboard content. Derive text from visible content only, account for other hidden renderer layers, and add a quote-with-math regression test.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c792-7f61-9255-b6a209f9077f",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

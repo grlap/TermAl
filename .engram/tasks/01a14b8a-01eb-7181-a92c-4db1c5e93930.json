@@ -1,0 +1,50 @@
+{
+  "id": "01a14b8a-01eb-7181-a92c-4db1c5e93930",
+  "external_ref": null,
+  "title": "Paged completed-session archive route and UI archive view: browse finished sessions without knowing their id",
+  "outcome": "Per Greg's direction that audit/history stays reachable through a separate paginated archive route: a new cursor-paged route lists completed sessions (roots and delegation children) that are outside the live projection, filterable by project, kind and completion time. A UI archive view lists them and opens one through the existing per-session history route. Nothing is deleted.",
+  "acceptance": [
+    "A new GET route returns completed sessions outside the live projection in a stable order with a bounded limit and an opaque cursor, filterable by project, kind (root or delegation child) and completion range; malformed cursors and limits are refused; tests cover paging, filters and stability under concurrent completion.",
+    "A UI archive view lists that route page by page and opens a selected session's transcript through the existing GET /api/sessions/{id}/history, without adding it to the live snapshot; focused UI tests cover listing, paging and opening.",
+    "The docs describe the route and view; the full gate passes on the exact committed tree with a clean independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "archive",
+    "greg-directed",
+    "performance",
+    "state-flood"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a147c0-22a0-7983-8bb2-b17b985f5dbc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

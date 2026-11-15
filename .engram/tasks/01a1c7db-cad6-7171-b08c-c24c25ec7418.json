@@ -1,0 +1,29 @@
+{
+  "id": "01a1c7db-cad6-7171-b08c-c24c25ec7418",
+  "external_ref": null,
+  "title": "Review the trusted runner-path boundary for direct Node Vitest verification",
+  "outcome": "The runner path/package/config trust assumed by registered direct Node Vitest verification is explicit, with any desired confinement implemented consistently with existing test-runner routes.",
+  "acceptance": [
+    "The installed-runner trust model and relative/absolute runner/config path behavior are documented or deliberately narrowed, without implying package-byte attestation that the host does not perform.",
+    "Any changed path-admission boundary has behavioral positive and refusal coverage and preserves supported Windows focused Vitest execution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-launcher",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

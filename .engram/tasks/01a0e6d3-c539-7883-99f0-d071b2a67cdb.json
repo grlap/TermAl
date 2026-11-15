@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c539-7883-99f0-d071b2a67cdb",
+  "external_ref": "tm-j6g0",
+  "title": "Make the CSS contract tests independent of the vitest working directory",
+  "outcome": "From /review-changes round 3 (Claude, delegation 46004bcb; gate test-171aa649) on the corrected UI/Test Runs changeset. Note, and seen first-hand: ui/src/test-run-waits.test.tsx:82 and ui/src/panels/SessionActivityStrip.test.tsx:68 build CSS file paths from process.cwd() (assuming cwd = ui/), and load node:fs through a variable module name. A focused run with vitest --root ui from the repo root (run test-ea04b73d, 2026-09-26) failed both with ENOENT. The gate runs from ui/, so it passes there. Resolve the path from import.meta.url, as transcript-activity-slot.test.tsx already does, or use Vite's ?raw CSS import, so these tests don't depend on the runner's cwd.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

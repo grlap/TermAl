@@ -1,0 +1,24 @@
+{
+  "id": "01a14b4c-baeb-7e02-b695-c327171f94f9",
+  "external_ref": null,
+  "title": "Complete automatic Engram retry mailbox disposition documentation",
+  "outcome": "Mailbox documentation and the classifier comment consistently describe waitingForEngramRetry without attaching independent-hold wording to automatic recovery.",
+  "acceptance": [
+    "Complete automatic Engram retry mailbox disposition documentation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

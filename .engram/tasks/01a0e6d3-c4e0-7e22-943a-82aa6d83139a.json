@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4e0-7e22-943a-82aa6d83139a",
+  "external_ref": "tm-d9gl",
+  "title": "Detect a same-path Engram binary upgrade and expose an explicit refresh path for running Engram MCP children",
+  "outcome": "Relayed by Engram::Advisor (2026-09-05) from the Phoenix pilot: after an Engram upgrade, shell CLI calls (engram --version, next --json, doctor --json) report the new build fddd9bcac44a while the injected MCP child of a long-running session (Phoenix::Codex::Engram session-5867) returns next results without build_fingerprint/schema, i.e. an older binary still serving that session. TermAl compares the installed Engram descriptor by binary_path string only (session_crud.rs binary_path comparisons; EngramMcpInstalledDescriptor stores path + home), so an upgrade that overwrites the same path is invisible: the MCP child keeps running the old binary until the session runtime rotates for an unrelated reason, and no explicit refresh path exists. Desired: (1) record binary identity in the installed descriptor (file size+mtime or the engram build fingerprint from --version/doctor) and detect a mismatch against the configured binary; (2) surface staleness where the operator and the session can see it (Settings > Engram host status and the session wake/context note: \"Engram MCP child runs build X, installed binary is build Y\"); (3) an explicit refresh path - per session rotation at the next turn (runtime_reset_required) or a host-level \"refresh Engram runtimes\" action - never a silent restart of working sessions; refresh failures visible; (4) tests for detection, visibility and the refresh action. Acceptance: upgrading the engram binary in place is detected within one status refresh; affected sessions show the stale build and offer/receive the refresh; no session is restarted without an operator or session-initiated action; docs/features/engram-host-adapter.md describes the freshness contract.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram",
+    "lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

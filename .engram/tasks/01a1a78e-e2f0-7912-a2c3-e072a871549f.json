@@ -1,0 +1,38 @@
+{
+  "id": "01a1a78e-e2f0-7912-a2c3-e072a871549f",
+  "external_ref": null,
+  "title": "One working source_id end to end: committed-input test credit in real repositories with submodules (TermAl and Engram)",
+  "outcome": "Real Questly and PhoenixCodeNav checkouts, clean with every submodule initialized at its pin, earn a registered committed-input verification that Engram accepts at exactly that commit, through the ordinary launcher route, as one joint TermAl and Engram result. Reporting-only observations never count. Parts: TermAl w-c07c410dac75 (capture and host admission) and Engram w-7828ac63767b (reader).",
+  "acceptance": [
+    "On the installed builds of both projects, after the joint restart, an agent in the real Questly and PhoenixCodeNav checkouts, on Linux (DL560) and on Windows, runs the repository's committed declared test command as the first tool activity of a fresh turn. TermAl captures the full source_id from `engram source` before dispatch (S0) and after the run. The two are equal, local changes are allowed, and a clean checkout is not required. TermAl validates the real result artifact and sends a registered verification, which Engram stores and accepts on the bound work for done, with evaluations off. No reporting-only observation counts.",
+    "A source change between S0 and the after capture gets no credit, with a named reason: an edited tracked file, a new non-ignored untracked file, or a changed submodule HEAD. So does an unavailable source_id (timeout, size bound or filters). This holds on Linux and on Windows. The documented option-B limits are accepted: a change fully reverted in between, edits that git status does not report, and changes to ignored files.",
+    "There is no exclusion list or profile; Git-ignored output stays outside the source_id. No stored evaluation, verification or seal is changed, and repositories without submodules work the same way.",
+    "Each part lands under its own project's standing rule. Criterion 1 needs the installed builds, so it is verified only after install and restart, and this item completes only then."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Done end to end after the joint install and restart of fdbb53c8 (DL560 TermAl 084dd9f0 / Engram 28ebd6c4; Central TermAl 7f02d86e / Engram 3cb2f9b3).\nCredited declared runs in real checkouts:\n- Questly Windows (w-d96f586eea8f).\n- Phoenix Windows (6dbad90f).\n- Questly Linux (bf2c3c19).\n- Phoenix Linux (verification 0217e45e on w-f7e6285dbb43): commit 5786218, tree 0c1d9898, 2 submodules at their pins, 0 changes, TRX 12/12.\nNegative case: the C2 Linux mid-run tracked edit got no credit, with the named reason source_changed listing test/core/theme/app_theme_test.dart (run test-c88e8bbe). The Windows negative cases are covered by the gate tests.\nEach part landed under its own project's rule (TermAl master fdbb53c8). Evidence: .evidence/eo-live/.",
+    "completed_at": "2026-11-07T21:24:38.502490200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

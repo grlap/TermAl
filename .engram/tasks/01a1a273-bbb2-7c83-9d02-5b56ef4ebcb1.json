@@ -1,0 +1,33 @@
+{
+  "id": "01a1a273-bbb2-7c83-9d02-5b56ef4ebcb1",
+  "external_ref": null,
+  "title": "Map incomplete TRX reader reasons to specific declared diagnostic codes",
+  "outcome": "Incomplete TRX artifacts retain useful fixed internal reason codes without raw result text or verdict changes.",
+  "acceptance": [
+    "The four existing reasons for missing outcome, ResultSummary, Counters and nonnumeric counter each map to a specific fixed diagnostic code instead of invalid_result.",
+    "Regression coverage exercises actual reader reasons and confirms fixed private output; parser verdicts and public contracts remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "declared-tests",
+    "diagnostics",
+    "flutter",
+    "greg-directed",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a235-c460-7fc3-a4db-588c5ec325b9",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

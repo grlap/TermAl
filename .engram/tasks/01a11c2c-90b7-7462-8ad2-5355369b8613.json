@@ -1,0 +1,28 @@
+{
+  "id": "01a11c2c-90b7-7462-8ad2-5355369b8613",
+  "external_ref": null,
+  "title": "Codex sessions with approval policy \"never\" cannot call TermAl's or Engram's read-only MCP tools (\"requires approval, but approval policy is never\")",
+  "outcome": "A Codex session started with a read-only sandbox and approval policy \"never\" can still call read-only MCP tools (Engram reads, TermAl mailbox read, send and acknowledge) without an approval prompt, so a locked-down observer session needs no CLI workaround.",
+  "acceptance": [
+    "In a Codex session with sandbox read-only and approval policy never, TermAl's read-only and mailbox MCP tools and Engram's read words succeed without an approval request, while any writing tool or sandbox-escaping command is still refused; a test covers the generated configuration for both cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-runtime",
+    "mcp",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

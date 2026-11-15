@@ -1,0 +1,29 @@
+{
+  "id": "01a15490-8dfb-7e23-9ad7-c6c2c268ebd4",
+  "external_ref": null,
+  "title": "Clarify the one-shot Windows rollback proof's worktree and evidence retention requirements",
+  "outcome": "Make the ignored pinned rollback proof's provisioning, worktree layout and evidence lifetime explicit so it is not presented as universally runnable after its artifact is retired.",
+  "acceptance": [
+    "The test's nearby comment and invocation guidance explicitly identify the current proof as bound to the provisioned increment artifact and worktree layout, including that task closure may retire the executable and pin file; alternatively a reviewed portable fixture removes those layout assumptions while preserving immutable executable identity and repository containment checks.",
+    "The default suite still ignores the externally provisioned proof, and documentation never treats an ignored or unprovisioned run as rollback validation; the existing passed historical proof remains attributed to its exact input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "federation-m4",
+    "review-follow-up",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

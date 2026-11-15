@@ -1,0 +1,29 @@
+{
+  "id": "01a1861b-3d04-72c3-8b4b-041e3547d6de",
+  "external_ref": null,
+  "title": "Clarify the Windows case-alias claim in the Rust fixture Cargo witness",
+  "outcome": "Reword or strengthen the Windows alias assertion in the fixture Cargo construction witness so it does not claim to prove an alias-removal block that std::process::Command already makes redundant through case-insensitive environment keys. Preserve discriminating target, intermediate, cwd and descendant checks.",
+  "acceptance": [
+    "The witness's stated guarantee is limited to assertions that discriminate, or a strengthened native-child raw-environment witness fails when the claimed behavior is removed.",
+    "Existing fixture-local target/intermediate/cwd, unrelated diagnostic preservation and descendant checks remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "beads-migrated",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3c0-7561-acd6-8376b03f2259",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

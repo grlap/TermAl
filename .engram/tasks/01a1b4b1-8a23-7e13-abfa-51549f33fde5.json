@@ -1,0 +1,28 @@
+{
+  "id": "01a1b4b1-8a23-7e13-abfa-51549f33fde5",
+  "external_ref": null,
+  "title": "Native relay keeps deferring deliveries to a deleted session (409 'session not found') at every boot boundary instead of retiring them",
+  "outcome": "A native relay delivery whose recipient session has been deleted is settled terminally, with a recorded reason such as 'recipient deleted', and visible to the sender. It is not deferred again with a 409 at every relay boot boundary. Deliveries to live sessions are unaffected.",
+  "acceptance": [
+    "Native relay keeps deferring deliveries to a deleted session (409 'session not found') at every boot boundary instead of retiring them is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

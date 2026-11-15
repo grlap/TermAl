@@ -1,0 +1,43 @@
+{
+  "id": "01a10f65-1894-7df3-9b95-4c9953ea93f3",
+  "external_ref": null,
+  "title": "Delegation refresh consumes parent waits and queues resume prompts in memory before its commit; a commit failure loses them",
+  "outcome": "A delegation terminal refresh whose commit fails leaves every registered parent wait and its resume prompt retained or durably owned, never consumed only in memory.",
+  "acceptance": [
+    "When the commit in refresh_delegation_for_child_session fails after the delegation was mutated, the parent waits it took are restored and the resume prompts it queued in memory are removed, or a volatile duty owned by the retry tick retains them until a later commit succeeds; no wait is consumed without a successful commit.",
+    "A fail-first test injects a commit failure at that point on a delegation terminal path and shows, on the frozen pre-fix tree, the wait consumed with no durable record; after the fix the wait is retained (or durably owned) and the parent is woken exactly once when the commit later succeeds.",
+    "Regression controls show healthy delegation terminal paths (completed, failed, cancelled) still consume their waits once and wake the parent once."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "durability",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

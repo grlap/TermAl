@@ -1,0 +1,28 @@
+{
+  "id": "01a157b7-9683-7fb2-b130-3a3d16851134",
+  "external_ref": null,
+  "title": "Host answers the test launcher's registration POST slowly under load; a focused run aborted at the 8 s registration budget",
+  "outcome": "Launcher registration (the host's test-run registration endpoint) answers well within its 8 s budget under normal multi-lane load, and the cause of the slow post_headers phase is diagnosed and fixed in the host (lock contention, writer queue, or similar). The registration budget is not inflated to hide it, per the repository's no-inflated-timeouts rule.",
+  "acceptance": [
+    "Host answers the test launcher's registration POST slowly under load; a focused run aborted at the 8 s registration budget is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "host-performance",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1c231-f7a1-70b3-9d01-038978d9798e",
+  "external_ref": null,
+  "title": "Remove unused normalization and case-fold dependencies after retired source producer deletion",
+  "outcome": "Remove direct icu_normalizer and regex-syntax dependencies left unused by deletion of content_revision_collisions.rs, preserving required transitive dependencies and supported build behavior.",
+  "acceptance": [
+    "Direct dependency entries no remaining source needs are removed and Cargo.lock is updated consistently; normal build and meaningful affected checks pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

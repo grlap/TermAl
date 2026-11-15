@@ -1,0 +1,27 @@
+{
+  "id": "01a18502-c83a-7d53-a263-4d75ddb7144e",
+  "external_ref": null,
+  "title": "Claude /review-code children repeatedly skip out-of-scope lens files even when the brief requires reading all six",
+  "outcome": "A Claude read-only /review-code child reads every lens file in .claude/reviewers and lists each in filesInspected on its first attempt, or the skill text and the integration owner's intake rule agree on what lens coverage is required. A follow-up attempt per round is no longer needed only to close lens coverage.",
+  "acceptance": [
+    "Claude /review-code children repeatedly skip out-of-scope lens files even when the brief requires reading all six is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "agent-workflow",
+    "review-workflow"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

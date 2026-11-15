@@ -1,0 +1,28 @@
+{
+  "id": "01a1722b-f973-71f1-abd7-fd856dcabd82",
+  "external_ref": null,
+  "title": "host-architecture.md names test-only watcher entry points instead of the production path",
+  "outcome": "host-architecture.md names test-only watcher entry points instead of the production path",
+  "acceptance": [
+    "host-architecture.md names test-only watcher entry points instead of the production path is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

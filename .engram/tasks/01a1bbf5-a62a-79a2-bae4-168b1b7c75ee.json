@@ -1,0 +1,34 @@
+{
+  "id": "01a1bbf5-a62a-79a2-bae4-168b1b7c75ee",
+  "external_ref": null,
+  "title": "Integrate combined TermAl train on d3499b97: remote workdir, registration recovery, projection cache, named source id, relay reasons",
+  "outcome": "Combined candidate bf7ff309 (five independently reviewed and focused-checked candidates composed on master d3499b97) passes a fresh combined review pair, a DL560 whole-binary focused run and FULLs on DL560 and Windows B from a test ref, then lands by fast-forward and is installed on Central and DL560. Components: ee8e7669 (Sol-c593, w-754d remote session workdir); 66652cd2 (Sol-a7bb, w-7c7c registration pending recovery); 38edf955 (Sol-03d4, de60 warm projection cache); 2d711724 (Sol-edfd, c8c6 named source id); 46785449 (Sol-03d4, w-706f relay home reasons).",
+  "acceptance": [
+    "Integrate combined TermAl train on d3499b97: remote workdir, registration recovery, projection cache, named source id, relay reasons is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration",
+    "train"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Combined candidate bf7ff309 landed by fast-forward on master at 18:11:11Z and is installed on Central (sha 5F0531A8) and DL560 (sha 64983f10). Pair: Codex 60ca479f plus Kimi stand-in 42bfc473, after Claude 492ad611 was refused in that round; no Medium or higher; Lows filed as w-0e21714cbb8f and w-2b7a81b9e525. DL560 whole-binary preflight passed. FULLs: DL560 test-0e6cca5b and Windows B test-84c51566, both eligible on tree 47ae4902. Hosts not restarted: the coordinator held the restart to bundle with the next train; the running hosts keep their old build until Greg restarts.",
+    "completed_at": "2026-11-08T18:22:48.160717200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

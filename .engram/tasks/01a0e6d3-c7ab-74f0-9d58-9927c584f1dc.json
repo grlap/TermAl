@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7ab-74f0-9d58-9927c584f1dc",
+  "external_ref": "tm-vzat",
+  "title": "Kimi live prompt/tool/cancel/resume acceptance after deployment",
+  "outcome": "Follow-up to tm-c9ly. Source integration and gates pass; installed CLI 2.0.2 has only authenticated ACP setup/config/close evidence. After explicit operator approval for deployment and a real model prompt, verify streaming, a disposable tool permission allow/reject, cancellation, model switch, and resume preserving conversation. Do not change credentials, restart the active host, or send paid prompts merely because this ticket exists. Record exact host/CLI builds and bounded evidence; Kimi Engram acceptance is not implied.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

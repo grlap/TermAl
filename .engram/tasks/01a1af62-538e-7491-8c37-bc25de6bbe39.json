@@ -1,0 +1,36 @@
+{
+  "id": "01a1af62-538e-7491-8c37-bc25de6bbe39",
+  "external_ref": null,
+  "title": "The 409 refusing termal_release_named_root for a session's own current binding should name the supported clear form",
+  "outcome": "An agent whose own named root is refused by termal_release_named_root because it holds the current binding is told how to retire that root by the supported route.",
+  "acceptance": [
+    "The 409 refusal that termal_release_named_root returns when the calling session itself holds the current binding for the root's claim names the supported route for retiring its own root (termal_name_source_root with the work and no root), and the refusal for another session's live claim stays unchanged.",
+    "A test asserts that the own-binding refusal text names that route."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed own-binding release refusal guidance on master/origin ee2f21c6. The existing 409 now names termal_name_source_root with work and omitted path for the actual own holder; other live-claim refusals, root retention and audit behavior remain unchanged. Regression passed in registered Windows focus; independent Codex/Claude pair clean (Notes only); integration owner recorded clean eligible identical-tree five-stage DL560 FULL. Install remains pending, no running-build claim.",
+    "completed_at": "2026-11-06T10:53:17.143699600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

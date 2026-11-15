@@ -1,0 +1,27 @@
+{
+  "id": "01a1216e-c910-7553-aa66-2e7770021e3f",
+  "external_ref": null,
+  "title": "SessionWait.since mixes formats: local HH:MM:SS for delegation and test-run waits, RFC 3339 for carried gates",
+  "outcome": "Every SessionWait.since uses one comparable, parseable format, so MCP consumers can compare and order waits.",
+  "acceptance": [
+    "SessionWait.since mixes formats: local HH:MM:SS for delegation and test-run waits, RFC 3339 for carried gates is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "api",
+    "session-status"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a1c8ef-5b71-72d2-b6ae-88b516274d44",
+  "external_ref": null,
+  "title": "Verify cancelled remote receipt identity through actual SQLite reload",
+  "outcome": "Cover committed never-sent cancellation across the actual persistence owner reload.",
+  "acceptance": [
+    "A session cancelled through the real owner is persisted and reloaded from SQLite; Rejected/attempt0, write_ahead and exact remote association survive and an identical associate is a non-recreating no-op."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

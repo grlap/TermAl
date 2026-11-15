@@ -1,0 +1,27 @@
+{
+  "id": "01a105d9-33b6-7ac2-92b8-524ef81eede1",
+  "external_ref": null,
+  "title": "Validate supplied acceptance attempt keys for history-less evaluators",
+  "outcome": "A supplied attempt key must match the persisted target in every evaluation mode; history-less targets may continue omitting it.",
+  "acceptance": [
+    "Validate supplied acceptance attempt keys for history-less evaluators is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

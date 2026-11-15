@@ -1,0 +1,30 @@
+{
+  "id": "01a108bf-ba2e-7250-920a-4f821f556bcf",
+  "external_ref": null,
+  "title": "Host-wake test fixtures leave temp homes on panic",
+  "outcome": "Host-wake test fixtures leave temp homes on panic",
+  "acceptance": [
+    "Host-wake test fixtures leave temp homes on panic is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "agent-runtime",
+    "agent-workflow",
+    "cleanup",
+    "test-credit",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

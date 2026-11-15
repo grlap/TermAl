@@ -1,0 +1,27 @@
+{
+  "id": "01a139a4-0b1c-78c0-b316-0411157ea38f",
+  "external_ref": null,
+  "title": "Avoid claiming a test-run artifact is unavailable before the first index scan",
+  "outcome": "Before discovery has scanned, a retained fallback does not report confirmed artifact loss; boot monitoring remains conservative and no unproven safe evidence value is introduced.",
+  "acceptance": [
+    "Avoid claiming a test-run artifact is unavailable before the first index scan is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

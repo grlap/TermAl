@@ -1,0 +1,37 @@
+{
+  "id": "01a1d6fa-2176-7db0-be6a-e941681013cc",
+  "external_ref": null,
+  "title": "Historical queue rows can no longer be dismissed: the Cancel control was removed, so they pin \"starting the next turn\" and disable Codex thread actions forever",
+  "outcome": "A queue row the backend keeps only as delivery history (ambiguous, accepted or handingOff, including legacy rows marked on load) does not stay in the session forever. Either the user can dismiss it, which removes the row without replaying it, or the backend retires it once its delivery is settled. Such rows do not count as pending for the activity indicator or the Codex thread-action guard.",
+  "acceptance": [
+    "A behavioural test shows that a session holding a history-only queue row (ambiguous, accepted or handingOff) can be cleared: by a UI dismiss/cancel that calls the existing cancel API without replaying the prompt, or by backend retirement once delivery is settled",
+    "A behavioural test shows that an idle session whose only queue rows are history-only does not show the 'is starting the next turn' indicator, and that its Codex thread actions are enabled",
+    "Dismissal or retirement never re-sends the prompt to the provider"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "prompt-delivery",
+    "review-medium",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "History-only queue rows can be dismissed again, and they no longer pin \"starting the next turn\" or block Codex thread actions.\n- Accepted and ambiguous rows, including legacy and Engram hand-off rows without a receipt, get a \"Dismiss\" action through the existing cancel API. The row is removed and never re-sent, and its delivery record stays. A receipt-less row gains a durable ambiguous receipt.\n- The waiting indicator, the UI thread-action guard and the backend Codex thread-action guard count only runnable rows. Pending and in-flight HandingOff rows still count, per the coordinator's guard-rail.\nLanded in combo103 as master 847e6c597056bd43167c996c752b87a93f78451e. The post-landing independent evaluation, delegation-b8e276e0 (session-18040), passed all 3 criteria. Review Lows are filed as w-323baac79dc5 and w-5bf36fbebc97; the pre-existing non-Windows set_path warning is filed as w-be16712b48aa.",
+    "completed_at": "2026-11-14T10:55:25.409221300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

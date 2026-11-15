@@ -1,0 +1,31 @@
+{
+  "id": "01a1c784-d1bd-7a23-b18d-9e89f4bf90a3",
+  "external_ref": null,
+  "title": "Cover activity visibility controller behavior in the maintained UI suite",
+  "outcome": "The maintained UI gate checks observable activity-animation visibility controller behavior rather than only the unsupported-IntersectionObserver fallback.",
+  "acceptance": [
+    "Maintained tests exercise intersection visibility, dynamic indicator tracking/reclassification, document visibility or motion-preference resynchronization and teardown using observable attributes/animation state.",
+    "The tests fail when the controller leaves indicators running offscreen or fails to release observer/listener state, without pinning CSS text, instruction files or duplicating the implementation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-low",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a10f02-5306-7571-935d-a6d1fd27d14f",
+  "external_ref": null,
+  "title": "Avoid holding global and shared session locks across reviewer turn-start stdin I/O",
+  "outcome": "Source-identified Low from reviewer MCP pair1. Approved continuation holds SharedCodexSessionMap and AppState mutexes through synchronous turn/start stdin write; a slow pipe can block sibling reader and state users. Its late recheck occurs after shared turn markers mutate. Preserve exact send authority while narrowing I/O lock scope; review any alternative reservation/generation design independently. Inventory only: no assigned owner or scheduled implementation trigger.",
+  "acceptance": [
+    "Avoid holding global and shared session locks across reviewer turn-start stdin I/O is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "reviewer-mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

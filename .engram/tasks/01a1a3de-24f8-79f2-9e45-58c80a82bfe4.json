@@ -1,0 +1,37 @@
+{
+  "id": "01a1a3de-24f8-79f2-9e45-58c80a82bfe4",
+  "external_ref": null,
+  "title": "Redesign the recovery-batch hold tests to catch a scan under the state lock without depending on the host's scheduler",
+  "outcome": "The recovery-batch hold tests detect a real regression, a scan under the state lock, and tolerate a thread pausing briefly, so they are enabled again and pass on Windows and on DL560 under parallel tests. Which of DL560's holds of tens of milliseconds are on-CPU work under the lock is answered by measurement; why the off-CPU ones sleep is left to w-d9c86985a960.",
+  "acceptance": [
+    "A note states from measurement, using the instrumented runs test-6be61b30 and test-f65ca018, which DL560 holds were on-CPU work under the state lock and which were off-CPU, naming the hold sites, and says the earlier runs test-e20b4f55, test-789dfcf3 and test-49895a93 were not instrumented. What the thread sleeps on while off-CPU, and whether that is a product finding, is left to w-d9c86985a960 and is not settled here.",
+    "The redesigned tests, the active-batch test and the empty-batch test, bound the median of each call's worst hold at 50 ms. They fail when the old session-table scan under the state lock is reintroduced, shown by a recorded failing run that reports the medians, and pass when a thread is forcibly paused during a hold in under half the calls. The oracle no longer takes each call's worst hold and then the second-worst of 100 calls. The test's comment states the known weakness in words: a scan under 50 ms is not caught.",
+    "The active-batch test is no longer ignored and the redesigned tests pass in a full gate on Windows and in a full gate on DL560, after repeated passes in the wide process on DL560 with the run count and the load recorded; the gate of the modeled parallel fixture in state_lock_parallel.rs is unchanged",
+    "The review pair has no outstanding finding of Medium or higher and the full gate is green on the exact candidate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "test-infrastructure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The recovery-batch hold tests now bound the median of each call's worst hold at 50 ms, catch a reintroduced session-table scan, tolerate a paused thread in half the calls or fewer, and are no longer ignored. Landed in 91a3da13 with full gates on Windows B and DL560. Known weakness, stated in the test: a scan under the bound, or one slowing half the calls or fewer, isn't caught. Why threads sleep under the lock stays with w-d9c86985a960. Acceptance evaluation not requested, per Greg's rule (memory greg-acceptance-evaluation-non-blocking-2026-11-02).",
+    "completed_at": "2026-11-04T05:48:16.724116200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

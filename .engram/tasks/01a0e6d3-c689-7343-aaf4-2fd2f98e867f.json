@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c689-7343-aaf4-2fd2f98e867f",
+  "external_ref": "tm-orxu",
+  "title": "A filtered test run that executes zero tests exits green and is indistinguishable from a passing run",
+  "outcome": "OBSERVED TONIGHT, on a real investigation, and it cost a wasted slice of someone else s serialized machine window.\n\nA focused Vitest invocation was written with a name filter. Shell quoting broke the filter into separate words, and those words were then taken as FILE filters instead. Vitest happily loaded several matching test files, matched no test name inside them, reported everything as skipped, and EXITED ZERO. The wrapper propagates the child exit code unchanged, so the operator sees a green run.\n\nWHY THIS IS THE DANGEROUS SHAPE RATHER THAN AN ORDINARY MISTAKE: a run that executed nothing and a run in which everything passed emit the same signal. The intent of a focused run is to learn something about a specific test; the outcome silently became \"no evidence at all\" while looking like \"evidence, and it was fine\". A person under time pressure reads the exit code, not the skip count.\n\nThis is the third instance of one pattern in a single evening, which is why it is worth a control rather than a note:\n  - a delegation endpoint answering 404 for both \"does not exist\" and \"not yours\";\n  - a process table answering empty for both \"never ran\" and \"already finished\";\n  - and now a test runner answering success for both \"all passed\" and \"nothing ran\".\nThe first two cost minutes and a false report to a peer project. This one is worse in kind, because THE TEST RUNNER IS THE INSTRUMENT WE CHECK EVERYTHING ELSE WITH. A blind spot here does not produce a wrong answer about one subject; it produces confidence about any subject we point it at.\n\nTHE CONTROL, and it is cheap: when a name filter or a file filter is supplied, REQUIRE A NON-ZERO COUNT OF EXECUTED TESTS, and fail the run otherwise with a message naming the filter that matched nothing. An unfiltered full run must keep its current behaviour. The natural home is scripts/test-temp-root.mjs, which today only forwards the child exit code (see the exitCode handling around lines 187-237); it would need to read the runner s summary rather than only its status. If parsing the summary is unattractive, the alternative is to pass the runner s own zero-match strictness through explicitly, so that the decision is expressed rather than inherited.\n\nSECOND, SMALLER ITEM FROM THE SAME EVENT, worth fixing in the same pass: the invocation went through a shell that re-split a quoted argument. A wrapper that accepts a test-name filter should pass it to the child as a single argv element and never through a shell string, so that quoting cannot silently convert a name filter into a file filter. The failure is not that quoting is hard; it is that a mangled name filter DEGRADES INTO A VALID DIFFERENT COMMAND instead of an error.\n\nDONE MEANS: a test of the wrapper that supplies a filter matching no test and asserts a non-zero exit with the filter named in the message.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

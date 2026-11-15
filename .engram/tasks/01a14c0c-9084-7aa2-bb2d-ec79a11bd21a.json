@@ -1,0 +1,33 @@
+{
+  "id": "01a14c0c-9084-7aa2-bb2d-ec79a11bd21a",
+  "external_ref": null,
+  "title": "Bound federation persistence overhead and completed placement detail",
+  "outcome": "Unchanged federation state avoids needless meta writes/digest work, and settled placement detail has bounded retention while minimal creation identity and unresolved reservations remain safe.",
+  "acceptance": [
+    "Demonstrate unchanged-domain full/delta writes avoid unnecessary federation meta UPDATE/hash work without weakening committed-content/version fences.",
+    "Define and test completed-detail compaction that retains the minimal identity needed to prevent reuse; unresolved/uncertain reservations are never evicted or freed by retention."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-3740-7bc3-8f26-14c782d0d16f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

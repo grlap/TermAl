@@ -1,0 +1,47 @@
+{
+  "id": "01a164fe-6291-7020-9a4d-06fb930cac38",
+  "external_ref": null,
+  "title": "Disabling and re-enabling Engram control leaves retained heads interrupted and POST queue/resume returns 200 doing nothing; only Cancel moves them (Greg P0, 2026-10-22)",
+  "outcome": "A retained queue head that was marked interrupted when Engram control was disabled (turn_dispatch.rs:1366-1382) or by the settings reset on re-enable (session_crud.rs:3009-3017) is resumable without Cancel: POST /api/sessions/{id}/queue/resume, or re-enabling control, re-admits the retained prompt through a fresh admission with a renewed automatic-recovery window. Neither returns 200 and does nothing (release_engram_begin_preparation_hold_for_resume NotHeld path, engram_begin_preparation_retry.rs:974-982; drain Ok(None) at turn_dispatch.rs:1385-1389 via engram_queue_head_refused_as_interrupted). Greg, verbatim (2026-10-22, via Engram::Opus): \"CZEMU MUSZE ANULOWAC PROMPTY ?\"",
+  "acceptance": [
+    "A retained head marked interrupted by the control disable (turn_dispatch.rs:1366-1382) and kept interrupted on re-enable (session_crud.rs:3009-3017) is resumable without Cancel: POST /api/sessions/{id}/queue/resume, or re-enabling control while the project is gated, re-admits the retained prompt through a fresh admission with a renewed automatic-recovery window, delivered at most once.",
+    "Neither Resume nor re-enable returns 200 while leaving the head interrupted and the queue paused with no durable result: a head that cannot be re-admitted gets a typed non-2xx refusal naming the reason and the supported next action, and the session preview no longer says control is off once it is on. Covered by a fail-first test for the sequence disable control, then enable control, then Resume.",
+    "On the running host, Resume starts the retained turn with no Cancel for the held sessions on a project with turn-gated control on (proved on Termal::Fable2 8112, Termal::Coder 7422, Termal::Sol-03d4 12327 at 22:29:54–22:30:17Z, dispatch cards recorded); a retained head on a project with turn-gated control off (Engram::Coder 8581) receives the typed 409 naming the reason and the next action and is left unchanged by policy (Advisor #195); a session whose head the host admitted on its own (Engram::Advisor 6219) is recorded as host-side admission, unattributed. A retained head whose prepared Begin is uncertain (observed on Termal::Architect1 8982 at 22:46Z, refused with 409 'Engram retained prompt cannot resume until its admission state is reconciled') is outside this item's scope and is tracked by w-b9b17d9735ad.",
+    "The full five-stage gate passes on the exact committed tree with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "engram-host-adapter",
+    "greg-reported",
+    "p0-profiling-2026-10-22",
+    "reliability",
+    "retained-prompt",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a12188-9cc9-7b60-9301-b21c5132848c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Cancelled under Greg's word of 2026-11-08 ('zespol moze zamykac albo anulowac taski, ktore nie maja sensu', Asistant #1015). The fix landed in 8cfc5739 with its review, gate and live Resume cases recorded, but the disable and re-enable control surface it concerned was later removed by EO (87f49ed0). `done` refused on an old unlocated source change and asked for a fresh check or a human waiver; no waiver was given, and a fresh test of a removed surface would prove nothing. So this is NOT recorded as completed, tested or waived. Later restart-head and uncertain-Begin incidents were tracked separately.",
+  "completion": null
+}

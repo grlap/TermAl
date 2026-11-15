@@ -1,0 +1,29 @@
+{
+  "id": "01a1be85-b9cb-73a3-8a9b-5fe29dbc2c1a",
+  "external_ref": null,
+  "title": "Host guidance says to set noContinuation on a fully handled page, but native relay mailboxes refuse it with 400",
+  "outcome": "The guidance and tool description a session sees state the limit for native relay mailboxes, so an agent doesn't hit a refusal following them.",
+  "acceptance": [
+    "Guidance and tool descriptions shown to a session say that noContinuation isn't available on native relay mailboxes, matching the refusal, and a behaviour test covers the existing refusal if none does.",
+    "Review pair with no Medium or higher and the normal checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "docs",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

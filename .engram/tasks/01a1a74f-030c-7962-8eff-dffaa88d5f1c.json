@@ -1,0 +1,30 @@
+{
+  "id": "01a1a74f-030c-7962-8eff-dffaa88d5f1c",
+  "external_ref": null,
+  "title": "A turn that starts before its predecessor's closing sighting is recorded closes with assumed_missing_baseline, which voids a clean check's evaluation",
+  "outcome": "A turn whose source never changed doesn't report an assumed source change just because it started within the few seconds its predecessor's closing report takes, so a clean registered check can be evaluated without any spacing between turns, and a real edit is still reported.",
+  "acceptance": [
+    "A deterministic test, with no timing assumption, shows the defect on the unchanged product: turn A closes with its closing worker gated, turn B starts, A's sighting is then recorded, B closes on unchanged content, and B reports assumed_missing_baseline.",
+    "After the fix that same sequence reports no source change from B, including when B closes before A's sighting is recorded.",
+    "Negative controls hold: a real edit made during B, before or after A's measurement, is still reported; a refused or undelivered A sighting, a rebind and a root change never supply a baseline.",
+    "A pinned real-Engram test on Windows and Linux: a placed clean registered check in turn A, turn B starting before A's sighting is recorded and requesting the evaluator, evaluator records its verdict and done succeeds. No wait is added to a turn or a send."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1a74f-2eb1-7712-9834-5f8e183e1f97",
+  "disposal_reason": "Greg approved the simple EO rule ('tak', Fable2 mailbox2366). Coordinator explicitly directs this predecessor-baseline slice to stand down, not carry, and supersede under the overall EO correction. Decision/provenance note0ef987f7b7ed4f6f95172cd8b35b402c; refs and original/review evidence retained. No successful acceptance or landing of this withdrawn design is claimed.",
+  "completion": null
+}

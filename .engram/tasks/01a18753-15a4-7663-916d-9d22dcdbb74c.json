@@ -1,0 +1,27 @@
+{
+  "id": "01a18753-15a4-7663-916d-9d22dcdbb74c",
+  "external_ref": null,
+  "title": "Reword the stale ENGRAM_BIND_COLLISION_PHRASE doc comment now that a typed flag decides the transcript notice",
+  "outcome": "The doc comment on ENGRAM_BIND_COLLISION_PHRASE in src/engram_verification_bind.rs describes the phrase only as the wording of the collision line. It says the typed EngramOwedBindSettled.collision flag in apply_engram_owed_binds decides which settled entries also get a durable transcript notice. It no longer says a line containing the phrase is written to the transcript.",
+  "acceptance": [
+    "Reword the stale ENGRAM_BIND_COLLISION_PHRASE doc comment now that a typed flag decides the transcript notice is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

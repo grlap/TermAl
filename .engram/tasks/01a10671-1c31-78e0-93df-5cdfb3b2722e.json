@@ -1,0 +1,52 @@
+{
+  "id": "01a10671-1c31-78e0-93df-5cdfb3b2722e",
+  "external_ref": null,
+  "title": "Budget-clock migration B7: the settings-API Engram tests choose their budget clock before the settings enable",
+  "outcome": "The suite-wide inventory for w-b3f0058feb49 ran on da0a3d9 (.tmp/admission-evidence/unselected-reads.md, sha256 a711b210). It found 14 tests that enable Engram through the settings API (update_project_engram_settings_with_grant), not enable_test_project_engram, and so no budget-clock batch (B1-B6) reached them. They read the budget clock before any clock is chosen, that is, on an undeclared Real clock.\n- 13 are in engram_host_adapter::session_reconciliation. Reads per test, before+after enable: absence_best_effort_disable_and_retirement_never_probe 1+6 (mixed); absence_declaration_change_inside_probe_refuses_and_retains_authority 0+2; absence_evidence_rejects_changed_generation_token_grant_status_and_store 0+11; absence_inspection_nonzero_invalid_and_oversized_output_never_clear_state 0+6; absence_multi_target_save_is_atomic_on_success_refusal_and_budget_exhaustion 0+25; absence_probe_never_follows_an_uncertain_or_different_checkpoint_failure 0+3; absence_receipt_requires_complete_exact_identity_and_no_authority 0+1; absence_selectors_reach_supported_scripts_literally 0+3; absence_store_checks_leave_state_unlocked_and_reject_drift_before_commit 0+34; absence_strict_save_failure_restores_retained_grant_for_fresh_proof 0+4; absence_strict_save_reconciles_only_proven_absence_and_persists_settings 0+14; absence_strict_tier_upgrade_recovers_errored_reviewer_and_fresh_binds 0+44; absence_windows_batch_wrappers_are_refused_without_launch 0+2.\n- 1 is in acceptance_settings: acceptance_settings_connection_edit_preserves_omitted_evaluator_defaults 1+1 (mixed).\nEach test, or the fixture it uses, chooses its clock through the slice-1 boundary before the settings enable. This batch is a prerequisite of FINAL (w-c06f573bef27). The production readers that never-enabled tests reach are w-b3f0058feb49's scope, not this one. No production change. Criteria are drafted in the test-only template and agreed before anyone claims it.",
+  "acceptance": [
+    "Scope at the master commit current when claimed: the 14 tests named in the outcome (session_reconciliation 13, acceptance_settings 1). Each test, or its fixture, chooses the budget clock through the slice-1 boundary before the settings enable and before any target or worker snapshot: select_test_scripted_engram_budget_clock, or declare_test_real_engram_budget_clock with its reason in a comment.",
+    "A note gives the transitive caller inventory of every changed fixture per file, showing that no caller installs, selects or declares a second clock or advances a clock other than the fixture's own. It also classifies each real-time and wall-clock source in those files as a liveness guard or the subject of its test.",
+    "Every test in scope that is compiled on the gate's platform passes on its chosen clock; a test compiled out is listed in a note with its cfg. A budget-expiry assertion (for example absence_multi_target_save_..._budget_exhaustion) either advances the same scripted clock across its causal boundary, with an unadvanced positive control, or declares Real with its reason. Each changed fixture asserts the clock is unread before the enable. No expectation is weakened, no timeout grows, and no retry is added.",
+    "No production change. A shared fixture used outside this scope stays unchanged unless the inventory covers every caller.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The 14 settings-API Engram tests now choose their budget clock before any read. The private setup_with_state fixture selects the scripted clock through the shared before-enable helper (13 session_reconciliation tests, the two mixed ones included), and the one acceptance_settings test selects before its store is enabled. Test-only, +6. Committed bf1a2b77 (freeze bea8025b; gate test-ec2e0bba PASS, credited as 39902eb9, the credit rerun after a silently uncredited first PASS; pair Codex 235fedbb and Claude d4b75355 clean; evaluation 3b714a99 5/5). Landed by fast-forward of master dccf38f..bf1a2b77; no train gate was needed (Fable2), and the committed diff hash bb9da1b4 equals the gated input.",
+    "completed_at": "2026-10-04T17:25:12.805312300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

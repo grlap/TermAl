@@ -1,0 +1,24 @@
+{
+  "id": "01a1c23a-0af5-7bc0-a511-1e5a72f965db",
+  "external_ref": null,
+  "title": "Test the caller-side stderr snapshot on startup timeout, admission budget, send failure and disconnect",
+  "outcome": "Regression tests pin that the control-child stderr snapshot is taken before cleanup on each caller-side path: the startup-handshake timeout and disconnect in spawn_engram_control_process, the admission-budget path, send failure and the Disconnected reply. A later reordering of snapshot and terminate fails a test.",
+  "acceptance": [
+    "Test the caller-side stderr snapshot on startup timeout, admission budget, send failure and disconnect is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1312c-2e3a-7e71-844b-1523cefb3bcd",
+  "external_ref": null,
+  "title": "Receipted delivery tests: the \"reloaded\" helper should read the saved SQLite row, not in-memory serialization",
+  "outcome": "Receipted delivery tests: the \"reloaded\" helper should read the saved SQLite row, not in-memory serialization",
+  "acceptance": [
+    "Every prompt-delivery test that asserts a durable or restart-time disposition reads it back from the saved store row (after the persist queue drains), not from in-memory serialization",
+    "A test shows such a read catches a settlement made without stamping the session"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a15a73-5fa7-7ad0-9228-5e0427d2a65a",
+  "external_ref": null,
+  "title": "Define orphaned adopted-trace and historical outbox behavior on reset or project detachment",
+  "outcome": "Document and test the disposition of an adopted trace that has no observed terminal boundary, and of retained closing jobs/reports when Engram settings reset or the project is detached; avoid silently overwriting an orphan trace.",
+  "acceptance": [
+    "An adopted trace left without an owned terminal boundary is explicitly retained or settled with a visible unreported reason when a later adoption or restart encounters it; the policy is documented and tested.",
+    "Settings reset and project detachment tests establish whether historical immutable reports continue delivery through their original connection and whether closing jobs settle visibly on scope loss; no report is re-scoped to another claim.",
+    "The maintained full gate passes on the exact input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

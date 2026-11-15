@@ -1,0 +1,29 @@
+{
+  "id": "01a15f17-4c57-7f10-b44e-d70970c1b705",
+  "external_ref": null,
+  "title": "Prompt textarea keyboard interactions stall for 568–768 ms in the live UI",
+  "outcome": "Diagnose and remove the severe prompt-typing delay reported by Greg, using the supplied Chrome interaction evidence and a discriminating before/after measurement without weakening behavior or inflating timing budgets.",
+  "acceptance": [
+    "Prompt textarea keyboard interactions stall for 568–768 ms in the live UI is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "deferred-until-p1",
+    "diagnosis-required",
+    "ui-performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a15f16-fdfb-7d60-92c3-5097b7b3b858",
+  "disposal_reason": "Concurrent filing race: Termal::UI created the same Greg-reported keyboard-latency defect at15:31:59Z while coordinator's three dedup searches were in flight. Retain existing w-5097b7b3b858 with explicit P1 prerequisite and better initial criteria; this duplicate has no implementation, source edits, tests or evaluation. Original relayed metrics and screenshot-missing provenance remain in both histories.",
+  "completion": null
+}

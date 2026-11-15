@@ -1,0 +1,29 @@
+{
+  "id": "01a1802a-8b33-78f1-b2fc-77e10e5fce2d",
+  "external_ref": null,
+  "title": "Document Windows owner short bootstrap scratch and long-path ledger publication",
+  "outcome": "docs/test.md accurately describes scratch-resident request/bootstrap files, guardian archival and failure retention, and native long-path log/ledger handling.",
+  "acceptance": [
+    "The Windows owner paragraph distinguishes in-progress short scratch breadcrumbs from the final archived trace beside the original run request, including guardian-death and archive-failure retention.",
+    "Documentation describes the copied namespaced log/ledger paths and native CREATE_NEW/Flush/MoveFileW publication without changing command environment, strict job guarantees or creating new authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "review-follow-up",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

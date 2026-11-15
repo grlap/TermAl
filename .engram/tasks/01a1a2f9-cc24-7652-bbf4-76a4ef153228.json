@@ -1,0 +1,33 @@
+{
+  "id": "01a1a2f9-cc24-7652-bbf4-76a4ef153228",
+  "external_ref": null,
+  "title": "Cover pinned child tracked deletion and Unix mode changes with restored positives",
+  "outcome": "Child cleanliness tests directly witness tracked deletion refusal and Unix executable-mode refusal despite local core.fileMode=false.",
+  "acceptance": [
+    "A real pinned-child test removes a tracked source file, requires production refusal, restores it and requires the original admitted revision.",
+    "On Unix a tracked mode-change test sets local core.fileMode=false, requires production refusal through the command-pinned mode check, restores the mode and requires the original revision; removing the command pin must fail the counterexample.",
+    "All mutations stay in disposable fixtures; no production semantics or bounds are weakened."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "team-pilot",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

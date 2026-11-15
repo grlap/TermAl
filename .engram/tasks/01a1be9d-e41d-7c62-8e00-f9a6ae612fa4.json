@@ -1,0 +1,27 @@
+{
+  "id": "01a1be9d-e41d-7c62-8e00-f9a6ae612fa4",
+  "external_ref": null,
+  "title": "Recover naming publication after a same-binding authority owner supersedes the installed selection",
+  "outcome": "The post-install naming publication window reports its persisted selection and supported recovery accurately, without treating a stale local publisher as authority or replaying a producer event.",
+  "acceptance": [
+    "Recover naming publication after a same-binding authority owner supersedes the installed selection is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "named-root",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be12-2a94-7573-99d2-e40047ef7d1b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

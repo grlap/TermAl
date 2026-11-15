@@ -1,0 +1,31 @@
+{
+  "id": "01a1c287-8c13-7d70-b994-57598019e402",
+  "external_ref": null,
+  "title": "Integrate combo31 on d6a359fc: redacted remote-prompt identity and shared strict codecs",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo31 on d6a359fc: redacted remote-prompt identity and shared strict codecs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo31 is on master as 9075802d3bb3bce13312e6f638150088253fb437 (tree e23e2e67). Its one part is Sol-03d4's 963d: a redacted remote-prompt identity, plus shared strict codecs. It is an intermediate component, and w-a15b stays open.\n\nReview and gate:\n- The contribution is byte-identical to 963d, so it adopted that pair: Codex 17127 (clean) and Claude 17128 (Notes only).\n- Focused test-b14609c0 on the exact commit: 19/0.\n- Gate: Windows B FULL test-15f6b5e3, PASS and eligible, equal fingerprints (linked note).\n\nLanded by fast-forward from d6a359fc, pushed at 23:54:46Z. The test ref is deleted.\n\nInstalls:\n- Central: 2d392380, at 23:58:45Z.\n- DL560: 12329d74, at 00:00:09Z.\n\nAfter Greg's 00:15Z restart, Central runs exe 0e955adf, cargo-run relinked from clean 9075802d. The DL560 confirmation FULL on master is dispatched.\n\nNo acceptance evaluation exists: evaluation is OFF for TermAl, so this closes self_asserted.",
+    "completed_at": "2026-11-10T00:20:12.328411400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

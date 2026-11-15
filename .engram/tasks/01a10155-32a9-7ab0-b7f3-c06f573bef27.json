@@ -1,0 +1,51 @@
+{
+  "id": "01a10155-32a9-7ab0-b7f3-c06f573bef27",
+  "external_ref": null,
+  "title": "install_test_engram_budget_clock replaces the budget clock without the snapshot guard that the new clock choice enforces",
+  "outcome": "AppState::install_test_engram_budget_clock (src/engram_budget.rs) still replaces the state's budget clock and marks it chosen without consulting the snapshot counter. The mixed-clock hazard that StateInner::select_test_engram_budget_clock refuses (a target or worker already holding the old clock) therefore stays reachable through its roughly 12 call sites. Some of those callers replace an already chosen clock on purpose, such as acceptance_evaluation_authority.rs, which installs Real after a scripted clock. The fix either routes those call sites through the guarded choice, migrating them in the B1-B5 batches, or documents install as the unguarded escape hatch and when it is permitted. The FINAL item then removes or guards it.",
+  "acceptance": [
+    "At the integrated base, install_test_engram_budget_clock has no caller in src/ or docs (a grep finds only its definition), and the change removes that definition and nothing else.",
+    "After the change, engram_budget_clock_selected is set to true only inside StateInner::select_test_engram_budget_clock, the snapshot-guarded choice, as a grep shows.",
+    "The reviewed tree's full-gate rust-tests.log has no 'method `install_test_engram_budget_clock` is never used' warning and no warning absent from the base's full-gate log (test-9d5183f1); both logs are cited by path and sha256.",
+    "No production change: the diff touches only #[cfg(test)] code.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10505-f554-7d40-b55f-b3f0058feb49",
+    "01a10596-91df-7a53-9e33-e66f39fb9fda",
+    "01a10671-1c31-78e0-93df-5cdfb3b2722e",
+    "01a10676-cb80-7760-863d-7974a025d022"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "FINAL landed: the uncalled #[cfg(test)] AppState::install_test_engram_budget_clock is removed, so only the snapshot-guarded select/declare methods choose a test budget clock, and the test build is warning-free. Commit 70b22dd3, fast-forwarded on master by Termal::Opus2 (ls-remote confirmed); install bfb9f5f6, no restart. Gate test-f431c16a (f4cafdbb, credit 85df1abc), pair b924948f/98b2cbae clean, acceptance 37c5a493 5/5.",
+    "completed_at": "2026-10-04T20:55:40.846491400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

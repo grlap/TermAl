@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c647-77d1-b02d-5923e0b2f87f",
+  "external_ref": "tm-mvei",
+  "title": "Clear a Claude shell move left pending at turn start",
+  "outcome": "Round-15 review (Claude, tm-winf steps 2+3). A Claude command that sets EngramShellDirectory.pending but never reports its end on the same runtime token (an interrupted turn without a tool_result) leaves the move pending; every later command then gets None from engram_command_directories, so no check is kept (and its commands count as writing in every worktree) until a later cd re-places the shell or the runtime restarts. engram_note_turn_started does not clear it. Fix direction: at turn start, drop a pending move and lose the shell (the command may have run its cd), so an absolute cd can re-place it; add a test.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

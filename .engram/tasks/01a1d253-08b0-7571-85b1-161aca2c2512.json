@@ -1,0 +1,29 @@
+{
+  "id": "01a1d253-08b0-7571-85b1-161aca2c2512",
+  "external_ref": null,
+  "title": "Clarify the root-rebound acknowledgment filter's redundant digest condition",
+  "outcome": "The root-rebound guard expresses the intended treatment of Received/Settled acknowledgments with an empty persisted body digest without a misleading presence check. Existing admission priority and fail-closed behavior remain explicit.",
+  "acceptance": [
+    "Clarify the root-rebound acknowledgment filter's redundant digest condition is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "engram-host",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d04a-ef4e-7751-a435-36d0e270de9d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

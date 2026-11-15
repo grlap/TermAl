@@ -1,0 +1,32 @@
+{
+  "id": "01a180ac-c623-7c82-a393-f6506822b7bd",
+  "external_ref": null,
+  "title": "Update shutdown documentation to name the concrete HTTP serving adapter",
+  "outcome": "Update shutdown documentation to name the concrete HTTP serving adapter",
+  "acceptance": [
+    "Shutdown comments point to the actual serving owner and preserve the documented SSE-before-connection-drain and persistence-after-serve order."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "deferred",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18073-bc4d-7e21-8d46-a81c8a3f5351",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

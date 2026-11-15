@@ -1,0 +1,36 @@
+{
+  "id": "01a1c27b-204b-7651-b5ce-59626e4d4004",
+  "external_ref": null,
+  "title": "A parent can run at most 4 delegations at once, so a 3-pair family-split review round can't start all 6 reviewers",
+  "outcome": "A parent session can run the six read-only reviewers that a three-family review round needs, or the host tells it plainly how many it can run and when the next slot frees, without unsafe load on the host.",
+  "acceptance": [
+    "A parent can hold six concurrent read-only reviewer delegations, or the per-parent limit is set from a stated resource reason and the refusal says the limit and how to proceed.",
+    "A behaviour test covers the limit boundary and the refusal text; existing limits for other delegation kinds are unchanged unless deliberately changed and stated."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed the six-total read-only Reviewer admission limit and safe count/limit/retry guidance through backend and UI. Other delegation kinds retain four; shared counting and both admission checks are preserved.",
+    "completed_at": "2026-11-10T04:13:25.851894Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

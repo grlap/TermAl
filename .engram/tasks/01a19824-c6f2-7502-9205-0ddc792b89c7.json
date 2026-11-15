@@ -1,0 +1,29 @@
+{
+  "id": "01a19824-c6f2-7502-9205-0ddc792b89c7",
+  "external_ref": null,
+  "title": "Remote-proxy rebase witness on the background delta path (baseline, sparse messages)",
+  "outcome": "Remote-proxy rebase witness on the background delta path (baseline, sparse messages)",
+  "acceptance": [
+    "A test persists a remote proxy's peer window through the delta path with a PersistTranscriptBaseline (serialize_persisted_session_since with Some(baseline), or persist_delta_via_cache), applies a tail rebase after a peer insert before the window, and shows that the relocated peer id is in the sparse messages list, is released from its out-of-window row, and that the durable rows match upstream order with the other omitted rows kept",
+    "The test passes on the code that contains the relocated-peer-identity release, and is verified by a host-recorded focused run"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "found-by-review",
+    "persistence",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

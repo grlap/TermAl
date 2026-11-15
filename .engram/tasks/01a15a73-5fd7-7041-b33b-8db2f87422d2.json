@@ -1,0 +1,49 @@
+{
+  "id": "01a15a73-5fd7-7041-b33b-8db2f87422d2",
+  "external_ref": null,
+  "title": "Extend unadmitted reporting coverage at inline fanout and workspace compatibility boundaries",
+  "outcome": "Add producer-boundary tests for fewer than 16, exactly 16 and 17 checks, and same-binding incompatible-workspace baseline handling; strengthen negative asynchronous assertions with completion barriers.",
+  "acceptance": [
+    "Tests show sub-16, exactly-16 and 17 check fanout without truncation or duplicate accounting and with every check uncredited.",
+    "A same-binding workspace change uses assumed_missing_baseline, retaining truthful observation timestamps, and negative send/retry assertions wait for an authoritative worker completion barrier.",
+    "The maintained full gate passes on the exact input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

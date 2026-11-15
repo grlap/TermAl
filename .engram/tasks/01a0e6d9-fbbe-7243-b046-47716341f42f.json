@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d9-fbbe-7243-b046-47716341f42f",
+  "external_ref": null,
+  "title": "Test launcher: the cargo-check stage passes with warnings while CLAUDE.md requires cargo check clean",
+  "outcome": "Test launcher: the cargo-check stage passes with warnings while CLAUDE.md requires cargo check clean",
+  "acceptance": [
+    "Test launcher: the cargo-check stage passes with warnings while CLAUDE.md requires cargo check clean is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-18",
+    "post-import",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

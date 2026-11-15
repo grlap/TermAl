@@ -1,0 +1,50 @@
+{
+  "id": "01a1697b-48d8-7d52-85fe-5d0e038cd039",
+  "external_ref": null,
+  "title": "File-change attribution scans every eligible session for high-churn TermAl test-state SQLite WAL files under worktree .tmp, and reports them as unresolved changes",
+  "outcome": "File-change observation rejects every watcher event whose path relative to its watched root contains a .tmp component, before eligible-owner snapshot and path normalization or analysis. This excludes nested worktrees and scratch below the main checkout, while a session rooted in a .tmp/wt-* worktree still observes its own relative source files. No claim of causation for the Windows freeze or evaluation stalls is made without measurements.",
+  "acceptance": [
+    "In record_file_change_captures, an event whose path relative to its watched root contains a .tmp component is discarded before the eligible-owner snapshot and before any path normalization or analysis. The regression proves no owner snapshot and no normalization happen, for a termal-test-state-* WAL and for a nested worktree file under the main checkout's .tmp.",
+    "A source file in a session whose watched root is itself a .tmp/wt-* worktree is still observed and attributed. Existing tests that asserted observation of nested .tmp worktrees from the main checkout are CHANGED to assert rejection, each one named with this contract change as its justification.\n(a) a named-root source edit is attributed;\n(b) a gate-root source edit during a carried gate still fences credit;\n(c) .tmp scratch inside a named root is dropped;\n(d) an unrelated nested worktree under main's .tmp stays unobserved.",
+    "Focused checks and the full gate pass on the landed input.",
+    "The read-only review pair has no outstanding in-scope Medium or higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "file-changes",
+    "gate-load",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

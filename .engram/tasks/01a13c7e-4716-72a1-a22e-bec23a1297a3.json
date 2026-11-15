@@ -1,0 +1,30 @@
+{
+  "id": "01a13c7e-4716-72a1-a22e-bec23a1297a3",
+  "external_ref": null,
+  "title": "A non-Engram Claude or ACP turn dispatch after Stop still sends the prompt to the retained runtime channel",
+  "outcome": "After the operator stops a session, no prepared turn dispatch delivers a provider prompt, whatever the runtime (Claude, Codex or ACP) and whether or not the turn is Engram-mediated; a dispatch that loses that race returns a non-delivering outcome and leaves the mailbox delivery unmarked.",
+  "acceptance": [
+    "Production preparation-to-handoff paths for ordinary Claude and ACP are shown reachable across Stop. Deterministic tests retain a live runtime channel, prepare a real ordinary turn, let public Stop win before final handoff, and prove Superseded, no provider Prompt enqueue, no delivered mailbox mark or consumption acknowledgement, no ACP lifecycle-active transition, and no loss of Stop's pause authority.",
+    "Final host ownership arbitration applies to every dispatch vendor independently of Engram mediation, under the same state lock as channel send. Deterministic controls refuse replaced runtime, newer turn on the same runtime, removed session and inactive session, without clearing or settling a newer attempt; valid ordinary Claude and ACP dispatches still enqueue exactly once.",
+    "The send-before-Stop ordering remains valid: a request handed off first follows existing cancellation semantics and is not reclassified as confirmed never accepted for automatic replay. A pending Stop supersedes ordinary Claude/ACP as ordinary Codex does; existing Engram deferred handoffs retain Scheduled versus Delivered, failed-Stop revalidation after deferred callbacks, and successful-Stop/lost-owner refusal.",
+    "The fix has fail-first regression evidence for ordinary Claude and ACP, a passing host-recorded focused check on the final bound source, and a review pair with all in-scope Medium-or-higher findings resolved. Integration records the maintained full gate on the exact reviewed input before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "stop-semantics",
+    "turn-dispatch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

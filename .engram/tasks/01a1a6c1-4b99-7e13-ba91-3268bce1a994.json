@@ -1,0 +1,32 @@
+{
+  "id": "01a1a6c1-4b99-7e13-ba91-3268bce1a994",
+  "external_ref": null,
+  "title": "Discriminate Windows committed-capture status stderr from attribute preflight refusal",
+  "outcome": "The Windows long-path fixture pins the actual preflight refusal cause, and a separate feasible control proves the complete committed-input capture refuses successful status with warning stderr after preflight passes.",
+  "acceptance": [
+    "Discriminate Windows committed-capture status stderr from attribute preflight refusal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "team-pilot",
+    "tests",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

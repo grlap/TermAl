@@ -1,0 +1,28 @@
+{
+  "id": "01a11df8-9a8f-7271-900d-873fae52cd0f",
+  "external_ref": null,
+  "title": "Engram control card says 'Original failure details unavailable' while its causal details are only pending a durable save",
+  "outcome": "Engram control card says 'Original failure details unavailable' while its causal details are only pending a durable save",
+  "acceptance": [
+    "While a cause is publication-pending, or after its acknowledgement failed, the wire carries a value-free 'details pending durable save' marker and the card renders neutral wording for it; 'Original failure details unavailable' is kept for legacy cards that truly have no cause; covered by a UI test and a wire test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-diagnostics",
+    "low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

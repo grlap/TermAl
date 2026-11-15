@@ -1,0 +1,37 @@
+{
+  "id": "01a156ad-5dba-7162-9221-fe358d16d425",
+  "external_ref": null,
+  "title": "S3 pilot lane: narrow authority bullet in TermAl's CLAUDE.md and AGENTS.md for writing under the Engram checkout's target/s3-pilot/",
+  "outcome": "S3 pilot lane: narrow authority bullet in TermAl's CLAUDE.md and AGENTS.md for writing under the Engram checkout's target/s3-pilot/",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md each gain, in the Commit and push section after the test-ref bullet, exactly this bullet and nothing else: \"S3 pilot lane (Greg, 2026-10-20, option (c)): a TermAl session assigned as a pilot host's lane may, as an exception to the work-only-in-the-repository rule, write only under the Engram checkout's `target/s3-pilot/` on that host and run Git there exactly as Engram's S3 pilot bullet allows; nothing else outside this repository. This grants no other commit, push, install or restart.\"",
+    "Before landing, the authority-text procedure is satisfied and recorded on this item: (a) both coordinators' concurrence on the exact wording (Termal::Fable2 and Engram::Fable); (b) Greg has been sent the exact wording and its consequence, and no objection was received; (c) the final-diff audit passed and names the input fingerprint; plus Greg's recorded word on the widening, verbatim with its source.",
+    "The independent review pair has no outstanding in-scope Medium-or-higher finding, and the maintained full gate passes on the exact final input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "cross-project",
+    "s3-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed the exact approved S3 pilot authority bullet in AGENTS.md and CLAUDE.md as cff7b73a208a0a41f897e735e3495bcf7015108b on origin/master. Exactly two +6/-0 insertions; reviewed/gated tree1cfc7f4c1c0370f9aac16beda0c693d494f67d77, parentb35618bb. Qualified independent Codex/Claude review pair, all five full-gate stages passed, final authority audit passed with matching compiled raw checks, and independent acceptance passed3/3. Opus2 verified authority conditions and fast-forward push; producer independently confirmed exact remote master. Two optional Low follow-ups stay open.",
+    "completed_at": "2026-10-20T03:32:10.526925800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

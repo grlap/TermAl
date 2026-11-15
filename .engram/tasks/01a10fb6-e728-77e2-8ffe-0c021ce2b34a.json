@@ -1,0 +1,27 @@
+{
+  "id": "01a10fb6-e728-77e2-8ffe-0c021ce2b34a",
+  "external_ref": null,
+  "title": "Review freeze fingerprint reads stale index stat data right after a merge, so a correct staged tree can look unstable",
+  "outcome": "Review freeze fingerprint reads stale index stat data right after a merge, so a correct staged tree can look unstable",
+  "acceptance": [
+    "Review freeze fingerprint reads stale index stat data right after a merge, so a correct staged tree can look unstable is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "freeze-check",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

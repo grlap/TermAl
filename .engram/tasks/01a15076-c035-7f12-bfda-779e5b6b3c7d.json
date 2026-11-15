@@ -1,0 +1,29 @@
+{
+  "id": "01a15076-c035-7f12-bfda-779e5b6b3c7d",
+  "external_ref": null,
+  "title": "A companion item that shares a gated tree needs a manual focused checkpoint before termal_evaluate_acceptance; make the capture explicit or automatic",
+  "outcome": "A companion item that shares a gated tree needs a manual focused checkpoint before termal_evaluate_acceptance; make the capture explicit or automatic",
+  "acceptance": [
+    "When a claim holds several items and one item's named source root has no Engram sighting at its evidence basis, the host either captures that root on the next checkpoint without the agent re-focusing, or exposes one explicit supported call that makes the capture, documented next to termal_evaluate_acceptance",
+    "The refusal text keeps naming the remedy, and a test shows the companion item can be evaluated after the supported capture without rerunning any test",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "source-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1d0ba-0b9f-7170-b753-2dd4796f6626",
+  "external_ref": null,
+  "title": "Avoid per-message layout snapshot work on every native history scroll frame",
+  "outcome": "Measure and remove unnecessary per-message getLayoutSnapshot work in useConversationHistoryScroll.measure during native scrolling, especially a fully resident conversation, preserving history reach, geometry and FOLLOW/STAY ownership.",
+  "acceptance": [
+    "A focused diagnostic establishes the scroll-frame work and validates a bounded or aggregate-height approach without per-message work when no missing extent or count change requires it.",
+    "Behavioral tests retain missing-history navigation, prefix correction and FOLLOW/STAY authority after the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "performance",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a11f02-b79f-7220-b2d6-a976d1f00221",
+  "external_ref": null,
+  "title": "Idle-wait Stop does not re-sync a delegated child's delegation attempt after setting the latch",
+  "outcome": "From the carry-confirmation review of w-f917452faa71 on 98ad64fd (Claude delegation-1e66bf2e, Low). In request_stop_session, the admission-shortcut branch calls sync_delegation_attempt_for_child_session after its Stop, but the Idle-wait Brake path (stop_idle_waiting_session) returns without it. The Brake sets orchestrator_auto_dispatch_blocked, which delegation_child_hold reads. A delegated child stopped from the new child-footer Stop (nested delegations allow up to depth 3) can therefore change its hold without its parent's delegation record being re-synced until a later refresh. Fix direction: call sync_delegation_attempt_for_child_session after a successful Brake, off the lock, with a test for a delegated child with its own wait.",
+  "acceptance": [
+    "Idle-wait Stop does not re-sync a delegated child's delegation attempt after setting the latch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

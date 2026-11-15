@@ -1,0 +1,28 @@
+{
+  "id": "01a1b4a7-cfa7-7a01-bb12-81cd6fd4db5a",
+  "external_ref": null,
+  "title": "Restore Windows source capacity parity for owned-command result reservations",
+  "outcome": "Owned-command capacity reservation follows the actual closed result shape without unnecessarily reserving the whole Windows protocol buffer, preserving terminal facts and source capacity across platforms.",
+  "acceptance": [
+    "Restore Windows source capacity parity for owned-command result reservations is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae54-d2e6-7803-9e56-8f4c5e2e071c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

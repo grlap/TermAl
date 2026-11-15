@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c545-74d1-9b96-0b40d8418eb6",
+  "external_ref": "tm-kds",
+  "title": "Extract delegation result parsing and synthesis helpers",
+  "outcome": "Move result-packet parsing, plain-output synthesis, findings parsing, and summary compaction out of src/delegations.rs into a focused module.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

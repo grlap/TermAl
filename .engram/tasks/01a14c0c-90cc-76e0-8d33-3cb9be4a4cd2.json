@@ -1,0 +1,33 @@
+{
+  "id": "01a14c0c-90cc-76e0-8d33-3cb9be4a4cd2",
+  "external_ref": null,
+  "title": "Define the federation settings projection in state snapshots and remote DTOs",
+  "outcome": "State/SSE and remote proxy clients have a documented deliberate federation-settings projection compatible with additive wire changes.",
+  "acceptance": [
+    "Either omit internal federation settings from public state projections or document and type the exposed fields.",
+    "Test remote state folding across an additive settings field without weakening strict persisted/internal validation unintentionally."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-3740-7bc3-8f26-14c782d0d16f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

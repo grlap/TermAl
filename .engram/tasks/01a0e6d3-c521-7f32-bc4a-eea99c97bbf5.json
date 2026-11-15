@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c521-7f32-bc4a-eea99c97bbf5",
+  "external_ref": "tm-h7w9",
+  "title": "Untested guard path: config/read stdin write failure must release the pending thread-setup slot",
+  "outcome": "Claude review session-6531, Low at src/codex.rs:1242, and the parent raises it\nbecause of what the surrounding code says about itself.\n\nThe change adds a THIRD `?` inside the window guarded by\nPendingCodexThreadSetupGuard - a config/read stdin write failure propagating out\nof start_shared_codex_engram_config_read via start_codex_json_rpc_request_with_id\n- and NO TEST EXERCISES IT.\n\nWHY THIS ONE MATTERS MORE THAN ITS SEVERITY SUGGESTS: the guard's own doc\ncomment at src/codex.rs:2122-2139 records that the LAST UNTESTED GUARD PATH WAS\nA LIVE DEFECT, and that \"deleting it left the suite green\". The file documents\nits own history of exactly this regression.\n\nCOVERAGE THAT EXISTS AND WHY IT IS NOT ENOUGH: the coordinator required a\nconfig/read failure case that does not lose the parked prompt, and the package\ndelivers engram_bootstrap_config_failure_is_visible_and_allows_retry covering\nRPC error, timeout, missing config and wrong type. The requirement was met in\nsubstance. THE HOLE IS NARROWER: the stdin WRITE failure on the config/read\nitself. engram_bootstrap_thread_start_write_failure_releases_resolved_setup\ncovers only the later thread/start write.\n\nFAILURE SCENARIO: a regression that skipped the release here would wedge the\nsession in {setup in flight} and park every later prompt forever - with a green\nsuite.\n\nFIX DIRECTION: add a BrokenWriter case on the FIRST prompt asserting the slot is\nreleased and the transport error reaches the writer loop.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. The test exists: src/tests/shared_codex.rs:4538 on master.",
+  "completion": null
+}

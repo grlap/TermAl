@@ -1,0 +1,29 @@
+{
+  "id": "01a11c90-2e8d-7121-9893-6cbbf75471d3",
+  "external_ref": null,
+  "title": "Test engram_bootstrap_config_read_has_a_fixed_deadline_despite_sibling_activity intermittently leaves its state directory in the test run root, failing the Rust stage with all tests passing",
+  "outcome": "The test cleans up after itself on every run, whatever the load, so the full gate's Rust stage never fails on a green test run because of leftover temp entries.",
+  "acceptance": [
+    "The writer that recreates the state directory after teardown is identified with evidence from the retained run root or a discriminating test.",
+    "The fixture joins or stops that writer before removing its state, and a test drives the late-write timing and asserts the run root is left empty; no retry, quarantine or timeout increase."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "nondeterminism",
+    "rust-tests",
+    "test-hygiene"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

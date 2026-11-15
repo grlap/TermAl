@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3c9-76b0-a71f-e057a809373f",
+  "external_ref": "tm-3azf",
+  "title": "Split AgentSessionPanelFooter.test.tsx and src/tests/acceptance_evaluation.rs before they grow further",
+  "outcome": "Delegated review follow-up (tm-1305 fan-in, Claude session-7319). ui/src/panels/AgentSessionPanelFooter.test.tsx is 5,028 lines, over the ~5,000-line test-file threshold in .claude/reviewers/architecture.md. src/tests/acceptance_evaluation.rs is 4,963 lines after the tm-dqk0 rustfmt reflow; the next feature addition crosses the threshold. Split each along its existing sections (footer: composer draft/commit, slash palette and /model refresh, delegation actions, virtualization/scroll; acceptance: mode selection, submission, CLI exit classification, request/duplicate refusal) as pure code moves with the standard provenance header. No behaviour change.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

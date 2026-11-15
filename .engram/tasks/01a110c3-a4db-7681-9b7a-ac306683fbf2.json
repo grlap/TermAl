@@ -1,0 +1,30 @@
+{
+  "id": "01a110c3-a4db-7681-9b7a-ac306683fbf2",
+  "external_ref": null,
+  "title": "Docs: qualify \"a change inside a turn is reported at that turn's close\" with the two withheld-observation cases, and the \"without a compatible baseline\" wording, in engram-host-adapter.md",
+  "outcome": "The \"What each comparison measures\" block of docs/features/engram-host-adapter.md states when a turn's own observation is withheld and where the change is then reported, and describes the baseline-less interval precisely.",
+  "acceptance": [
+    "The sentences \"Whoever made a write inside the turn, the turn's close reports it\" and \"A change inside one of this scope's own turns is instead reported at that turn's close as the turn's own change, which Engram judges by revision\" are qualified with the two cases in which the turn's own observation is withheld — a source change under a grant that mediates no local mutation (src/engram_turn_observations.rs, the withheld branch) and a turn no prompt owned overlapping the grant with no reported check (src/engram_turn_checks.rs, the mixed-attribution branch) — stating that the close then stays owed and the next opening reports it as an inter-turn change, cross-referencing \"How the baseline moves\".",
+    "The clause \"without a compatible baseline the interval is the sighting's own moment\" is replaced by wording that matches the code: an absent baseline arises only when the opening plan drops one stamped after the owed close (src/engram_source_sightings.rs, the plan), while an incompatible baseline is refused by the protocol (src/engram_source_observation_protocol.rs), e.g. \"without a usable baseline (none, or one stamped after the interval's end)\".",
+    "The change is docs-only, keeps the file's lines within its existing column discipline for the edited block, contains no tracker ids, and is reviewed by the pair under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "review-low",
+    "source-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3eb-7022-9c85-9c076b4b96eb",
+  "external_ref": "tm-5c1k",
+  "title": "Queued mailbox dispatch can strand a session in Active with no runtime and an unstoppable LIVE TURN",
+  "outcome": "Observed by Greg (2026-08-30): with a mailbox message queued behind an active turn, Stop misbehaves — LIVE TURN keeps spinning forever and nothing happens; Stop appears dead. Distinct from tm-pukb (silent paused queue) and tm-yq2d (work keeps running): here the session is stranded in Active with no live turn and Stop is physically impossible.\n\nDiagnosed mechanism (read-only, code on 796aa90):\n1. NO ROLLBACK AFTER FAILED DELIVERY: turn-end paths dispatch the next queued prompt by committing status=Active + appending the prompt message FIRST (dispatch_next_queued_turn), then calling deliver_turn_dispatch (turn_lifecycle.rs ~:746-752 and the three sibling sites ~:913/:1043/:1232). A delivery error only propagates into a log line; the started turn is never rolled back, so the session stays Active forever with nothing running. (The stop path already has the correct pattern: post_stop_record rollback in session_lifecycle ~:684-709.)\n2. SHARED-CODEX PROMPT FAILURES CAN VANISH: handle_shared_codex_prompt_command_result (codex.rs ~:2092-2111) reports failures via fail_turn_if_runtime_matches guarded by the writer runtime token. If Stop just cleared/replaced the session runtime the token no longer matches and the failure is silently dropped; if a stop is in flight the callback defers, and the stop transition then does deferred_stop_callbacks.clear() (session_lifecycle ~:584, turn_lifecycle ~:498), discarding the deferred failure instead of replaying it.\n3. STOP 409s IN THE STRANDED STATE: with status=Active and runtime=SessionRuntime::None, stop_session returns 409 'session is not currently running' (session_lifecycle ~:375-377), so the user cannot recover from the UI.\n4. INTERRUPT NO-OP RACE: SharedCodexSessionHandle::interrupt_turn returns Ok when state.turn_id is still None (session_runtime.rs ~:220-222) — a Stop racing a just-dispatched turn 'succeeds' without interrupting anything.\n\nSuggested fix order (smallest first):\n(c) stop_session on Active+runtime=None must close the turn (fail_turn 'runtime lost') instead of 409 — restores UI recovery on its own;\n(a) roll back the started turn when deliver_turn_dispatch fails at the four turn_lifecycle sites (reuse the post_stop_record pattern), requeueing the mailbox notification like record_rejected_turn_dispatch does;\n(b) stop discarding deferred_stop_callbacks in stop transitions — replay them after the claim is released;\n(d) turn-start watchdog for shared Codex: prompt sent but no turn-started event within a deadline => fail_turn (also covers events lost to a detached thread mapping).\n\nMethodology per tm-oixt: tests-first reproduction of both interleavings (deliver failure after queued dispatch at natural turn end; stop racing the queued dispatch with the deferred-callback discard) before the fix. Related: tm-pukb, tm-oixt, tm-yq2d.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Stop and mailbox recovery were hardened in 7f6052c (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

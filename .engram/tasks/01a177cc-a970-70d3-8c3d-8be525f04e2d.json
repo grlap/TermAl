@@ -1,0 +1,30 @@
+{
+  "id": "01a177cc-a970-70d3-8c3d-8be525f04e2d",
+  "external_ref": null,
+  "title": "Dependent file, Git and terminal startup refusals omit typed inventory code and Retry-After",
+  "outcome": "Inventory-dependent I/O mutations return the same starting/unavailable classification and Retry-After header as other dependent routes, while independent reads retain ordinary validation.",
+  "acceptance": [
+    "Dependent file, Git and terminal startup refusals omit typed inventory code and Retry-After is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "review-follow-up",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

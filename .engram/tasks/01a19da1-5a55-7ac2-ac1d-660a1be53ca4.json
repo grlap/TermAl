@@ -1,0 +1,41 @@
+{
+  "id": "01a19da1-5a55-7ac2-ac1d-660a1be53ca4",
+  "external_ref": null,
+  "title": "w-3fe8 C2 review (Medium): the human-send persistence fence now gates every session and a concurrent queue change stalls 20 s then marks the session Error",
+  "outcome": "An explicit human send in any session cannot be stalled for the fence deadline or turned into a session Error by an unrelated concurrent queue change; the fence matches only the accepted prompt's own entry or receipt (or a monotonic row stamp at or after the captured one), or stays scoped to the sessions that need it.",
+  "acceptance": [
+    "Restore master's Engram-project-only scope for the additional Human-send fence; capture only session id, minimum per-row mutation_stamp and incarnation under StateInner, keep waits outside it, and retain all sessions' existing intake/promotion own-session SQL rejection guards.",
+    "Use the existing writer/cache for a Human-specific proof that acknowledges only an actually saved own row of the same incarnation at stamp >= captured after COMMIT and integrity, including later supersession and late fence arrival. Older or different-incarnation rows, sibling/global watermark success, rejected/quarantined rows and rolled-back writes cannot acknowledge. Generic OrdinarySessionRow and receipt/runtime/Stop/Cancel ownership semantics stay unchanged.",
+    "Provide event-driven real-SQLite concurrent second-Human-send or mailbox-wake regressions covering intake and promotion acknowledgements without Error and with each prompt delivered once, plus own-row rejection, sibling, old-stamp and incarnation negatives. No sleeps or budget changes. Deliver one immutable source-only patch/blobs/ledger on TREE91db2eb2 to Sol-03d4 cc Fable; no cargo/compiler/tests/parser/fmt/lint/live/agents/review/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "persistence",
+    "review-medium",
+    "w-3fe8-regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only producer contribution delivered: BASE TREE91db2eb2 -> RESULT TREE454926e764f781bec1c14b0f77c413dd57e84a81, 13 paths +474/-33, seven UNRUN regression bodies and exact assertion ledger. Handoff to Sol-03d4 mailbox227/message2917e5e8-fcfe-494c-a9a0-9e645b9fda08, cc Fable2383/message90d8f444-89be-48b7-8962-de87626cf608. Named producer root now handed/hands-off. No execution, review, gate, commit or landing claimed.",
+    "completed_at": "2026-11-02T19:39:46.678438600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

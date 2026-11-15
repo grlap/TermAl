@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3bc-7540-aa28-dca5a9c5c48b",
+  "external_ref": "tm-1ucb",
+  "title": "isolatedWorktree delegations refuse a dirty tree with untracked files, so a frozen review input cannot go to an isolated child without restaging",
+  "outcome": "Reported by Engram::Opus (mailbox #237, 2026-09-25 22:59-23:02 UTC, parent session-7284): spawning Kimi as explorer with writePolicy isolatedWorktree, cwd = a worktree holding a new untracked file, returned 400 'isolatedWorktree delegation cannot materialize untracked files yet; stage, stash, or remove untracked file(s): docs/features/turn-gate-assessment.md'. Staging changes the review freeze, so Engram had to cancel an already-running Claude reviewer (delegation-666c6606), stage the files with unchanged content and re-freeze before Kimi could spawn (delegation-6efd570a). Agents that cannot run readOnly (Kimi, OpenCode; see tm-fy7m) can only use isolatedWorktree, so any review input with a new file is blocked for them. Wanted: materialize untracked files into the isolated snapshot (the /review-changes skill already names this limitation: 'isolated delegation worktree snapshots omit untracked files'), or otherwise let the child read the frozen input without mutating the parent's index.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

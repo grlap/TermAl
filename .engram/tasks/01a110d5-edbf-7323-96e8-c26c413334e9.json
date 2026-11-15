@@ -1,0 +1,35 @@
+{
+  "id": "01a110d5-edbf-7323-96e8-c26c413334e9",
+  "external_ref": null,
+  "title": "Cover short non-ASCII byte boundaries in Claude cut-output credit diagnostics",
+  "outcome": "Retained Low from independent Codex delegation-6a441d08-53ce-4c45-9275-16b27ec86631/session-11149 on w-4d18277c0a1a frozen index8c0cc205/base151c. All positive cut-diagnostic fixtures in src/tests/engram_claude_output_cut.rs use the same 30000-byte ASCII prefix and size173853; a fixed30000 threshold or character-count classifier could pass them. Current output.len() production logic is correct; source/fixture gap, no executed product failure. Add short non-ASCII recorder-to-checkpoint refusal controls at equal UTF8 byte length and byte length+1. Both retain no credit; equal keeps generic refusal, plus1 gets cut+quiet remedy.",
+  "acceptance": [
+    "Real Claude parser-to-recorder-to-execution_observe tests with short non-ASCII supplied stdout distinguish persisted size equal to its UTF-8 byte length (runtime_output_cut false and ordinary passed shell observation) from one byte greater (runtime_output_cut true and indeterminate observation). Neither case shows a passing test summary or grants native verification credit; supplied raw stdout remains unchanged and the private persisted-output path stays out of result diagnostics and observations. The controls fail for character-count or fixed-30000-threshold classification."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

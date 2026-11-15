@@ -1,0 +1,57 @@
+{
+  "id": "01a0fe7d-a1c1-7563-a3df-837ea1a08c4e",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance spawns an evaluator for a named root with no sighting yet, whose submission Engram then refuses",
+  "outcome": "Before termal_evaluate_acceptance spawns an evaluator or returns a same-session brief for any task, whether or not its claim names a local source root, it reads Engram's named-root sighting for the task's run at the task's evidence basis and refuses up front, naming the reason and its remedy, when that root has no sighting there, when the producer's binding changed or disagrees with the local root, or when the sighting cannot be determined. A present sighting only clears this prerequisite; every later acceptance check is unchanged. Lands only after Engram ships named_root_sighting_read.",
+  "acceptance": [
+    "A deterministic witness first fails on the unmodified host: for a task whose claim names a source root, termal_evaluate_acceptance creates an evaluator (independent_session) or returns a brief (same_session) without first reading the named root's sighting at the task's evidence basis.",
+    "After canonical discovery and the locked local root selection, and before the mode split, TermAl reads named_root_sighting_read off the state lock for the task's work and run with run_cut equal to the task's evidence_basis, and carries that identity and cut into the evaluation without moving the cut. Matching bound root with sighting absent: refuse before any spawn or brief, naming root, generation and cut, and asking for an acknowledged eligible capture for this claim and root. Matching bound root with sighting present: proceed. Local and producer roots both none: unchanged. Mismatched roots or binding_changed: refuse as a conflict. Any read error, unsupported operation or malformed result: refuse as unknown with its own wording, never read as absent or present. Tests cover both modes, the exact cut sent, a sighting made by another session on the same run, a sighting made before a host restart, a local rename during the read, and each outcome.",
+    "Mode-specific final local revalidation and the existing evaluation refusals are unchanged and their tests pass; no host-side sighting cache, history scraping or new capture path is added.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "source-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "termal_evaluate_acceptance now reads Engram's named_root_sighting_read for the task's run at its evidence basis before any evaluator or brief exists. It refuses an absent sighting, a moved or mismatched binding, and an unreadable answer (as unknown), and proceeds when neither side binds a root or when the same root has a sighting. Landed as 59b2fd4. Gate test-c537d780 passed and was credited (fed71b2a). Original and delta review pairs clean; Lows filed as w-489149d9d264, w-74eef354496a and w-8188a4927764; the parser decision is w-65a334f95484. Live check on Engram 8460234afad4 passed (test-b9a1d89c, and the new test in test-8fe57ca1, whose one master failure is w-0726c4641d50). Evaluation 7218f543 passed 4/4.",
+    "completed_at": "2026-10-03T08:03:35.936429200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

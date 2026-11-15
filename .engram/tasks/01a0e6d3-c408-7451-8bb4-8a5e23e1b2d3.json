@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a5e23e1b2d3",
+  "external_ref": "tm-7cu.31",
+  "title": "Cache transcript nested-scrollable wheel classification per event",
+  "outcome": "The pane capture arbiter, pane wheel handler, normalized intent handler, and virtualizer each call canNestedScrollableConsumeWheel for the same WheelEvent. Each call walks ancestors and invokes getComputedStyle on non-passive wheel listeners, adding repeated forced-style work to the hottest transcript input path. Cache the normalized direction and nested-consumer verdict in a WeakMap keyed by WheelEvent and share it across all consumers.",
+  "acceptance": [
+    "One DOM/style ancestor walk occurs per WheelEvent; all pane and virtualizer consumers receive the same verdict; nested-scroller ownership and top-level transcript wheel behavior remain unchanged; focused performance-contract tests and UI gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

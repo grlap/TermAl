@@ -1,0 +1,35 @@
+{
+  "id": "01a1c70f-6d80-7892-9d21-b785ba9918f7",
+  "external_ref": null,
+  "title": "Integrate combo42 on dab1d863: c593 b7ebe819 (w-64b8), 8e1f 80dbb2e3 (w-3a0e), a7bb f0184a12 (w-87a2)",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 5be407c353f93eed3c40bf24efccc1f2abc445f2 (tree 17024e9a4214c9dbb061589caf13ab825b874aad) is on origin/master, where master was moved to it by a fast-forward from dab1d863274153236b403f6a894b1cb45b67d344, and its diff against that parent equals the reviewed parts c593 b7ebe819, 8e1f 80dbb2e3 and a7bb f0184a12: every path touched by one part carries that part's exact blob, and src/main.rs and src/turn_dispatch.rs, touched by c593 and a7bb, carry the merge of both.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 17024e9a passed every stage, with equal source ids before and after and an eligible clean input, and a review pair (one Codex, one Claude) on 5be407c3 recorded no finding of Medium or higher.",
+    "The release binary built from tree 17024e9a is installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo42 (c593 read-only Git guards, 8e1f GPU activity motion, a7bb interrupted-root restart recovery) landed on master as 5be407c3 by fast-forward from dab1d863. It was gated by DL560 FULL test-007ae42a (6/6 stages, Rust 7586/0, vitest 5090/0, eligible, equal source ids), with the composite pair clean (Codex 17275 none; Claude 17276 1 Note). Installed on Central (4da39b5e) and DL560 (fe1acadd) with the previous binaries kept aside and no restart. Independent evaluation by Codex session-17286 (delegation-b0584992) passed all 3 criteria.",
+    "completed_at": "2026-11-10T22:08:31.171845200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

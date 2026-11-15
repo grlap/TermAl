@@ -1,0 +1,53 @@
+{
+  "id": "01a15929-9d57-7c92-a405-d0b8d75c4ad6",
+  "external_ref": null,
+  "title": "Host-observed test-run markers (\"observed-…\") stay state=running after the launcher-registered run they shadow has ended",
+  "outcome": "A host-observed run record that corresponds to a launcher-registered run (or to a process that has exited) reaches a terminal state, so /api/test-runs does not show phantom running runs that block or confuse gate/cold scheduling.",
+  "acceptance": [
+    "A deterministic reproduction exercises a host-observed observed-… execution that shadows a launcher run. Once that exact launcher run has ended, the test-run list, detail and published updates no longer present a separate stale running marker; they expose the associated run's factual PASS or FAIL and retain the observed execution's provenance and access to available PID/log information. Association requires positive execution/artifact identity and must not select an unrelated concurrent run merely because its session, worktree, preset or start time is similar.",
+    "An observed execution whose own terminal result is known, or whose execution/monitoring has definitively ended, stops being reported as running. When the workload's result cannot be established, including a removed worktree or unavailable artifacts after execution has ended, it reports explicit Unknown/interrupted with a reason rather than fabricating success or failure. Missing PID, missing logs, an idle owner, or a missing path alone does not prove a live workload ended. Detached/background launch acknowledgement is not a passing test result, and these visibility transitions mint no verification credit or relax existing claim/source/evidence authority.",
+    "Deterministic regressions fail on the original stale-marker behavior and pass on the correction, covering exact shadowed PASS and FAIL, definitive execution end without a launcher terminal result, artifact/worktree disappearance, genuinely live execution, unrelated concurrent executions, and persistence/restart behavior. Tests exercise the production reconciliation and API/publication paths without sleeps, live-store mutation, or weakening existing tests.",
+    "The corrected input has passing focused compile and regressions, a passing maintained five-stage full gate on the exact landing input, and independent read-only Codex plus Claude reviews with no outstanding in-scope Medium-or-higher finding; all earlier such findings are fixed and re-reviewed. Completion uses a fresh independent acceptance evaluation after host-recorded checks settle."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Host-observed observed-… test-run rows now reach a terminal state.\n- An observed row that shadows a launcher run merges into that run's row and shows its factual PASS or FAIL, keeping the observed provenance.\n- Ended executions whose result cannot be established show an explicit Unknown/interrupted.\n- Genuinely live executions stay running.\n\nLanding and install:\n- Landed as f03db46c28de1c9b6d80b1e2eda714fdddd9b53d (tree f3cf3c7f), pushed to origin/master at 03:54:26Z by Opus2.\n- Installed as target/release/termal.exe, sha256 5d886a6404b14103da11fc6ad47a7f448423334668ee5db7b19fdf6ca2d8820c.\n- Live since the 15:02Z restart (instance 84dfc92c on 852c0a98).\n\nEvidence:\n- The acceptance is consumed from the fresh independent evaluation 404976ec (4/4).\n- Post-restart read-only API check: note 9d809f54, which found no phantom running rows; a cut run showed as explicit unknown/interrupted.",
+    "completed_at": "2026-10-23T15:22:21.076782100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

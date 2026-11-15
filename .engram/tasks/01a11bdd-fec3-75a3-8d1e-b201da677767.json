@@ -1,0 +1,49 @@
+{
+  "id": "01a11bdd-fec3-75a3-8d1e-b201da677767",
+  "external_ref": null,
+  "title": "A session's other commands, even read-only ones outside the check's root, withhold credit from its own open checks",
+  "outcome": "A passing check in a named root is credited unless a command that may write in that root overlapped it; a session's read-only commands, and commands whose places to write exclude the check's root, never withhold its credit, and any refusal names the overlapping command as another command of the session.",
+  "acceptance": [
+    "The cause is classified with file:line evidence: which command the refusal's 'own command (key …)' names, why it fenced the session's open check, and whether a6c655a4 changed it.",
+    "A check running in its named root is not marked overlapped by another command of the same session that only reads, or whose places to write exclude the check's root; a command of the session that may write in the check's root still marks it, and the cause names it as another command of the session rather than as the check's own. Tests cover each case.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A session's other commands no longer withhold credit from its own open checks.\n- The behaviour change: a fresh command marks only the session's checks whose root it may write in (engram_mark_own_checks_for_command). A read-only command, or one placed in another worktree, leaves a check unmarked, and a repeated start never marks the check the command itself runs. The cause now names \"another command of this session (key …)\".\n- Committed as cd88b5643ff7ee852cbcd2e3ef3d5c15d29f81a7 on master 48be4f57, in .tmp/wt-own-overlap-9474. The push is Opus2's, through Fable2.\n- The patch is byte-identical to the reviewed freeze d4326200 (pair Codex e121c627 and Claude c93d50a5, clean). The carries were onto dae4bfd9 and then 48be4f57, with no upstream hunks in b201's paths (rule rev 3).\n- Tests: credited GREEN test-91e7d699 549/0; RED test-4b4d3992 with 4 overlap_cause failures; credited full gate test-51c636b6 PASS.\n- Independent evaluation 3f5e808b: all 3 criteria pass. Criterion 1's evidence was consolidated in note fe46ea85 after evaluation 0c6faeee was insufficient on it.",
+    "completed_at": "2026-10-16T17:32:41.919883200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "01a131ef-4eb5-7771-8f0e-66d54f4a4068",
+  "external_ref": null,
+  "title": "TermAl host aborted at 20:32Z on a failed 1 MiB allocation after a 15.7 s persist commit stall, during machine-wide memory exhaustion",
+  "outcome": "The 2026-10-12 20:32Z host crash is diagnosed from the preserved evidence, not dismissed as transient. The diagnosis establishes how much of the machine's memory exhaustion was TermAl's own: the host's working set, private bytes and commit before the crash, and what drives its peak. It also establishes why a SQLite commit took 15.7 s, and whether TermAl must survive a failed allocation or bound its own memory. Every confirmed TermAl defect gets its own scoped fix item.",
+  "acceptance": [
+    "A diagnosis note on the item, from the preserved evidence, states TermAl's own share at the crash (process and job tree), the system commit state, the abort cause, and the status of each of H1, H2 and H3 with its evidence.",
+    "The host's startup peak (about 5.7 GB) and its steady state are each attributed to their driving allocations by a recorded measurement or a code-level accounting. The measurement never restarts, stops or attaches a debugger to the live host, never opens the live store with SQLite, and adds no synthetic load. Any profiling of the live host happens in a quiet window the coordinator grants.",
+    "Every confirmed TermAl defect has its own scoped fix item with provenance.",
+    "The 15.7 s commit is either explained with evidence, or filed with what is missing.",
+    "A recorded decision, the coordinator's or Greg's, on whether TermAl should survive or bound allocation failure (a Rust abort today), or rely on bounding its footprint."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-direction",
+    "host-stability",
+    "incident",
+    "memory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

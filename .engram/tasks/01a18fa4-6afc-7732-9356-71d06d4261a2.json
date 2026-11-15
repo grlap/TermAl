@@ -1,0 +1,33 @@
+{
+  "id": "01a18fa4-6afc-7732-9356-71d06d4261a2",
+  "external_ref": null,
+  "title": "Test exact recovery of a reset-originated Unknown checkpoint after its reset fence is released",
+  "outcome": "A regression drives an Unknown checkpoint created by the bounded project-reset path, retains its reset-owner generation across settings restoration and state reload, then recovers through the existing owner with an identical request and confirmed canonical settlement.",
+  "acceptance": [
+    "A test creates an Unknown checkpoint through a bounded project reset, verifies that its original checkpoint owner generation is present and the reset fence is released, and that restoring same-authority gating sends no checkpoint or bind and leaves its request and exclusion intact.",
+    "The existing recovery owner replays the complete original checkpoint request, including report and idempotency key, after settings restoration or state reload; the canonical original identity is unchanged, settlement becomes Confirmed, and exclusion is released only on the matching accepted receipt."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "checkpoint-recovery",
+    "cross-project",
+    "engram-host",
+    "engram-interop",
+    "lost-reply",
+    "test-gap",
+    "w-c205-slice"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18720-f22a-7fc2-9bfc-2b7bcdbebf64",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

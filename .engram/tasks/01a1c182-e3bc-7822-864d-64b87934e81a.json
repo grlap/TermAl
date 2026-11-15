@@ -1,0 +1,36 @@
+{
+  "id": "01a1c182-e3bc-7822-864d-64b87934e81a",
+  "external_ref": null,
+  "title": "Read-only gate refuses ordinary Git object inspection in evaluators: `git cat-file -t` and `<rev>^{tree}`",
+  "outcome": "A read-only evaluator or reviewer can inspect Git objects and trees the ordinary way, while commands that can run external programs or change state stay refused.",
+  "acceptance": [
+    "The read-only Git rule admits `git cat-file` with `-t`, `-s`, `-e` or `-p` on an object, and keeps refusing `--textconv`, `--filters` and the batch modes.",
+    "Revision arguments using `^{tree}`, `^{commit}` and similar peel syntax are admitted in read-only Git commands such as `git rev-parse <rev>^{tree}`, without admitting shell brace expansion that runs anything.",
+    "Behaviour tests cover each admitted form and each still-refused form."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "read-only-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only Git object inspection and fixed literal peels landed in combo42, with strict dangerous-mode/expansion refusal. Fresh independent evaluation414a25fe013149af8b08f08faf912f37 passed3/3 at cleanjudgedb7ebe819 after actualpostrestarteligibleBuildadmission; qualifiedsourcepair andgreenintegrationFULL retained, original failures unchanged.",
+    "completed_at": "2026-11-11T01:20:51.477713600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

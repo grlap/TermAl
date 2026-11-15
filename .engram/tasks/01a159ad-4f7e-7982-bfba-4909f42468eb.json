@@ -1,0 +1,29 @@
+{
+  "id": "01a159ad-4f7e-7982-bfba-4909f42468eb",
+  "external_ref": null,
+  "title": "State the registration card's ten-second idle backstop or signal a prompt background rescan",
+  "outcome": "The documented post-ACK card visibility matches the background scanner's actual schedule without making registration wait for a global scan.",
+  "acceptance": [
+    "The pre-indexed discovered-run registration race has an accurate documented bound, or a cheap nonblocking signal causes the existing scanner to pick it up promptly.",
+    "Durable POST ACK and exact GET remain independent of the rescan mutex and historical artifact enumeration."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "registration",
+    "review-followup",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a178eb-1dc2-7052-8cf0-422f809f0638",
+  "external_ref": null,
+  "title": "Assess hardening against unsupported external live-file ABA in Unix delegation loading",
+  "outcome": "Assess additional protection against repeated externally orchestrated rename/unlink/replacement/restore of an in-use SQLite source between separate VFS and pathname observations. This concerns unsupported external live-file operations only. Any counterexample reachable through supported TermAl lifecycle or persistence operations remains in scope and blocking for the parent; this follow-up grants no waiver or automatic severity downgrade.",
+  "acceptance": [
+    "Strengthen Unix delegation source binding against repeated pathname ABA between VFS observations is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "review-followup",
+    "sqlite",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

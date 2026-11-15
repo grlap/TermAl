@@ -1,0 +1,38 @@
+{
+  "id": "01a0e6d3-c3df-7ae2-9176-fb2b0d02457c",
+  "external_ref": "tm-xc0b",
+  "title": "Split src/engram_host_adapter.rs below 2,500 lines (Engram w-0aeab324dfeb)",
+  "outcome": "TermAl tracker item for Engram work item w-0aeab324dfeb. Engram holds the acceptance criteria (independent-session evaluation). Reconciled 2026-09-26 at Greg's request, relayed by Engram::Advisor: focus on cleanup and refactoring.\n\nState at 317b286: src/engram_host_adapter.rs is 6,793 physical lines. It was 6,173 at the 09-21 baseline and 6,382 at 9103e30, so it has grown. No split work exists: no extracted modules, no split commits, no split worktree.\n\nAcceptance, summarized from Engram: (1) a host-observed test proves this file and every module extracted from it are each at most 2,499 physical lines, and lists every path with before/after counts; (2) a lightweight size check in normal validation fails at 2,500, passes at 2,499, counts LF and CRLF the same, and refuses an empty inventory; (3) independent-session acceptance cites fresh host-observed evidence; (4) pure responsibility moves into ordinary modules, with no behavior, schema or public-interface change, no minification, no deleted tests and no oversized destination.\n\nPlan: first the size test (child task), then 1 extraction per commit, starting with tm-81vf. Children: tm-81vf, tm-lwwl, tm-ydbw, tm-4soy. Do the test file split (its own bead) after this one.",
+  "acceptance": [
+    "A host-observed automated test proves src/engram_host_adapter.rs and every module extracted from it are each at most 2,499 physical lines at the final source revision. Evidence lists every covered path and before/after count; include blank/comment lines and a nonempty final unterminated line. Newly extracted modules must not escape the inventory.",
+    "A lightweight size check for this file family runs in normal validation and fails at 2,500 lines, passes at 2,499, counts LF/CRLF consistently, and refuses an empty or failed inventory. Reuse one shared checker if already available; do not build a new framework per task.",
+    "Independent-session final acceptance cites the fresh host-observed line-count test evidence. Completion must remain blocked when that bound evidence is missing, failed or stale; demonstrate that gating safely on an isolated fixture rather than relaxing the live task. A plan evaluation or author-written gate note is not a substitute for the observed size result.",
+    "Split only this file's responsibilities into ordinary modules without behavior, schema/SQL or public-interface changes. Preserve existing tests/assertions and pass relevant regressions plus required project gates/review. No minification, duplicate implementation, deleted tests or transferring the oversized body to another oversized file."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "beads-migrated",
+    "file-size",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

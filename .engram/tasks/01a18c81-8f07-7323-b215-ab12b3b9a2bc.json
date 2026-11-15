@@ -1,0 +1,33 @@
+{
+  "id": "01a18c81-8f07-7323-b215-ab12b3b9a2bc",
+  "external_ref": null,
+  "title": "Avoid spurious final containment ACK refusal when an owned Stop commits queue changes",
+  "outcome": "A legitimate concurrently executing containment Stop does not spuriously invalidate the final durability image while original obligations remain excluded.",
+  "acceptance": [
+    "A deterministic interleaving covers a Stop queue commit between final containment image capture and durability comparison.",
+    "Final acknowledgement either confirms the intended durable state or returns a precise supported refusal without weakening original obligation exclusion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "containment",
+    "durability",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "outage",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a188dd-2eb5-7c30-b8b5-3af0aab58d4c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1bdc9-8b93-7f01-bcaa-786e7d9bfdb0",
+  "disposal_reason": "Fable2722 obsolete-feature sweep: completed parent w3af0 blocks claim; tracker-advertised independence is used only for removal-provenance disposition, not renewed gated-control implementation.",
+  "completion": null
+}

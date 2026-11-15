@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c50c-7ae1-831b-d0c95f077aba",
+  "external_ref": "tm-gcs8",
+  "title": "Fence-gate tests hide the racing update's early return, so a failure reads as a bare 30 s Timeout",
+  "outcome": "Seen 2026-09-27, tm-5gi4 phase 2 round 15. Full gate test-a6dc26ad (worktree .tmp/wt-source-revision, 12:48:05-12:54:08 local) FAILED in rust-tests: 2954 passed, 1 failed.\n\nThe failure: tests::engram_host_adapter::engram_mcp_rechecks_active_grant_ownership_under_the_commit_lock panicked at src/session_crud.rs:1197, 'Engram project reset should enter the test fence gate: Timeout'. The wait is 30 s (TEST_ENGRAM_PROJECT_RESET_GATE_TIMEOUT). The racing settings update behind it runs real PowerShell fixture processes.\n\nEvidence it was load, not the change:\n- Two Engram full gates ran on the same machine at the same time: docs-agent-contract test-0b0211c4 (12:47:12-12:54:04, over the whole run) and plan-bindings test-43b85676 (12:50:36-12:54:46, over the Rust stage).\n- The Rust stage took 271.6 s, against 191-238 s in the previous four TermAl gates.\n- Run alone on a quiet machine right after (focused test-b66dff45, 12:55:15), the same test passed in 1.26 s: a slowdown of more than 24x.\n- The change under test touches neither this test nor the settings-update path.\n\nClassification: environment/resource. The runner assumes it has the machine; a second project's gate violates that. Per CLAUDE.md it is neither a flaky test nor grounds for a longer timeout.\n\nFix direction, to decide:\n(a) Make gates machine-exclusive across the TermAl and Engram launchers (a shared lock both honour), or at least have the launcher detect another project's gate and refuse or queue.\n(b) Record concurrent-load evidence in the failure summary, so the cause can be read after the fact (see tm-d1ba, the same class for the deadlock guard).\nUntil then, check that no other gate is running before launching one.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

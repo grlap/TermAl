@@ -1,0 +1,39 @@
+{
+  "id": "01a194c1-7fd0-7cf3-b918-8ec0f56d9976",
+  "external_ref": null,
+  "title": "A UNIQUE(messages.session_id, message_id) failure persisting one session's transcript makes durable writes fail host-wide, so admissions go durability-unknown",
+  "outcome": "A transcript write conflict on one session never blocks other sessions' durable commits. The conflicting session's transcript position is reconciled (idempotent upsert, or a refusal confined to that session with a diagnostic), and admissions elsewhere keep known durability.",
+  "acceptance": [
+    "The incoming duplicate-ID case and the sparse retained-cold-prefix relocation case are reproduced deterministically in disposable SQLite, and the RED is distinguished from a compile or fixture failure.",
+    "The conflicting session is corrected or rejected while keeping its last-good transcript identity and order, its metadata and its overview. It never receives a false durable acknowledgement, and it stays re-collected rather than silently forgotten when the global watermark advances. In the same delta, an unrelated valid session commits and acknowledges.",
+    "A regression test shows that an unrelated session's gated admission, whose durability fence shares the delta with the conflicting session, reaches its durable outcome rather than durability-unknown.",
+    "Real store, I/O and checkpoint ledger or mirror integrity failures remain fatal. There is no INSERT OR REPLACE, no arbitrary id renumbering and no discarding of cold history.",
+    "The existing reorder, truncate, cold-prefix rollback and fence guards pass. The review pair has no outstanding Medium or higher finding, and the full gate passes on the exact input, or a broken-procedure record exists where that mechanism is broken. None of this uses live-store access or new logging."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "persistence",
+    "stop-the-line"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; db3c46ee; conflict isolation, repaired pair/Mac atomic FULL (outer-exit defect disclosed), installed24788eda; closure only, no claim original duplicate-ID producer fixed.",
+    "completed_at": "2026-11-08T19:22:12.947048200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

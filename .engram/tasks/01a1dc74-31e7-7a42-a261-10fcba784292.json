@@ -1,0 +1,33 @@
+{
+  "id": "01a1dc74-31e7-7a42-a261-10fcba784292",
+  "external_ref": null,
+  "title": "Cover Telegram missing-session code through real local and cold remote-proxy routes",
+  "outcome": "Route-level behavior protects the local missing-session code and strips upstream codes on cold proxy failures.",
+  "acceptance": [
+    "A route-level test requests a definitively missing local session id and observes HTTP404 with code local_session_missing from the real GET /api/sessions/{id} handler.",
+    "A route-level cold proxy test uses a fake remote returning HTTP404 with error and code local_session_missing, then observes that the local response omits that code and Telegram retains retryable state."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "post-restart",
+    "review-low",
+    "startup",
+    "telegram",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

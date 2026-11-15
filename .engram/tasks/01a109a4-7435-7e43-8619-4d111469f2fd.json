@@ -1,0 +1,28 @@
+{
+  "id": "01a109a4-7435-7e43-8619-4d111469f2fd",
+  "external_ref": null,
+  "title": "Avoid the unused host_workdir parameter warning in Unix Work launch builds",
+  "outcome": "The non-Windows Work launch branch explicitly accounts for its Windows-only host_workdir argument while retaining the existing Unix project-root cwd and command semantics.",
+  "acceptance": [
+    "Avoid the unused host_workdir parameter warning in Unix Work launch builds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

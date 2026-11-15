@@ -1,0 +1,25 @@
+{
+  "id": "01a1d941-c78c-7d21-be04-0717f76b2c16",
+  "external_ref": null,
+  "title": "README \"Works now\" EO bullet: qualify \"each turn's end reaches Engram\" to traced turns on a claimed item",
+  "outcome": "README.md's \"Where TermAl stands / Works now\" Execution Observability bullet says each traced turn on a claimed item reaches Engram as a host observation, matching the Work tracking section and docs/features/execution-observability.md (lines 56 and 319-323: only traced turns report; a turn with no claim reports nothing). Optionally also reword the registered-verification sentence so registered verification, not specifically a launcher run, is named the only source of test credit (declared native verification is another route). Low found by the Claude reviewer (delegation-4ba693c7) of the README EO update, round 2; left unfixed there under the Low rule.",
+  "acceptance": [
+    "README.md's 'Works now' Execution Observability bullet no longer states that every turn's end reaches Engram; it qualifies the report to traced turns on a claimed item, consistent with the Work tracking section and docs/features/execution-observability.md.",
+    "check-doc-links reports 0 unresolved links after the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

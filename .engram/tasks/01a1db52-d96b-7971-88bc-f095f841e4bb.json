@@ -1,0 +1,46 @@
+{
+  "id": "01a1db52-d96b-7971-88bc-f095f841e4bb",
+  "external_ref": null,
+  "title": "Prepare test-run evidence persistence off StateInner using immutable cuts and owner-generation fences",
+  "outcome": "Test-run lifecycle, receipt, association and evidence-publication selection uses maintained derived indexes to avoid full retained-history scans under StateInner, preserving existing evidence and publication semantics; measurements determine whether off-lock immutable cuts are still needed.",
+  "acceptance": [
+    "Lifecycle revalidation, receipt settlement, check association and evidence-batch publication use maintained candidate indexes instead of full live or compacted history scans under StateInner. Original matching predicates, multiplicity and first-match ordering remain authoritative. Indexes are rebuilt on load and maintained incrementally at every relevant mutation, replacement, compaction transfer and rollback, with a test-only full-scan consistency oracle.",
+    "Existing evidence semantics, authority and binding checks, exact durability fences, compacted proof and durability flags, receipt input order, delta revisions and first-match projection equivalence are preserved. Deterministic regression coverage exercises these semantics plus index maintenance, restart/load reconstruction and persistence failure/rollback.",
+    "Deterministic witnesses account for production-path candidate visits, nested association work and index maintenance, showing no growth from history outside the queried index buckets; same-bucket distractors and large matching rows are measured separately. Record comparable baseline-versus-repaired StateInner hold measurements on controlled retained-history fixtures, with counts, payload sizes and exclusion of test-only oracle overhead disclosed. Live/canary measurements may supplement this evidence but are not required to schedule the controlled measurement. Report remaining clone, fallback-persistence or hot-bucket cost and whether a follow-up is needed; do not infer a total latency bound from row counts alone.",
+    "The required independent review pair has no outstanding in-scope Medium-or-higher findings, and the full gate passes on the exact input that is landed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "host-persistence",
+    "performance",
+    "state-lock",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

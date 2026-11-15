@@ -1,0 +1,27 @@
+{
+  "id": "01a15195-47f5-77b2-b451-d258965553c9",
+  "external_ref": null,
+  "title": "One helper each for the turn-check producer digest and for persist-fence read-back",
+  "outcome": "The producer-observation digest 'termal-turn-check:{session}:{grant}:{sequence}:{key}' is built by one helper (engram_batch_producer_observation_id), which engram_turn_report and test_run_evidence call, so batch binds can never silently stop matching their gate's record. confirm_engram_owed_close_durable calls the general confirm_persist_fence_target rather than keeping its own copy of the fence and read-back logic.",
+  "acceptance": [
+    "One helper each for the turn-check producer digest and for persist-fence read-back is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "carried-checks",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

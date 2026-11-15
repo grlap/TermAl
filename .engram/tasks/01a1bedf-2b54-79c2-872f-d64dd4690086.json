@@ -1,0 +1,31 @@
+{
+  "id": "01a1bedf-2b54-79c2-872f-d64dd4690086",
+  "external_ref": null,
+  "title": "Integrate combo21 on db52491e: Stage A direct prompt foundation, domain wake summaries, Test Runs fixes, memory practice",
+  "outcome": "The composed candidate is on master as one commit, gated on DL560 and Windows B, pushed, installed on Central and DL560, with ui/dist rebuilt.",
+  "acceptance": [
+    "Integrate combo21 on db52491e: Stage A direct prompt foundation, domain wake summaries, Test Runs fixes, memory practice is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed as combo24, not the broader composition in this item's title: Test Runs refresh and Project dropdown (615ac728), Session picker removal (4ffd3594), domain wake summaries (387d7158), as one commit 1098a838, gated on DL560 with Windows focused evidence on Central, pushed, installed on Central and DL560, ui/dist rebuilt. Stage A and memory practice left this item and go on their own trains.",
+    "completed_at": "2026-11-09T07:47:45.980107800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

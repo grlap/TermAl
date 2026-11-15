@@ -1,0 +1,28 @@
+{
+  "id": "01a11bf8-2fcf-7dc0-9015-7eab00fbb843",
+  "external_ref": null,
+  "title": "Docs: agent-mailboxes.md says send and acknowledge keep their existing waits, but their participant-row check now has the 5 s connection cap",
+  "outcome": "docs/features/agent-mailboxes.md states that every mailbox interaction's participant-row check and repair (ensure_mailbox_session_active → reactivate_session_rows_timed) is subject to the 5 s connection-admission cap and can fail typed Retryable, and that only the store work of send and acknowledge keeps its earlier waits.",
+  "acceptance": [
+    "docs/features/agent-mailboxes.md no longer claims that send and acknowledge keep their existing waits; it names the participant-row check's 5 s cap and the typed retry error for send, acknowledge, list and message reads, consistent with ensure_mailbox_session_active's implementation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "mailboxes",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

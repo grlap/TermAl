@@ -1,0 +1,28 @@
+{
+  "id": "01a15978-bb26-78b3-b81e-8bb853ad698a",
+  "external_ref": null,
+  "title": "Check that the launcher helper manifest covers reachable relative module imports",
+  "outcome": "Catch a newly imported launcher module missing from helperSupportFiles before copied-launcher fixtures fail at runtime.",
+  "acceptance": [
+    "Check that the launcher helper manifest covers reachable relative module imports is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "review-followup",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

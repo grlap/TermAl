@@ -1,0 +1,57 @@
+{
+  "id": "01a1009a-1027-7242-b145-0726c4641d50",
+  "external_ref": null,
+  "title": "Live suite on master f7a26a5: a lost session_bind reply no longer parks the root prompt as Waiting/Unknown (live_root_lost_committed_replies_replay_exact_requests_once fails)",
+  "outcome": "On clean master f7a26a5, `node scripts/test-launcher.mjs live` with the pinned Engram 8460234afad4 (sha256 ef3b8f9620adb6bc8e2f4198e69e01251cab3e59b16fd9fb7a25f28e5cf20078) fails tests::engram_host_adapter::root_recovery_live::live_root_lost_committed_replies_replay_exact_requests_once. For operation session_bind, the assertion at src/tests/engram_root_recovery_live.rs:702, `record.session.preview.contains(\"Waiting/Unknown\")`, fails after a committed bind reply is dropped. The same live suite passed 13/13 on 5c6f6dd plus the w-837 change (run test-b9a1d89c-cb95-451b-911f-ebc00f66c035). So the change came in between 5c6f6dd and f7a26a5. The likely suspect is 559498f \"Fix retained bind retry and isolate test home fixtures\" (train 19, b24d91c); the other commits there are wording, Beads removal, an edit-fence message, a doctor-fixture teardown and a JS fixture. The full gate does not run the live stage, so no gate caught it. To decide: is the new bind-retry behaviour intended (the live test's expectation is stale and needs updating with the owner's ruling), or is it a regression (an uncertain bind must park the exact prompt as Waiting/Unknown until resumed)?",
+  "acceptance": [
+    "The preserved same-pin historical comparison and actual diagnostic snapshot establish why the lost committed session_bind reply takes the same-live-host pre-evaluate/provider retained-bind retry path rather than Waiting/Unknown; the checked architectural ruling distinguishes unknown bind execution from uncertain provider delivery, with no production semantic change justified by the preview failure alone.",
+    "With pinned Engram 8460234afad4 SHA256 ef3b8f9620adb6bc8e2f4198e69e01251cab3e59b16fd9fb7a25f28e5cf20078, the corrected real lost-bind-reply witness asserts the exact retained prompt, Prepared bind/request/key and live owner proof, durable retry/head state, no evaluate/begin or provider delivery before acknowledgement/backoff/due eligibility, then drives the maintained automatic retry path without Resume or a new prompt, reconciles the identical committed bind request/key, and hands that prompt to the provider exactly once.",
+    "Lost evaluate/begin replies retain their existing explicit conservative recovery and exact-request replay assertions; exact-source restart/lost-live-proof, stale-owner and persistence-unknown controls establish no bind-only automatic release for those cases.",
+    "The pinned live suite and full maintained five-stage gate pass on the exact reviewed input, with run directories and fingerprints recorded; the independent Codex/Claude complete-input review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "live-suite",
+    "regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Corrected the test-only live session_bind expectation to prove durable acknowledged automatic exact replay without Resume; evaluate/begin remain conservative. Pinned live 13/13 and exact-input full gate 5/5 passed, independent different-vendor review pair has no Medium+, and fresh independent evaluation 63862fd682af421fbdf2bfe3af2d2ac3 passes all four criteria. Optional readability Low filed separately. Commit and integration handoff follow; no master landing, install or running-host validation claimed.",
+    "completed_at": "2026-10-03T12:35:01.485385300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

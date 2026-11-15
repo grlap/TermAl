@@ -1,0 +1,27 @@
+{
+  "id": "01a188bf-62ac-7270-8885-f5fa6270e73b",
+  "external_ref": null,
+  "title": "Pin assert_lost_bind_replayed_identically to the first bind and its replay",
+  "outcome": "assert_lost_bind_replayed_identically in src/tests/engram_post_receipt.rs asserts that the session's first session_bind (binds[0]) is the request replayed (binds[1]) on the same connection, as the backoff-retry test already does. It no longer accepts any adjacent identical pair, so a missing eager-bind replay cannot pass it on another pair.",
+  "acceptance": [
+    "Pin assert_lost_bind_replayed_identically to the first bind and its replay is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

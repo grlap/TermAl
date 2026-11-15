@@ -1,0 +1,28 @@
+{
+  "id": "01a1b342-2495-7431-8a99-f4537dda421c",
+  "external_ref": null,
+  "title": "Commit rule: tie review adoption to a review pair with no unfixed Medium-or-higher finding in that same contribution",
+  "outcome": "The review-adoption passage can't be read as letting a recommitted contribution adopt a review whose Medium-or-higher finding was fixed only in some later, different candidate.",
+  "acceptance": [
+    "CLAUDE.md, AGENTS.md and .claude/commands/review-changes.md say that adoption needs a candidate whose own review pair left no in-scope Medium-or-higher finding unfixed in that same contribution, through the authority-text process (a), (b) and (c)",
+    "The wording only narrows the rule and adds no mechanism, condition, proof format or gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "authority-text",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

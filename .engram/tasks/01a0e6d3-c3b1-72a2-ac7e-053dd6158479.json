@@ -1,0 +1,69 @@
+{
+  "id": "01a0e6d3-c3b1-72a2-ac7e-053dd6158479",
+  "external_ref": "tm-0ufr",
+  "title": "Codex reviewer child ran without its delegation-mcp bridge and TermAl surfaces no MCP startup diagnostics",
+  "outcome": "REPORTED by Engram::Fable (mailbox #713, 2026-09-11 20:37Z): Codex reviewer child session-6697 (delegation-0b0b8639, parent session-5132, spawned 20:28Z, finished 20:34Z) ended with the reviewer's own statement \"Required authoritative submission could not be completed: `termal_submit_review_result` is unavailable in this session. No submission was made.\" The parallel Claude reviewer (session-6698) submitted normally; earlier Codex reviewers in the same parent submitted normally.\n\nCOORDINATOR FINDINGS (read-only, 20:38-20:40Z):\n- TermAl classified the delegation failed with no fabricated result: the fail-closed path in the review protocol worked as documented.\n- The child transcript (62 messages via GET /api/sessions/session-6697/history) contains NO MCP tool call of any kind and no MCP startup error; the reviewer did all inspection through PowerShell reads (allowed for Codex) and never touched termal tools.\n- Process snapshot at 20:38:19Z: no delegation-mcp bridge with --parent-session-id session-6697, while the bridge of the earlier Codex reviewer session-6693 (started 20:08:22Z) is still alive. So the 6697 bridge either never started or exited early; no snapshot exists from 20:28-20:34Z.\n- No TermAl route exposes per-session Codex MCP server status (codex_mcp.rs asks mcpServerStatus/list internally only); no startup timeout is set for the termal server in the config TermAl injects (Codex default applies); Codex keeps no readable log on this host.\n- Host memory at 20:38Z: commit 79.0 of 88.4 GB, 1025 processes, still under pressure (tm-z0mg). Engram saw an Engram MCP initialize timeout under the same pressure at 17:06Z.\n\nHYPOTHESIS, not proof: the bridge failed to initialize within Codex's MCP startup timeout under host pressure, so the thread ran without termal tools. Alternatives not excluded: bridge crash on start, or eligibility fail-closed (tm-i5mx family).\n\nASKS: (1) when a reviewer-mode child starts, and again when it finishes without a submission, query mcpServerStatus/list for the termal server and record the answer in the delegation result and the child transcript (typed, e.g. \"termal MCP server: failed to start: <reason>\"); (2) set an explicit startup_timeout_sec for the termal server in the injected Codex config, sized for a loaded host, and log the actual startup duration; (3) fail the delegation immediately with that reason instead of letting a reviewer work for six minutes without the submit tool. Related: tm-jvuw (delegation diagnostic surface), tm-z0mg (bridge accumulation and memory pressure), tm-i5mx.",
+  "acceptance": [
+    "Before starting the model work of a Codex reviewer delegation, TermAl queries mcpServerStatus/list on the owning Codex profile for the reviewer's exact thread using the installed protocol's supported scope, and verifies the injected termal-delegation server exposes termal_submit_review_result. An observed startup failure, absent server, absent required tool or unavailable/invalid bounded status response fails that delegation with a typed diagnostic and a persisted child-transcript explanation, without sending its review turn/start. A still-starting server is not mislabeled failed before the configured bounded startup opportunity ends. Readiness of another thread/profile cannot authorize this reviewer.",
+    "A Codex reviewer finishing without an authoritative submission triggers another bounded termal-server status query before terminal cleanup/archive discards its MCP state. The typed observation (including an explicitly unavailable observation and any captured startup reason) is retained in the failed delegation result and child transcript. It remains a failed/unavailable review, not a fabricated clean result. A valid authoritative submitted result retains existing precedence and is not overwritten by later MCP/transport failure.",
+    "The injected termal-delegation Codex config explicitly sets startup_timeout_sec to 60 seconds, without changing user MCP servers, tool timeouts or unrelated host deadlines. TermAl records observed startup/readiness elapsed milliseconds and its measurement boundaries, success/failure/unknown outcome and configured budget. A failed notification's bounded sanitized reason is preserved when supplied; the absence of a reason is stated, not invented. Elapsed time from thread setup to observed readiness is labeled as such, not claimed to be isolated bridge-process initialization time.",
+    "Permanent transport/lifecycle controls cover ready, failed, missing-server, missing-tool, invalid/query-error and bounded timeout cases; finishing-without-submission; a healthy reviewer/submission; and Stop/reset/replacement/stale callbacks. The integration neither blocks the JSON-RPC reader nor holds the state lock while awaiting status, does not damage a sibling thread or shared app-server, and does not start a stopped/replaced reviewer. Transcript/result diagnostics are bounded and omit raw config, environment secrets, routing credentials and unrelated tool inventories. Existing permission/write-policy and immutable-submission safeguards remain unchanged.",
+    "Preserve a fail-first run of discriminating reviewer startup/finish witnesses against unchanged production at the named root, cite its failed host verification and holder diagnosis distinguishing the missing startup/status safeguards from timeout/load hypotheses. Keep the regression assertions for the fixed behavior; do not bind this criterion to the intentionally failing test.",
+    "The maintained five-stage full gate passes on the exact frozen final input. The same input receives independent read-only Codex and Claude review with no outstanding in-scope Medium-or-higher finding; any unfixed Low is filed separately."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered exact-thread Codex reviewer MCP readiness/finish diagnostics, explicit60s startup budget and65 permanent lifecycle controls. Independent evaluation1405c5476/6PASS; own fullgate7793ee44/pair7noMedium+; train53 fullgate6c62b096/integrationpair/finalaudit PASS per FULL99d6706f. Landed151c0b0d verified origin/master; committed tree7d7016f5/parents verified. Installed binary SHA256dbf6df56…2b79 independently matches; file hash, not Engram build fingerprint. All9Low followups/limitations preserved. No restart/provider-readiness claim.",
+    "completed_at": "2026-10-06T09:50:16.591435300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

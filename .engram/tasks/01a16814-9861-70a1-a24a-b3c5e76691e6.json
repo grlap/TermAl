@@ -1,0 +1,30 @@
+{
+  "id": "01a16814-9861-70a1-a24a-b3c5e76691e6",
+  "external_ref": null,
+  "title": "Make stage admission aware of declined launcher observations and terminal runs",
+  "outcome": "Determine and implement an authoritative bounded refusal for a launcher whose recorder dropped/refused its launch or whose run is terminal, or document the narrower stage-observation contract where no such durable marker exists. Preserve the separate verification recorder and do not infer credit from registration or stage ACKs.",
+  "acceptance": [
+    "Make stage admission aware of declined launcher observations and terminal runs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "host-capability",
+    "launcher",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16742-3d70-74e2-8a89-273596743af6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

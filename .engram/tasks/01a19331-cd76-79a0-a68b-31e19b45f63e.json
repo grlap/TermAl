@@ -1,0 +1,30 @@
+{
+  "id": "01a19331-cd76-79a0-a68b-31e19b45f63e",
+  "external_ref": null,
+  "title": "termal_resume_after_test_runs refuses a run registered on a remote host with 404 \"not indexed\" instead of a typed cross-host answer",
+  "outcome": "A native wait naming a run that is registered on another host either settles through that host's existing completion route, or is refused with a typed answer that says the run is remote and names the supported completion route (the runner's mailbox), instead of a bare 404 'not indexed' that reads like a lost run.",
+  "acceptance": [
+    "termal_resume_after_test_runs given a run id registered on a remote host (and not on this host) returns a typed remote-run answer naming the host and the supported completion route, distinct from the unknown-id 404 and from the same-host index-lag case of w-b7c81c59f96e; or, if a cross-host wait is implemented, it settles once from the remote terminal without polling or duplicate runs.",
+    "Deterministic tests cover a remote-registered id, an unknown id and a same-host indexed id; no test verification credit is invented for a remote run.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "native-wait",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

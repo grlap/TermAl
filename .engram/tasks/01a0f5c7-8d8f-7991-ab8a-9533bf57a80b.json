@@ -1,0 +1,28 @@
+{
+  "id": "01a0f5c7-8d8f-7991-ab8a-9533bf57a80b",
+  "external_ref": null,
+  "title": "termal_name_source_root ignores an unknown argument (root instead of path) and takes the call as a clear of the named root",
+  "outcome": "Reported by Engram::Opus (session-7284), TermAl mailbox 37bcca97 #175, 2026-10-01 about 04:41Z.\n\nThe call was termal_name_source_root {work: \"w-d566cfb96475\", root: \"C:\\\\github\\\\Personal\\\\Engram\\\\.worktrees\\\\named-root-assessment\"}. The parameter is `path`, so `root` was a misspelling. It was not refused. The answer was generation 0 and \"has no named source root: its turns are measured in the session's workdir\": the tool treated the call as one that omits path, which by its description clears the name.\n\nHad a root already been named, it would have been removed without a word and the turn's revision sealed. That silently changes where the item is measured and which tests count.\n\nExpected:\n- An unknown argument is refused with the accepted fields (work, path).\n- A clear happens only when the call leaves path out and names no other field, or better, only through an explicit clear flag.",
+  "acceptance": [
+    "A call that leaves path out and carries no unknown argument still clears the name as documented; a test covers it.",
+    "termal_name_source_root refuses a call with an unknown argument, naming the accepted fields, and changes nothing; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delegation-mcp",
+    "source-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0ee3d-d791-73d3-a3ac-d3f42e26a806",
+  "disposal_reason": "Duplicate. The same defect was filed first as w-d3f42e26a806 on 2026-09-29, with stronger criteria: refusal naming the argument, additionalProperties false, a review of the other tools, and a gate. This item's recurrence evidence (note 319b3b49: three silent clears on 2026-10-02 costing two gates' credit) carries over by reference. The coordinator failed to search before filing.",
+  "completion": null
+}

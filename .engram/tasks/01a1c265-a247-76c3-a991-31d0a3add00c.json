@@ -1,0 +1,37 @@
+{
+  "id": "01a1c265-a247-76c3-a991-31d0a3add00c",
+  "external_ref": null,
+  "title": "Record the exact doc-link check as Lint so Markdown-only items can be evaluated",
+  "outcome": "A registered run of the exact doc-link check is recorded as a Lint verification, so an item whose only check is that run can be acknowledged and evaluated instead of being refused for unclassified stages.",
+  "acceptance": [
+    "A registered run of the exact `node scripts/check-doc-links.mjs` command (and Engram's equivalent exact command, if it differs) produces a verification_record whose stage is Lint, with its passed or failed outcome preserved.",
+    "Other unrecognised commands stay unclassified and refused, and admission is not widened beyond the exact commands.",
+    "Whether TermAl's evaluation admission accepts a Lint-only record as an acknowledged basis is established and recorded; if it doesn't, the item says what does."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "verification-record"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed exact doc-link Lint recognition in combo39 62a4785a. Pass/fail preserved, unsupported variants still refused, and acknowledged passing Lint-only evaluation admission established without Test credit. Focused123/0/0, validated whole5 pair with no Medium+, exact-tree FULL green; two Low follow-ups remain filed.",
+    "completed_at": "2026-11-10T08:41:34.837261300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

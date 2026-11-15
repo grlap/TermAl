@@ -1,0 +1,27 @@
+{
+  "id": "01a12844-92cf-7b31-9e78-afe779d0484c",
+  "external_ref": null,
+  "title": "An evaluator's result packet and attemptHistory don't carry the server's submission-refusal text verbatim",
+  "outcome": "When the host refuses an acceptance evaluator's submission, the exact refusal text (including any bracketed code) reaches the requesting parent in the delegation result packet and the attemptHistory, so the parent can quote it instead of relying on the evaluator's paraphrase.",
+  "acceptance": [
+    "An evaluator's result packet and attemptHistory don't carry the server's submission-refusal text verbatim is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1d2cc-5a1c-7823-8424-ed0fad2e1be2",
+  "external_ref": null,
+  "title": "Repair execution observability link to the canonical source_id heading",
+  "outcome": "Repair execution observability link to the canonical source_id heading",
+  "acceptance": [
+    "The execution-observability.md link resolves to the existing source-identity.md canonical-native-source_id-and-credit heading without changing the source identity contract; no Markdown phrase-pinning test is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "links"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

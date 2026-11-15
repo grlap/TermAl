@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4fa-7d21-981e-a8db563d2d32",
+  "external_ref": "tm-eoc2",
+  "title": "Drop Engram grant delivery-page and delivery_tokens handling once Engram w-106de4b03b57 is installed",
+  "outcome": "Turn-gate simplification (Engram::Opus relay, mailbox #200 to #203). Grants will carry no delivery page, and turn_begin will not need delivery_tokens. Compatibility is confirmed both ways: today's TermAl accepts a page-less grant (EngramIssuedTurnGrant.delivery is an Option with serde default, so turn_begin sends delivery_tokens: []), and w-106de4b03b57's acceptance requires Engram to accept an empty or absent delivery_tokens. So Engram installs first and this cleanup is not a blocker. Scope: remove the page parsing, EngramDeliveredRange, the delivery_tokens in TurnBegin and its begin-intent key, and the related fixtures (src/tests/engram_control_transport.rs, engram_host_adapter.rs, fixtures/engram-control-fixture.ps1). Wait for Engram::Opus's exact wire diff before starting. See also tm-e5lj (nudge costs a delivery page).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

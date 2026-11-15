@@ -1,0 +1,30 @@
+{
+  "id": "01a17a71-50d0-74a2-87f5-c3ac4539b5f7",
+  "external_ref": null,
+  "title": "Preserve an explicit startup outcome when Ready-path Engram recovery preparation fails",
+  "outcome": "A failure in prepare_engram_sessions_for_boot_recovery on the already-Ready post-listen branch is explicitly fenced or reported through the existing startup owner, or the changed failure semantics are deliberately documented. Do not introduce another lifecycle.",
+  "acceptance": [
+    "Preserve an explicit startup outcome when Ready-path Engram recovery preparation fails is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "review-followup",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

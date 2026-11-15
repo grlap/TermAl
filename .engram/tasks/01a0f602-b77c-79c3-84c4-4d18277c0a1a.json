@@ -1,0 +1,41 @@
+{
+  "id": "01a0f602-b77c-79c3-84c4-4d18277c0a1a",
+  "external_ref": null,
+  "title": "A large passing cargo test in the one-call form earns no credit (\"output shows no passing test\"): its summary line is past the output the host reads",
+  "outcome": "Reported by Engram::Opus (TermAl mailbox 37bcca97 #180), session-7284, Engram item w-89927aff07ed, named root generation 143, 2026-10-01 about 05:38–05:45Z.\n\nTwo runs, each `pushd \"<root>\" && cargo test …` with nothing chained after it:\n- `cargo test --lib`: 1430 tests, ending \"test result: ok. 1426 passed; 0 failed; 4 ignored\", output about 162 KB.\n- `cargo test --lib -- verbs:: mcp:: host::`: ending \"test result: ok. 430 passed\", output about 49 KB.\n\nBoth were refused with \"a cargo test (check 9cd17377… / aeac4317…) ended successfully but earned no credit and was not recorded: its output shows no passing test\". Smaller runs in the same form were credited.\n\nThe summary line is the last line, so the host most likely reads only a bounded part of the output, either because the Claude tool result is itself truncated past about 30 000 characters or because of the host's own capture bound, and misses `test result:`.\n\nFix direction: find which bound drops it. Then read the summary from the end of the output (keep a bounded tail as well as the head), or say plainly that the output was too long to find a summary. Workaround until then: `cargo test -q …`, whose output is small and still ends with the summary line.",
+  "acceptance": [
+    "When a Claude Bash result's structured output was cut by the runtime (persisted-output metadata present) and the supplied output contains no passing summary, the check earns no credit and the holder's refusal line says the runtime cut the output before any summary and names `cargo test -q` as the remedy; the host never infers PASS from exit status, is_error or size. An inline output longer than 30000 characters whose supplied text contains the passing summary is still credited, and failing, interrupted, background and no-summary full outputs keep their current behaviour. Tests drive a real Claude result shape through the recorder to the withheld line, including malformed persisted metadata."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed diagnostic-only Claude runtime-cut refusal at0488bed2, exact reviewed/gated tree997badd. Fullgate5stagesPASS, focused5P, independent evaluationa1641/1PASS. Three Low followups retained; persisted file never opened and no PASS inferred from metadata. Integrationowner installation fileSHA5c00cf61 recorded separately; runninghost oldbuild until Gregrestart. Reconstructed launcher component variance cause UNKNOWN retained in b926f510/w-0c021ce2b34a; matching native tree/diff confirmed, original evidence preserved.",
+    "completed_at": "2026-10-06T12:50:26.975478400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

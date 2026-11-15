@@ -1,0 +1,40 @@
+{
+  "id": "01a1d870-eafd-7032-b914-8318a4ce5a64",
+  "external_ref": null,
+  "title": "Rust source capture: validate complete bounded warning stderr without silent transport truncation",
+  "outcome": "Rust source measurement accepts the agreed complete bounded slow-warning stderr contract and refuses unsupported or oversized producer output through the real native transport, preserving strict probes and source identity checks.",
+  "acceptance": [
+    "The source-command transport on Windows and Unix captures complete stderr through 262144 bytes or reports bounded overflow; a valid 65536-byte warning prefix cannot hide unsupported, invalid UTF-8 or oversized tail content.",
+    "The Rust source measurement accepts status-0 valid envelopes with only supported complete warning lines, including valid streams above 64 KiB and at the agreed ceiling, retaining the diagnostic; malformed envelopes, pins, roots, source identities and status remain independent refusal gates.",
+    "Behavioral tests exercise the actual bounded-read transport and discriminate the status-0 gate; version/schema probes remain strict unless occurrence of the exact agreed warning is independently proven, and unrelated bounded-read callers retain their current behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "greg-directed",
+    "review-medium",
+    "source-capture",
+    "source-identity",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1d825-e07c-7d33-80df-e879e6155b1d",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed Rust complete bounded slow-warning stderr capture on Windows/Unix with strict source/refusal guards; byte-identical reviewed55ba contribution in combo104/a6f605aa. Fresh independent acceptance41d3410da603429fb307c428874a0fe8 passed3/3 at revision2, exact landedtree. AuthorF2 890/0, landingFULL all6stagesPASS, admission-only native9/0 separately recorded; no extraFULL. Optional Low fixture-marker followup w-c52ffaf142f5 remains separate.",
+    "completed_at": "2026-11-14T17:03:10.925655300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

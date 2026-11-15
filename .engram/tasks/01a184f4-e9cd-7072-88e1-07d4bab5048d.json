@@ -1,0 +1,56 @@
+{
+  "id": "01a184f4-e9cd-7072-88e1-07d4bab5048d",
+  "external_ref": null,
+  "title": "Read-only sed checker skips the rest of a script after an unknown character at command start; `w`/`e` writes pass on master",
+  "outcome": "claude_sed_script_can_write (src/claude.rs, about :1443 on master 9ce9b521) parses sed scripts fail-closed. Addresses are recognized (N, $, /re/, \\cREc with any delimiter, first~step, addr,+N and addr,~N, the I and M flags, !). After them, only a known command letter is accepted; w, W, e and any write-capable or unknown construct are refused. A read-only reviewer can no longer write files through sed on any read-only path (Claude adapter, strict, Kimi, engram_command_reads_only). Regression tests cover each bypass spelling on every path.",
+  "acceptance": [
+    "C1 (script parser, fail closed). claude_sed_script_can_write parses each sed script command by command and treats the script as read-only only when every command is understood.\n- Addresses: a line number, first~step, $, /re/ and \\cREc with any delimiter c, each regex optionally followed by I or M; a second address of any of these or +N or ~N; then optional '!'.\n- Commands accepted: { } = d D g G h H l [N] n N p P q [N] Q [N] x z F, : b t T with a label of [A-Za-z0-9_.-], a/i/c with their text, # comments, s and y with their sections, and s flags g p I i M m and digits.\n- Commands refused: w W e r R; s flags w W e; any other command letter.\n- Also refused: an unterminated address, regex, s or y; a bracket expression in a regex that contains the delimiter, or one left unclosed; a \\c escape in an s or y section, or in an address regex; and any character after a command other than whitespace, ';', '}' or '#'.",
+    "C2 (option parser, fail closed). claude_sed_tokens_are_read_only accepts only these exact options:\n- -n, --quiet, --silent;\n- -E, -r, --regexp-extended;\n- -s, --separate;\n- -z, --null-data;\n- -u, --unbuffered;\n- --posix, --debug, --sandbox;\n- -e SCRIPT, -eSCRIPT, --expression=SCRIPT, --expression SCRIPT;\n- short clusters of n E r s u z, optionally ending in e followed by its script;\n- --, after which every word is a file.\n\nEvery script, whether given with -e, with --expression or as the first operand, goes through C1. Any other option is refused, including -i or -f inside a cluster, any abbreviation, and any option taking a value.",
+    "C3 (tests, on every read-only path that checks sed on master: the Claude permission adapter, the strict checker, Kimi's gate and engram_command_reads_only).\n\nREFUSED:\n- `sed -n '\\%foo%w victim.txt' input.txt`\n- `sed -n '1~2w out' f`\n- `sed -n '$!w out' f`\n- `sed -n '/x/!w out' f`\n- `sed -n '/x/Iw out' f`\n- `sed -n '/x/Mw out' f`\n- `sed -n '0,/x/w out' f`\n- `sed -n '1,+2w out' f`\n- `sed -n '1,~4w out' f`\n- `sed -n '/x/{w out' f`\n- `sed '1e touch x' f`\n- `sed 's/a/b/e' f`\n- `sed 's/a/b/w out' f`\n- `sed -n '\\%x%e touch y' f`\n- `sed -n --expression='1w out' f`\n- `sed -n --expression '1w out' f`\n- `sed -ni 's/a/b/' f`\n- `sed -si 's/a/b/' f`\n- `sed --in-pl 's/a/b/' f`\n- `sed -n 's/[/]/x/w out' f`\n- `sed 'r /etc/passwd' f`\n- `sed -n 'p w' f`\n\nACCEPTED:\n- `sed -n '1,10p' f`\n- `sed 's/a/b/' f`\n- `sed 's#a#b#g' f`\n- `sed -n '/^[a-z]/p' f`\n- `sed -n '/[[:alpha:]]/p' f`\n- `sed -n '$p' f`\n- `sed -n '2~3p' f`\n- `sed -n '/x/,/y/p' f`\n- `sed '/x/d' f`\n- `sed -ne '1p' f`\n- `sed --quiet -e '1,3p' f`\n- `sed -n '/x/!p' f`\n\nEvery existing read-only checker test still passes unchanged.",
+    "C4 (validation and landing). The full gate passes on the exact tree submitted for landing; the review pair has no outstanding finding of Medium or higher on it; and the item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "pre-existing",
+    "read-only-gate",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

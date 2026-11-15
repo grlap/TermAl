@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-8a1769a77975",
+  "external_ref": "tm-ncc6.13",
+  "title": "Slice 2: test-run card in the owner session's transcript",
+  "outcome": "Contract: docs/features/test-runs.md 'Slice 2: the test-run card' (approved by Greg 2026-09-25; reviewed by Termal::Fable and Termal::Codex). A persisted Message variant testRun (schemaVersion 1, run: TestRunCardSnapshot) appended to the owner's transcript at the index's first sight of a post-epoch run, updated in place by the host from the index (testRunCardUpdated delta). A specialized tool execution rendered in the command-card family. Children: backend (Opus), index extensions (Opus), UI renderer (Codex).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

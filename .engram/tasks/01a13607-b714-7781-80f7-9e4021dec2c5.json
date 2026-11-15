@@ -1,0 +1,30 @@
+{
+  "id": "01a13607-b714-7781-80f7-9e4021dec2c5",
+  "external_ref": null,
+  "title": "Import reconciliation B: G2 admission and handoff fence with lifecycle",
+  "outcome": "While an import hold covers a run, every TermAl dispatch and recovery path refuses NEW provider dispatch for that run with a typed 'held by import reconciliation' disposition. Retained heads are kept unchanged, FIFO and sibling runs are preserved, and the fence is removed only after the exact terminal decision is durably reconciled.",
+  "acceptance": [
+    "Tests: a hold before direct or queued admission gives a typed retained-head refusal; a hold while Evaluate or Begin is off-lock permits no later provider send; a hold competing with final handoff counts a prior winning send as outstanding; a deferred Stop callback, an ordinary Defer wake, an explicit Resume, a generic queue ACK, source continuation and boot cannot bypass the fence; a sibling run continues and FIFO is preserved; apply or cancel removes only its exact guard after durable matched reconciliation; a failed release write, an unknown decision and a changed incarnation stay fenced.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a135ff-5979-7203-93d4-358040469407",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

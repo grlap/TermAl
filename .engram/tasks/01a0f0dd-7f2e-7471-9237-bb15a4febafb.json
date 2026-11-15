@@ -1,0 +1,27 @@
+{
+  "id": "01a0f0dd-7f2e-7471-9237-bb15a4febafb",
+  "external_ref": null,
+  "title": "Carried gates: bound the checkpoint's wait on the carried-poll lock, and add a contract test between the launcher's run records and the host's reader",
+  "outcome": "Carried gates: bound the checkpoint's wait on the carried-poll lock, and add a contract test between the launcher's run records and the host's reader",
+  "acceptance": [
+    "Carried gates: bound the checkpoint's wait on the carried-poll lock, and add a contract test between the launcher's run records and the host's reader is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,48 @@
+{
+  "id": "01a10eed-5c4c-7be2-aa67-7df0ce6b1169",
+  "external_ref": null,
+  "title": "Declared test commands: feature/usage doc and agent instructions for termal-tests.toml (lands before any runner code)",
+  "outcome": "Declared test commands: feature/usage doc and agent instructions for termal-tests.toml (lands before any runner code)",
+  "acceptance": [
+    "A new feature document docs/features/declared-test-commands.md, cross-linked both ways with docs/features/test-runs.md, defines exactly: termal-tests.toml at the repository root; its [[test]] fields command, cwd and artifact; the exact-match rule for the command; the artifact rules (inside the worktree; untracked and git-ignored at the canonical target; absent or hashed at command start and new or changed by hash at the end, modified at or after the start; one regular file; 4 MiB bound) and why the git-ignore rule exists; TRX and JUnit pass/fail/unknown semantics; one .NET (dotnet test --logger trx) and one JUnit example declaration; and the agent/operator workflow, consistent with the concurred pilot design on w-8e72f7e16778 (aa219353 + 431da8e1 + 165e393e + c83cae3f + a7b0c025 + A3-3 of 75d7cd3a + 2d0b87b2 points 2-4 + 73824d7c + 5638d152 + Fable2's final decision note)",
+    "The document states plainly what the pilot does not do: environment is not captured; no console-text parsing; no framework/version matrix; a declared command is trusted as current-worktree configuration; JUnit availability follows the pilot's fit rule; every instruction surface states that recognition requires a running build that implements it; quoted separators are literal only on the declared route; built-in recognition is unchanged",
+    "The agent instruction surfaces a coding agent actually reads when working under TermAl are identified in the item notes and updated, so an agent knows how to discover a declaration, declare a command, invoke it in the recognised form, and that UNKNOWN is not PASS; no change grants or limits commit, push, tracker or approval authority",
+    "The change contains documentation and instruction text only, with no runner code, and lands before any runner implementation of w-8e72f7e16778 begins",
+    "The maintained five-stage full gate passes on the exact frozen input, and a read-only Codex and Claude review pair has no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "docs",
+    "dotnet",
+    "team-pilot",
+    "test-runners"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a10cfc-06d2-7f81-82e0-8e72f7e16778",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Documentation and instruction text for declared test commands. The work landed before any runner code.\n- New docs/features/declared-test-commands.md, marked planned. It covers termal-tests.toml with command, cwd and artifact; the exact-match rule; the one-file artifact rules and why the artifact is git-ignored; TRX and JUnit PASS/FAIL/UNKNOWN with their precedence; a .NET and a JUnit example; the operator and agent workflow; and what the pilot does not do.\n- Cross-links from test-runs.md, the features README and engram-host-adapter.md.\n- One identical instruction bullet in AGENTS.md and CLAUDE.md, and one line in SKILL.md.\n\nLanded as a fast-forward: master = origin/master = 961b218a030d210fed94b2325f18c0fa1bc68be4, tree aa2b2c7b, parent 99768769. 7 files, +118, 0 deletions.\n\nEvidence:\n- Gate test-881d0dec passed (record 59af553c), input fingerprint 16bf8821a8c165d3d2c4db773744ac15781649c18a0762bc3c8b0a6be3b673db. Opus2 independently matched its five components.\n- Authority-file conditions: (a) both coordinators concurred (Fable2; Engram::Fable 3270bc3c); (b) Greg was sent the text; (c) Fable2's audit 8fad44bd PASSED, naming 16bf8821.\n- Review pair 3 clean (Codex afbb5b21, Claude 74fce38d). The Mediums of pairs 1 and 2 were fixed in freezes 3 and 4. The Low is filed as w-e76449de9c78.\n- Evaluation 6363439e: 5 of 5 pass, after the landing, per Fable2's ruling #1456. Criterion 1 is supported by notes a3b415da and efffc87e; criterion 4 by note ec1f6639.\n\nInstall: no product source changed, so running sessions need no restart.",
+    "completed_at": "2026-10-06T05:41:19.448084Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

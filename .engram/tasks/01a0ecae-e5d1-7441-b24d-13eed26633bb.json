@@ -1,0 +1,27 @@
+{
+  "id": "01a0ecae-e5d1-7441-b24d-13eed26633bb",
+  "external_ref": null,
+  "title": "docs/features/agent-delegation-sessions.md (~line 1229) still describes /review-changes as one Codex + one Claude reviewer and as updating the retired docs/bugs.md",
+  "outcome": "docs/features/agent-delegation-sessions.md (~line 1229) still describes /review-changes as one Codex + one Claude reviewer and as updating the retired docs/bugs.md",
+  "acceptance": [
+    "docs/features/agent-delegation-sessions.md (~line 1229) still describes /review-changes as one Codex + one Claude reviewer and as updating the retired docs/bugs.md is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

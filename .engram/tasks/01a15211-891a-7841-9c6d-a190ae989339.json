@@ -1,0 +1,36 @@
+{
+  "id": "01a15211-891a-7841-9c6d-a190ae989339",
+  "external_ref": null,
+  "title": "Prevent malformed launcher run directories when Git echoes an unsupported rev-parse option",
+  "outcome": "The launcher accepts only a valid run-directory result from Git and either resolves it correctly on the Mac agent's Git or refuses with a clear compatibility error before creating artifacts or registering.",
+  "acceptance": [
+    "On Git output containing an echoed unsupported --path-format=absolute option, the launcher never creates a malformed relative directory or submits it for registration; it resolves the intended Git metadata directory through a supported path query or refuses with a named compatibility diagnostic before side effects.",
+    "Focused regressions cover the Git 2.29.2 output shape, normal current-Git paths, linked-worktree metadata paths, and paths with spaces; supported shapes retain canonical registration and execution behavior, with the required review and exact-input gate evidence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "git-compatibility",
+    "mac-runner",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a15210-e29d-7073-9f21-604b535e1e3b",
+  "disposal_reason": "Duplicate filed during concurrent triage; Fable2 #613 identifies canonical w-604b535e1e3b, already owned by Sol-c593. Same Git2.29 unsupported-option path and registration refusal. Transferred own source trace and retained Mac outcome to canonical evidence3514d97e9181418388a57b3fcc2d94fb. No implementation was performed under this duplicate.",
+  "completion": null
+}

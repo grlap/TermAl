@@ -1,0 +1,26 @@
+{
+  "id": "01a0fa6a-0a99-7562-9a63-bf2e7a07c1d2",
+  "external_ref": null,
+  "title": "Claude turn ownership: capture-backed rules for frames outside a turn that carry a parent tool use, other slash commands, and a session left busy by an unassigned turn",
+  "outcome": "Claude turn ownership: capture-backed rules for frames outside a turn that carry a parent tool use, other slash commands, and a session left busy by an unassigned turn",
+  "acceptance": [
+    "Claude turn ownership: capture-backed rules for frames outside a turn that carry a parent tool use, other slash commands, and a session left busy by an unassigned turn is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

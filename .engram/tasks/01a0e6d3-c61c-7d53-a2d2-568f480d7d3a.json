@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-568f480d7d3a",
+  "external_ref": "tm-m6r1.6",
+  "title": "Cover Work detail CLI transport and source/ref validation branches",
+  "outcome": "Round-1 Claude Low, tests/work_visualizer.rs:243: fixtures answer only ls; missing process-path coverage for show REF --notes --gates --json --after, stale binding, remote project, unavailable continuation 409, declaration/path limits, invalid refs, Beads absent/notSupported, and the Work launcher returning null. Add focused deterministic tests; avoid duplicating regressions owned by sibling defect tasks. Use build-labelled genuine receipts when available, keeping synthetic fixtures explicitly labelled synthetic.",
+  "acceptance": [
+    "Actual isolated fixture process validates show argv and continuation; negative source/ref branches tested; control-surface Work launcher null covered; no live store or invented host identity."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

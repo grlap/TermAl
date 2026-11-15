@@ -1,0 +1,31 @@
+{
+  "id": "01a16df7-f024-7190-a4ad-f85a79066b3b",
+  "external_ref": null,
+  "title": "Add retained-probe provenance negative controls to onboarding report completeness tests",
+  "outcome": "Pure report-completeness controls reject malformed, mismatched and foreign-authority retained probes while accepting valid retained provenance.",
+  "acceptance": [
+    "Add retained-probe provenance negative controls to onboarding report completeness tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

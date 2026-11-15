@@ -1,0 +1,29 @@
+{
+  "id": "01a15437-4e70-7e42-bc13-d647edbc1303",
+  "external_ref": null,
+  "title": "Reconcile the test-ref push grant to the integration-owner role with Greg's 'Opus moze wypychac' and record its source",
+  "outcome": "The grant in the test-ref bullet is either bound to the session Greg named, or backed by Greg's recorded word that it covers the integration-owner role. The citation names the route Greg's word came by (session and mailbox locator), as the section's other quoted grants do.",
+  "acceptance": [
+    "Greg's recorded word on whether the test-ref push grant attaches to the integration-owner role or to a named session is recorded on this item, verbatim with its source.",
+    "Any resulting wording change is concurred by both coordinators and lands under the authority-text rule, or this item records that no change is needed, citing Greg's word."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "cross-project",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8e3-93bc-7823-bd29-82ef68871332",
+  "external_ref": null,
+  "title": "Make closing-witness negative tests discriminate each guard and remove the restore tautology",
+  "outcome": "Witness tests exercise actual resource-reset, generation, terminal, store, stale-job and unbound guards; restore helper does not present manual binding installation as restoration proof.",
+  "acceptance": [
+    "Behavioral negative cases distinguish session_resource_reset_in_progress, successor generation mismatch, terminal failure, authority-store change, stale off-thread job and witness unbound guard without an earlier unrelated predicate masking each case.",
+    "Remove the assert_restore_uses_existing_binding_rule subassertion that installs A then asserts A, retaining meaningful persisted root, focus and lookup checks and explicit baseline restore limitation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

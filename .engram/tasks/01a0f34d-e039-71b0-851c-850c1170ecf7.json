@@ -1,0 +1,35 @@
+{
+  "id": "01a0f34d-e039-71b0-851c-850c1170ecf7",
+  "external_ref": null,
+  "title": "Move the displaced doc comment back onto name_turn_source_root in the turn-check tests",
+  "outcome": "Move the displaced doc comment back onto name_turn_source_root in the turn-check tests",
+  "acceptance": [
+    "The doc comment that describes the linked worktree at `.worktrees/wt` sits above `fn name_turn_source_root` in src/tests/engram_turn_checks.rs, and `name_other_session_source_root` carries only its own.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "test-code"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

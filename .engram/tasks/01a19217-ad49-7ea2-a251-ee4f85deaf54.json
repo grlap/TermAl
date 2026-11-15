@@ -1,0 +1,27 @@
+{
+  "id": "01a19217-ad49-7ea2-a251-ee4f85deaf54",
+  "external_ref": null,
+  "title": "After a TermAl reload, a control-OFF session's committed-input verification records are never delivered: nothing re-establishes its flagged Base token",
+  "outcome": "With w-decd61d62831's T2 fix, the verification_record sender starts no advisory bind or renewal. It delivers only with the initiating session's existing valid Base credentials. A TermAl reload flags every restored routing token rebind_required (persisted_state.rs:1222).\n\nFor a control-OFF session, no supported production path re-establishes that token automatically:\n- Boot recovery, the owed-binds tick, turn admission, runtime-loss rebind and the delegation bind all require turn-gated control ON (engram_binding_target_for_session_shape_locked(.., true), engram_session_authority.rs:130; turn admission returns Ok(None) for OFF at engram_host_adapter.rs:9483).\n- Root naming (bind_fresh_engram_source_root_until) returns early when a token is present (engram_source_roots.rs:~1998), so even re-naming does not rebind a flagged token.\n\nSo after a reload, the session's pending committed-input records stay typed-pending, never delivered, and acceptance admission for those runs stays refused. Line references are from the w-decd worktree read of 2026-10-31.\n\nDone means: a supported Base path re-establishes a control-OFF session's flagged token after reload without inventing authority or adding a sender-owned bind, and the same pending record, key and association is then delivered, with a test proving redelivery after an actual Base recovery. This relates to w-212221c53e2c and Engram w-952b4211be2d (full OFF delivery). Provenance: the w-decd round-3 T2 disposition (Fable2 df007e37 #1433 and #1435; Architect2 notes 168f1a36 and 6accfe7d).",
+  "acceptance": [
+    "Naming re-binds a flagged OFF token. After a reload, an OFF session whose restored Base token is flagged rebind_required, and which is otherwise idle, re-establishes its binding through its own source-root naming. Naming sends the existing naming SessionBind under that path's current-target, ownership and idle fences, then adopts the returned token and the claim's work binding and clears the flag in one persisted write. A failed persist restores the flagged token, the prior work binding and the flag. Naming with a valid, unflagged token sends no bind. ON sessions, the turn-admission and recovery binders, and the verification_record sender are unchanged. The sender starts no bind, and nothing binds a session automatically at boot.",
+    "Fences. Naming does not re-bind a flagged OFF session that holds an active or uncertain grant, a retained checkpoint, a retained bind whose answer was lost, an admission, checkpoint, bind or abort in progress or retry, or a retained queued prompt. It refuses with the existing conflict and keeps the flag and token as they were. The bind owner revalidates the captured token, flag and work binding with the existing current-target and ownership checks before sending and before adopting its answer; a concurrent replacement is not overwritten.",
+    "Redelivery, on w-decd's sender. A test drives the whole path. An OFF session is bound by naming and its run is registered. The record is reloaded through the persisted form, so its token is flagged. The sender's tick keeps the record pending as AwaitingNamingBinding and sends nothing. The session names the same root again under the same live claim, which sends exactly one session_bind in this successful recovery trace. The next tick delivers the same record, with the same idempotency key and original registration association; subsequent ticks create no duplicate record. The fixture follows the actual producer's bind replay and named-root lifecycle semantics, preserving the existing same-name generation where canonically confirmed, rather than rewriting the registration to fit a new name. Further tests cover the fences in criterion 2, a failed persist rolling back, an unflagged token sending no bind, and an ON session unchanged.",
+    "The full gate passes on the exact landing input, and the review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

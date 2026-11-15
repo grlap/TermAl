@@ -1,0 +1,31 @@
+{
+  "id": "01a17b3c-0299-7a11-8e6b-a7b06434d0bb",
+  "external_ref": null,
+  "title": "Mac full gate on 7d5116e3: WorkViews.window-lifecycle \"settles a wide 119-row auto-layout table…\" timed out at 10000 ms (10781 ms) in the parallel component lane",
+  "outcome": "Mac full gate on 7d5116e3: WorkViews.window-lifecycle \"settles a wide 119-row auto-layout table…\" timed out at 10000 ms (10781 ms) in the parallel component lane",
+  "acceptance": [
+    "The root cause of the 10781 ms run of ui/src/panels/WorkViews.window-lifecycle.test.tsx:210 'real Work views at the clamped end of a measured window > settles a wide 119-row auto-layout table as mounted rows change its scrollbar and wrapping' (Mac full gate test-145dd576 on master 7d5116e3) is classified as product, test/runner, or environment/resource, with discriminating evidence recorded on this item.",
+    "The fix addresses that cause without raising the test timeout, adding retries, or quarantining the test (CLAUDE.md: no flaky category).",
+    "A later full gate on macOS and one on Windows, each on an input containing the fix, pass the vitest stage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "gate-failure",
+    "macos",
+    "tests",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

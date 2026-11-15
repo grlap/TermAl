@@ -1,0 +1,30 @@
+{
+  "id": "01a1c469-cb57-7681-a9c2-99044c16f31b",
+  "external_ref": null,
+  "title": "Scope doc-link Lint instructions to repositories that ship the checker",
+  "outcome": "The documented exact doc-link Lint route clearly applies to repositories that provide scripts/check-doc-links.mjs, so readers are not directed to run a missing script in TermAl.",
+  "acceptance": [
+    "The doc-link Lint instructions distinguish repositories that provide the checker from TermAl checkouts where that file is absent.",
+    "The correction preserves the exact-command classification, existing Lint admission rules and the distinction from Test credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "docs",
+    "review-low",
+    "verification-record"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

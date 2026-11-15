@@ -1,0 +1,30 @@
+{
+  "id": "01a175a9-8a00-76a0-a2eb-2deb04a0088e",
+  "external_ref": null,
+  "title": "Release a satellite mailbox read intent after a definitive wrong-identifier refusal",
+  "outcome": "A definite session-id-as-mailboxId refusal does not retain a satellite's frozen-read intent slot or exhaust the host-wide read-intent map.",
+  "acceptance": [
+    "Receipt reads that receive the typed definite wrong-identifier refusal release the corresponding satellite client-read intent; unknown transport/authority outcomes continue retaining their original recovery identity.",
+    "A focused disposable test submits more wrong session-id reads than the intent capacity and confirms later eligible roots can still read; repeating a wrong argument after the former TTL returns the actionable diagnostic rather than an unrelated read-expired result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "pre-existing",
+    "review-low",
+    "usability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17500-d81b-77d2-afc3-5e74fca28c0d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

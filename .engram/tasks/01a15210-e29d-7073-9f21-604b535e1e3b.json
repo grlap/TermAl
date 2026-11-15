@@ -1,0 +1,57 @@
+{
+  "id": "01a15210-e29d-7073-9f21-604b535e1e3b",
+  "external_ref": null,
+  "title": "Test launcher requires git rev-parse --path-format (Git >= 2.31) without checking: on the MacBookPro agent session (Git 2.29.2) the run dir is malformed and registration fails 400 canonicalize_directory",
+  "outcome": "The test launcher works with the Git version a remote agent session actually resolves, or refuses clearly. Either it computes the review-runs path without `git rev-parse --path-format=absolute` (for example from `--git-common-dir` resolved to an absolute path in Node), or it checks the Git version up front and fails with a typed message naming the minimum version and the resolved git path. It never creates a run directory from echoed option text.",
+  "acceptance": [
+    "A regression test runs the launcher's run-directory resolution against a Git that does not support --path-format (simulated by a fixture git shim that echoes unknown options, as Git 2.29 does) and shows either a correct absolute run directory or a typed refusal naming the minimum Git version and the resolved git path; no malformed directory is created and no registration is attempted with it.",
+    "With a current Git, run-directory resolution and registration are unchanged (existing launcher tests pass).",
+    "docs/test.md states the launcher's minimum Git version, or that none is required, and how a remote runner should check it; the full gate passes on the exact input with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "macos",
+    "multi-machine",
+    "remote",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed launcher Git-directory compatibility repair and maintained regression suite. Uses isolated --absolute-git-dir with fail-closed path validation before artifacts/registration; workflow helper parity and remote prerequisites documented.",
+    "completed_at": "2026-10-20T09:59:08.541498100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

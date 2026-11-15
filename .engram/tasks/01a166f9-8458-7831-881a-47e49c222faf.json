@@ -1,0 +1,50 @@
+{
+  "id": "01a166f9-8458-7831-881a-47e49c222faf",
+  "external_ref": null,
+  "title": "A claude.exe process wrote a transient <file>.tmp.<pid>.<hex> into a Merger gate worktree with no Edit/Write tool call, and the host refused the gate's credit",
+  "outcome": "The origin of out-of-band atomic-save temp files in gate worktrees is identified and either prevented, or excluded from credit refusal when the tracked content is provably unchanged; gate credit isn't lost to writes no session issued.",
+  "acceptance": [
+    "C1 (attribution and bounded claim). Each reported occurrence records its writer with supporting session/process/tool/path evidence, or explicitly records UNPROVEN and what was checked. Distinguish a filename PID, a possible writer implementation and an observed invocation. The note states which write paths the prevention covers and which remain outside it; it does not claim the historical incidents are prevented until that causal link is established.",
+    "C2 (host-mediated prevention). During the host's protected credit interval for a carried gate, the host denies a Claude Write, Edit, MultiEdit or NotebookEdit request before authorizing that operation when its resolved write target lies in the protected worktree. This applies to requests from the gate owner as well as other sessions, including subagents whose requests reach this permission boundary; it does not block the admitted gate's own execution or legitimate build-output production. Resolve relative targets against the requesting tool's actual cwd and account for existing symlink/junction aliases and nonexistent targets through their existing ancestor. An unresolved target that may overlap cannot be treated as proven outside. Apply the guard to both automatic permission decisions and delayed user approvals, with a current protected-root check before returning Allow. Record the protected run and denial reason. A proven denied request that performed no write must not itself create a write/command-overlap fence or erase an independent existing fence. Outside the protected interval, normal permission policy resumes; no automatic Allow is granted by this feature. Tests cover owner/other-session/subagent requests, relative/aliased targets, delayed approval after gate admission, denial without any write or lost credit, and normal policy when no protected gate exists.",
+    "C3 (no false credit and truthful evidence). Unprevented relevant watcher changes retain existing credit fencing, coordinated with the trusted interval/order fix in w-3c44. Nothing is exempted merely by filename, disappearance or equal endpoint revisions. Retain bounded evidence of the observed path and event kinds/order, launch tracked-status when known, its relation to the measured input boundary, and endpoint source-basis comparison when obtainable; explicitly mark unavailable/ambiguous fields rather than inventing them. Diagnostic capture must not unblock or authorize a fenced check, and failure/overflow must remain explicit. Tests keep tracked modify-then-restore, real untracked create/remove (including random and atomic-temp-looking names), rename onto source and unclassifiable possible-overlap events refused, with distinguishing evidence. Product test outcome and credit disposition remain separate facts.",
+    "C4 (validation and landing). The full gate passes on the exact tree submitted for landing, and the required independent review pair has no outstanding in-scope finding of Medium or higher on that input. The committed tree is that reviewed and gated tree, and the item carries the evidence required by the standing landing rule."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

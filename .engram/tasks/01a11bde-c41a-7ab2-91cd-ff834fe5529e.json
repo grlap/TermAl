@@ -1,0 +1,29 @@
+{
+  "id": "01a11bde-c41a-7ab2-91cd-ff834fe5529e",
+  "external_ref": null,
+  "title": "A Codex child's `Get-ChildItem Env:` fails with a duplicate-key error, so its environment likely holds two names differing only in case",
+  "outcome": "A delegated session's environment on Windows has no case-variant duplicate names, so ordinary PowerShell environment reads work.",
+  "acceptance": [
+    "The cause is classified with evidence: which names were duplicated and which layer introduced them (TermAl's child environment assembly, the Codex runtime, or the user environment).",
+    "If TermAl introduced them, a delegated child on Windows receives an environment with no names differing only in case, and a test covers the assembly."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "environment",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10199-c4a0-7862-bd39-6d42c3e614aa",
+  "disposal_reason": "Duplicate: I filed this on 2026-10-08 without finding w-6d42c3e614aa, which I filed for the same symptom on 2026-10-03. Architect2 has already recorded the 10-07 occurrence there (note 37634bdb). Reconciled at the reporter's request (TermAl mailbox 8dd22e02 #5).",
+  "completion": null
+}

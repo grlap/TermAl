@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3c3-7bc1-8a7e-65004013291a",
+  "external_ref": "tm-2rg4",
+  "title": "Scope structured review submit tool advertisement",
+  "outcome": "termal_submit_review_result is advertised to every delegation child even though explorer/worker children and reviewers without review_result_required are rejected by the backend. Advertise it only when the served delegation requires the structured reviewer-result protocol, or make the reviewer-only restriction explicit without weakening backend validation; add focused capability-list coverage.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

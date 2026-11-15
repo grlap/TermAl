@@ -1,0 +1,27 @@
+{
+  "id": "01a166c5-0cb6-71d2-af04-62089fda950c",
+  "external_ref": null,
+  "title": "A focused run's credit is refused because a write under the worktree's .claude directory (agent tool state, not source) counted as a possible source change",
+  "outcome": "Writes to agent-tool state directories inside a worktree (such as .claude/) no longer refuse a test run's credit, while real source changes still do; or, if .claude can hold source-relevant files, the refusal names what was written.",
+  "acceptance": [
+    "A focused run's credit is refused because a write under the worktree's .claude directory (agent tool state, not source) counted as a possible source change is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

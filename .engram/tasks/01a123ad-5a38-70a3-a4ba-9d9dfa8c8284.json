@@ -1,0 +1,27 @@
+{
+  "id": "01a123ad-5a38-70a3-a4ba-9d9dfa8c8284",
+  "external_ref": null,
+  "title": "Boot reconstruction lacks restart witnesses for authority mismatch, eligibility exclusions, legacy shape without its record, and Stop during an attempt",
+  "outcome": "src/tests/engram_begin_boot.rs also covers: (a) a saved begin-unknown or pre-fix head whose retained evaluate's connection or settings differ from the current target schedules nothing and keeps its explicit hold; (b) the boot pass leaves an interrupted head, an operator-paused one, disabled control and an unknown transcript position as they are; (c) a head with the pre-fix shape but no begin_reconstruct record keeps its earlier cold-restore and bind routes; (d) a Stop or pause between the replayed evaluate and the begin preparation of a reconstruction ends it without a begin.",
+  "acceptance": [
+    "Boot reconstruction lacks restart witnesses for authority mismatch, eligibility exclusions, legacy shape without its record, and Stop during an attempt is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

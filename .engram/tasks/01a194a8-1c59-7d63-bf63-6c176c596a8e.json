@@ -1,0 +1,28 @@
+{
+  "id": "01a194a8-1c59-7d63-bf63-6c176c596a8e",
+  "external_ref": null,
+  "title": "Windows: replace_review_document_file failed once with Access is denied (os error 5) in MoveFileExW REPLACE_EXISTING (review.rs:160)",
+  "outcome": "The cause of the single Windows \"Access is denied\" review-file replacement failure is classified from code and evidence as product, test or environment. If it's product, replacing a review document on Windows succeeds, or reports a typed retryable condition, when another process briefly holds the target, without weakening the test.",
+  "acceptance": [
+    "Windows: replace_review_document_file failed once with Access is denied (os error 5) in MoveFileExW REPLACE_EXISTING (review.rs:160) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "file-io",
+    "review",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a194a8-1c2c-75d1-af91-95affa0af585",
+  "disposal_reason": "Duplicate filed in the same minute. Termal::Opus2 filed the same Windows B test-17d8d784 failure (replace_review_document_file_replaces_existing_target_on_windows, Access is denied os error 5, MoveFileExW at review.rs:160) as w-95affa0af585, which stays the live item. This item's creation note keeps Termal::Fable2's provenance and hypotheses (another process holding the file without FILE_SHARE_DELETE, or the mid-run LongPathsEnabled change; it passed in 74c9fada and on Central). The Windows B runner asked for consolidation in relay 1196c4b5 #135.",
+  "completion": null
+}

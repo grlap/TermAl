@@ -1,0 +1,51 @@
+{
+  "id": "01a0f470-f4e6-7221-9b17-478c8a2dcc87",
+  "external_ref": null,
+  "title": "Acceptance-evaluation policy form: a normal Save that keeps the operator's edits on a conflict and warns only on an actual reduction",
+  "outcome": "Carries the TermAl part of Engram w-e57091faa4e5 (\"Make ordinary policy settings a normal Save operation\"), at Engram::Fable's request (mailbox ebe242f7 #351, 2026-09-30), triaged read-only against TermAl d2cb603 by Engram::Opus. Engram's part is delivered (Engram w-a562563fed5c): the policy setters need only --authorized-by, an idempotency key and an optional expected policy hash, with no reason, and the receipt returns the previous and the new policy. What remains is TermAl's. Today a first-attempt 409 closes the editor and reloads from the store, losing the operator's edits (ui/src/AcceptanceEvaluationSettings.tsx about lines 105–110, and a test enforces the reload). A generic warning is always shown (about line 159). Scope: the acceptance-evaluation policy form only. The turn-gated toggle and its Verify step belong with w-5b6ef1e321ae and Engram w-67775bc92f06. An unchanged submission may succeed as an idempotent no-op. Bookkeeping in scope: w-e4a5b3186aa0 (tm-4ilz) and w-1887d5476ed7 (tm-uyx2) are still ready with no criteria although their code landed in 513018d; close them against this item or their own evidence.",
+  "acceptance": [
+    "A concurrency refusal (409) on Save does not lose the operator's edits: the form keeps them, shows the store's current values beside them, and lets the operator re-apply or discard; a test covers a first-attempt 409 and replaces the test that enforces the reload.",
+    "The form uses plain wording with Save and Cancel; a test covers Cancel discarding the edits without a request.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The reduction warning appears only for an actual reduction computed from the receipt's previous and new policy (fewer modes, a looser basis or freshness), never as an always-shown line; tests cover a reduction and a non-reduction.",
+    "w-e4a5b3186aa0 and w-1887d5476ed7 are closed against this item or their own evidence, with the closing reason recorded on each."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

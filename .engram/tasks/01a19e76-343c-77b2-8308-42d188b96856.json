@@ -1,0 +1,37 @@
+{
+  "id": "01a19e76-343c-77b2-8308-42d188b96856",
+  "external_ref": null,
+  "title": "Historical obligation-ledger allowlists refuse the whole state load on any shape they did not anticipate",
+  "outcome": "A TermAl build without gated control starts on a store that holds gated-era obligation history: every obligation-ledger shape that earlier builds actually wrote is either accepted by the passive historical validators or kept as opaque history, so the state load is never refused for a well-formed historical entry.",
+  "acceptance": [
+    "Evidence that the historical validators (historical_request_shape, historical_queued_shape, historical_decision_card_shape and the transfer/successor matchers in src/engram_session_obligations.rs) accept every obligation shape that the gated builds' writers could produce. Acceptable evidence: a test corpus generated from the BASE writers, OR a validation run against a copy of a real store made under an authorised procedure. Alternatively, a change that keeps unrecognised historical entries as opaque raw history instead of refusing the load, with a test.",
+    "A test showing that a store with a gated-era obligation ledger loads, and that a malformed ledger is still refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The historical validators accept every ledger shape the gated writers produced in a 4553-ledger corpus, and a malformed ledger is still refused with nothing written. Keeping the corpus on master is w-30ad5d74b7dd.",
+    "completed_at": "2026-11-04T06:57:05.254764500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

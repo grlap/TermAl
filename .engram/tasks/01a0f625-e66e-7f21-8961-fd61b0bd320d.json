@@ -1,0 +1,30 @@
+{
+  "id": "01a0f625-e66e-7f21-8961-fd61b0bd320d",
+  "external_ref": null,
+  "title": "Retain a readable run identity when a naming session is removed",
+  "outcome": "Retain a readable run identity when a naming session is removed",
+  "acceptance": [
+    "Retain a readable run identity when a naming session is removed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

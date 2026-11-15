@@ -1,0 +1,28 @@
+{
+  "id": "01a1369e-69d8-70a3-ac98-eaac7de656d1",
+  "external_ref": null,
+  "title": "host-architecture: move the prompt-delivery state machine out of its single table cell into its own subsection",
+  "outcome": "host-architecture: move the prompt-delivery state machine out of its single table cell into its own subsection",
+  "acceptance": [
+    "docs/features/host-architecture.md keeps a short prompt-delivery table row that links to a dedicated subsection (or a feature brief under docs/features/, cross-linked both ways) describing the receipt state machine: write-ahead, admission ownership, Codex turn/start marker, park until Resume, restart rules."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "delivery",
+    "docs",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

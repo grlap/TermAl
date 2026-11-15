@@ -1,0 +1,31 @@
+{
+  "id": "01a14672-1406-7942-ab51-1f6425b74926",
+  "external_ref": null,
+  "title": "Label registration path identity failures and document the helper contract",
+  "outcome": "Registration path identity errors identify the failing host or receipt field, with a concise helper contract explaining native realpath and fail-closed throwing behavior.",
+  "acceptance": [
+    "The helper documents why native realpath is required and why invalid/unavailable operands throw instead of returning a comparable sentinel.",
+    "Diagnostics name the failing registration path field while preserving identity checks, refusal behavior, budgets and retry bounds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "ci",
+    "greg-reported",
+    "review-followup",
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a145cf-8b9f-7d93-a5f7-9b211ca7daa2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

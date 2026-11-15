@@ -1,0 +1,36 @@
+{
+  "id": "01a0e6d3-c421-7cd2-810e-44c93fdc2e4c",
+  "external_ref": "tm-7ux",
+  "title": "Split OpenCode config tests out of acp_gemini.rs",
+  "outcome": "Purely move the cohesive OpenCode dynamic-config test suite (ordering, post-model waits, timeouts, partial refresh, rejection, and option reconciliation) from src/tests/acp_gemini.rs into src/tests/opencode_config.rs and wire the module in src/tests/mod.rs. Preserve behavior and test names; keep this separate from feature changes.",
+  "acceptance": [
+    "On master, the OpenCode dynamic-config test suite lives in src/tests/opencode_config.rs, registered by `mod opencode_config;` in src/tests/mod.rs, and src/tests/acp_gemini.rs contains no test function whose name begins with opencode_ (struct fields such as opencode_mode are not tests).",
+    "Every opencode_ test that was in src/tests/acp_gemini.rs before the split exists on master under its original name, or under a recorded rename made by the commit that moved it; the two renames in 6e9b1b87 are recorded on this item.",
+    "The move was not a separate pure-move commit: it landed inside feature commit 6e9b1b87. This is recorded as accepted history, not reworked."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verification-only closure. The OpenCode config test suite moved from src/tests/acp_gemini.rs into src/tests/opencode_config.rs, registered in src/tests/mod.rs, inside feature commit 6e9b1b87 (an ancestor of master 1495e8d3). All 19 original tests are on master, 2 of them under renames recorded on the item. The missing separate pure-move commit is accepted as history (Fable2 concurrence d974dda1). Independent evaluation 3f3c4c0f passed 3/3.",
+    "completed_at": "2026-10-15T15:29:19.141333500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

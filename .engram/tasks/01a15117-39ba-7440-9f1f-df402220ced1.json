@@ -1,0 +1,53 @@
+{
+  "id": "01a15117-39ba-7440-9f1f-df402220ced1",
+  "external_ref": null,
+  "title": "Land the bounded read-only persistence writer observer",
+  "outcome": "Land the isolated observer slice so natural-load persistence latency can be measured after the new build is installed and Greg restarts the host; keep parent latency diagnosis and repair open.",
+  "acceptance": [
+    "The read-only GET /api/diagnostics/persistence endpoint exposes a bounded current tick and the latest 16 completed ticks: phase and age, the eight existing persistence phase durations, drain/bookkeeping/loop duration, serialized byte and item counts, StateInner collection wait versus hold time, and fence counts and age. It acquires neither StateInner nor SQLite, enqueues no work, and returns no persisted payloads or paths. Unavailable channel depth is null, and fence age is documented as an upper bound starting at construction.",
+    "The observer preserves persistence scheduling, timeouts, acknowledgements, retry/admission behavior, SQLite settings, and persisted schemas. Focused tests pass for bounded storage, passive reads, phase and byte accounting, lock separation, real SQLite and fence acknowledgement behavior, error preservation, and the HTTP read-only contract.",
+    "The exact observer landing input has a passing maintained full gate and an independent read-only Codex/Claude review pair with no outstanding in-scope Medium-or-higher finding, with any authorized capacity substitute recorded. Landing this observer does not close the parent latency diagnosis or establish its cause; live measurements require a host running this build."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "gate-load",
+    "host-persistence",
+    "observer-slice",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed the bounded read-only persistence writer observer on origin/master as 364dd446a90da672e7cc5ad0485f70225025b2be; exact reviewed/gated tree62fda892, parent4eb9b914. Focused tests11/0/0, maintained full gate5/5, independent acceptance3/3 passed. Parent latency diagnosis remains open; installation is deferred under coordinator QUIET hold.",
+    "completed_at": "2026-10-21T06:26:15.616020300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

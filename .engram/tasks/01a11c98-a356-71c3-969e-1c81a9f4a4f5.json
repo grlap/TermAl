@@ -1,0 +1,28 @@
+{
+  "id": "01a11c98-a356-71c3-969e-1c81a9f4a4f5",
+  "external_ref": null,
+  "title": "Read-only Claude Bash refusal says \"unbalanced quotes\" when a balanced quoted operator sits on a line with a non-git/grep/rg command",
+  "outcome": "Read-only Claude Bash refusal says \"unbalanced quotes\" when a balanced quoted operator sits on a line with a non-git/grep/rg command",
+  "acceptance": [
+    "Read-only Claude Bash refusal says \"unbalanced quotes\" when a balanced quoted operator sits on a line with a non-git/grep/rg command is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "read-only-delegation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1c7dc-1429-75d1-819e-b1fd66b7544a",
+  "external_ref": null,
+  "title": "Specify and test zero-execution outcomes for registered Vitest verification",
+  "outcome": "Registered Vitest verification has an explicit behavior for a successful process whose filter executes no tests, supported by behavioral evidence rather than assumed test counts.",
+  "acceptance": [
+    "A behavioral case covers a Vitest filter selecting zero executed tests and records the actual classification/outcome/count evidence.",
+    "Any tightened passing-Test policy uses validated runner evidence and applies consistently to direct Node and existing Vitest routes; no summary text or client label substitutes for that evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-launcher",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a17168-1800-7f52-9e11-69baf399e967",
+  "external_ref": null,
+  "title": "engram-host-adapter.md under-lists the barriers that exclude an automatic-retry queue hold",
+  "outcome": "engram-host-adapter.md under-lists the barriers that exclude an automatic-retry queue hold",
+  "acceptance": [
+    "engram-host-adapter.md under-lists the barriers that exclude an automatic-retry queue hold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

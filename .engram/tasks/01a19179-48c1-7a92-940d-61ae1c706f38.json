@@ -1,0 +1,28 @@
+{
+  "id": "01a19179-48c1-7a92-940d-61ae1c706f38",
+  "external_ref": null,
+  "title": "A WSL2, VM or container guest reached at its own address is classified as another machine though it can write central worktrees",
+  "outcome": "A remote proxy whose SSH remote is a guest on this machine (a WSL2 distro in NAT networking reached at its 172.x address or a name resolving to it, a Hyper-V or a Docker guest) is not left out of the credit count of writers. Today the connection observer in src/engram_host_identity.rs (engram_address_is_this_machine) sees that no Windows interface holds the guest's address and classifies the connection as Elsewhere. The guest can still write a central worktree through /mnt/c/… or a bind mount, so a focused check, which the watcher does not cover, could be credited while the guest writes. The common WSL setup reached through localhost is already handled. Either the coordinator rules such guests unsupported and the docs name them beside the share and routed-back cases, or a destination inside a local virtual adapter's subnet (vEthernet) counts as possibly this machine, with a test.",
+  "acceptance": [
+    "Either a coordinator note rules WSL2, VM and container guests reached at their own address unsupported and docs/test.md names them beside the existing unsupported configurations, or a destination inside the subnet of a local virtual adapter is classified maybe this machine and a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "credit",
+    "federation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

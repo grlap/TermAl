@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7e1-7861-b10f-11c148c9bedf",
+  "external_ref": "tm-xn1",
+  "title": "Extract oversized session scroll and virtualization controllers",
+  "outcome": "The active architecture review threshold is exceeded by ui/src/SessionPaneView.scroll.ts and ui/src/panels/VirtualizedConversationMessageList.tsx. Extract cohesive state-machine, measurement, or controller seams without changing live-tail ownership, user-detach behavior, bounded-history alignment, or virtualizer imperative contracts. Add focused tests around each extracted boundary.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

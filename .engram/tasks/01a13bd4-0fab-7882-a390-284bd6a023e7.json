@@ -1,0 +1,36 @@
+{
+  "id": "01a13bd4-0fab-7882-a390-284bd6a023e7",
+  "external_ref": null,
+  "title": "Cover network paths, host basename resolution and approval-mode controls for trusted Engram help",
+  "outcome": "The help exception has permission-seam coverage for stated executable and approval-mode boundaries, including successful host-controlled basename resolution and file aliases.",
+  "acceptance": [
+    "Production permission-seam tests deny network and UNC executable spellings, cover host-controlled bare configured-program resolution, and prove the help exception does not independently allow a request outside ReadOnlyAutoApprove.",
+    "Identity controls admit a canonical symlink alias when supported and refuse distinct copied or hard-linked path identities under the documented canonical-path contract; unsupported platform capabilities are stated explicitly.",
+    "The maintained gate passes on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "read-only-gate",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,50 @@
+{
+  "id": "01a11f0b-17f7-7411-ab58-5f050b78456a",
+  "external_ref": null,
+  "title": "Reviewer-MCP tests synchronize on 2-3 s wall-clock recv_timeout bounds and fail under host load",
+  "outcome": "The reviewer-MCP startup and control tests synchronize on the events they wait for, not on short wall-clock bounds, so the full Rust suite is deterministic under host load. This covers codex_reviewer_mcp_startup.rs (2 s) and the shared next_command helper in codex_reviewer_mcp_controls.rs (3 s).",
+  "acceptance": [
+    "Every test-synchronization wait in the reviewer-MCP test files (src/tests/codex_reviewer_mcp_*.rs: startup, controls, send_controls, regressions, terminal_controls, settlement_controls, lifecycle, and any other file in that module), including the shared next_command and join_worker helpers and the tokio timeouts, waits for the event it needs, with no wall-clock bound short enough to fire under host load. Any remaining bound is the one shared, documented liveness-guard constant (crate::TEST_PHASE_DEADLOCK_GUARD), applied to each wait, sized so it cannot fire on a merely slow host, and never a synchronization point. The holder's note lists each wait changed, with file:line.",
+    "A test that delays the awaited event well beyond the old bound (for example, a worker held back by a barrier that the test releases late) passes after the change and would have failed with the old bound. It is shown failing on the unchanged code first.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex-reviewer-mcp",
+    "test-defect",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The reviewer-MCP tests now wait for the events they need, not 2-3 s wall-clock bounds. Every wait uses the one shared liveness-guard constant crate::TEST_PHASE_DEADLOCK_GUARD, through await_event or receive_before_cleanup. A new regression test holds settlement past the old bound and was shown failing on the unchanged code first. Commit 2597fcb2 was gated (record 2625f18a) and reviewed clean (Codex c4331d27, Claude c4f609e2), and evaluation 364c96f6 passed 3/3 on revision 5. Termal::Opus2 landed it as a fast-forward 1cb6bf91 -> 2597fcb2 on origin/master, confirmed in mailbox a2b548b7 #2 at 21:16:25Z and checked by me with ls-remote. No install: the change is test-only. Lows are filed as w-0cacbdc03919 and w-029d9276dfe7.",
+    "completed_at": "2026-10-09T21:17:11.537907900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

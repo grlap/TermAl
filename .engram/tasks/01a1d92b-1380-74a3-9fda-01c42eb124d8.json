@@ -1,0 +1,24 @@
+{
+  "id": "01a1d92b-1380-74a3-9fda-01c42eb124d8",
+  "external_ref": null,
+  "title": "Align remaining raw queue counts with the delivery-history rule (Codex re-archive compensation, actionableQueuedCount)",
+  "outcome": "Callers that decide whether a session has queued work use the shared delivery-history rule (backend session_has_runnable_queued_prompt / queued_prompt_is_delivery_history; UI runnableQueuedPrompts), so a queue holding only settled delivery history does not block Codex delegation re-archive compensation (src/codex_delegation_release.rs rearchive_undispatched_codex_child, raw queued_prompts.is_empty()) and AgentSessionPanel's actionableQueuedCount uses the same history test as the shared rule (today it counts rejected rows and excludes handingOff ones). Found by the Claude reviewer (delegation-788c90ad) of the historical-queue-row fix; outside that change's scope; neither reproduces its reported symptoms.",
+  "acceptance": [
+    "Align remaining raw queue counts with the delivery-history rule (Codex re-archive compensation, actionableQueuedCount) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

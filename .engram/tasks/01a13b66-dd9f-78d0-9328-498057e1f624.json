@@ -1,0 +1,36 @@
+{
+  "id": "01a13b66-dd9f-78d0-9328-498057e1f624",
+  "external_ref": null,
+  "title": "An in-progress dedicated cleanup can leave a terminal child spuriously failed and paused",
+  "outcome": "A terminal-delegation poll racing unfenced natural dedicated-runtime cleanup treats the owner as busy, and later successful confirmation cannot leave a new stale cleanup Error/pause.",
+  "acceptance": [
+    "RuntimeCleanupPhase::InProgress is distinguished from Unconfirmed when a terminal child is polled; a real failed cleanup retains its existing Error, exact retry owner and public Stop path.",
+    "A deterministic owned-native-process race delivers a terminal poll while natural waiter cleanup is in progress, then confirms cleanup and proves the poll does not leave a spurious failed preview or automatic-dispatch pause; a failed-cleanup control still reports and retains failure."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "process-lifecycle",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

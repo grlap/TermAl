@@ -1,0 +1,29 @@
+{
+  "id": "01a1b4aa-3d30-79a1-abd2-0e37ad3ca5ac",
+  "external_ref": null,
+  "title": "Native send to a remote session right after a host restart returns 423 'federation persistence is settling; retry' before any receipt",
+  "outcome": "A native termal_send_to_session to a remote host-qualified session shortly after a TermAl host restart either succeeds or is queued durably with a receipt, or it fails with a refusal that says whether the message was saved. The sender doesn't have to resolve an unknown outcome while federation persistence settles.",
+  "acceptance": [
+    "Native send to a remote session right after a host restart returns 423 'federation persistence is settling; retry' before any receipt is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

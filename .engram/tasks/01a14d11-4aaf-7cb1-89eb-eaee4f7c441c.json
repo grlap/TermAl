@@ -1,0 +1,29 @@
+{
+  "id": "01a14d11-4aaf-7cb1-89eb-eaee4f7c441c",
+  "external_ref": null,
+  "title": "A canceled delegation's session stays registered (idle) with its runtime working in the worktree, so `git worktree remove` of that clean worktree fails with \"Permission denied\"",
+  "outcome": "A canceled delegation's session stays registered (idle) with its runtime working in the worktree, so `git worktree remove` of that clean worktree fails with \"Permission denied\"",
+  "acceptance": [
+    "After termal_cancel_session returns canceled for a delegation, the child's runtime process (and any process it started) no longer holds the child's working directory open within a bounded time, so `git worktree remove` of a clean worktree succeeds (Windows test or a documented, verified procedure).",
+    "If the host cannot release the directory, the cancel result or the session state says so explicitly (which process or handle remains) instead of reporting a plain \"canceled\"."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "lifecycle",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

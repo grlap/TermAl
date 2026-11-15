@@ -1,0 +1,28 @@
+{
+  "id": "01a18abb-fd26-7380-8e90-214437118fcf",
+  "external_ref": null,
+  "title": "A late writer recreates a termal-delegation-* test temp root's state/termal.sqlite after its guard removed it",
+  "outcome": "The test whose state outlives its TestTempRoot is named with the late writer's thread and stack. That test waits for or joins the writer (or drops every state-owning handle) before its guard drops, so no full gate leaves a residual termal-delegation-* root, and the launcher's temp-cleanup guard passes on DL560 and Windows.",
+  "acceptance": [
+    "Every AppState booted on a temp_delegation_state_paths root holds that root, so the root is removed only after its last AppState clone drops; a source-lock test fails if a test boots AppState::new_with_paths on such a root without attaching it; the full gate is green on the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "blocking-landing",
+    "flaky-cause",
+    "test-isolation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

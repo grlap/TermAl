@@ -1,0 +1,27 @@
+{
+  "id": "01a123b0-aab2-76d2-8b38-d699624ac61a",
+  "external_ref": null,
+  "title": "Move begin_guard_deadline next to Begin's call bound in engram_begin_replay.rs",
+  "outcome": "EngramBindingTarget::begin_guard_deadline lives in src/engram_begin_replay.rs beside begin_rpc_timeout_until (whose module keeps Begin's call bound out of the large adapter file), and that module's ownership header names it; engram_host_adapter.rs only calls it.",
+  "acceptance": [
+    "Move begin_guard_deadline next to Begin's call bound in engram_begin_replay.rs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "host-persistence",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

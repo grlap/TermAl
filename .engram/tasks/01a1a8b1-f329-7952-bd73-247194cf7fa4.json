@@ -1,0 +1,29 @@
+{
+  "id": "01a1a8b1-f329-7952-bd73-247194cf7fa4",
+  "external_ref": null,
+  "title": "Check retained queue and absence of a WAL request after the controlled selected-resume409",
+  "outcome": "The controlled receipted stale-selection regression also proves its409 leaves queue/history untouched and requests no write-ahead fence.",
+  "acceptance": [
+    "After the exact409 refusal, repeat the existing queue/history/pause assertions and assert that the receipt writer received no write-ahead fence; preserve all current negative checks.",
+    "Focused receipt coverage passes without changing production refusal or durability semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "human-queue",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

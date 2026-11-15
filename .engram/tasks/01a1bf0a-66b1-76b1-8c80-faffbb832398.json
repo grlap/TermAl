@@ -1,0 +1,29 @@
+{
+  "id": "01a1bf0a-66b1-76b1-8c80-faffbb832398",
+  "external_ref": null,
+  "title": "Native mailbox wake leaves an on-request Codex session held on 'Codex needs MCP input' with no one to answer",
+  "outcome": "It is established what a Codex session with approvalPolicy on-request asks for when woken by native mail, and such a session can handle its mail, or the host says clearly that it can't, instead of sitting silently held.",
+  "acceptance": [
+    "The exact pending request of a held session is established from source or a supported read, and the host surfaces enough of it for an operator or agent to see what is being asked.",
+    "Whether an on-request Codex session can handle native mail without a person is stated with evidence; if it can't, sending or listing shows that limit, or a fix lands with a behaviour test, a review pair with no Medium or higher, and the normal gate. No approval is clicked on anyone's behalf, and no policy is changed silently."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "mailbox",
+    "needs-triage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

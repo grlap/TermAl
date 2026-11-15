@@ -1,0 +1,27 @@
+{
+  "id": "01a0f409-ff5a-75f1-8164-ee720eef4971",
+  "external_ref": null,
+  "title": "Rustfmt drift in the files the bound-claims change touched",
+  "outcome": "Rustfmt drift in the files the bound-claims change touched",
+  "acceptance": [
+    "`cargo fmt --check` reports no difference for src/acceptance_evaluation_api.rs, src/tests/acceptance_evaluation.rs, src/tests/acceptance_evaluation_source.rs and src/tests/engram_source_root_naming.rs, and the change is formatting only."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "formatting"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a11d18-6b71-7ca1-9ce4-adca48037bf5",
+  "external_ref": null,
+  "title": "Preserve non-secret host causal codes instead of redacting them as credentials",
+  "outcome": "Host-owned authorization and routing-token-unavailable codes remain readable while request secrets are still safely redacted before persistence.",
+  "acceptance": [
+    "Preserve non-secret host causal codes instead of redacting them as credentials is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-diagnostics",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

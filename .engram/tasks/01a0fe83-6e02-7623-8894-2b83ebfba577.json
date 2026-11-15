@@ -1,0 +1,27 @@
+{
+  "id": "01a0fe83-6e02-7623-8894-2b83ebfba577",
+  "external_ref": null,
+  "title": "Clear omitted empty queue fields in loss-repair replacement projections",
+  "outcome": "Clear omitted empty queue fields in loss-repair replacement projections",
+  "acceptance": [
+    "Clear omitted empty queue fields in loss-repair replacement projections is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "conversation-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,46 @@
+{
+  "id": "01a1397f-9bfa-7982-8914-6231b6df1f43",
+  "external_ref": null,
+  "title": "Admission refusal wording misidentifies alternate shell-parser failure as a path or expansion rejection",
+  "outcome": "A recognized command refused because a conservative alternate shell-word reading is unavailable receives an accurate quoting/escape refusal, with all admission guards preserved.",
+  "acceptance": [
+    "Feedback distinguishes unavailable alternate shell quoting/escape interpretation from outside-path or expansion rejection without relaxing admission guards.",
+    "A regression drives the differing ordinary/Bash parser reading and asserts the accurate refusal plus no passing verification.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-recognition",
+    "codex",
+    "coordination-cost",
+    "host-recording",
+    "review-followup",
+    "severity-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1216b-df1d-7343-834d-c53817fab911",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

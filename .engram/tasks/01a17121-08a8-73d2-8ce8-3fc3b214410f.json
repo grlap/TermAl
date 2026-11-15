@@ -1,0 +1,27 @@
+{
+  "id": "01a17121-08a8-73d2-8ce8-3fc3b214410f",
+  "external_ref": null,
+  "title": "A focused cargo filter can silently miss newly added tests (they compile but don't run), and the run still reads as passing evidence for them",
+  "outcome": "A focused run offered as evidence for new tests shows which tests actually executed, and a run whose filter selected none of the named new tests can't be reported as passing them.",
+  "acceptance": [
+    "A focused cargo filter can silently miss newly added tests (they compile but don't run), and the run still reads as passing evidence for them is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "launcher",
+    "test-evidence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

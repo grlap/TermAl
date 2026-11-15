@@ -1,0 +1,32 @@
+{
+  "id": "01a18a69-521a-7d31-a3b7-1b3d8e11db41",
+  "external_ref": null,
+  "title": "Deferred containment Stop waits for the project reset fence even when retry slots are free",
+  "outcome": "Decide and implement the intended ordering for immutable exact-owner containment Stops during a project reset: allow safe interruption before the reset fence releases, or document and test the bounded fence-release delay, while preserving rollback/durability and grant settlement exclusions.",
+  "acceptance": [
+    "The intended Stop timing relative to the project reset fence is documented and covered by a deterministic test with free scheduler slots and settlement held; exact runtime/turn ownership and durable obligation exclusion remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "outage",
+    "review-low",
+    "stop-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a188dd-2eb5-7c30-b8b5-3af0aab58d4c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1bdc9-269d-77a0-87c3-16d0e2cc86be",
+  "disposal_reason": "Fable2722 authorizes obsolete gated-control sweep. Completed ancestor w3af0 blocks this child's execution; use the tracker-advertised independence action solely to record obsolete removal provenance and cancel, not to revive the removed containment mechanism or claim a test.",
+  "completion": null
+}

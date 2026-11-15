@@ -1,0 +1,65 @@
+{
+  "id": "01a118fe-577c-7b13-aede-48618ba39f11",
+  "external_ref": null,
+  "title": "Expose a root continuation's original causal failure in session, result card and durable diagnostics.",
+  "outcome": "Deliver bounded safely redacted causal diagnostics for held root continuations in normal session/result-card and durable record, without changing recovery behavior. Fully validate and review exact diagnostic input; close only after authorized landing. A future observed stop gets a new narrowly scoped proven-cause bug; no speculative recovery expansion.",
+  "acceptance": [
+    "A held root continuation retains a bounded, safely redacted causal record: operation, original failure class/code/message, component boundary, correlation/attempt identity, remote-application certainty or uncertainty, and the reason continuation is held. Distinct Evaluate, Begin and closing-checkpoint failures are attributed to the correct owning operation through the production queue/control path; unknown history and intentional operator holds without an original failure are described honestly, not invented.",
+    "The causal record survives the actual message-writer commit and durable reload and is exposed by the normal session/result-card renderer. Deterministic capture/persistence and actual UI-consumer tests cover the same optional causal field, original actionable reason and redaction; absent legacy fields remain compatible. Scripted producer, synthetic UI messages and unavailable live-store/running-browser evidence are identified explicitly rather than represented as end-to-end proof.",
+    "Diagnostic capture and presentation preserve the exact retained prompt/head and existing owner/grant/attempt/generation, Stop/Cancel/operator-pause, replacement/reset/revocation, stale-response and persistence fences. This change adds no automatic reconciliation, retry scheduling, fresh-key probe, generic unpause or new authority; existing useful diagnostic-capture and negative-control tests remain.",
+    "The exact final diagnostic input passes the maintained five-stage full gate compiled in this item's named source root and an actual independent read-only Codex plus Claude complete-change review with no outstanding in-scope Medium or higher; unfixed Lows are filed separately. Historical failed runs, missing original incident evidence and remaining verification limits stay attributed, without declaring an unproved original cause or automatic recovery fixed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "autonomy",
+    "diagnosis-required",
+    "host-recording",
+    "mailbox",
+    "sev0"
+  ],
+  "assigned_to": "Termal::Coder",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed: a held root continuation keeps a bounded, redacted causal record of its original failure on the Engram control card. The record holds the owning operation, failure class and original code, a value-free message, the boundary, the exact request's idempotency key, remote-application certainty and the hold reason. It survives the writer commit and reload, and the normal card renderer shows it. All persisted or rendered diagnostic text is constant categories and structural field paths. Typed parse errors on warm and cold recovery keep their exact request attribution. Publication follows the exact message's writer ACK through a non-blocking fence hook, so lifecycle and admission timing are unchanged. No recovery, scheduler, decision-policy, key or watchdog change. Commit 53ee9c6583d8e98704986b095abc344ed5fc24b1 (tree aa0e12f2) was fast-forwarded to origin/master by Termal::Opus2.",
+    "completed_at": "2026-10-09T02:21:49.187009100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a16d27-199f-75d3-9735-eab4a74c23fe",
+  "external_ref": null,
+  "title": "Remove elapsed wall-clock dependence from the terminal-carry retirement regression",
+  "outcome": "Remove elapsed wall-clock dependence from the terminal-carry retirement regression",
+  "acceptance": [
+    "The terminal-carry positive control keeps a known exact margin independent of elapsed time between the launch and first terminal read, while preserving nearby ambiguous-running and distant eligible controls.",
+    "Focused carried-check regressions pass and the change receives the required independent source review without reducing assertions or inflating timeouts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "review-low",
+    "test-determinism"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

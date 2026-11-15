@@ -1,0 +1,32 @@
+{
+  "id": "01a17241-96f6-7ab1-a332-507f2f7110d1",
+  "external_ref": null,
+  "title": "Explain held relay queue heads and their effect on unrelated automatic work",
+  "outcome": "An idle root whose relay carrier is held exposes an actionable reason instead of appearing silently stuck; automatic bypass remains subject to an explicit product decision.",
+  "acceptance": [
+    "Held relay head status explains disable/revoke/unavailable metadata without claiming delivery or empty history.",
+    "Controls preserve relay authority/Stop/retained-preparation boundaries; any automatic-work bypass expansion has separately recorded product authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-host",
+    "greg-reported",
+    "mailbox",
+    "mailbox-relay",
+    "review-followup",
+    "ux"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1711f-eab5-7671-a7e1-559787f77f80",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c505-7093-9086-5cc74b7d7166",
+  "external_ref": "tm-fgwi",
+  "title": "Allow a delegation cwd in a linked git worktree of the project's repository",
+  "outcome": "Reported by Engram::Opus (2026-09-25 ~03:4x UTC). termal_spawn_session for read-only reviewers (Codex and Claude, mode reviewer) with cwd C:\\tmp\\engram-family, a linked worktree of the Engram repository created with git worktree add, returned 400 'delegation cwd ... must stay inside project Engram' (containment check in src/delegations.rs:534 via src/paths.rs). Agents keep parallel changesets in linked worktrees outside the project folder because a worktree inside it shows up as an untracked directory and drifts the main worktree's review-freeze fingerprint and gate input (it invalidated one of Engram's gates). So reviewers cannot be pointed at a separate worktree. Suggested: accept a cwd that the project repository's own 'git worktree list --porcelain' reports as one of its worktrees (canonicalized, resolved off the state lock, same repository only, so project scoping still holds), or let a project declare extra allowed roots. Workaround meanwhile: a worktree inside the project under a gitignored directory (TermAl uses .tmp/).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

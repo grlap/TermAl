@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-89a46ca27a11",
+  "external_ref": "tm-7cu.15",
+  "title": "Recheck marker-create freshness after persisted anchor resolution",
+  "outcome": "Conversation marker creation resolves persisted anchors outside the state lock but, unlike marker update, does not perform a compare-and-swap freshness recheck before committing. Concurrent transcript or session mutation can make the resolved anchor positions stale by the time the marker is inserted.",
+  "acceptance": [
+    "Marker creation captures the relevant session revision or mutation stamp, resolves anchors, and rechecks freshness before committing. On concurrent mutation it retries safely or returns a deterministic conflict without storing stale anchors. Add a create-path race regression matching the update-path protection."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

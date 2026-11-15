@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d9-3a30-7603-a635-9ebadc01e428",
+  "external_ref": null,
+  "title": "A lost-shell command of any writable session marks every open check on the host as overlapped, across repositories, silently",
+  "outcome": "A lost-shell command of any writable session marks every open check on the host as overlapped, across repositories, silently",
+  "acceptance": [
+    "A command of a session whose shell TermAl cannot follow no longer marks every open check on the host: when each of its line's directory changes names an absolute literal target and nothing on the line may hide a change, it marks only the open checks whose worktree is among the places that shell may be — where it was, where a pending move leads, and those targets, at most 32 places; any other change counts in every worktree, for that command and for the lost shell's later commands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "PI-26",
+    "host-recording",
+    "post-import"
+  ],
+  "assigned_to": "Termal::Opus2 (session-8111)",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

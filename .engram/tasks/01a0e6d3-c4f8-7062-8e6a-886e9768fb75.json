@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4f8-7062-8e6a-886e9768fb75",
+  "external_ref": "tm-e7tp",
+  "title": "Fresh browser opens Control panel with unknown workspace URL and attempts background PUTs",
+  "outcome": "Observed on 2026-09-07 UTC during a passive, read-only browser session against http://127.0.0.1:8787. Served and loaded bundle: /assets/index-c6wjlS51.js (aae1f91 UI). A new isolated headless Chrome profile under the product temp root opened / once. No clicks, session selection, scrolling, resizing, layout changes, prompts, or reloads were performed. The app changed its local address to /?workspace=workspace-71e5bab2-e6a2-448a-9179-4d8fc35c9ead. GET /api/workspaces/workspace-71e5bab2-e6a2-448a-9179-4d8fc35c9ead returned HTTP 404. Two DOM inspections showed the selected Control panel tab, one message-stack.control-panel-stack, and zero active session-conversation-page elements. The app attempted 16 PUT requests to that same workspace endpoint before the browser was closed at 2026-09-07T05:30:06.164Z. A request guard installed before navigation blocked every non-read request before it reached the server. Therefore this records repeated ATTEMPTS under a write-blocked observer, not successful writes or the behavior after a successful initial PUT. No page errors or asset 404s were recorded. No conclusion is made about intended fresh-browser behavior or a fix. This observation is separate from the transcript scroll defects and did not reproduce an append refresh. Evidence and execution boundaries are retained in TermAl Scroll/Fable mailbox messages 288-291. Observer context is closed; its exact temporary profile was later independently verified absent. Requested by Fable message 292 as a standalone factual investigation item.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

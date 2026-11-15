@@ -1,0 +1,27 @@
+{
+  "id": "01a121c2-0b3d-7de2-ac84-ef9f30e9f8ef",
+  "external_ref": null,
+  "title": "Launcher test barrier waiters wait for their owner to die instead of failing fast when a sibling process crashes",
+  "outcome": "A barrier waiter in scripts/test-launcher.test.mjs (for example the notification fixture with FIXTURE_NOTIFICATION_BARRIER=4) ends promptly with a named failure when a sibling it waits for exits early. It does not wait until the test's 600 s liveness guard fires, and it still never uses a deadline.",
+  "acceptance": [
+    "Launcher test barrier waiters wait for their owner to die instead of failing fast when a sibling process crashes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

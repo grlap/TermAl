@@ -1,0 +1,29 @@
+{
+  "id": "01a166c0-1cec-7a31-818d-ae823d6c8b72",
+  "external_ref": null,
+  "title": "Decide whether the plain stale-descriptor federation test should stay strict (first retry 409) instead of following the retryable-503 contract",
+  "outcome": "A recorded coordinator decision on whether federation_delivery_capability_stale_descriptor_is_not_retargeted_to_recreated_recipient keeps the bounded, invariant-checked contract retry for documented retryable 503s, or becomes strict again with the retry kept only in the scripted-outage variant.",
+  "acceptance": [
+    "The coordinator records which behaviour the plain variant should have, citing the trade-off: strict detection of an unexplained load 503 versus following the documented intent-retry contract.",
+    "If the decision is strict, the plain variant asserts 409 on the first retry, the bounded retry stays only in the scripted-outage variant, and the module's tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "federation",
+    "review-low",
+    "test-stability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Decided, no change: the plain variant keeps its contract-following bounded retry (decision note, Fable2 03:17Z on 10-23).",
+  "completion": null
+}

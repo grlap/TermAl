@@ -1,0 +1,32 @@
+{
+  "id": "01a1dc3c-7043-7ed0-a0d0-85e81f061f2f",
+  "external_ref": null,
+  "title": "Make malformed Kimi permission-choice dismissal visible",
+  "outcome": "A Kimi permission request dismissed because its choices cannot be interpreted leaves a useful visible diagnostic without restoring generic first-option approval.",
+  "acceptance": [
+    "Malformed Kimi choices remain rejected/cancelled without fabricating an answer and produce a useful log or resolved transcript notice explaining the dismissal.",
+    "Behavioral coverage observes the diagnostic for invalid choices and confirms no pending generic approval and no selected answer are created."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "greg-reported",
+    "kimi",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dbb6-58b9-7cf1-9bc0-65b096fb3238",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

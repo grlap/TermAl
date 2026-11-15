@@ -1,0 +1,31 @@
+{
+  "id": "01a1754d-b898-7f50-900f-b649856b6c98",
+  "external_ref": null,
+  "title": "Pin lazy-root ordinary admission behavior when the rebind status process never starts",
+  "outcome": "A lazy settled root's first admission during a certified never-started session_status failure has an explicit documented availability contract and discriminating coverage without weakening uncertain-grant or local durability boundaries.",
+  "acceptance": [
+    "Record the intended eligibility of fresh NotStarted session_status control-process failures for ordinary local root admission after lazy boot, distinguishing uncertain grants and restored causes.",
+    "Add a regression through lazy boot and first admission that pins the chosen status-read failure behavior while preserving strict uncertainty and local write controls."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "boot-recovery",
+    "engram-host-adapter",
+    "p0-profiling-2026-10-22",
+    "performance",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16500-237d-7433-add7-9a356000735e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

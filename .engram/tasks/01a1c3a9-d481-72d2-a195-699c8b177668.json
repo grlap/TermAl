@@ -1,0 +1,31 @@
+{
+  "id": "01a1c3a9-d481-72d2-a195-699c8b177668",
+  "external_ref": null,
+  "title": "Cover final delegation capacity admission after a concurrent create passes the precheck",
+  "outcome": "A behavioral race-seam test separately exercises the final locked-insertion per-request capacity check, preserving total six for incoming read-only reviewers and total four otherwise, with no child created by a refused request.",
+  "acceptance": [
+    "A deterministic controlled race or existing seam lets another delegation become nonterminal between the initial precheck and final insertion check; the later request is refused with the actual total and its applicable limit.",
+    "The refused request leaves no child delegation/session or isolated worktree, and coverage distinguishes read-only reviewer capacity from another supported request kind without source-text or instruction-file assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "review",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

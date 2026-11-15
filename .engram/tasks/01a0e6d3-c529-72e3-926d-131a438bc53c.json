@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c529-72e3-926d-131a438bc53c",
+  "external_ref": "tm-hsif",
+  "title": "Bound shared Codex exit claim bookkeeping",
+  "outcome": "shared_codex_exit_claims is insert-only and can grow without bound across runtime exit/restart cycles.",
+  "acceptance": [
+    "Exit claims are removed or compacted after their deduplication window without permitting duplicate runtime-exit handling; stress coverage proves bounded state."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

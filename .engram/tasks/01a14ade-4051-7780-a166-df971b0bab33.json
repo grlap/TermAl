@@ -1,0 +1,29 @@
+{
+  "id": "01a14ade-4051-7780-a166-df971b0bab33",
+  "external_ref": null,
+  "title": "Handoff ledger: diagnose a terminal prerequisite whose run stays unknown for a reason other than a gone process",
+  "outcome": "Handoff ledger: diagnose a terminal prerequisite whose run stays unknown for a reason other than a gone process",
+  "acceptance": [
+    "Handoff ledger: diagnose a terminal prerequisite whose run stays unknown for a reason other than a gone process is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "greg-directed",
+    "reliability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14a88-8e97-7391-a2a5-d9f93ea08fd2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

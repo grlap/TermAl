@@ -1,0 +1,43 @@
+{
+  "id": "01a176bb-eea7-7c30-87fa-a72e0004717c",
+  "external_ref": null,
+  "title": "Native authority fixture rejects UUID-based work-context generations during advisory nudges",
+  "outcome": "The native authority fixture accepts identities emitted by TermAl's current production context-nudge path, while malformed identities and unrelated authority/argv/environment violations remain rejected; nested advisory context nudges report success without production changes.",
+  "acceptance": [
+    "A focused regression invokes the unchanged production run_engram_context_nudge path against the native authority fixture, reproduces the current UUID-plus-positive-counter rejection before repair, and passes afterward with the expected context output and successful nested child result.",
+    "The fixture validates the actual termal-<host UUID>-<positive u64 counter> identity using an existing production parser if available; otherwise reuse the existing UUID and integer parsing primitives. The positive regression obtains its argument from the production path rather than duplicating its formatter. Malformed UUIDs, missing or zero counters, invalid/overflowing counters and wrong prefixes remain rejected.",
+    "Preserve the fixture's exact argv layout, project/home/actor/session/context environment checks and authority-refusal controls. Existing public Stop and MCP assertions remain unchanged, and their advisory context nudge succeeds with no generation-mismatch child failure.",
+    "Keep the repair and new controls test-only; production behavior and identity format remain unchanged. Preserve the original nested failure and main-versus-nested result attribution, and attach focused checks plus the required independent whole-change review evidence to the final input, and the maintained full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "context-generation",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

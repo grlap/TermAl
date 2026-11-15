@@ -1,0 +1,29 @@
+{
+  "id": "01a1a1f1-3c48-7bf0-a89a-77168fa20782",
+  "external_ref": null,
+  "title": "A merger reading an author's cited review result gets 404 \"review attempt has no confirmed publication\"",
+  "outcome": "An eligible root of the original review project (such as the Engram Merger) can read a review attempt's published structured result by delegation id, attempt and result id when the author cites it as clean, or receives a precise reason (for example custody rows missing after a restart, or the attempt never published) and a supported recovery route.",
+  "acceptance": [
+    "For the two reported attempts (Codex delegation 94507c51…, attempt 1, result 14cd14d8…; Claude delegation 083c0411…, attempt 2, result 68c64a3f…), the reason termal_get_session_result returns 404 at delegation_review_attempts.rs:372 (no review custody rows) is established: never published, custody lost (for example across restart #3), or a project-basis / eligibility mismatch.",
+    "Either the published results become readable through the supported route, or the error names the specific cause and a recovery path; a regression test covers the established case and the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation-mcp",
+    "merger",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

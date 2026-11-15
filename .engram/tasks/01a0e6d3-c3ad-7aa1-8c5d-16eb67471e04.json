@@ -1,0 +1,35 @@
+{
+  "id": "01a0e6d3-c3ad-7aa1-8c5d-16eb67471e04",
+  "external_ref": "tm-0og",
+  "title": "Delayed dispatch send failure clears a NEWER runtime and fails its turn",
+  "outcome": "Round-9 review (Codex High #4). Pre-existing at HEAD; now fixable because the dispatch carries an attachment.\n\nsrc/api.rs:41/62/78 handle a sender.send(...) failure by unconditionally calling state.clear_runtime(&session_id) and state.fail_turn(...). Neither is guarded. If the old process exited and the session has since attached to a NEW runtime, this destroys the new runtime binding and fails the new attachment's live turn.\n\nFIX DIRECTION: the TurnDispatch::PersistentCodex arm now carries . Guard both calls on it (clear/fail only if the session is still on that attachment).",
+  "acceptance": [
+    "A rejected runtime-command delivery from a superseded dispatch, one whose session has since attached a successor runtime and a newer active-turn generation, neither clears the successor runtime nor fails or changes its turn, and leaves the state revision unchanged; src/tests/session_stop.rs stale_rejected_turn_delivery_does_not_touch_a_successor_runtime shows it.",
+    "A rejected runtime-command delivery from the dispatch that still owns the session clears the dead runtime and records the turn failure in one state transition; src/tests/session_stop.rs rejected_turn_delivery_is_one_atomic_terminal_transition shows it.",
+    "Both tests pass in a full five-stage launcher gate on a tree whose src/ matches current master, cited by run directory and launcher fingerprint."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verification-only closure. A rejected runtime-command delivery is now guarded by the dispatch's runtime token and active-turn generation. In src/api.rs, record_rejected_turn_dispatch calls fail_rejected_turn_delivery, and src/turn_lifecycle.rs claims and re-checks the guard under one lock. So a stale dispatch never clears a successor runtime or fails its turn, and the owning dispatch's rejection is one atomic terminal transition. The fix landed in 7f6052c8, an ancestor of master 8dd0f6ce. Both regressions in src/tests/session_stop.rs passed in full gate test-9a715c89 on a tree whose src/ equals master's. Criteria concurred by Termal::Fable2 (note 5fafff6e). Independent evaluation 90cd4f9bf22d4166b515f9859ad49f7f passed 3/3. No source change.",
+    "completed_at": "2026-10-15T18:52:15.593793900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

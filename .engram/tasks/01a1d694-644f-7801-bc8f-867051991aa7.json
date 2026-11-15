@@ -1,0 +1,27 @@
+{
+  "id": "01a1d694-644f-7801-bc8f-867051991aa7",
+  "external_ref": null,
+  "title": "Integrate combo98 on combo97: 03d4 3ab6 repair 4312e90f carried as b1b842b6 (EO opening refresh, forward work_revision)",
+  "outcome": "The 3ab6 repair is on master as one commit, gated by a full launcher run on the exact tree, reviewed clean, and pushed.",
+  "acceptance": [
+    "Commit b1b842b6fedf81ba815d22bd634a355de4bbc2f6 (tree e99f4d976b3913681a2ad8f4f222d05692108d18, sole parent cca3d3b2e9380cf8772efdde96090385c430f08d = combo97) is on origin/master, where master was moved to it by a fast-forward from cca3d3b2 after combo97 landed; its contribution is byte-identical (git diff --raw --no-abbrev --no-renames) to 03d4's 4312e90f contribution vs 05062f47, as recorded on this item.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is e99f4d97 passed every stage, with equal source ids before and after and an eligible clean input; and Sol-03d4's standalone pair (Codex 17892, Claude 17893) on 05062f47..4312e90f, adopted for the byte-identical contribution, found no Medium or higher outstanding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d78d-e5be-7d50-b3a6-bde8a85463aa",
+  "disposal_reason": "combo98 candidate b1b842b6 is dead. Its FULL failed on the opening-refresh contract (test-908a335f), and its test ref was deleted. The 3ab6 repair was redone by 03d4 as f7185f67, now review-clean and live-verified on master cca3d3b2. It is integrated with 08ff9898 and 7c679622 as combo99 e04feafc under w-bde8a85463aa.",
+  "completion": null
+}

@@ -1,0 +1,52 @@
+{
+  "id": "01a10032-f419-76b2-a61a-a2d34cc16987",
+  "external_ref": null,
+  "title": "Grant-ownership and quarantine tests run real PowerShell readiness under the product's 20 s wall-clock budget, so a machine stall fails tests whose subject is not timing",
+  "outcome": "Tests whose subject is grant ownership, grant retirement or quarantine re-planning under the commit lock (engram_mcp_rechecks_retired_grants_under_the_commit_lock_across_projects, engram_mcp_rechecks_active_grant_ownership_under_the_commit_lock, engram_mcp_quarantine_disappearing_during_validation_preserves_deferred_rotation, and any others that reach real readiness only as setup) no longer fail when one fixture process launch is slow. The product's ENGRAM_READINESS_TIMEOUT (20 s, Greg's doubled value, pinned by load_sensitive_limits.rs) is unchanged, and the readiness deadline stays covered by its own deadline tests.",
+  "acceptance": [
+    "A deterministic witness that doesn't depend on machine load first fails on the unmodified tests: with the setup's readiness launch made to outlast the readiness budget, by a test-only seam and not by real load, the three named tests fail on setup with \"Engram readiness exceeded the 20 second enablement deadline\", although none of them is about readiness timing.",
+    "The fix is test-only or a test seam: tests that use readiness only as setup no longer race a real process launch against the product's wall-clock budget. ENGRAM_READINESS_TIMEOUT and the product's readiness and absence-probe behaviour are unchanged, no product timeout is raised, no retry is added, and the readiness deadline tests still exercise the real budget.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The three grant/quarantine tests no longer race a real PowerShell readiness launch against the product's 20 s budget. A cfg(test) seam stages readiness without a process and expires any real diagnostic launch for their homes. A passing witness shows their unstaged setups fail on that budget when a launch expires, and seam tests check the staged receipt against the real fixture. ENGRAM_READINESS_TIMEOUT and all non-test behaviour are unchanged. Round-3 gate test-ed448f85 passed (fingerprint 0b5fd1f3…08ba); three review rounds, with Mediums fixed; evaluation 6614de64 passed 3/3. Landed as 1c8d144 and installed as 120e15d5. Lows filed: w-cd31d9f7f451, w-6476bd5eed60.",
+    "completed_at": "2026-10-03T08:36:11.672008Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

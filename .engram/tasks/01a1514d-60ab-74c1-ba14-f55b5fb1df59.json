@@ -1,0 +1,27 @@
+{
+  "id": "01a1514d-60ab-74c1-ba14-f55b5fb1df59",
+  "external_ref": null,
+  "title": "Read verification_bind refusals from Engram's typed details and stop calling an unconfirmed receipt \"not recorded\"",
+  "outcome": "engram_bind_outcome recognises an already_bound target from the refusal's typed details (work_id and reason), and keeps the message text only as a fallback. An Ok receipt that does not name the member, or names another original, is settled as unconfirmed, by a resend or a 'not confirmed' line, not reported as 'not recorded'.",
+  "acceptance": [
+    "Read verification_bind refusals from Engram's typed details and stop calling an unconfirmed receipt \"not recorded\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

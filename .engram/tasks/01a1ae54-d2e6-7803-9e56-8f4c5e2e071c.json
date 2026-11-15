@@ -1,0 +1,46 @@
+{
+  "id": "01a1ae54-d2e6-7803-9e56-8f4c5e2e071c",
+  "external_ref": "engram:w-0675f3198972",
+  "title": "Cut automatic launcher host readers over from fingerprints to full source_id equality",
+  "outcome": "Automatic launcher input checks and their TermAl host readers use only the launcher's existing complete admitted, before and after source_id values, through the shared validator and whole-object equality. Equal dirty source is allowed for this comparison; no automatic input fingerprint, .git/info image, replacement digest, independent parent expected-value copy or source-value fence remains. Explicit review-freeze identity and separate committed-input/landing policy remain outside this cutover.",
+  "acceptance": [
+    "New automatic launcher run evidence uses only the existing full request.sourceId, results.sourceIdBefore and results.sourceIdAfter. Host readers validate these through the shared source_id type and compare the complete objects; they do not require, calculate or synthesize an automatic fingerprint, a .git/info image, or a replacement digest/encoding.",
+    "For the source-input comparison, equal full source_id objects qualify even with unchanged root or child local changes; explicit committed-input and landing policy remain separate. Any source_id difference, including a newly untracked path, cannot qualify; missing, unavailable, malformed or oversized evidence is not equality or PASS. Original command failures and unknown outcomes retain their existing meaning.",
+    "Cut over the existing focused-build reader, carried-run fixture reader, run index, wait/resume reporting, native completion input and test-run detail projection to the launcher's own admitted, before and after full source_id records only. Remove the parent-held independent expected-value copy and source-value fence; retain existing non-source run/directory/root/owner, argv, time, terminal, request/locator, claim and durability guards and bounds. Wait/reload, native completion and detail records may carry actual source_id observations within those bounds, but do not create or require an independent parent expectedSourceId copy. The public registration request remains runId and runDirectory.",
+    "Stored historical evidence remains readable as attributed history, without using old fingerprints as proof for a new source_id run. The review-freeze tool, reviewer identity, test-ref names and Review-Freeze trailer remain deferred and unchanged in this cutover; the new-untracked-only automatic-run exception is removed in the paired launcher change.",
+    "Focused regressions cover equal clean and dirty objects, root/child/new-untracked drift, unavailable or malformed evidence, wait/resume replacement, and preserved failure/unknown behavior. The exact candidate satisfies the existing independent review-pair and full-gate rules, with governed instruction passages concurred and audited under the existing policy if they are changed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered full source_id automatic launcher and host reader cutover in landed30ddf016. C1-C4implementation/historypreservation and cleanpair/exactFULLson30dd recorded712b4e835c044a2eac104c4373fcb942. NormalregisteredE2readercheck4be853b6 oncleanmastere503 passed8/0/0, verification61b9278b35094b69b3136a0d2efce3d5 received andcheckpointacknowledged; satisfiesTestobligation/C5. Acceptance evaluation is OFF, so no evaluation exists. No waiver, rerun, replacementdigest orcreditfabrication; optionalfollowupscontinueindependently.",
+    "completed_at": "2026-11-07T16:26:38.822258500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

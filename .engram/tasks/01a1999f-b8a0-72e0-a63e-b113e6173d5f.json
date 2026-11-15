@@ -1,0 +1,32 @@
+{
+  "id": "01a1999f-b8a0-72e0-a63e-b113e6173d5f",
+  "external_ref": null,
+  "title": "Upgrade jsdom to 29.x to remove cssstyle's computed-style cost from the slowest App UI tests",
+  "outcome": "Upgrade jsdom to 29.x to remove cssstyle's computed-style cost from the slowest App UI tests",
+  "acceptance": [
+    "ui/ uses jsdom 29.x (Node >= 24.0.0 compatible with .nvmrc 24.14.0) through the lockfile, with no other dependency or Node change",
+    "The whole Vitest stage passes with the same test population and without changing any test's assertions or query scope",
+    "Before/after timing of the heaviest App files (App.scroll-behavior, App.workspace-layout, App.session-lifecycle) on the same host and selection shows the measured effect, reported honestly even if small",
+    "The change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "dependencies",
+    "performance",
+    "test-durations",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

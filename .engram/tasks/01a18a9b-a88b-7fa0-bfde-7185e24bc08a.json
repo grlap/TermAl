@@ -1,0 +1,26 @@
+{
+  "id": "01a18a9b-a88b-7fa0-bfde-7185e24bc08a",
+  "external_ref": null,
+  "title": "Let the \"retired work authority settled\" project notice clear",
+  "outcome": "ENGRAM_RETIRED_AUTHORITY_SETTLED_NOTICE, which the boot-time settlement writes in place of the background-revocation warning, is cleared on the project's next successful Engram settings save or finish, or can be dismissed, so it does not stay in the cleanup-warning slot for good.",
+  "acceptance": [
+    "Let the \"retired work authority settled\" project notice clear is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

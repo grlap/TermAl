@@ -1,0 +1,41 @@
+{
+  "id": "01a0f435-1ebc-7890-82b9-53ab42df726c",
+  "external_ref": null,
+  "title": "Two-profile Codex tests: drive a read-only child's release, archive and thread actions with both app-server slots filled, and check exit cleanup per profile",
+  "outcome": "Lows from the review of the read-only Codex sandbox change (Codex delegation-e3faeffd-eade-422f-82de-a016164cb6a2, Claude delegation-f99b8f27-9012-406c-8632-111db1c373df), left unfixed at landing under the Low rule. (1) In test builds an empty read-only app-server slot is served from the default slot (the #[cfg(test)] fallback in src/shared_codex_mgr.rs). So in the existing delegation tests every read-only child runs on the default scripted runtime, and a routing mistake between the two profiles in archive, fork or delegation release cannot fail them. Only each_profile_keeps_its_own_app_server fills both slots, and it does not drive thread actions or release. (2) That test's exit check covers only slot removal: it registers no session records, so handle_shared_codex_runtime_exit's session-exit and Engram-rebind scans run over an empty state. Add tests that fill both slots with distinct scripted runtimes and drive a read-only child's delegation release, archive, unarchive and fork, asserting which runtime receives each request. Add a test that registers sessions of both profiles, with runtime handles and routing tokens, and asserts that one profile's exit ends and rebinds only its own sessions. Consider making the fallback opt-in per test.",
+  "acceptance": [
+    "A test registers sessions of both profiles with runtime handles and routing tokens and shows one profile's app-server exit ends and rebinds only that profile's sessions.",
+    "A test with both slots filled by distinct scripted runtimes drives a read-only Codex child's archive and delegation release and shows every request reaches the read-only runtime, and a default session's reach the default runtime."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

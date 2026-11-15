@@ -1,0 +1,28 @@
+{
+  "id": "01a18973-b0c7-71a1-b97a-b4187d92eaf1",
+  "external_ref": null,
+  "title": "Near-miss notice misses a first-command test in a multi-line script when ; or && or a heredoc ends that first segment",
+  "outcome": "In a script of several lines, which is never a check, a recognised test in the first command gets the typed uncredited near-miss line whatever ends that command (`;`, `&&`, a line break or a heredoc's `<<`). Even-run continuation is tested for cmd `^` and PowerShell backticks too.",
+  "acceptance": [
+    "Near-miss notice misses a first-command test in a multi-line script when ; or && or a heredoc ends that first segment is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

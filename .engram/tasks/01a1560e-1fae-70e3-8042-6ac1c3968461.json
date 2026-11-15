@@ -1,0 +1,48 @@
+{
+  "id": "01a1560e-1fae-70e3-8042-6ac1c3968461",
+  "external_ref": null,
+  "title": "Exercise every fresh-nonce federation handoff retry and supersession boundary",
+  "outcome": "Extend direct coverage of fresh write-ahead nonce creation and federation handoff latch ownership beyond the closed-channel outcome path, preserving exact same-attempt deduplication and stale callback rejection.",
+  "acceptance": [
+    "Production-path tests cover begin_prompt_delivery_write_ahead_locked and other fresh nonce transitions, showing the old attempt's handoff latch cannot suppress the current attempt.",
+    "Tests show unchanged same-attempt replay is deduplicated and delayed callbacks cannot authorize another prompt, turn, runtime or write-ahead nonce."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation-m4",
+    "follow-up",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-c160-77c3-b4e2-c50515867f37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

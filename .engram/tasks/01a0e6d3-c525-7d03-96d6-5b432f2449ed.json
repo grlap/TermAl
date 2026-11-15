@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c525-7d03-96d6-5b432f2449ed",
+  "external_ref": "tm-hbne",
+  "title": "Clamp termal_get_session_result outputLimit to the page ceiling instead of answering 400; say a follow-up replaces the paged output",
+  "outcome": "Reported by Engram::Fable (mailbox a71ec118 #25/#27, 2026-09-27) after two Codex explorers whose '## Result' bodies a parent wanted to read.\n\nFacts checked in the product:\n1. termal_get_session_result with outputOffset/outputLimit pages the child's latest assistant output after the LAST user-prompt boundary (src/delegations.rs, the loop that breaks at user_prompt_text(), ~4324-4346 and ~4411-4426). A termal_followup_session therefore replaces what that paged read returns: the earlier body stays in the child's transcript but is no longer reachable through the tool. Neither the termal_followup_session description (src/delegation_mcp.rs ~2468) nor the termal_get_session_result description says so.\n2. The fan-in prompt (src/delegations.rs ~2741) suggests outputLimit 4096 and does not mention the ceiling; a limit above 8192 answers 400 'limitBytes must be at most 8192' (MAX_DELEGATION_RESULT_OUTPUT_PAGE_BYTES). The tool description does say 256-8192.\n\nAsked: (a) one sentence in both tool descriptions: read the final output before following up, a follow-up's output replaces it; (b) the fan-in prompt names the 8192 ceiling (or suggests 8192 outright). Docs-only; no behaviour change. The changedFiles overlap seen on the same explorers is tm-ljgz, not this.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a17bc6-67d4-7ad3-865a-15906aa5daf7",
+  "external_ref": null,
+  "title": "A repair cut lost to a stream break before its diff arrives leaves the repair-delta commit uncovered",
+  "outcome": "A repair cut lost to a stream break before its diff arrives leaves the repair-delta commit uncovered",
+  "acceptance": [
+    "A repair cut requested but not yet covered by an adopted stateDiff or marked full state at or above its revision is repaired over HTTP (/api/state with forceAdoptEqualOrNewerRevision at that revision) when a stream continuity break voids the diff baseline",
+    "A deterministic UI test covers: repair cut requested, stream error before any covering diff, HTTP repair requested for that revision; and a covering diff adopted before the break requests no HTTP repair"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "review-low",
+    "state-diff"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6d8-75e0-9354-1f4f26c82991",
+  "external_ref": "tm-t219",
+  "title": "Pin with a test that a \\?\\Volume{GUID}\\ cwd is treated as unresolvable (no shell follow, no test credit)",
+  "outcome": "From the Claude /review-code of tm-5gi4 phase 2, round 13, Low; no code change needed.\n\nSince tm-5gi4 phase 2, engram_network_path counts every Windows verbatim path that does not name a drive letter as possibly network. That includes local volumes mounted without a letter (\\?\\Volume{GUID}\\), so a shell cd there is taken as lost and a test there gets no credit. The doc comment says this is intended and conservative. Add a focused test so the behaviour stays visible.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

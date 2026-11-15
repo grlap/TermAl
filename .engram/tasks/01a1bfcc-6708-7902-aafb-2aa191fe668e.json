@@ -1,0 +1,25 @@
+{
+  "id": "01a1bfcc-6708-7902-aafb-2aa191fe668e",
+  "external_ref": null,
+  "title": "Give kept naming an actionable result when its Prepared owner belongs to another retained run",
+  "outcome": "Kept/no-event naming either refreshes the correct caller-owned association safely or gives accurate retry advice for a foreign-run Prepared owner.",
+  "acceptance": [
+    "A deterministic control replaces the Prepared owner with another retained run while preserving the selected root and verifies safe refusal or bounded recovery under the actual caller binding.",
+    "The response identifies the supported recovery and does not imply a root was installed or grant a different run authority; ordinary and changed-binding controls remain meaningful."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be12-2a94-7573-99d2-e40047ef7d1b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

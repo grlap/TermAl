@@ -1,0 +1,29 @@
+{
+  "id": "01a19818-6059-7112-a096-37260c83f92d",
+  "external_ref": null,
+  "title": "Transcript footer shows 'Agent is working' for queued, waiting and sending states, contradicting the Idle status popup",
+  "outcome": "Transcript footer shows 'Agent is working' for queued, waiting and sending states, contradicting the Idle status popup",
+  "acceptance": [
+    "transcriptActivityLabel derives its text from the existing resolveSessionActivity result, so queued, waiting and sending each show their own existing descriptive label (e.g. queued 'is starting the next turn') rather than 'Agent is working'; working keeps 'Agent is working' and stopping keeps 'Agent is stopping'; no new status registry",
+    "The footer's data-activity reflects the resolved state rather than always 'running'",
+    "Vitest coverage asserts the footer label for each resolved state, including an idle session with a queued prompt, and npx tsc --noEmit and npx vitest run stay green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

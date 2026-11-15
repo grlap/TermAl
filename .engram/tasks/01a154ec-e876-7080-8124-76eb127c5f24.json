@@ -1,0 +1,30 @@
+{
+  "id": "01a154ec-e876-7080-8124-76eb127c5f24",
+  "external_ref": null,
+  "title": "Cover Git run-directory terminators and existing-path validation branches",
+  "outcome": "Extend real launcher boundary controls for single CRLF success, legitimate path-space preservation, nonexistent absolute directory, a file instead of directory, and doubled terminal newline, retaining no-mkdir/no-registration assertions.",
+  "acceptance": [
+    "Cover Git run-directory terminators and existing-path validation branches is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "macos",
+    "multi-machine",
+    "remote",
+    "test-coverage",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a15210-e29d-7073-9f21-604b535e1e3b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a158c2-3930-70e0-9196-5346dcbdc540",
+  "disposal_reason": "Continue as independent work under Fable919 after parent landed and completed.",
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a169eb-f7dd-7642-8bdf-e84ec1fac42d",
+  "external_ref": null,
+  "title": "Rework a_stale_end_of_an_id_less_line_leaves_a_later_run_of_it_running to drive a resolvable stale tag through the shared Codex path",
+  "outcome": "The test feeds turn 1's stale id-less end tagged with a Codex turn the host recorded at item/started, so it guards the turn-scoped late-end path (and fails before that path exists). Its doc says which tag it sends.",
+  "acceptance": [
+    "Rework a_stale_end_of_an_id_less_line_leaves_a_later_run_of_it_running to drive a resolvable stale tag through the shared Codex path is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

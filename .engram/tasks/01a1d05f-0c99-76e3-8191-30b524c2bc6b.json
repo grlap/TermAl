@@ -1,0 +1,37 @@
+{
+  "id": "01a1d05f-0c99-76e3-8191-30b524c2bc6b",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance's tool contract omits the 16-distinct-record limit across all criteria",
+  "outcome": "An agent can tell, from the termal_evaluate_acceptance tool definition alone, that criterionEvidence may cite at most 16 DISTINCT records in total across all criteria, not just 16 per criterion. It can then plan its citations without hitting a 400 refusal.",
+  "acceptance": [
+    "The criterionEvidence description in the tool definition (src/acceptance_evaluation_api.rs) states that the union of locators across all criteria may hold at most MAX_ACCEPTANCE_SELECTED_RECORDS (16) distinct records, rendered from the constant rather than a separate literal, and suggests citing consolidated notes when more would be needed.",
+    "A request whose per-criterion lists each pass the schema but whose union exceeds the limit is still refused before any spawn, with a message that names the distinct-record count it received and the limit (src/acceptance_evidence_selection.rs).",
+    "The full gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "agent-api",
+    "cross-project"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

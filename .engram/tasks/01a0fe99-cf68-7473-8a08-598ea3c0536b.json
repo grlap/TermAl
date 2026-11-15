@@ -1,0 +1,29 @@
+{
+  "id": "01a0fe99-cf68-7473-8a08-598ea3c0536b",
+  "external_ref": null,
+  "title": "Replace the isolated HOME consumer accept barrier busy-spin with a bounded blocking wait",
+  "outcome": "Replace the isolated HOME consumer accept barrier busy-spin with a bounded blocking wait",
+  "acceptance": [
+    "Replace the isolated HOME consumer accept barrier busy-spin with a bounded blocking wait is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0e6d3-c3ec-72d2-a99a-670af503338b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1413e-d27b-7e22-80ba-be63d3592407",
+  "disposal_reason": "The parent is completed. Continue as independent work: a small test-only fix that is still open (Termal::Opus3's triage, TermAl mailbox 03723eab #2619).",
+  "completion": null
+}

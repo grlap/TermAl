@@ -1,0 +1,30 @@
+{
+  "id": "01a17b38-80af-7131-8a05-5081671c6a7a",
+  "external_ref": null,
+  "title": "Pin retained checkpoint exclusion across automatic queue drain entry points",
+  "outcome": "Existing automatic queue entry points cannot dispatch through a retained Unknown checkpoint duty, with direct controls for each supported drain owner.",
+  "acceptance": [
+    "Exercise retry-attempt, capacity-resume, durability-release, boot-recovery and source-observation drain entry points against a retained original Unknown checkpoint through existing fixtures.",
+    "Assert no new control or provider dispatch, exact retained request and ledger/mirror identity, and unchanged queued ownership while the independent duty excludes admission.",
+    "Rename or extend the control-returning transient case so its name matches the recovery transition it actually exercises; preserve positive supported settlement tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

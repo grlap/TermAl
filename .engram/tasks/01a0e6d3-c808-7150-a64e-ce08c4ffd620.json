@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c808-7150-a64e-ce08c4ffd620",
+  "external_ref": "tm-zicl",
+  "title": "Count only tool calls that can write as overlapping an open Engram test check",
+  "outcome": "From tm-winf round-10 review (Claude, Note). Every tool start through command_started counts as a fresh command that marks open checks overlapped, including Codex webSearch and ACP tool calls identified only by a title (reads and searches in Gemini/Cursor). A read-only call during a running test makes the check Unknown: safe (never overclaims) but it lowers evidence yield, most for ACP runtimes. Consider counting only calls whose kind can write (ACP kind execute/edit/delete/move) or that carry a command line; keep unknown kinds conservative.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

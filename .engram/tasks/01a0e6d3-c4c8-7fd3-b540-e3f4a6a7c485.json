@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4c8-7fd3-b540-e3f4a6a7c485",
+  "external_ref": "tm-c3ym",
+  "title": "Decide whether user continuation of a finished child replaces the parent delegation result",
+  "outcome": "Consolidated Claude review session-6694, confirmed structured packet, frozen trackedHead b5d4bc4b. src/api.rs:1480 routes ordinary UI chat for completed/failed Codex children through followup_delegation_request; rearm_terminal_delegation_for_followup_locked clears result, submitted_review_result and schema version, bumps attempt and marks Running. Casual user continuation can therefore replace the parent-facing validated review with failed/unavailable if no new structured submission occurs. Decide and document whether to preserve the terminal result with detached continuation, require explicit confirmation, or restrict reviewer continuations. Include UI/parent-result regression. Related Low: new user-reopen route is Codex-only; explicitly document/reject unsupported agents or decide supported-agent scope, and keep routing in AppState. This is a policy decision/follow-up, not authorization to change the behavior. Existing tm-z0mg owns cleanup race and UI archived guard; tm-px5 owns parent-requested followup. Searched existing child/delegation/follow tasks and user-chat/user-continuation descriptions; no matching user-continuation decision found.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

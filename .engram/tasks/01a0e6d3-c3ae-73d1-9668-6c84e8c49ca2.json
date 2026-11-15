@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3ae-73d1-9668-6c84e8c49ca2",
+  "external_ref": "tm-0q0z",
+  "title": "Freeze helper branches on symlinks but no test exercises that path",
+  "outcome": "Found by auditing our own instrument after Engram::Fable reported the same class in theirs (Fable, 2026-09-08). Their freeze checker declared coverage for executable modes and symlink targets while skipping both on the only platform they run; I went looking for our version.\n\nWHAT IS ACTUALLY TRUE HERE, checked rather than assumed. scripts/review-freeze-fingerprint.test.mjs has ten tests, of which exactly one is skipped on win32: untracked executable semantics. That skip is legitimate and is NOT the same defect - the helper deliberately declines to consider the execute bit on win32 (scripts/review-freeze-fingerprint.mjs, the executable flag is gated on process.platform !== \"win32\"), with the reason recorded beside it: Git for Windows records new worktree files as non-executable because the filesystem bit is not meaningful there. The test is skipped because the behaviour is intentionally absent, not because verifying it was inconvenient. Scope narrowed on purpose, and the code says so.\n\nTHE REAL GAP is different and smaller: the helper distinguishes a symlink from a regular file when hashing untracked content, and NO test exercises that branch on any platform. The claim \"the review target did not move\" therefore rests partly on code that has never been run under test.\n\nWhy it is not purely theoretical despite Windows being the usual host: this repository is also worked on from macOS - an earlier delegated reviewer ran under /Users/greg/GitHub/Personal/termal - and there symlinks are checked out as symlinks. A review frozen on that host exercises the untested branch for real.\n\nSuggested shape, small: one test creating an untracked symlink and asserting that retargeting it changes untrackedContentSha256, with the same win32 skip the executable test already uses if Git for Windows will not produce one. If the branch turns out to be unreachable in practice, delete it rather than leaving untested code in the integrity boundary.\n\nRelated: the same test file confirms the helper excludes tracked and untracked .beads state, which is why a hand-rolled `git diff | sha256sum` disagrees with it. Not a defect - a different input.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

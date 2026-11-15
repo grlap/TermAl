@@ -1,0 +1,28 @@
+{
+  "id": "01a1686b-1fa8-75b0-926c-6da49e058ce6",
+  "external_ref": null,
+  "title": "Remove read-only reviewer input manifests when their attempt ends",
+  "outcome": "Per-attempt reviewer input manifests (termal-review-input-<delegation>-<attempt>.json in the reviewed worktree's own Git directory) are removed when the attempt is superseded, the delegation is torn down, or a launch or follow-up is rolled back after admission; stale pending follow-up admissions are dropped with them.",
+  "acceptance": [
+    "A superseded, torn-down or rolled-back reviewer attempt leaves no termal-review-input manifest in the worktree's Git directory, and an active attempt's manifest is never removed; covered by regression tests.",
+    "A rejected follow-up leaves no pending review-input admission behind."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

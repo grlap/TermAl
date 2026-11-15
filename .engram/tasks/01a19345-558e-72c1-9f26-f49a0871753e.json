@@ -1,0 +1,28 @@
+{
+  "id": "01a19345-558e-72c1-9f26-f49a0871753e",
+  "external_ref": null,
+  "title": "Write drained output-size reports in one journal append, and the Shutdown record before them",
+  "outcome": "Write drained output-size reports in one journal append, and the Shutdown record before them",
+  "acceptance": [
+    "record_output_sizes writes all drained output-size reports in one journal append with one sync, and on shutdown the Shutdown record is written before them, so size records can't delay shutdown or widen the window in which the panic hook's try_append skips a panic record",
+    "A test shows the panic and shutdown classification is unchanged with output-size records present"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-stability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

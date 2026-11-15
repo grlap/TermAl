@@ -1,0 +1,28 @@
+{
+  "id": "01a1d381-f2b8-7643-8215-073bd2673491",
+  "external_ref": null,
+  "title": "Integrate combo86 on 8e4fd2f9: d50d 932084c6 (w-70ed remove retired test-only source selector, byte-identical carry of 4ecefd8b, formerly combo83)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 932084c6e30569590ad55f69404d39b5e13f4e32 (tree 763eb4d0ad17d65714ed3efa653585c1b702ec72) is on origin/master, where master was moved to it by a fast-forward from 8e4fd2f90f18647b1b00c900640696d1407a9e2c.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 763eb4d0 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 8e4fd2f9 is byte-identical (same 5 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 4ecefd8b's contribution against 57a762c8, whose R1 review pair found no Medium or higher, and the candidate adopts that pair.",
+    "The release binary built from tree 763eb4d0 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

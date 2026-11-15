@@ -1,0 +1,31 @@
+{
+  "id": "01a175d6-5578-7a42-b18c-c65288fbeedb",
+  "external_ref": null,
+  "title": "Add native fault coverage for combined Windows owned-job cleanup",
+  "outcome": "Deterministic native tests cover exceptional StopAndWaitForCleanup orchestration and its published unresolved result.",
+  "acceptance": [
+    "Exercise partial capture/query/wait failure through combined cleanup and Run publication, verifying exact-job termination still occurs and cleanup remains unresolved/nonzero.",
+    "Verify retained member handles close on all exceptional paths and an admission-count change is reported without weakening existing held/released or unrelated-process assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gate-blocker",
+    "launcher",
+    "review-low",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173e6-4ea8-7281-911d-d712933fd9c0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a1584a-fe7f-7821-a7c7-cdcf26456ad9",
+  "external_ref": null,
+  "title": "Avoid building wake scan candidates for federation journal operations pages",
+  "outcome": "Operations-only journal reads avoid cloning and revalidating the wake reservation window while retaining the documented scan observations and read-only behavior.",
+  "acceptance": [
+    "Operations-stream journal reads do not clone or revalidate cached wake candidates, while retaining the documented dispatchScan observations and read-only behavior; focused regressions prove operations pages remain readable with an invalid cached wake candidate and wake-stream candidate validation/classification remains intact.",
+    "The combined follow-up input has a passing maintained five-stage full gate and an independent Codex plus Claude read-only review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "remote-mailbox",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

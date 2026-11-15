@@ -1,0 +1,49 @@
+{
+  "id": "01a1529b-33f6-74a2-b055-e0a030ff5cc5",
+  "external_ref": null,
+  "title": "A test run that survives a host restart has its check closed Unknown (\"no end before restart\") although its launcher keeps running and will write a terminal result",
+  "outcome": "When a host restart interrupts the turn that launched a still-live test run, the host keeps that run's check open, or otherwise settles it from the run's later terminal result artifact. It does not finalize the check Unknown and advise a rerun while the launcher process is alive. The test-run registry and the check record agree about whether the run is live.",
+  "acceptance": [
+    "Given a durably correlated launcher focused run that is nonterminal at serialize/reload and remains positively live under the existing validated heartbeat/process-identity rules, recovery keeps its associated check pending and reports it as running/pending, with no final restart-only Unknown or rerun advice. The registry and check disposition agree about execution liveness; uncorrelated ordinary runtime-ended checks retain fail-closed recovery.",
+    "When that exact run later writes a valid terminal result, recovery/next eligible checkpoint settles the original check exactly once from the matching immutable artifact without an original-runtime completion event or rerun. Pass/fail credit requires all existing owner/request/root/claim-fence/source/fence predicates; missing continuity produces an explicit evidence-gap disposition, never manufactured PASS. Duplicate ticks, checkpoints and another reload cannot duplicate evidence.",
+    "Deterministic serialize/reload regressions cover live-to-pass, live-to-fail, PID reuse/stale heartbeat, genuinely gone launcher without terminal output (including terminal-write-versus-exit ordering), malformed/replaced/mismatched terminal artifacts, and source/root/claim/fence changes. Wrong or insufficient identity never attaches another run or earns credit; genuine disappearance resolves with the existing bounded/missing-evidence policy. Full gate plus independent review meet normal landing requirements."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "restart",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

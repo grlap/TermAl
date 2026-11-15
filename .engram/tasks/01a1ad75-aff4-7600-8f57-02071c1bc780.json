@@ -1,0 +1,28 @@
+{
+  "id": "01a1ad75-aff4-7600-8f57-02071c1bc780",
+  "external_ref": null,
+  "title": "Cover native completion appends during exact query, named replay and check notice identity reads",
+  "outcome": "Cover native completion appends during exact query, named replay and check notice identity reads",
+  "acceptance": [
+    "Deterministic regressions append the real retained native completion during exact-query, committed-input named-root replay and registered check-notice snapshot windows.",
+    "Completion append preserves those consumers while actual registration identity, authority and previously retained completion changes remain refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "remote-runner",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

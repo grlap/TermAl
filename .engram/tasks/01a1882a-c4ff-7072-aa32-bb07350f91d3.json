@@ -1,0 +1,27 @@
+{
+  "id": "01a1882a-c4ff-7072-aa32-bb07350f91d3",
+  "external_ref": null,
+  "title": "Sessions list labels a foreground run as background work while its session waits for approval",
+  "outcome": "A run that a session's turn started in the foreground (detached: false) is labelled and counted consistently with the pane's marker while that session waits for approval.",
+  "acceptance": [
+    "Sessions list labels a foreground run as background work while its session waits for approval is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "session-status"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

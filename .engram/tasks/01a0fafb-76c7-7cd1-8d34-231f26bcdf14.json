@@ -1,0 +1,30 @@
+{
+  "id": "01a0fafb-76c7-7cd1-8d34-231f26bcdf14",
+  "external_ref": null,
+  "title": "Validate naming ownership before mutating selection and confirmation on second learn",
+  "outcome": "Validate naming ownership before mutating selection and confirmation on second learn",
+  "acceptance": [
+    "Validate naming ownership before mutating selection and confirmation on second learn is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a177fe-0ff2-7023-92d6-18ee5a34fb19",
+  "external_ref": null,
+  "title": "Review-output paging reports offsetBytes/totalBytes in characters, not UTF-8 bytes",
+  "outcome": "The review-output paging fields named in bytes are in UTF-8 bytes, or are renamed to say what unit they use, so a strict reader's offsets match the text it receives.",
+  "acceptance": [
+    "A note identifies, with file and line, where the review-output offsetBytes and totalBytes are computed and which unit is used; it links any existing review-output item that already covers this, and if one does, this item is superseded into it.",
+    "The fields and their consumers use one documented unit, with a deterministic test using non-ASCII text where character and byte counts differ; no text is lost or duplicated across pages.",
+    "The independent review pair finds no Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "api-contract",
+    "review-output"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

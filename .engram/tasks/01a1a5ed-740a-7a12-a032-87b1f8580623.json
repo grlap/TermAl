@@ -1,0 +1,28 @@
+{
+  "id": "01a1a5ed-740a-7a12-a032-87b1f8580623",
+  "external_ref": null,
+  "title": "Cover conservative registered-check closing fallback branches and clean failed runs",
+  "outcome": "Regression coverage distinguishes each conservative rejection in registered closing baselines and states that a failed clean committed-input run can supply a comparison.",
+  "acceptance": [
+    "Add discriminating tests for source-attribution uncertainty, launch-only or unfinished commands, runtime-output cuts, watcher/outstanding-writer fences, authority-store and registration-root mismatches, and invalid measurement ordering; add a positive clean failed-run case."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

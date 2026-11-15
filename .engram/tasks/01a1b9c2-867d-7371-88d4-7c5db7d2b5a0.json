@@ -1,0 +1,38 @@
+{
+  "id": "01a1b9c2-867d-7371-88d4-7c5db7d2b5a0",
+  "external_ref": null,
+  "title": "Switch run, check and baseline projections from content-v1 to the full source_id (C6 prerequisite, group 3)",
+  "outcome": "TermAl's test-run, check and closing-baseline paths write and compare the full source_id instead of content-v1 revision strings for NEW records. Historical content-v1 records stay readable as stored. After this, no new-record producer in this group reaches content_revision.rs, so the C6 deletion (w-6f42 criterion 7) is not blocked by it.",
+  "acceptance": [
+    "NEW run, check and closing-baseline records in this group retain and compare the complete owner-provided source_id, including its identity components, with no digest or revision-string surrogate and no fallback to content-v1. No new-record producer in this group reaches content_revision.rs; existing authority, provenance and credit conditions remain unchanged.",
+    "Historical persisted content-v1 and git-commit records remain readable as stored, without conversion or rewriting. Historical readers are distinguished from new write producers. Acceptance and evaluation behaviour and the evaluation wire are unchanged; TermAl's committed-input record readers for acceptance (acknowledgement, notice and evidence binding (committed flow)) accept the new SourceId record equivalently to the historical Commit record, preserving all commit, claim, root, receipt, digest and admission semantics. Naming/root-binding/sealing seams are unchanged, and deletion of the shared content-v1 producer remains a separate final candidate.",
+    "The change uses the existing Engram source_id wire fields, confirmed with the Engram owner, without changing the Engram wire contract. No automatic agent-facing surface exposes a full source_id or execution_observe body; only bounded summaries and root-path lines are exposed.",
+    "Behavioral validation covers complete-identity preservation/comparison for new records and retained historical reading. The exact candidate has passing focused checks and the repository-required full gate, with an independent Codex/Claude pair having no outstanding in-scope Medium-or-higher finding; required Windows checks are included."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed new run/check/baseline complete-SourceId projections with historical readers preserved in joint master db52491e; exact-input Codex/Claude review, Windows and DL560 full gates, and installed consumer proof complete.",
+    "completed_at": "2026-11-09T06:14:01.351107500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

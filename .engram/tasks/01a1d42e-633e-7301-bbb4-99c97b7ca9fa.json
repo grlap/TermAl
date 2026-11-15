@@ -1,0 +1,28 @@
+{
+  "id": "01a1d42e-633e-7301-bbb4-99c97b7ca9fa",
+  "external_ref": null,
+  "title": "Header comment of acceptance_evaluation_committed_input.rs claims a skip-worktree root is refused, with no test and against the docs",
+  "outcome": "The header comment of src/tests/acceptance_evaluation_committed_input.rs matches behaviour. Either it no longer lists \"a root whose index skips a tracked path\" as refused, which agrees with docs/test.md:290 and execution-observability.md's Limits (skip-worktree edits are not seen), or the refusal is intended and a behavioural test covers it and the docs are corrected.",
+  "acceptance": [
+    "Header comment of acceptance_evaluation_committed_input.rs claims a skip-worktree root is refused, with no test and against the docs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

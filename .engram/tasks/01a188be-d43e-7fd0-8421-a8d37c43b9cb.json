@@ -1,0 +1,28 @@
+{
+  "id": "01a188be-d43e-7fd0-8421-a8d37c43b9cb",
+  "external_ref": null,
+  "title": "test_panic_journal second-panic test times out waiting for its child process under full-suite load",
+  "outcome": "tests::test_panic_journal::a_panic_is_recorded_even_when_a_second_panic_aborts_the_test_process passes deterministically inside a full `cargo test --bin termal` run, not only when run alone. The root cause of its child-process wait failing under load is diagnosed and fixed without retries, quarantine or a larger timeout, as CLAUDE.md requires.",
+  "acceptance": [
+    "test_panic_journal second-panic test times out waiting for its child process under full-suite load is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "load-sensitive",
+    "panic-journal",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1802c-3448-7722-a5db-af3c30bfe828",
+  "external_ref": null,
+  "title": "Acceptance evaluation impossible for a landed item with no naming history when turn-gated control is off (no checkpointed sighting can be produced)",
+  "outcome": "An item that landed without its implementer ever naming a source root can still be independently evaluated through a supported path: either a documented way to produce the required sighting with turn-gated control off, or evaluation against an explicitly named root revision. There must be no dead end.",
+  "acceptance": [
+    "A note documents, from source, how a root session with turnGatedControl=false obtains an 'acknowledged capture under the claim' (a checkpointed turn of the claim's session focused on the item), and whether that is reachable today.",
+    "If it is unreachable, a fix lands, or a documented, supported alternative exists, so the evaluation of an item lacking naming history can proceed after naming a root, without bypassing evidence rules. Tests cover the formerly dead-ended path.",
+    "The full gate passes on the landed tree, with the review pair clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "source-root-naming"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a114f1-ff46-71f0-8873-97ac91c9499e",
+  "external_ref": null,
+  "title": "Align the delegation receipt type sketch with evaluationId wire naming",
+  "outcome": "The acceptance receipt type sketch in docs/features/agent-delegation-sessions.md names the emitted evaluationId field and accurately distinguishes the decode-only evaluationHash alias for older stored host snapshots.",
+  "acceptance": [
+    "Align the delegation receipt type sketch with evaluationId wire naming is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

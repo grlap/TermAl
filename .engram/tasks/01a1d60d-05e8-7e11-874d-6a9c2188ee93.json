@@ -1,0 +1,37 @@
+{
+  "id": "01a1d60d-05e8-7e11-874d-6a9c2188ee93",
+  "external_ref": null,
+  "title": "Mailbox ACK with a mistyped mailboxId returns a generic 404/409; name the mailbox the receipt was issued for",
+  "outcome": "When a root session acknowledges a valid receipt but passes a mailboxId different from the one the receipt was issued for (local or relay), TermAl refuses with an explicit error that names the receipt's mailbox. This replaces the generic 404 or 409, so a copy mistake is visible at once. No guard is relaxed.",
+  "acceptance": [
+    "Root cause recorded: Engram::Merger's failing ACKs at 17:50Z and 18:04Z carried mistyped mailboxIds, and the same receipt then acknowledged successfully with the exact id from the read response (Merger #418). No server state was lost.",
+    "A behavioural test: for a local mailbox and for a relay mailbox, acknowledging a valid receipt with a different, existing or non-existent, mailboxId refuses with an error naming the receipt's actual mailbox. It does not advance any cursor, and the correct pair still succeeds. If the receipt store cannot identify its mailbox, the item records that with file:line, and the error text improves within what the store knows.",
+    "The change has a clean review pair and passes the full gate."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

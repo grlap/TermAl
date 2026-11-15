@@ -1,0 +1,31 @@
+{
+  "id": "01a179f9-6a83-7722-b6f2-34ed5be81e69",
+  "external_ref": null,
+  "title": "Assert watchdog recovery renders the reply exactly once inside the transcript",
+  "outcome": "Five changed App DOM checks may be satisfied by sidebar preview alone; unique store-record assertions do not prove transcript rendering. Scope DOM queries to transcript container and assert one rendered message. Locations watchdog.test1952/2139/2347 anddelta-watchdog1525/1821.",
+  "acceptance": [
+    "Five changed App DOM checks may be satisfied by sidebar preview alone; unique store-record assertions do not prove transcript rendering. Scope DOM queries to transcript container and assert one rendered message. Locations watchdog.test1952/2139/2347 anddelta-watchdog1525/1821. Relevant focused checks pass and standard review covers the final change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directive",
+    "performance",
+    "review-followup",
+    "testing",
+    "ui",
+    "watchdog"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a179cc-7346-77c1-b51f-8700e28a5963",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a0f50a-e51b-7f83-876f-ff7db2300cf5",
+  "external_ref": null,
+  "title": "Prefer citable acceptance evidence over verbose omission metadata in brief budgeting",
+  "outcome": "Prefer citable acceptance evidence over verbose omission metadata in brief budgeting",
+  "acceptance": [
+    "A bounded evaluator-brief regression shows a long unread continuation gives way before otherwise fitting citable evidence bodies and outcome text, with complete criteria and response evidenceOmissions unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0ea91-e695-7472-8e21-67e7b8bdcade",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a141ce-8e51-7773-ac2a-4fe0ef749180",
+  "disposal_reason": "The parent is completed. Continue as independent work: a small product fix that is still open (Termal::Opus3's triage, TermAl mailbox 03723eab #2675); Opus3 implements it.",
+  "completion": null
+}

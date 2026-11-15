@@ -1,0 +1,36 @@
+{
+  "id": "01a148c9-7622-7e92-b0d7-cab938759ecb",
+  "external_ref": null,
+  "title": "Idle worktree target/ dirs accumulate until C: fills (0 bytes at 2026-10-17 07:29Z); add a retention sweep",
+  "outcome": "Build output in idle TermAl worktrees no longer grows without bound. A documented, path-checked sweep (or a policy that agents follow) removes target/ dirs of worktrees whose work has landed or is idle, before free space gets low.",
+  "acceptance": [
+    "A written retention rule (CLAUDE.md or docs/test.md) says when a worktree's target/ is removed and who removes it, with the path check from 'Work only in the repository folder'.",
+    "A free-space warning appears before a gate starts, from the launcher or another check, so a gate isn't launched with less than a stated threshold free."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "disk",
+    "reliability",
+    "worktrees"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the path-checked target/ retention policy and pre-gate disk-space preflight on the TRAIN-5 tree. Acceptance evaluation 2908cc7ac3ca4260a95579c368a59339 passed both criteria. Opus2 confirmed commit 982e043a3c6e51ae497b5407339a67d63580cbc3 was pushed as a fast-forward to origin/master from 33fbae62.",
+    "completed_at": "2026-10-18T03:40:15.503631800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

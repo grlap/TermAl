@@ -1,0 +1,28 @@
+{
+  "id": "01a14825-dd48-7a71-9ad4-988295906d3f",
+  "external_ref": null,
+  "title": "Correct the architecture status paragraph for implemented isolated Worker spawns",
+  "outcome": "Correct docs/architecture.md delegation status: Worker+isolatedWorktree is implemented, other Worker policies return 400, sharedWorktree and remote-backed requests remain deferred 501. Keep the separation-not-containment boundary and do not expand ingress or authority.",
+  "acceptance": [
+    "Correct the architecture status paragraph for implemented isolated Worker spawns is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

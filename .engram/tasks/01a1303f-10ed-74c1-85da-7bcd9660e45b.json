@@ -1,0 +1,27 @@
+{
+  "id": "01a1303f-10ed-74c1-85da-7bcd9660e45b",
+  "external_ref": null,
+  "title": "source_observation_audit_rejects_wrong_receipts_without_releasing_the_provider ran over 60 s once",
+  "outcome": "source_observation_audit_rejects_wrong_receipts_without_releasing_the_provider ran over 60 s once",
+  "acceptance": [
+    "The cause of the test's >60 s run is diagnosed with discriminating evidence (what it waits on, and whether the wait is bounded by a fixture signal or by load), and either the test's waits are made signal-driven or the cause is recorded as environmental with that evidence; no timeout is inflated and no retry added"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "slow-test",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

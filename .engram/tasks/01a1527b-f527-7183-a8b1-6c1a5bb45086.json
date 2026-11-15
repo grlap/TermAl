@@ -1,0 +1,32 @@
+{
+  "id": "01a1527b-f527-7183-a8b1-6c1a5bb45086",
+  "external_ref": null,
+  "title": "Document and regression-pin the accepted end of automatic source observation after a confirmed root clear",
+  "outcome": "The post-clear trust boundary is explicit: later edits outside any retained captured scope are not automatically observed; this never asserts the old source stayed unchanged or permits completion with a truthfully differing fingerprint to consume its old evaluation. No perpetual watcher is introduced.",
+  "acceptance": [
+    "Document that confirmed clear/release ends future automatic source observation for that claim until an explicit new root selection; already captured accounting and carried-check duties retain their original scope and are not discarded.",
+    "A regression distinguishes absence of post-clear automatic observation from the existing completion-fingerprint equality guard, using the truthful current fingerprint with no fallback to the last evaluated fingerprint.",
+    "Any implementation or documentation change retains the parent item's unchanged-source/no-fallback guarantee and the separately required old-scope owed-close recovery tests; no watcher or credit authority is expanded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "accepted-limitation",
+    "host-recording",
+    "named-root",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14b0b-2268-76a2-a5ba-f1b8868a7ba7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

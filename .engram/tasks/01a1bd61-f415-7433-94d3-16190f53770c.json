@@ -1,0 +1,28 @@
+{
+  "id": "01a1bd61-f415-7433-94d3-16190f53770c",
+  "external_ref": null,
+  "title": "Bound frozen verification-body reads on terminal check notice preparation",
+  "outcome": "Keep terminal closing/check notice preparation memory and I/O bounded when an agent-writable frozen verification body is oversized, preserving canonical replay and no-credit refusal semantics.",
+  "acceptance": [
+    "Bound frozen verification-body reads on terminal check notice preparation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b9c2-867d-7371-88d4-7c5db7d2b5a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

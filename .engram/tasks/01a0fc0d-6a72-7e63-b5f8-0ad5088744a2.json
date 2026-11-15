@@ -1,0 +1,29 @@
+{
+  "id": "01a0fc0d-6a72-7e63-b5f8-0ad5088744a2",
+  "external_ref": null,
+  "title": "A recovered claim whose newly named root is at newer content records no source sighting, so checks there are stale against the run's old latest source change",
+  "outcome": "Observed 2026-10-02 on w-72e7daa92a6a, while closing an already-fixed item with evidence.\n\nSetup:\n- The item's fix had landed as 5eb447a. Under the earlier claim (Termal::Opus2, root .tmp/wt-p0), the run's latest source change was recorded at run-feed position 37: revision content-v1:1316e9e82cc2c2f279ba4c56472572d85d5b55bf6e32ddf4a75b86839195c5b7, with check 968a444c passing there.\n- Termal::Opus3 recovered the lapsed claim, named a new root .tmp/wt-p0-close-9474 clean at master 169fc8b (content-v1:5e75553035e4697dd433ec724c1eeff929df49b4c655ff380c08c9236cb979c4), made no edits, ran the focused test there (verification c0e143d4, passed) and a credited full gate (test-03c1630f, passed). The independent evaluation, delegation-3dbaaaaf, passed 4 of 4.\n\n`done` was then refused: \"criterion 1 requires test verification, and the newest one (c0e143d41def44ee85bf4c953306dc4c) does not verify the run's latest source change (stale_source_revision); record a passing check of the current source, or drop the binding\". Its details: decider latest_change, position 37, revision 1316e9e8 in workspace .tmp/wt-p0; the check revision was 5e75553 in .tmp/wt-p0-close-9474; satisfied_by 968a444c, superseded because a newer verification exists.\n\nCause: naming a new root at different content, with no edits, records no source sighting. The run's latest source change stays at the old workspace's revision, and the newest check, being at newer content, counts as stale. An item already fixed on master cannot be closed by checking it on current master.\n\nWorkaround used: a new worktree at the old revision (5eb447a, verified to hash to 1316e9e8), renamed as the root, with the check run there.\n\nFix options, for the host or Engram to decide:\n- the host records a source sighting when a root is named or renamed;\n- or Engram treats a root rename's sealed or new revision as the run's latest source.",
+  "acceptance": [
+    "After a claim names a new root at different content with no edits, a passing bound check there satisfies the criterion at done (no stale_source_revision); a test covers the rename-without-edit case.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a0fcc3-768e-7632-ae59-805e92312e06"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Already fixed elsewhere by landed commit 10ec5e7241da86991ec90c9018a66f398be00b45 (canonical claimed/active validator and real recovered-claim no-edit completion witness). Confirmed on unchanged current master65e4233ed842dd12c17b4f6fbb292fcac35541d9 by pinned live test-aad2c7dc-af8c-4830-b000-19a3d53c8845:12PASS/0, including recovered_claim_check_in_a_newly_named_root_completes_without_an_edit, which records a bound passing check in a newly named root at newer content and successfully evaluates/completes with no edit. Disposition explicitly directed by Fable2 mailbox824/message9a71fc2e under work-fixed-elsewhere policy. Separate inter-turn observation defect from fail-first2a776ce5 is w-e16e7268155a; typed mismatch repair is w-83e7593f2158.",
+  "completion": null
+}

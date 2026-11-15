@@ -1,0 +1,29 @@
+{
+  "id": "01a11bf8-6fb1-7542-b36b-6f52da28ceba",
+  "external_ref": null,
+  "title": "Test the one-line-per-slow-read handoff between the mailbox read's blocking task and its handler",
+  "outcome": "Tests cover the slow-read reporting handoff that the instrumentation exists for: read_mailbox_measured reports from the blocking task (with the error outcome on failure) and sets `reported`; report_if_slow skips when `reported` is set; read_mailbox_routed reports only when blocking_to_resume or serialize carries the total over the threshold, on both the success and the error branch — so a duplicate or missing line fails a test.",
+  "acceptance": [
+    "The report decision is returned, or the threshold and a line sink are injectable, so a test asserts: a read reported from the blocking task produces no second line from the handler; a read pushed over the threshold only by the handler's own stages produces exactly one line; a failed read's line carries the error outcome.",
+    "The tests run as a focused launcher check in the named root and pass; the existing slow_report formatting tests pass unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailboxes",
+    "review-followup",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

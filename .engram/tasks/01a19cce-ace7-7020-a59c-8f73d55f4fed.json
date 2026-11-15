@@ -1,0 +1,40 @@
+{
+  "id": "01a19cce-ace7-7020-a59c-8f73d55f4fed",
+  "external_ref": null,
+  "title": "Correct ordinary naming, durability and confirmation test fixtures on the C2 input",
+  "outcome": "A separate source-only test return ports the assigned C2 naming fixtures to current ordinary owners while preserving every original safety assertion through an explicit equivalent.",
+  "acceptance": [
+    "Only the assigned naming, durability, confirmation and generic mismatch fixture paths change relative to immutable tree 92a1830d; product owners and other producers' returns remain untouched.",
+    "Each changed assertion records the master assertion and current equivalent; nested worktree census, authority phase selection, successor service identity, held-claim mismatch and warning/association schedules use real existing owners with no dropped protection, timeout/budget increase or sleep.",
+    "Return the exact source-only scoped delta and before/after evidence to Sol-03d4 cc Fable2 from a fresh named root; no Cargo/compiler/parser/formatter/tests, review, evaluation or landing claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "test-port"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered and integration-accepted exact four-file source-only naming fixture correction e87f3196 on immutable 92a1830d, with complete before/after evidence and six-row/20-case master assertion/current equivalent ledger. All 213 test attributes retained. Root reports the scoped return carried into assembly1939fe5d. No execution, review, evaluation or landing claimed; those remain parent integration work.",
+    "completed_at": "2026-11-02T15:28:31.776127600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

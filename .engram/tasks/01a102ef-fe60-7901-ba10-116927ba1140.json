@@ -1,0 +1,57 @@
+{
+  "id": "01a102ef-fe60-7901-ba10-116927ba1140",
+  "external_ref": null,
+  "title": "Deleting a session with an unresolved source observation orphans the intent and holds same-run admissions indefinitely",
+  "outcome": "With 2769bb7 (turn-opening source observation, w-e16e7268155a), suppose an execution_observe reply is lost and the session is then deleted. Today the unresolved source-observation intent survives with no recovery path:\n- kill_session and StateInner::remove_session_at / retain_sessions never retire or reconcile engram_source_sightings;\n- retry_tick scans only existing sessions;\n- Resume recovery filters by the original session_id;\n- finalization needs the session record.\nMeanwhile engram_source_observation_holds_admission (src/engram_source_sightings.rs:212-226) holds every other session bound to the same store, work, run, claim and root.\n\nWanted: deletion first retires and durably settles or reconciles the observation responsibilities, or an orphan recovery exists that doesn't need the deleted session. A regression test covers a held observation, then deletion, then a same-run admission that proceeds.\n\nFound by Codex in train 26's integration review, delegation-ef930ce4-7cf0-4254-b9cd-4d8c64fb89ca. It blocks landing 2769bb7.",
+  "acceptance": [
+    "When deletion is requested for a session with an unresolved source observation, including a Prepared observation whose execution_observe reply was lost, before removing any session of the affected set the host may discharge ordinary delivered observations through the existing local finalization while retaining their original sessions; if any recording, settlement or required local-finalization duty remains after that attempt, it refuses removal and retains the original sessions and their recovery obligations. An observation is unresolved for deletion while any recording, settlement or local-finalization duty of it remains — including a delivered and recorded observation not yet finalized, and a refused-policy record whose same-responsibility replacement is missing or unfinished — even where admission is no longer held. A regression test demonstrates the defect on unchanged 2769bb7 and verifies refusal and retained recovery on the corrected input.",
+    "The removal barrier covers kill_session and its transitive delegated children, remove_session_at, retain_sessions, and session hiding that would delete the persisted recovery record. A public delete cannot partially remove its affected session set or bypass the barrier through a concurrent capture or delivery. Captured measurements, original connection and routing, exact request and key, and grant-settlement identity remain available until their duties are durably discharged. Tests cover removal routes, races and persistence failure, the delivered-but-unfinalized case that blocks when its local finalization fails, the delivered case removed after its local finalization succeeds, and the completed-compaction-only case that does not block. Completed optional compaction alone does not block deletion. The full-duty refusal is decided for the whole affected set before any teardown checkpoint or runtime shutdown runs on any session of it, after that bounded local-finalization attempt, and is revalidated under the final mutation lock.",
+    "After a refused deletion, including across restart, the original session remains accessible with a visible explanation and an explicit tracking-recovery action. That action uses the original captured authority and identical payload and key for uncertain retries, settles the original observation and grant, and durably finalizes local duties without provider replay or queued-prompt dispatch. A live provider continuation of that observation is retired before recovery and is never delivered afterwards. Recovery failure retains the session and applicable admission hold with an actionable reason. After successful recovery the user can retry deletion, and the old observation no longer holds same-run admission. Tests cover the lost-reply, restart, failure and successful-recovery sequence, including a blocking delegated child, and a delivery receipt that arrives after retirement, which does not resurrect the retired continuation.",
+    "Existing source-observation controls and the full gate pass on the reviewed exact input, with no outstanding in-scope Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "review-medium",
+    "train-blocker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed on origin/master as train32 commit 5e7d41d0a6050a3d32612b8be1a842ff2060180f (tree56a1e12bd4b72d1e3f5e5d715283ba0ea0780d90), carrying 2769bb7, 5d8b46c and author correction a344aaae67316a1becdf686c1fa27bb587ccca7e. Deletion now retains unresolved source-observation owners and tracking-only recovery through capture races and settings/project resets. Author exact-tree full e33375eb/hoste0a919c9, clean resolved-Medium review chain and fresh acceptance f17d8601=4/4; owner landing note299251b22d054cfeb5b346742099e905 reports integration gate86ea0ed0 PASS and clean pair a8c4bdfb/65cdea26. Independently verified a344aaae ancestry in origin/master. Deferred Lows remain separately tracked.",
+    "completed_at": "2026-10-04T04:12:37.323813Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

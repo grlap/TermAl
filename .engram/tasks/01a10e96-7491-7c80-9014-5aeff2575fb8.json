@@ -1,0 +1,74 @@
+{
+  "id": "01a10e96-7491-7c80-9014-5aeff2575fb8",
+  "external_ref": null,
+  "title": "Begin recovery activation: exact automatic replay with complete takeover and settlement barriers",
+  "outcome": "After the foundation lands, eligible normal-operation begin-unknown automatically reconciles the retained exact begin and delivers its original head once through the existing bounded scheduler. Complete ownership and settlement barriers precede activation; saved old/new boot recovery remains separately held for slice B.",
+  "acceptance": [
+    "R1: On the accepted foundation, an eligible normal-operation begin-unknown automatically replays its immutable exact grant/tokens/original begin key under validated stable producer authority and a valid current connection, without Resume. Applied begin returns its retained receipt; live issued grant begins at most once. A permanent lost-reply witness distinguishes one remote begin from one retained original-head provider handoff and prevents a second handoff.",
+    "R2: Activation uses the existing shared scheduler, unchanged2/5/10/20/30/60-second delays, at most20percent positive jitter, bind/circuit not-before times, call/dispatch budgets, one-head guard and aggregate four-slot cap. Timeout/unavailability retains the same unresolved key. Cap deferral charges neither attempt index nor first-held time. Preview names reconciliation, attempt and due time. Tests cover caps, delays, holds and positive eligible replay.",
+    "R3: Shared exact attempt authority extends through replay reservation, off-lock transport, result ACK and provider delivery settlement. Stop/Cancel/Resume/admission/bind/reset/revocation/replacement/removal and compensating checkpoint races join, defer or explicitly transfer ownership. Barrier witnesses before reservation, in flight and before local result/delivery commit prove no stale settlement, successor release, removed-head resurrection, operator-pause bypass or duplicate delivery. Remote Begin plus failed/ambiguous result ACK stays visibly held until exact valid reconciliation.",
+    "R4: Only a producer-attributed grant_expired result for the retained never-begun exact envelope permits fresh ordinary admission, with a different key only for that fresh grant after durable settlement. Every grant_scope_mismatch, including after status/resume expiry, remains held; missing grants, null/different status, stale identity and fresh evaluate are never negative proof or harmless probes. No fabricated restart checkpoint settles uncertainty.",
+    "R5: Activation covers normal-operation recovery only. New/legacy saved uncertainty remains fenced before competing boot, bind, restart-checkpoint, Resume and admission until separately verified slice B reconstructs it. Tests prove no boot wire action or provider handoff bypasses this boundary; healthy and operator controls remain covered. Closing-checkpoint recovery is not activated.",
+    "R6: docs describe enabled normal-operation replay, authority, ownership, settlement and temporary boot boundary. The holder declares/measures a separately concurred activation line guard before implementation. This child has its own passed maintained full gate/host Test record on the exact final input, independent read-only Codex/Claude pair without outstanding in-scope Medium+, filed remaining Lows and independent acceptance. Current w79 and parent receive their own final combined evidence/evaluation rather than inheriting child credit automatically."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "pilot",
+    "reliability",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10e6a-1870-70e0-b938-79d03c979dfa",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10e96-4acd-7b50-bfe2-f79e3484ac46"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

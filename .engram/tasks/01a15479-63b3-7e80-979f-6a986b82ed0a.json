@@ -1,0 +1,30 @@
+{
+  "id": "01a15479-63b3-7e80-979f-6a986b82ed0a",
+  "external_ref": null,
+  "title": "Preserve a retained-session open when the child becomes resident during its tail read",
+  "outcome": "An explicit open click opens the requested child in the target pane even if a valid concurrent resume or another pane made the session resident during the bounded read; cancellation and identity guards still hold.",
+  "acceptance": [
+    "A deterministic test starts a retained-child tail read, admits the child through sessionCreated before the response, and verifies the original target pane opens the resident session.",
+    "A deterministic test opens the child concurrently in another pane and verifies the original pending click also opens its requested pane without a duplicate transcript read.",
+    "Closed panes, superseded requests and server identity changes still cancel safely."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "session-projection",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

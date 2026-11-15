@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c698-7781-93a0-a3fbbc3ec2d1",
+  "external_ref": "tm-picu",
+  "title": "Implement Phase 0 Engram host adapter",
+  "outcome": "Add the opt-in shadow-only Engram host adapter for delegated sessions: persistent binding identity, off-lock evaluate/begin/checkpoint lifecycle, fail-open budgets and circuit breaker, structured control cards, restart recovery, and scripted/real-process transport tests.",
+  "acceptance": [
+    "S1-S11 conformance scenarios pass; 250ms per-call and 600ms overall dispatch deadlines; project opt-in defaults off and validates explicit project file, binary, home, and doctor; no routing token appears in wire/transcript/card/mailbox; all relevant backend quality gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

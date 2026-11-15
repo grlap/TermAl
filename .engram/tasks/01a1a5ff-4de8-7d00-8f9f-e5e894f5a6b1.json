@@ -1,0 +1,31 @@
+{
+  "id": "01a1a5ff-4de8-7d00-8f9f-e5e894f5a6b1",
+  "external_ref": null,
+  "title": "Keep transient settling and capacity authority refusals out of mailbox FIFO fence classification",
+  "outcome": "Transient inability to determine relay authority preserves the older mailbox carrier's FIFO position; actual authority fences can still be overtaken without releasing their owed wake.",
+  "acceptance": [
+    "Keep transient settling and capacity authority refusals out of mailbox FIFO fence classification is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "mailbox",
+    "remote-runner",
+    "review-low",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a1e0-eb76-72d2-b95d-c752e99e378b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

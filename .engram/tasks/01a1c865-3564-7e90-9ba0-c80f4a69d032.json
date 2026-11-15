@@ -1,0 +1,28 @@
+{
+  "id": "01a1c865-3564-7e90-9ba0-c80f4a69d032",
+  "external_ref": null,
+  "title": "Avoid repeated empty startup recovery passes for retired-run journal custody",
+  "outcome": "Startup recovery work that cannot select a readable binding does not schedule an empty recovery thread on every host tick, while exact unresolved journal custody and later supported recovery remain intact.",
+  "acceptance": [
+    "A behavioral regression covers retired-run journal custody whose pending or unsettled reconciliation prevents automatic settlement; repeated startup ticks do not repeatedly spawn empty recovery passes, and the exact journal remains protected until a supported settlement applies."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "named-root",
+    "recovery",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

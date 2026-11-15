@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c7da-7053-9719-bea28bf24930",
+  "external_ref": "tm-xbw6",
+  "title": "Checkpoint and reap Engram sessions before project deletion",
+  "outcome": "delete_project currently detaches/removes the project without the off-lock Engram reset fence used by settings changes, so begun grants and control sidecars can be orphaned.",
+  "acceptance": [
+    "Deleting an Engram-enabled project fences new adapter work, checkpoints begun grants with exit off-lock, reaps all affected sidecars, preserves persistence rollback semantics, and has race coverage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

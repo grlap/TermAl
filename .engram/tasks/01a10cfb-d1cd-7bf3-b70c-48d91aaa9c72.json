@@ -1,0 +1,27 @@
+{
+  "id": "01a10cfb-d1cd-7bf3-b70c-48d91aaa9c72",
+  "external_ref": null,
+  "title": "Paused-queue card labels the abort-path and bind-deferred automatic retries as an Engram hold",
+  "outcome": "ui/src/panels/queue-pause-cause.ts (resolveQueuePauseCause, ~:41) treats every preview starting with 'Engram' that is not the admission-retry prefix as engramHeld. The abort-path automatic retry ('Engram: delivery not attempted; retrying automatically at <RFC 3339>.', src/engram_abort_retry.rs:277-280) and the bind-deferred retry ('Engram: bind deferred before delivery; waiting for durable automatic retry.', src/engram_bind_retry.rs:403) therefore show 'Engram is holding the queue' with a raw RFC 3339 time. Recognise these as automatic-retry causes and format the time locally.",
+  "acceptance": [
+    "Paused-queue card labels the abort-path and bind-deferred automatic retries as an Engram hold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1d86e-5f3d-7642-bf48-59ce624fcb1e",
+  "external_ref": null,
+  "title": "Preserve accepted source slow-warning diagnostics when a later envelope check refuses",
+  "outcome": "Known bounded slow-operation warnings remain observable when a status-0 source response fails later envelope, identity or root validation, while the response remains unavailable.",
+  "acceptance": [
+    "A status-0 source response with accepted warning stderr and an invalid envelope, source identity or root remains unavailable and retains the accepted diagnostic.",
+    "Unsupported stderr is still refused without echoing its payload, and successful source identity semantics remain unchanged.",
+    "A behavioral regression distinguishes retained diagnostics on a later refusal from the successful-response path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "greg-directed",
+    "review-follow-up",
+    "source-identity",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d825-e07c-7d33-80df-e879e6155b1d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

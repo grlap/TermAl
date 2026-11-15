@@ -1,0 +1,38 @@
+{
+  "id": "01a1c446-7d7c-7c90-ab1f-752c2ef9f795",
+  "external_ref": null,
+  "title": "Compact delegation result and wake packet report \"Findings: None\" for an explorer whose full output holds 5 Medium, 1 Low and 3 Note findings",
+  "outcome": "A non-reviewer delegation's compact result and resume-wake packet never present an output that contains findings as having none: either the findings are parsed into the packet, or the packet states plainly that findings could not be parsed and the full output must be read, with the severities it saw.",
+  "acceptance": [
+    "Given the real explorer output from delegation-0c255262-8105-43a7-9895-57439d4c99e9 (or a fixture with its exact section and severity layout), the compact termal_get_session_result packet and the resume_after_delegations wake packet either list its 5 Medium, 1 Low and 3 Note findings, or carry an explicit 'findings not parsed; read full output' marker naming the highest severity seen; neither shows 'Findings: - None'.",
+    "Verdict or other non-path lines are not placed into filesInspected.",
+    "A behavioural test drives the real parser and packet builders with that layout plus a genuinely clean output, and shows the clean output still reports no findings while the findings output is never reported clean.",
+    "The termal_get_session_result tool description states the outputLimit maximum (8192) that the route enforces."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "delegation-results",
+    "evidence-integrity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The reported explorer layout now preserves all nine findings in the compact result and parent wake, excludes verdict/explanatory prose from inspected files, and retains a genuinely clean control. Landed and pushed in combo39 commit 62a4785a; no Medium-or-higher review findings and the exact-tree full gate passed.",
+    "completed_at": "2026-11-10T08:40:28.390791300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

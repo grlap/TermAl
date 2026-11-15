@@ -1,0 +1,26 @@
+{
+  "id": "01a1d8c0-a11a-71b0-993b-8aa5f23b14f8",
+  "external_ref": null,
+  "title": "C6 probe: Codex harness records ordinary evidence after the EO restart",
+  "outcome": "Root session Termal::Sol-d50d (session-13196, Codex) on the running build claims this item, names a clean registered worktree, and runs one registered focused check there; the host records its turn observation, named-root sighting, verification record and credit result through Engram's ordinary writer, as evidence for criterion 6 of w-3fe8f4472e5d.",
+  "acceptance": [
+    "Session-13196 holds a claim on this item and has named .tmp/wt-c6-codex-13196 as its source root.",
+    "A registered test-kind run, `node scripts/test-launcher.mjs focused --input commit -- node --test scripts/check-doc-links.test.mjs`, in that root ends eligible, and its verification record, credit result and the session's turn observations appear on this item's run feed.",
+    "The evidence (run id, records and running build) is cited on w-3fe8f4472e5d for C6's Codex row."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

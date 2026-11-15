@@ -1,0 +1,28 @@
+{
+  "id": "01a10a21-bad4-7952-a70f-1acf8c9c740b",
+  "external_ref": null,
+  "title": "An evaluation request fails 502 when one canonical discovery page read exceeds the 6 s per-read budget (long history, cold store after a restart); an identical retry succeeds",
+  "outcome": "termal_evaluate_acceptance fails the whole request with 502 \"engram work show canonical discovery page: Engram acceptance-evaluation reader exceeded 6000 ms\" when a single discovery-page read overruns its 6 s budget, although the overall request deadline still has room. A slow single read (a long note history, or the first reads against a cold store just after a TermAl restart) should be retried or continued within the request's discovery deadline, or reported as an incomplete brief, rather than failing the request outright. The fix must not exceed the request deadline or the closing reserve (see w-6616fbef4689's budget layout), and must not replay a non-idempotent call. A deterministic test injects one slow page read with time left in the request deadline.",
+  "acceptance": [
+    "An evaluation request fails 502 when one canonical discovery page read exceeds the 6 s per-read budget (long history, cold store after a restart); an identical retry succeeds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

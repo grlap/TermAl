@@ -1,0 +1,24 @@
+{
+  "id": "01a1a49e-7cc7-7753-9ffe-e5875835f974",
+  "external_ref": null,
+  "title": "termal_resume_after_test_runs refuses a run on another host with 'not indexed' and doesn't say why",
+  "outcome": "A session waiting on a test run that ran on another host learns from the tool description and the refusal that this wait covers only runs this host can index, and which route to use instead, so it doesn't retry or take it for a lost run.",
+  "acceptance": [
+    "The tool description in src/delegation_mcp.rs and the refusal at src/test_run_waits.rs state the scope of the wait and name the supported alternative for a remote run, a test pins the wording, and whether a remote run can be waited on natively stays out of this item"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

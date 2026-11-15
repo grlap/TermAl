@@ -1,0 +1,30 @@
+{
+  "id": "01a1c9dc-250e-75c3-8dea-999580c92a55",
+  "external_ref": null,
+  "title": "Central boot: state_load took 146 s and the listener bound only after 154 s (2026-11-11 reboot)",
+  "outcome": "Central boot time to a bound listener is measured per sub-phase, its dominant cost is identified, and it is reduced or the reason it cannot be reduced is recorded with evidence.",
+  "acceptance": [
+    "load_state_for_boot is broken down into timed sub-phases in the startup log (open, schema, per-table or per-session loading, transcript tails, derived rebuilds), and a boot of Central with that logging records which sub-phase dominates.",
+    "The dominant sub-phase is reduced, with a behavioural or measured before/after comparison recorded on this item, or a recorded measurement shows why it cannot be reduced and what it costs.",
+    "The comparison distinguishes a cold OS cache (first boot after a machine reboot) from a warm process restart, using recorded timings for both."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "boot",
+    "greg-reported",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

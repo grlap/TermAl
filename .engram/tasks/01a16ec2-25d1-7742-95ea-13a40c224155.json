@@ -1,0 +1,30 @@
+{
+  "id": "01a16ec2-25d1-7742-95ea-13a40c224155",
+  "external_ref": null,
+  "title": "Every READY-INTEGRATE packet to Merger carries a complete evidence map before it gets a gate slot",
+  "outcome": "Merger never stalls after a passing gate for evaluation-only reasons. Every input packet handed to Merger names, before the packet gets a gate slot: the review-pair delegation ids; the repair-review ids for any post-review fix; a carry or disjoint-tree assessment against the current master; the focused and gate run ids with fingerprints; and a criterion-to-evidence map for each item. Validation is not weakened: the evaluator still judges every criterion independently.",
+  "acceptance": [
+    "A written READY-INTEGRATE packet template lists the five required fields: review-pair ids; repair-review ids; carry or disjoint-tree assessment naming the base commit; focused and gate run ids with fingerprints; and the per-item criterion-to-evidence map, with each entry pointing to a note, record or delegation id the evaluator can read. The template is recorded as a project memory and sent to every TermAl lane and to Merger.",
+    "Merger refuses a gate slot to a packet missing any field and names the missing field; it doesn't fill gaps itself.",
+    "For the next three batches landed after adoption, no landing stalls after a passing gate because evidence wasn't visible to the evaluator. Any stall that does occur is recorded with its cause."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "merge-throughput",
+    "process"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

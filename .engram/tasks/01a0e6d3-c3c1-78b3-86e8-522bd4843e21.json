@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c3c1-78b3-86e8-522bd4843e21",
+  "external_ref": "tm-2kwe",
+  "title": "Delegated Claude children inherit every user/project MCP server (no --strict-mcp-config)",
+  "outcome": "Observed live 2026-09-02: each delegated Claude child is spawned with --setting-sources user,project,local (claude_args.rs push_claude_cli_common_args) and a private --mcp-config for termal-delegation, without --strict-mcp-config. Result: every reviewer child also starts the operator's user-level MCP servers — on this machine two chrome-devtools trees per child (~124+63+86 MB each) started at 01:39:09/:25/:26 — although the injected delegation prompt tells the child not to use browser/Chrome DevTools/external MCP tools. This is a per-child memory multiplier (~270 MB per reviewer), slows child startup, and widens the tool surface of read-only reviewers beyond what TermAl authorizes. Expected: delegation children run with a TermAl-owned strict MCP set (termal-delegation plus explicitly allowed servers such as Engram when the delegation opts in), e.g. --strict-mcp-config with the private --mcp-config, while root interactive sessions keep inheriting user settings. Verify against the current Claude CLI contract for --strict-mcp-config semantics before changing; keep the Codex delegation MCP baseline aligned. No Beads IDs in code comments.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "delegations",
+    "resources",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

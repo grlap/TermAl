@@ -1,0 +1,29 @@
+{
+  "id": "01a19676-3557-7ce3-a47d-32a6b3d92774",
+  "external_ref": null,
+  "title": "Audit direct &mut inner.sessions[..] mutations that skip the session mutation stamp and can escape the delta persist",
+  "outcome": "Every product-code mutation of a persisted session field is either stamped, so the delta persist collects it, or explicitly proven to be followed by a stamp or a full persist. Unstamped durable mutations are fixed.",
+  "acceptance": [
+    "Each direct mutable session-record access in product code is classified, with file:line, as: stamped in the same critical section; followed by a stamp or full persist on every path; or not persisted state.",
+    "Every unstamped durable mutation is fixed through the stamping accessor, with delta-path regression tests on a disposable store (persist a baseline, mutate, collect the delta, reload) for each fixed class; the review pair is clean and the gates pass. A guard or lint is considered so that new unstamped writes are caught."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "audit",
+    "durability",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

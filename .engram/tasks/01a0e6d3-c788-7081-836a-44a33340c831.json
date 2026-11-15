@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c788-7081-836a-44a33340c831",
+  "external_ref": "tm-uwx.2",
+  "title": "Add transactional mailbox sequencing and fetch-time supersession",
+  "outcome": "Within a durable neutral mailbox, assign every append a dense mailbox sequence and stable message id together with sender, receivers, class, topic, timestamp, and state stamp. Support optional same-sender supersedes references. Superseded unprocessed messages remain immutable but are collapsed into audit stubs by the server fetch result, so agents do not receive stale imperative bodies; processed history remains visible.",
+  "acceptance": [
+    "Concurrent sends receive one dense transactional order and stable ids across restart. Fetches detect gaps and return superseded unprocessed messages only as audit stubs naming the successor, while exact bodies remain addressable for audit. Same-sender, cross-sender, invalid, already-processed, corrected-chain, state-stamp, topic-filter, and Unicode cases are tested."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c787-7eb0-87d9-543a5293bb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

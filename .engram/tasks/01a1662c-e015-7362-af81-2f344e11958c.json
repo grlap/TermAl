@@ -1,0 +1,30 @@
+{
+  "id": "01a1662c-e015-7362-af81-2f344e11958c",
+  "external_ref": null,
+  "title": "Stale federation mailbox retry can surface 503 instead of terminal conflict under full-suite load",
+  "outcome": "A stale mailbox capability remains terminally refused when unrelated persistence is settling during the Windows full suite; transient retryable persistence responses do not replace the captured stale-binding outcome.",
+  "acceptance": [
+    "The cause of the full-suite 503 versus the isolated 409 is established with run evidence, and a correction preserves stale-binding refusal without retargeting the recreated recipient.",
+    "The focused regression and Windows full gate pass on the exact reviewed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "gate-failure",
+    "test-stability",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

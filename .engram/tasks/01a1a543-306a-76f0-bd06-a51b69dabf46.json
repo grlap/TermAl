@@ -1,0 +1,24 @@
+{
+  "id": "01a1a543-306a-76f0-bd06-a51b69dabf46",
+  "external_ref": null,
+  "title": "The initial-connect fallback retry test can pass with the retry removed",
+  "outcome": "'retries initial-connect fallback resyncs after a transient /api/state failure' fails when the retry it tests is removed.",
+  "acceptance": [
+    "The test fails with a recorded run when the retry at about app-live-state-transport.ts:905-915 is removed, and it doesn't depend on a real-clock limit to tell the retry from the 3 s mount timer"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

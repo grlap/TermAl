@@ -1,0 +1,34 @@
+{
+  "id": "01a1d95f-1b69-7702-8b25-0dd8a99e2e86",
+  "external_ref": null,
+  "title": "Gate combo103 (5d + 5dfe + e941) as 847e6c59 on 73177116 with one full launcher run on a DL560 test ref; Opus2 lands",
+  "outcome": "The review-clean w-5d287f58a811 (d10b4843), w-5dfe0e65635b (6a78d8dc) and w-e941681013cc (8c2a32c6) are carried byte-identically onto master 73177116 as 847e6c59. They have one passing full launcher gate on their exact tree via a test ref, the integration checks hold, and master is fast-forwarded to 847e6c59 and pushed.",
+  "acceptance": [
+    "A full launcher run (node scripts/test-launcher.mjs full) on a fresh checkout of the test ref test/w-<this item>-<fp8>, whose commit has tree ef1986cb0315bdc6916d58f12369a564ebfac52a, the tree of the landing commit 847e6c597056bd43167c996c752b87a93f78451e, passed every stage, with the same review-freeze fingerprint before and after its run. The landing commit 847e6c59 sits on 73177116 as three commits whose contributions are byte-identical (raw diff, full blob ids, no renames) to 5d d10b4843, 5dfe 6a78d8dc and e941 8c2a32c6. The run id, host, test-ref commit, tree and before and after fingerprints are recorded on this item.",
+    "Before the push, origin/master equals 7317711656696fa95c0ef9663b33489d708b8b21, so the landing 73177116 -> 847e6c59 is a fast-forward. After the push, git ls-remote origin refs/heads/master equals 847e6c59, which is recorded on this item, and the test ref is deleted with its push and deletion recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo103 (5d + 5dfe + e941) carried byte-identically onto 73177116 as 847e6c59 (tree ef1986cb). DL560 test-ref FULL test-d13c5040 passed every stage on test ref fccda139 (same tree; runner fingerprint bf260123 equal before and after). Master was fast-forwarded and pushed 73177116..847e6c59 at 10:42:35Z, and both refs were deleted at 10:42:43Z. The independent evaluation (Codex session 18045) passed 2/2. All three members are closed (5dfe, e941; 5d's evaluation is in flight with d50d).",
+    "completed_at": "2026-11-14T16:08:55.002107800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

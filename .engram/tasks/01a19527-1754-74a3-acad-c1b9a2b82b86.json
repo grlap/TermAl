@@ -1,0 +1,25 @@
+{
+  "id": "01a19527-1754-74a3-acad-c1b9a2b82b86",
+  "external_ref": null,
+  "title": "The named-roots test model answers session_status without the connection's capabilities, unlike the producer",
+  "outcome": "Tests that drive real naming and the verification_record sender through ScriptedEngramControlTransport see the producer's status shape, so that the sender's capability gate is not silently tripped by the fixture itself.",
+  "acceptance": [
+    "The named-roots model's own session_status answer (engram_named_root_test_transport.rs) has the producer's shape that old_and_new_bind_and_status_answers_both_parse pins, including `capabilities`, or a test that relies on the older shape names that explicitly. No existing test loses coverage. The model's other answers are unchanged.",
+    "The full gate passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

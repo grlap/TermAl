@@ -1,0 +1,42 @@
+{
+  "id": "01a156c2-f2df-7893-b7da-bfbe9e7d2ea3",
+  "external_ref": null,
+  "title": "macOS named-source-root evaluator control compares /tmp and /private/tmp spellings",
+  "outcome": "The named-source-root evaluator regression checks actual directory identity on macOS filesystem aliases while preserving the proof that an evaluator runs in the intended named root. Equivalent /tmp and /private/tmp spellings do not fail the control; a different root still does.",
+  "acceptance": [
+    "A deterministic macOS alias witness reproduces the current named-source-root evaluator assertion mismatch without changing product dispatch or source-root authority.",
+    "The control passes for filesystem aliases of the same directory and retains a negative witness for a genuinely different evaluator directory; relevant focused checks pass on the final source."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "gate-failure",
+    "macos",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1bbdd-a27c-7f12-8870-4b7f51a330df",
+  "external_ref": null,
+  "title": "Use accurate peer attribution for native relay refusal diagnostics in both directions",
+  "outcome": "Use accurate peer attribution for native relay refusal diagnostics in both directions",
+  "acceptance": [
+    "Native relay refusal codes/advice identify the refusing peer accurately for both home read/ACK calls and Wake/InspectWake calls to the native host, with documentation matching the chosen direction-neutral or operation-specific convention.",
+    "Behavioral coverage witnesses safe authenticated persistence/capacity refusals in both directions while preserving original status, MAC, authority, retry and outcome classification."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

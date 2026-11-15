@@ -1,0 +1,57 @@
+{
+  "id": "01a1691b-f8a6-7162-8cfd-2dcd927cfb4d",
+  "external_ref": null,
+  "title": "Uncarried-test closure line: report the other-grant reason first and give advice per reason",
+  "outcome": "The closure line for a test left uncarried at a turn boundary names the reason that actually kept it from being carried, and its advice fits that reason.",
+  "acceptance": [
+    "C1 (reason order at the close). engram_close_unended_checks knows the closing grant. At the turn's close, a check started under a grant other than the closing one is told ENGRAM_UNCARRIED_OTHER_GRANT, before any session-wide cause (agent, line key, carry refusal, runtime). At the next turn's start, a check that nothing about itself kept from being carried is told ENGRAM_UNCARRIED_UNRESOLVED_CLOSE, as now.",
+    "C2 (advice fits the reason). The generic \"run it again to record it\" is replaced by advice chosen per reason: Unnamed: \"name the worktree with termal_name_source_root, then run it again in a later turn\"; OutsideRoot: \"run it again in the named source root\"; Delegated: \"ask the root session that holds the claim to run it in its named source root\"; Overlapped: \"run it again on its own\"; Outstanding: no rerun advice, \"it can earn credit only once Claude reports that work ended\"; non-Codex runtime, line key, runtime gone, other grant, unresolved close: \"run it again and let it end within its turn\". The reason clause itself is unchanged from w-1b4f. No other line changes.",
+    "C3 (tests, absorbing w-c5c50). Table-driven regression tests through the real close paths assert each reason and its advice: at the turn's close for line key, unnamed, overlapped, Claude, runtime gone, delegated session, target outside the named root, an outstanding-work fence, and a check of another grant (OTHER_GRANT, and not a session-wide cause, even when one would also apply); at the next turn's start after a cached close, for an unnamed root and for a named root with a Codex item-keyed check (UNRESOLVED_CLOSE).",
+    "C4 (unchanged rules). Carried tests and the background-gate refusal lines (EngramCarryRefusal::gate_line) are unchanged word for word, and the existing reported_ends, unended_closures and silent_check_outcome tests pass unchanged except where they assert the replaced generic advice; any such expectation is named with its justification.",
+    "C5 (validation). The review pair has no outstanding finding of Medium or higher; focused checks pass on the frozen input; it lands after w-1b4f and w-e11e."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

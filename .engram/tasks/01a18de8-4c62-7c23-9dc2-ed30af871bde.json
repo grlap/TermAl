@@ -1,0 +1,30 @@
+{
+  "id": "01a18de8-4c62-7c23-9dc2-ed30af871bde",
+  "external_ref": null,
+  "title": "TermAl's mirrored Engram source-basis type carries no git_tree, so TermAl can neither send nor read the tree Engram's applicability and measured_unchanged checks use",
+  "outcome": "TermAl's mirrored Engram source-basis type carries no git_tree, so TermAl can neither send nor read the tree Engram's applicability and measured_unchanged checks use",
+  "acceptance": [
+    "TermAl's mirror of Engram's source basis carries the optional git_tree field with Engram's exact wire form and semantics (present or absent), round-tripping real Engram producer output without loss",
+    "Where TermAl emits a source basis it reports exactly the tree the host recorded for that revision, or none when none was recorded, never a tree inferred from the current worktree; deterministic tests cover present, absent and mismatch-refused cases",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "id-contract"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

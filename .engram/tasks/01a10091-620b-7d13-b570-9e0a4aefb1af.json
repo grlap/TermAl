@@ -1,0 +1,30 @@
+{
+  "id": "01a10091-620b-7d13-b570-9e0a4aefb1af",
+  "external_ref": null,
+  "title": "Budget-clock migration B3: engram_host_adapter.rs boot-recovery region (about lines 12700-16600)",
+  "outcome": "An audited migration, through the state-owned clock boundary from slice 1, of the fixtures in src/tests/engram_host_adapter.rs at about lines 12700-16600, the boot-recovery region. w-4401's fixture at :13387 is already scripted there. Navigation counts at 593c783: 15 enable_test_project_engram calls and 10 direct deadline_ms sites (:12774, :12941, :13076, :13360, :13464, :13957, :14036, :14584, :14772, :15287). The batch lists each converted test's deadline, elapsed and wait sources and its assertions, adds focused boundary controls, and keeps the negative scheduling and timeout assertions. It inventories the transitive test callers of every changed shared fixture, including indirect clock selection and existing time hooks. A full run validates the batch; it does not classify it. No blanket Real declarations and no production change. The decomposition is note 7c38dafc37c5410391ab42881615461a on the parent, with f842da36050949b3ba884f5884c64766. Criteria are to be agreed before this batch starts.",
+  "acceptance": [
+    "Budget-clock migration B3: engram_host_adapter.rs boot-recovery region (about lines 12700-16600) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a10069-95fe-7623-a4e5-8f9988de4cb3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a102f1-d5e2-7cb1-aeba-34c2438275b8",
+  "disposal_reason": "Parent w-8f9988de4cb3 (budget-clock slice 1) completed after landing in 98ff008; the remaining batches continue as independent work (coordinator decision, Termal::Fable2).",
+  "completion": null
+}

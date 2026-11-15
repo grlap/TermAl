@@ -1,0 +1,70 @@
+{
+  "id": "01a0fa84-7f43-7782-b76d-47338f8245e3",
+  "external_ref": null,
+  "title": "Preserve stable asserted Engram session identities and rotate them per restore occurrence",
+  "outcome": "TermAl keeps local UI identities separate from persisted asserted Engram identities, preserves the same validated association across ordinary restart/upgrade, and creates fresh opaque identities for new sessions and new restore occurrences without replaying pre-restore authority. Restore rotation and local retirement become durable before any consumer can use the new association.",
+  "acceptance": [
+    "I1 — CONCURRED REPRESENTATION AND INVENTORY. Before implementation, a non-implementer concurs on distinct local-session and asserted-Engram identity representations, a persistent mapping keyed by validated destination identity, durable host/session identity and restore occurrence where applicable, and the format/length accepted by the actual Engram producer. The design names all consumers and persisted recovery fields: control --session-id, ENGRAM_SESSION_ID, CLI/MCP configuration, session/work binding and external references, root and delegated sessions, work/claim reads, queued begin/checkpoint/evaluation/delivery operations, acceptance/resend records, carried evidence and reverse/history lookups. It names the closed-admission interface required for restore rotation and the retirement transaction. Local UI/transcript identifiers remain unchanged.",
+    "I2 — NEW ISSUANCE AND STABLE REUSE. A new logical session/store association receives a fresh opaque, collision-resistant asserted identity independent of reusable session-N counters, process identifiers, copy hashes and timestamps. The mapping is durable before its first external use and is reused after restart for the same validated association. Distinct sessions/hosts do not derive equal identities from equal local counters; newly created associations after a host-state copy/rollback do not reuse a sequential namespace. Existing copied identity state is not thereby authorized for simultaneous independent hosts. Tests cover repeated restart, equal local identifiers in distinct hosts, multiple stores, and new association creation after restoring local state; generated identifiers satisfy the producer's real format contract.",
+    "I3 — COMPATIBLE MIGRATION, FAIL-CLOSED AMBIGUITY. On ordinary upgrade with the same validated destination and no new or unresolved restore occurrence, migration materializes the prior asserted identity/external reference durably before recovery, preserving legitimate existing authority and its routing. It does not silently rotate all sessions or permanently fall back to local UI ids. A new restore occurrence takes precedence over migration and invokes I4–I5. Missing, invalid, conflicting or unvalidated association/restore evidence prevents authority admission with a reason rather than guessing an identity. Tests prove compatible migration, restart after migration, new-restore precedence, and ambiguous/corrupt mapping failures.",
+    "I4 — OCCURRENCE-SCOPED DURABLE ROTATION. Under a verified closed-admission boundary, a newly completed intended restore occurrence creates and persists distinct asserted identities for all existing affected session associations before they reconnect, bind or recover work; sessions subsequently created against that destination use the current occurrence. The mapping, handled-occurrence acknowledgement and I5 local retirement are committed as one recoverable durable transition before reopening. Retrying or rebooting the same handled occurrence reuses its mapping; a new occurrence from restoring the same copy rotates again. Other destinations and local UI/history identities remain unaffected. Tests cover existing and new sessions, retries, reboot, repeated restore of the same copy, per-store isolation, and faults between persistence steps; no partially completed transition admits a consumer.",
+    "I5 — LOCAL RETIREMENT WITHOUT PRODUCER AUTHORITY REWRITE. Rotation durably retires or quarantines old binding/routing handles, active or uncertain grant references, pending authority operations, saved resend/evaluation arguments and carried receipt/delivery state so they cannot execute under either the old restored association or a relabelled new identity. Historical evidence and queued user prompts remain available, with unresolved work retained and an explicit reason where applicable. Existing provider/MCP environments carrying the old identity cannot continue as current consumers. This transition does not reset, renew, checkpoint or otherwise rewrite restored producer authority automatically; producer claim-expiry and explicit recovery rules continue to govern. Tests cover each persisted authority category in I1, fault/restart recovery, old environment/late-callback attempts, retained history/prompts, and absence of automatic old-authority operations.",
+    "I6 — CONSISTENT USE AND REVERSE LOOKUP. All inventoried external consumers obtain the current asserted identity from the validated durable mapping; local UI ids cannot be substituted at those boundaries. Reverse mapping routes current responses to the correct local session and preserves historical association lookup without making that historical identity an admission fallback. Tests cover root and child sessions, control/CLI/MCP/environment/external-reference consistency, two stores bound to one local session, and stale-generation responses after rotation. Missing current mappings fail closed.",
+    "I7 — EVIDENCE AND ACTIVATION BOUNDARY. Recognized checks on the implementation revision in the named source root prove I2–I6 and identify the compatible Engram producer contract/build. The identity implementation may land as a dormant transaction behind an explicit closed-admission seam and be tested there; it must not activate restore reconnection or recovery before the dependent host-quiescence item enforces and verifies that boundary. Integrated admission/drain/release evidence belongs to that dependent item. Completion of identity mechanics alone must not be reported as a completed restore-safety guarantee."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-backup",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

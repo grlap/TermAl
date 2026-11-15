@@ -1,0 +1,32 @@
+{
+  "id": "01a1b143-f8ee-75d0-a58f-63f1ee9864ca",
+  "external_ref": null,
+  "title": "Clarify or enforce the source-owner limiter for pinned registration probes",
+  "outcome": "Source-owner documentation accurately states whether the two-permit limiter covers only GET metadata or also pinned-registration probes, and the chosen admission/resource bound is covered without changing the outer registration POST or ACK contract.",
+  "acceptance": [
+    "The documented limiter scope matches GET metadata and pinned registration/replay behavior; any concurrency admission change preserves existing registration refusal/ACK identity and aggregate deadlines.",
+    "Focused coverage demonstrates the chosen limiter scope and no sharing of review-freeze capacity."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "resource-bound",
+    "review-follow-up",
+    "source-owner",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

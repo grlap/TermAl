@@ -1,0 +1,63 @@
+{
+  "id": "01a0faac-0c79-74a0-9e7d-3c4e8851eb7c",
+  "external_ref": null,
+  "title": "Read-only Claude children get a refusal that names no rule (and calls evaluators reviewers), and the evaluator brief invites refused command shapes, so evaluators cannot check freeze fingerprints",
+  "outcome": "Read-only Claude children: a chained read-only git command is refused with no refusal reason visible, so evaluators cannot check freeze fingerprints",
+  "acceptance": [
+    "A read-only Claude child's denied Bash request gets a message that names the rule it broke and the allowed form, for at least chaining, redirection, git repository retargeting (`-C` and friends) and a `cd` away from the cwd; tests cover each.",
+    "The denial message names the delegation kind correctly (it does not call an evaluator a reviewer); a test covers an evaluator child.",
+    "The acceptance-evaluator brief states the read-only command form (one git command per call, run in the workspace, no -C, no cd elsewhere); a test pins it.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "delegations",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only Claude delegation children, reviewers and acceptance evaluators, now get refusals that name the rule broken and the allowed form, and that say \"delegation\" rather than \"reviewer\". The rules covered:\n- Bash: chaining, redirection (including `2>&1`), substitution, background, a cd away from the workspace on a git line (in the checker's own order), git's -C, --git-dir, --work-tree and -c, git help, listing-only git remote and branch, and unlisted commands;\n- PowerShell, file edits, the tracker, and other tools.\n\nThe explanation lives in src/claude_read_only_refusal.rs and never decides; the allow/deny decision is unchanged. A Claude evaluator's brief states the allowed command form. A Codex evaluator's brief is unchanged, since it runs in its own sandbox.\n\nCommitted as 80536d0, landed in train 15 as master commit 169fc8b, pushed and verified on origin.\n- Merged gate test-e3c5a5c9 passed.\n- Integration pair: no Medium or higher.\n- TermAl build 555af4a6 installed, restart signal sent.\n\nEvidence:\n- Exact-input gate test-0dcbaabf, verification 6a926982.\n- Pair: round 1 found 2 Mediums, both fixed; round 2 (Codex b0a5e9d4, Claude e041a0fe) had no Medium or higher.\n- Independent evaluation delegation-a9320ee8 (Codex): 4 of 4 criteria passed, evaluation f091ec44.\n\nLows filed: w-a1bff8497d62, w-35aac795da57, and w-cbfd8c27f706 (fixed and done in the same train).",
+    "completed_at": "2026-10-02T08:05:25.759834300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

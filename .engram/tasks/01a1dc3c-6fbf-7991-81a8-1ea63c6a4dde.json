@@ -1,0 +1,34 @@
+{
+  "id": "01a1dc3c-6fbf-7991-81a8-1ea63c6a4dde",
+  "external_ref": null,
+  "title": "Keep opaque user-input option IDs confined to adapters that validate by ID",
+  "outcome": "Codex question adapters continue to answer by exact labels even if an incoming option includes an unrelated id field; only ID-validating adapters populate the shared opaque option value.",
+  "acceptance": [
+    "Both Codex request_user_input parse paths keep shared UserInputQuestionOption.id unset, or use an equivalent protocol-specific decoding boundary that preserves label-answer semantics.",
+    "Behavioral coverage sends a Codex option with an id distinct from its label and confirms the existing label answer is accepted and forwarded correctly; Kimi exact-ID questions retain their behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "codex",
+    "greg-reported",
+    "kimi",
+    "review-low",
+    "ui",
+    "user-input"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dbb6-58b9-7cf1-9bc0-65b096fb3238",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

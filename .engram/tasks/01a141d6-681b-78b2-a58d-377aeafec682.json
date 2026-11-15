@@ -1,0 +1,30 @@
+{
+  "id": "01a141d6-681b-78b2-a58d-377aeafec682",
+  "external_ref": null,
+  "title": "Harden the named-root startup retry fixture against wall-clock process delays",
+  "outcome": "Investigate and, when supported by evidence, isolate the startup retry fixture's real process-I/O timing from its deterministic admission-budget contrast without widening production limits.",
+  "acceptance": [
+    "Record the real process-I/O boundary in ColdStartRootReader and distinguish injected pre-dispatch exhaustion from an unrelated warm-read timeout using deterministic phase controls or preserved failure evidence; no flake is claimed without an observed failure.",
+    "Any test change preserves the original two RED-discriminating assertions, production reclamation deadlines, and send/post-dispatch timeout cleanup; do not widen timeouts or add automatic retries to obtain green.",
+    "Evaluate optional transport controls for an already-warm process with an exhausted budget and a concurrent in-flight request; add meaningful deterministic coverage if it is needed to pin shared-process preservation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "named-root",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

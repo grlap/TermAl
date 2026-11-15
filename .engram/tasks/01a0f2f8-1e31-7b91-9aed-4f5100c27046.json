@@ -1,0 +1,36 @@
+{
+  "id": "01a0f2f8-1e31-7b91-9aed-4f5100c27046",
+  "external_ref": null,
+  "title": "The line for an ordinary check that lost its credit to an overlap does not say what overlapped it",
+  "outcome": "When a test of a turn ends successfully but is withheld as overlapped, the holder's line names what marked it (its own later command started before the closing snapshot was ready, its own edit, another session's command or edit, or a write through TermAl), as a carried gate's refusal already does.",
+  "acceptance": [
+    "An ordinary check keeps the first cause that marked it overlapped, and the withheld line names it: the holder's own command by program and line digest, its own edit, another session by name and id with what it did, or a write through TermAl; a test covers each.",
+    "The full gate passed on the exact landed input.",
+    "The line no longer says 'while it ran' for a mark made after the test ended and before its closing snapshot was ready; it says the closing snapshot was still being taken, and a test covers that case."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

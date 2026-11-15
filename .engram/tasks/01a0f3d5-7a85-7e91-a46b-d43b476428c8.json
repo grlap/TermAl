@@ -1,0 +1,36 @@
+{
+  "id": "01a0f3d5-7a85-7e91-a46b-d43b476428c8",
+  "external_ref": null,
+  "title": "Engram revoked-grant rotation readiness exceeds 20 seconds in the full Rust gate",
+  "outcome": "The revoked-grant rotation regression passes reliably within its unchanged enablement budget in the maintained full gate; diagnostic evidence identifies whether the failure is test/runner assumptions or product startup under supported load, rather than dismissing it as contention.",
+  "acceptance": [
+    "Capture the failed readiness phase (process startup/execution versus pipe collection) and identify a falsifiable root cause using retained run diagnostics; a passing retry alone is not diagnosis.",
+    "Fix the demonstrated test/runner or product cause without ignoring/quarantining the test, raising the 20-second production deadline, or retrying until green; the exact reviewed input passes the focused test and full maintained gate."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "gate-failure",
+    "rust",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

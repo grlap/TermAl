@@ -1,0 +1,29 @@
+{
+  "id": "01a0e967-6779-70b3-afb1-e0f80b315a6d",
+  "external_ref": null,
+  "title": "The 10 s admission durability fence fails when TermAl's state writer stalls, retaining the prompt and pausing the session (root of PI-32 and PI-34 occurrences)",
+  "outcome": "After Engram grants and begins a turn, TermAl checks that its own state is durable before delivery (confirm_engram_admission_durable, src/engram_queued_admission.rs:347-398). The check asks the local SQLite writer to save the session and read it back, within admission start + ENGRAM_DISPATCH_BUDGET_MS (10 000 ms, src/engram_host_adapter.rs:16). When it misses that deadline, engram_host_adapter.rs:4732-4758 calls interrupt_queued_engram_admission. That retains the prompt, blocks auto-dispatch, shows \"Engram: interrupted/unknown delivery. Prompt retained; cancel or reconcile before continuing.\" and drops the session to Idle. TermAl then sends Engram an exit checkpoint keyed termal-stale-begin-checkpoint:<session>:<grant>. Engram answered every call in the observed cases, so the stall is inside TermAl. What stalls the writer for 10 s is unproved: disk contention from concurrent gates, a write retry backoff, or the state lock held elsewhere. No timing is logged.",
+  "acceptance": [
+    "A missed admission durability deadline under host load does not leave a session silently paused: either the check is retried or reconciled once the writer recovers (the grant's begin is known to Engram), or the paused state is named to the session's senders (PI-32's cheap half)",
+    "TermAl logs, for each admission durability check, how long the save and the read-back took and what the writer was waiting on, so a missed deadline names its cause",
+    "The cause of the observed 10 s stalls is identified from that logging and fixed or bounded, with a regression test for the chosen behaviour"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "control-plane",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": "2026-10-03T00:00:00Z",
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1a31f-9dbb-7ed3-87cd-58fa1c679ff5",
+  "external_ref": null,
+  "title": "Make the committed-input flow the default source basis (flip ORDINARY_COMMIT_INPUT_DEFAULT) once gitlink repos are admitted",
+  "outcome": "A commit-clean checkout's default source basis is git-commit:, so identity is the commits (Greg 2026-11-03) and on-disk path spelling is irrelevant in the common case.",
+  "acceptance": [
+    "The default source basis for a commit-clean checkout is git-commit:<HEAD>, in the host (src/ordinary_commit_input.rs) and the launcher (scripts/test-launcher.mjs), with the existing parity test still enforcing that both constants agree.",
+    "The behaviour for a dirty checkout follows the design choice recorded on this item before implementation, and a test covers it.",
+    "A repository with gitlinks that is eligible under the committed-input rules gets a git-commit: basis by default, by a test.",
+    "docs/test.md describes the new default, and the release note states that one round of re-measurement follows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "design-pending",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d2b2-cb1a-7442-95ee-70ed4ca2bb12",
+  "disposal_reason": "The premise no longer holds. At master 4a46b552, ORDINARY_COMMIT_INPUT_DEFAULT is #[cfg(test)] (src/ordinary_commit_input.rs:7-10, 'False now means unavailable'), and production observations and naming use the configured Engram source owner's complete source_id, not a content-v1 or git-commit selector. There is nothing to flip. The remaining legacy is the test-only selector and its wrappers, which w-70ed4ca2bb12 removes. (Termal::Fable2, coordinator, 2026-11-13.)",
+  "completion": null
+}

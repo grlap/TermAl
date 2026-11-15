@@ -1,0 +1,49 @@
+{
+  "id": "01a10a30-8104-7e80-a482-4fea2d22dc50",
+  "external_ref": null,
+  "title": "Delete and delegation-child removal drop a retained non-Confirmed cleanup lease",
+  "outcome": "Delete and delegation-child removal drop a retained non-Confirmed cleanup lease",
+  "acceptance": [
+    "On Windows, Delete of a local session or its delegated-child subtree refuses removal while any affected dedicated runtime cleanup owner is InProgress or Unconfirmed, including retained predecessors. The affected session/card and exact retry ownership remain visible through the existing session state and cards (this item makes no UI change); refusal must not partially remove the subtree or report confirmed cleanup.",
+    "Cancelling or settling a delegated child does not discard an exact dedicated-runtime cleanup owner on failed or unknown teardown. The visible child reports the cleanup failure and has a working public Stop retry; successful cleanup is confirmed by job-zero/native process exit before ownership is released.",
+    "Healthy Delete remains usable and removes its intended subtree after successful scoped cleanup. Cleanup waits run outside StateInner, and stale cleanup completion cannot remove a replacement runtime/session or a concurrently changed affected subtree. Windows native-process regressions distinguish failed cleanup, successful retry, healthy deletion, retained predecessor and final revalidation; the exact final input passes the maintained full gate and the independent Codex/Claude read-only pair has no unresolved in-scope Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "agent-workflow",
+    "delegation",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

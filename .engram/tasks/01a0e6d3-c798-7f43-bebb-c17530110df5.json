@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c798-7f43-bebb-c17530110df5",
+  "external_ref": "tm-v64k",
+  "title": "Normalize interrupted response bodies in JSON-first API requests",
+  "outcome": "Parent-verified finding from authoritative reviewers 6460/6461, frozen trackedHeadDiffSha256 7853f694. ui/src/api-request.ts requestJsonFirst leaves response.text/json transport rejection unclassified, unlike request. In-memory diagnostic executed the actual TypeScript helper (transpiled without file output; only sanitizer stubbed): identical HTTP200 application/json errored ReadableStream yields ApiRequestError/status200/backendUnavailable=true from request, but raw TypeError/backendUnavailable=false from requestJsonFirst. Used by state/tail/history fetches. This sibling behavior predates the current save fix; it is incomplete error normalization, NOT proof snapshot retry stops: app-live-state-transport catch still schedules fallback retry for generic errors. Normalize transport/body failures consistently, retain HTTP status/cause, preserve malformed JSON and intentional cancellation semantics, and add regressions for JSON/text, known/unknown content length, 200/503/permanent4xx. No source edits in review. Searches requestJsonFirst, interrupted, response body and body-read found no existing item.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. readResponseBody in ui/src/api-request.ts, landed in 0e7ab55 (ancestor of master).",
+  "completion": null
+}

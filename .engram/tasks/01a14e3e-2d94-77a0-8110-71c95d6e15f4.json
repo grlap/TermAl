@@ -1,0 +1,33 @@
+{
+  "id": "01a14e3e-2d94-77a0-8110-71c95d6e15f4",
+  "external_ref": null,
+  "title": "Provision an attested proxy → native principal association so the agent facade can resolve a remote root's proxy id",
+  "outcome": "Provision an attested proxy → native principal association so the agent facade can resolve a remote root's proxy id",
+  "acceptance": [
+    "Provision an attested proxy → native principal association so the agent facade can resolve a remote root's proxy id is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a14bba-d1c2-7610-8c8e-8c0a4f62bbc0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a14e3f-a539-7dd2-ae91-fc620307cb7a",
+  "disposal_reason": "Architect2 (note 74d50513, mailbox #835) ruled this must be a REQUIRED child of M5. No update action converts optional to required, so it is replaced by required child w-fc620307cb7a, which carries Architect2's five criteria verbatim with coordinator concurrence.",
+  "completion": null
+}

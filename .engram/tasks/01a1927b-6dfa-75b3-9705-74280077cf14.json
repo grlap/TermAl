@@ -1,0 +1,29 @@
+{
+  "id": "01a1927b-6dfa-75b3-9705-74280077cf14",
+  "external_ref": null,
+  "title": "Give the source and meaning of option B in the candidate-commits citation of Greg's 2026-10-31 word",
+  "outcome": "Give the source and meaning of option B in the candidate-commits citation of Greg's 2026-10-31 word",
+  "acceptance": [
+    "The candidate-commits bullet's citation in CLAUDE.md and AGENTS.md names the session or route of Greg's word (directly in Termal::Fable2's session, about 01:56Z on 2026-10-31, corroborated via Engram::Advisor) and briefly says what option B was (commit first on the agent's own branch or worktree, gate that commit, fast-forward master to it), matching how neighbouring citations name their source",
+    "The change lands under the instruction-change conditions (a), (b) and (c), with a clean review pair and full gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

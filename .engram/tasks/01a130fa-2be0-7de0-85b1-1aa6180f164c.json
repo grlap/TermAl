@@ -1,0 +1,28 @@
+{
+  "id": "01a130fa-2be0-7de0-85b1-1aa6180f164c",
+  "external_ref": null,
+  "title": "Receipted delivery: a failed or timed-out write-ahead fence leaves the queue stalled until an unrelated dispatch trigger",
+  "outcome": "Receipted delivery: a failed or timed-out write-ahead fence leaves the queue stalled until an unrelated dispatch trigger",
+  "acceptance": [
+    "After a write-ahead fence fails or times out and the receipted head returns to pending, the queue is either drained once by an explicit, bounded continuation after that write commits, or the stall is surfaced to the operator; no unbounded retry is introduced",
+    "A test drives a failed write-ahead fence on an unpaused queue and shows the chosen behaviour"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

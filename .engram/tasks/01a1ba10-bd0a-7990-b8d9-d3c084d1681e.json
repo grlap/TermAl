@@ -1,0 +1,30 @@
+{
+  "id": "01a1ba10-bd0a-7990-b8d9-d3c084d1681e",
+  "external_ref": null,
+  "title": "Cover declared-native SourceId receipt associations through durable settlement",
+  "outcome": "A behavioral declared-native fixture drives a received SourceId record through its own launch-row association, persistence fence, settlement and reload, preserving complete identity and original authority.",
+  "acceptance": [
+    "Cover declared-native SourceId receipt associations through durable settlement is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "review-low",
+    "source-revision",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b9c2-867d-7371-88d4-7c5db7d2b5a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

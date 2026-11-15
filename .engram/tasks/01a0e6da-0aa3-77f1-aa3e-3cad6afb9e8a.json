@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6da-0aa3-77f1-aa3e-3cad6afb9e8a",
+  "external_ref": null,
+  "title": "Test launcher: add the unreadable-temp-root pass (TERMAL_TEST_USER_TEMP) to the maintained full gate",
+  "outcome": "Test launcher: add the unreadable-temp-root pass (TERMAL_TEST_USER_TEMP) to the maintained full gate",
+  "acceptance": [
+    "Test launcher: add the unreadable-temp-root pass (TERMAL_TEST_USER_TEMP) to the maintained full gate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "PI-19",
+    "post-import",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

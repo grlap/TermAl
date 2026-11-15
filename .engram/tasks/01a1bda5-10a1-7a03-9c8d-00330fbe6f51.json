@@ -1,0 +1,31 @@
+{
+  "id": "01a1bda5-10a1-7a03-9c8d-00330fbe6f51",
+  "external_ref": null,
+  "title": "Keep federation page notification summaries consistent with verified wake causes",
+  "outcome": "Federation page reads do not show a verified wake cause beside a contradictory state-derived notification summary, while preserving stored disposition and receipt/ACK behavior.",
+  "acceptance": [
+    "A production federation page read with retained unconfirmed disposition and verified receiver outcome presents a summary consistent with the cause, without changing receipt, acknowledgement, authorization or wake behavior.",
+    "Behavioral regression coverage exercises the page-read path; repository review and exact-input gate requirements are satisfied."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "federation-mailbox",
+    "follow-up",
+    "greg-reported",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173d0-4952-7482-8ab2-44909af1b8bc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1be36-4589-7432-b817-62e838484881",
+  "external_ref": null,
+  "title": "Trace registered run refusal 'named root moved since registration' after a parent clear",
+  "outcome": "Determine from supported evidence whether run ed7fde84 lost credit because a real named-root generation changed or because validation wrongly rejects the child binding, and assess joint FULL/credit exposure.",
+  "acceptance": [
+    "Record the registration and terminal root/work/claim/generation evidence supplied by the run owner, distinguishing known observations from unavailable history.",
+    "Trace the relevant existing TermAl validation and named-root clear ownership code without reading the peer worktree or producer store; classify the refusal only as far as evidence permits.",
+    "Send a short finding and joint FULL / w-46e8 risk assessment to Fable2 and Sol-03d4; no retry, source repair, or extra live test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "diagnosis",
+    "named-root",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a135cf-dec6-75f1-82b3-4e99f0fdb28c",
+  "external_ref": null,
+  "title": "A root session whose turn was cut by a TermAl shutdown comes back after restart as error with a paused queue, and holds its mail until a manual Resume",
+  "outcome": "After a TermAl restart, a root session whose turn was cut by the shutdown, and whose closing Engram checkpoint could not settle, is recovered into a usable state: it is admitted and its queued mail is delivered, or it shows a precise recovery state that names what is needed. It is not left in status=error with queuePaused=true, holding every message \"heldBehindPausedQueue\" until a human presses Resume. The safety rules for an unsettled closing checkpoint are kept: no prior grant is assumed closed, and no possibly delivered request is duplicated.",
+  "acceptance": [
+    "A fail-first test: a root session has an active turn when the host shuts down, and its closing turn_checkpoint fails with a transport error (pipe closed, control_unavailable). On unchanged code, after boot recovery, the session is status=error with queuePaused=true and an inbound mailbox message is held behind the paused queue. After the fix, boot recovery settles or explicitly re-establishes the unsettled checkpoint, and the session's next queued mailbox message is delivered as a new turn without a manual Resume.",
+    "A test shows that a session paused for another reason (a user Stop or pause, a provider capacity error with unknown delivery, or an exhausted usage limit) still stays paused after a restart, so only shutdown-interrupted turns are auto-recovered.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination-cost",
+    "cross-project",
+    "host-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

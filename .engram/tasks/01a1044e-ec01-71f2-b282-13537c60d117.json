@@ -1,0 +1,28 @@
+{
+  "id": "01a1044e-ec01-71f2-b282-13537c60d117",
+  "external_ref": null,
+  "title": "Read source-observation budget clocks lazily on no-op recovery paths",
+  "outcome": "Source-observation no-op Delete, local finalization and retired reconciliation do not consume the dispatch budget clock unless they have actual work.",
+  "acceptance": [
+    "Read source-observation budget clocks lazily on no-op recovery paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "budget-clock",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

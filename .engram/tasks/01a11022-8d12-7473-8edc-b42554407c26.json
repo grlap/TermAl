@@ -1,0 +1,36 @@
+{
+  "id": "01a11022-8d12-7473-8edc-b42554407c26",
+  "external_ref": null,
+  "title": "Acceptance evaluation on a work item with no naming history (e.g. a recovered unnamed claim) refuses 409 with a remedy that cannot succeed",
+  "outcome": "Acceptance evaluation on a work item with no naming history (e.g. a recovered unnamed claim) refuses 409 with a remedy that cannot succeed",
+  "acceptance": [
+    "An acceptance-evaluation request for a work item that has no acknowledged naming history either proceeds against the documented fallback basis (the session workdir, as the evaluate notice already describes for an unnamed claim) or refuses with a typed reason whose remedy can succeed (name a source root with termal_name_source_root, end the turn, then request again); it never tells the caller to request a fresh evaluation when the same request would refuse again.",
+    "A test drives a request for a recovered claim with no naming history and asserts the chosen behaviour and the exact remedy text; existing refusals for a genuinely changed or unresolved naming history keep their current behaviour."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

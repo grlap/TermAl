@@ -1,0 +1,24 @@
+{
+  "id": "01a100e2-74a4-7690-8366-0b5516291f22",
+  "external_ref": null,
+  "title": "Document the inter-turn source-observation barrier and recovery",
+  "outcome": "Document the shared durable sighting owner, execution_observe barrier, explicit Resume and historical root_basis_moved exception; correct host-architecture row14 which currently says inter-turn changes are recorded by neither turn.",
+  "acceptance": [
+    "Document the inter-turn source-observation barrier and recovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

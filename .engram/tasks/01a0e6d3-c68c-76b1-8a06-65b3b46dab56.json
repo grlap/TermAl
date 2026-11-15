@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c68c-76b1-8a06-65b3b46dab56",
+  "external_ref": "tm-p4og",
+  "title": "Stop attached-tail scroll settle/repin feedback from blocking prompt sends",
+  "outcome": "Browser console on workspace deep-link session-5867 shows repeated SessionPaneView scrollToLatestMessage -> settled tick -> pill clear, plus virtualized layout and resize repins. Under scroll tracing this repeatedly captures Error stacks and can monopolize the client while a prompt remains in Sending. Diagnose and bound/deduplicate bottom-follow writes and trace emission without breaking attached-tail behavior.",
+  "acceptance": [
+    "Prompt send stays responsive while attached to a virtualized transcript; redundant stable bottom-follow frames/repins do not generate repeated pill state-change traces; existing scroll-follow behavior and tests remain green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

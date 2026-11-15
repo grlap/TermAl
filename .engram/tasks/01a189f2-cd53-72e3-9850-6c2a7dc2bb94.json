@@ -1,0 +1,27 @@
+{
+  "id": "01a189f2-cd53-72e3-9850-6c2a7dc2bb94",
+  "external_ref": null,
+  "title": "Engram turn_checkpoint answers a redaction refusal with generic storage_error, so TermAl cannot drop the refused report",
+  "outcome": "A turn_checkpoint report that Engram's redactor refuses comes back with a distinct documented no-write code, which TermAl adds to its definitive-refusal list, so the report falls back instead of being kept for an exact replay that is refused again.",
+  "acceptance": [
+    "Engram turn_checkpoint answers a redaction refusal with generic storage_error, so TermAl cannot drop the refused report is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

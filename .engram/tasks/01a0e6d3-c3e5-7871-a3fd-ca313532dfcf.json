@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3e5-7871-a3fd-ca313532dfcf",
+  "external_ref": "tm-53e3",
+  "title": "Follow-up delegation that never delivers its turn must surface a typed failure, not the stale attempt result",
+  "outcome": "Observed 2026-09-06 (Phoenix::Fable report 20 via Engram::Advisor): parent session-5867 attempted at 06:02:58Z to resume its completed reviewer children session-6324 (delegation-070da530…) and session-6325 (delegation-c2defd7e…) for a re-frozen packet, then idled ~2h40m waiting for results that never came; its audit still showed attempt=1 with the original timestamps and pre-fix findings; no error, timeout or parent wake was observed. Coordinator's read-only evidence: both children's histories (GET /api/sessions/{id}/history) end at 05:38Z / 05:42Z with the attempt-1 ; no follow-up prompt was ever appended, so no attempt-2 turn was dispatched. The TermAl server restart at ~06:29Z (instance 004720e5 -> 974336f1; Windows boot time 01:48Z was unrelated) came 26 minutes later and cannot explain the missing dispatch, though it is a second gap (below). The parent's exact tool call and its immediate receipt are not yet supplied, so the server-side path is unclassified: gate rejection (conflict/404), Phase-2 dispatch failure, or a request that never reached the server. What TermAl does today (src/delegations.rs followup_delegation): Phase 1 re-arms terminal -> Running and bumps review_result_submission_attempt; Phase 2 dispatch_turn_and_snapshot; on dispatch error it refreshes from the child, and refresh_delegation_from_child_locked derives Completed again from the child's OLD packet — the durable record then reads Completed with the stale result while only the transient tool error says otherwise. A parent that loses that error (turn end, context truncation) audits a completed delegation and waits forever. Second gap: run_post_listen_boot_after_readiness reconciles review submissions, mailbox wakes and delegation waits, but never a Running delegation whose child came back idle: the first refresh after boot re-completes it from the stale packet the same way. Desired: (1) a follow-up whose turn is not delivered ends as Failed for attempt N+1 with a typed reason (dispatch error, restart interruption, gate rejection is already an immediate error) and the parent card/wait treat it as a fresh terminal outcome; a stale attempt-N packet is never re-published as attempt N+1's result; (2) boot reconciliation marks re-armed-but-undelivered follow-ups interrupted instead of leaving them for a stale re-completion; (3) termal_list_delegations/status expose the attempt number, follow-up delivery state and last error so a parent can audit without the transient receipt. Evidence still requested from Phoenix: exact follow-up tool/API invocation and receipt, audit output with delegation ids and times. Related: tm-ds1 (re-arm/dispatch window race re-completing with the stale result), tm-s678 (no watchdog once a turn runs), tm-px5 (follow-up tool), tm-pgp (cap bypass on re-arm). No replay or interruption of the currently running fresh review round.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

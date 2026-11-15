@@ -1,0 +1,41 @@
+{
+  "id": "01a19c56-4c21-7620-8f58-e1fc1595d96c",
+  "external_ref": null,
+  "title": "EO acceptance discovery: reconcile mandatory work-session read reservation",
+  "outcome": "Fix the C1 product regression where optional notes paging can starve the new mandatory ordinary work-session read and binding pages, preserving the existing total budget and conditional no-read paths.",
+  "acceptance": [
+    "In a separate named root on c3ea70b8/tree0c00cea3, acceptance_evaluation_api.rs (and acceptance_evidence_selection.rs only if its actual read condition must be shared) accounts for WorkSessionRead in the mandatory-read reservation on the eligible canonical discovery path, preserving conditional no-read cases and every budget constant.",
+    "The frozen scoped source tree, before/after blobs, exact condition/constants trace, provenance and expected affected tests are returned to Sol-03d4 and Fable2; the six-file test fixture return remains separate and immutable.",
+    "No Cargo/test/evaluator/review/commit/push, no timeout inflation, unrelated edits, aliases or ignored tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evidence",
+    "budget-reservation",
+    "cross-project",
+    "engram-host-adapter",
+    "found-by-gate",
+    "gating-removal-audited",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only reconciliation complete. Original API-only +6/-1 product return from c3ea/tree0c00 produced d1b60; its API postimage equals87f49 exactly and87f49 is ancestor of current5f65. c3ea itself is NOT claimed an ancestor of currentHEAD. The authoritative e81 mandatory-phase/optional-quota design still funds WorkSessionRead and preserves conditional no-read paths; no duplicate patch or product edit needed. All3 criteria passed independent Claude17871 evaluation472b01c5e39f4a90a07afe84e21885c8 attempt1 at revision2/cut51 on unchanged clean root3648/5f65. Full3310B output, packet and verdicts archived at .evidence/w-e1fc1595d96c/evaluation-attempt1. No tests/builds/reviews/commit/push ran for this reconciliation and no runtime proof is claimed. Original separated test6 and product provenance retained through final parent intake; physical own completed roots can now be cleaned after checked paths.",
+    "completed_at": "2026-11-13T17:49:59.275664700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a1db75-19ca-7ed0-b0be-4a4ad16cc5ee",
+  "external_ref": null,
+  "title": "Prevent one pending causal admission target from starving later targets",
+  "outcome": "Within the bounded recovery pass, a target-specific pending outcome does not indefinitely prevent the other captured targets of the same completion from being attempted.",
+  "acceptance": [
+    "A behavioral test holds one target pending while another remains admissible, and observes progress on the latter without changing either original operation key, body, connection or receipt.",
+    "Per-pass work remains bounded and uncertain-write custody is retained."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "remote-verification",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d3bf-d356-70b1-985a-c82b845900a5",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

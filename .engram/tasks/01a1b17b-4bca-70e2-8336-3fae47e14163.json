@@ -1,0 +1,31 @@
+{
+  "id": "01a1b17b-4bca-70e2-8336-3fae47e14163",
+  "external_ref": null,
+  "title": "Remove scheduler-sensitive wall-clock assumptions from received-notice tests",
+  "outcome": "Received-notice deadline tests distinguish the intended boundary using controlled time or distant positive controls, with no false failure caused solely by scheduling delay.",
+  "acceptance": [
+    "received_notice_authority_steps_share_the_remaining_batch_time and received_notice_other_root_read_cannot_restart_its_authority_deadline exercise expiry/nonrenewal without requiring scheduling within one second.",
+    "Positive current-source notice controls have a deterministic seam for deadline behavior while real Git correctness controls remain; production source predicates and budget are not weakened."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "diagnostics",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

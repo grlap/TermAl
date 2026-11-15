@@ -1,0 +1,27 @@
+{
+  "id": "01a16ce7-0b0a-7f73-8169-5925f3529e08",
+  "external_ref": null,
+  "title": "Claude gate write guard: normalize ~ and MSYS /c/... targets (or fail closed), and document the acceptEdits/allow-rule bypass",
+  "outcome": "A guarded Write/Edit/MultiEdit/NotebookEdit target spelled with a leading ~ or a Git Bash MSYS drive path is resolved the way Claude's tools resolve it, or is treated as Unresolved, and never slips past the guard; docs/test.md names the acceptEdits and settings allow-rule cases, where no permission request reaches the guard.",
+  "acceptance": [
+    "Claude gate write guard: normalize ~ and MSYS /c/... targets (or fail closed), and document the acceptEdits/allow-rule bypass is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

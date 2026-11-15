@@ -1,0 +1,27 @@
+{
+  "id": "01a0fbdf-596b-7071-bfb6-57abaa569a05",
+  "external_ref": null,
+  "title": "Unit-project guard should also reject the @jest-environment pragma (Vitest honours it), plus small wording tidy-ups",
+  "outcome": "The UI category guard (ui/src/test-categories.test.ts) rejects a `@vitest-environment` comment in a unit file, so one file can't take jsdom inside the node-environment unit project. But Vitest 4 picks a file's environment with /@(?:vitest|jest)-environment\\s+([\\w-]+)\\b/ over the whole file text (getSpecificationsEnvironments in vitest's cli-api chunk). So a unit file with `@jest-environment jsdom` still gets jsdom, and nothing catches it.\n\nFix: use /@(?:vitest|jest)-environment\\b/u, and mention both pragmas in docs/test.md and the guard comment.\n\nTidy-ups to fold in:\n- rewrap the ~140-character line in docs/test.md near \"The other three projects run in jsdom\";\n- tighten or drop the loose `toMatch(/environment,/u)` source check on vite.config.ts; the manifest check and the runtime typeof assertion already prove the environment;\n- word the docs' \"two cases\" as examples (\"such as\"), since DOM access wrapped in try/catch is another case the node run doesn't fail.",
+  "acceptance": [
+    "The guard rejects both @vitest-environment and @jest-environment comments in unit files, and docs/test.md says so; a test covers both.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-architecture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-f27e-7121-a87c-69381fdd8ae8",
+  "external_ref": null,
+  "title": "Remove obsolete forceMessagesUnloaded adoption plumbing",
+  "outcome": "Remove obsolete forceMessagesUnloaded adoption plumbing",
+  "acceptance": [
+    "Remove obsolete forceMessagesUnloaded adoption plumbing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fc35-7998-7831-a732-393d6abf525b",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate. Dead forceMessagesUnloaded; covered by w-393d6abf525b.",
+  "completion": null
+}

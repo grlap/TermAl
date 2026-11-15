@@ -1,0 +1,27 @@
+{
+  "id": "01a10403-ea9b-7ff3-805b-7b4972f46380",
+  "external_ref": null,
+  "title": "Reject unusable Canceled or Held acceptance evaluators before minting a reuse attempt",
+  "outcome": "Reject unusable Canceled or Held acceptance evaluators before minting a reuse attempt",
+  "acceptance": [
+    "Reject unusable Canceled or Held acceptance evaluators before minting a reuse attempt is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "deferred-review-low",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

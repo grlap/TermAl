@@ -1,0 +1,30 @@
+{
+  "id": "01a1be95-4bbb-7771-9958-62e67dd31751",
+  "external_ref": null,
+  "title": "Completed-root OwnClear: recover safely from authority-image supersession without replaying a producer event",
+  "outcome": "The completed or obsolete root's own-clear path handles a same-context authority-image supersession through supported bounded recovery, while genuine entry, journal, run, reader or ownership changes remain refused and no producer naming event is fabricated.",
+  "acceptance": [
+    "Record a deterministic regression for the completed-root OwnClear supersession seam, distinguishing it from live-held naming and the parent repair; preserve the original natural refusal and do not infer an identical retry succeeded from later background retirement.",
+    "Establish the safe existing recovery boundary from source before changing behavior. Any retry reuses the original deadline and bounded policy, revalidates the exact entry, journal, run association, naming-session and reader authority, and emits no new producer naming event; changed or unknown state remains truthfully refused/retained.",
+    "Behavioral controls cover same-context progress, genuine supersession or replacement rejection, once-only confirmed retirement/publication and truthful failures, without sleeps, widened timeouts, raw-store access or authority relaxation. Exact-input focused checks, fresh required review pair and final full gate precede landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "named-root",
+    "optional-followup",
+    "recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be12-2a94-7573-99d2-e40047ef7d1b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

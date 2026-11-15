@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c692-7140-a001-0d6698541e6d",
+  "external_ref": "tm-p9o5",
+  "title": "Instrument file-change tracking behind 13.8s global state-lock hold",
+  "outcome": "Greg observed: state lock held 13811ms by src/sse_broadcast.rs:524:36 (wait 0ms), with workspace PUT, mailbox and state accessors waiting 5-11.6s. Holder is record_active_turn_file_changes. It loops sessions/events and calls path_contains -> fs::canonicalize under the global mutex; slow filesystem checks are a candidate, not yet the measured cause. Add aggregate local telemetry separating preparation, acquisition wait, scan/path checks, late-summary construction and commit work; include workload counts and max path-check duration. Emit only slow operations, outside the state lock using bounded nonblocking diagnostics; no raw paths/transcript data. Preserve behavior; do not implement a speculative lock redesign. Related prior stall report tm-7cu.21.",
+  "acceptance": [
+    "Deterministic tests cover timing threshold, workload counters, active/no-summary and grace/commit branches, report after unlock and bounded queue behavior. Slow log distinguishes inclusive scan time from its path-check subset. No release build or live deployment."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch a640e340, spot-checked by Termal::Fable2): CLOSE-DONE. Telemetry and regression markers landed in 4dec5eb (ancestor of master f7db2c58); src/sse_broadcast.rs:686-689 and src/tests/file_changes.rs:210. No product lock fix was claimed. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

@@ -1,0 +1,44 @@
+{
+  "id": "01a128b3-ec68-7ab3-a779-5ab174a58400",
+  "external_ref": null,
+  "title": "A restart recovery degraded by a transient failure (rebind_failed) leaves its session for Resume",
+  "outcome": "Boot restart recovery that fails with a code-less transport error appends a Degraded rebind_failed card (engram_host_adapter.rs:4345-4355 at be2ed177). Check whether a retained head behind it then needs Resume, and if so retry the recovery on the shared bounded schedule.",
+  "acceptance": [
+    "A discriminating restart regression uses a production-constructed transient transport failure and a persisted, acknowledged, never-begun admission retry head. It records the original boot-recovery result and determines whether the head recovers automatically or remains stranded; no fabricated code-less error or failing assertion is used to force a reproduction.",
+    "After transient boot-rebind failure, the same retained prompt recovers without Resume or a new prompt using the existing durable, idempotent retry schedule and shared bound; verification shows at most one provider delivery, no admission before recovery authority is ready, and retention across another restart.",
+    "Verification preserves explicit Stop or operator pause, cancellation, changed authority, definitive configuration errors and possibly-begun grant reconciliation. A transient recovery does not bypass these holds, reset the shared first-held bound or introduce a second recovery mechanism.",
+    "The full maintained five-stage gate passes on the exact landed input if a source or test changeset is needed. If the discriminating check confirms existing behavior, the item records that causal evidence and coordinator concurrence on a no-change disposition instead of inventing a product repair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "resume-only-hold-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

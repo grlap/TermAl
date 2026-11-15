@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-80180e5976ca",
+  "external_ref": "tm-5fsy.9",
+  "title": "Test Codex freeze elicitation validation and MCP failure projection",
+  "outcome": "Claude session-6885 Low src/delegation_mcp.rs:99/872. New ReviewFreeze classifier and bridge branches lack direct coverage. No product failure reproduced; this is a test gap.",
+  "acceptance": [
+    "Matching authenticated description plus valid parameters accepted; malformed fingerprint, extra fields, wrong description and non-readOnly authority rejected. verified:false and missing verified both map to MCP isError:true."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

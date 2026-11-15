@@ -1,0 +1,31 @@
+{
+  "id": "01a18011-4172-7570-8df0-a2ae6541480c",
+  "external_ref": null,
+  "title": "Windows runner: process-owner bootstrap log write fails at 261-char path in linked-worktree launcher fixtures (MAX_PATH)",
+  "outcome": "On Windows, the launcher's process-owner bootstrap logging never fails because of path length. The 'launcher Git path … linked worktree with spaces' tests pass for any source root of reasonable length, rather than depending on a few characters of headroom under MAX_PATH.",
+  "acceptance": [
+    "The root cause is recorded with evidence: scripts/test-process-owner-windows.ps1:5 [IO.File]::AppendAllText(RequestPath+'.bootstrap.jsonl') throws DirectoryNotFoundException when the path is 261 characters. A note states which component is changed: the owner script, the run-path layout, or the fixture depth.",
+    "The fix makes bootstrap logging robust to long run paths on Windows: for example, writing via an extended-length path, or keeping owner bootstrap files on the existing short compiler-scratch root. No timeout or assertion is weakened, and the run path is not silently truncated.",
+    "A regression test on Windows exercises a source root long enough that the old code's bootstrap path would exceed 260 characters, and passes with the fix.",
+    "The standard full gate passes on the landed tree, and a Windows B TermAl full gate on a master tree containing the fix passes fingerprint-tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

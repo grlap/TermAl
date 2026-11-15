@@ -1,0 +1,29 @@
+{
+  "id": "01a1bdb8-9cdd-7bc0-8045-a5bdb0a2af21",
+  "external_ref": null,
+  "title": "Remove the unreachable RpcCapacity stage from native relay 5xx diagnostics",
+  "outcome": "Native relay 5xx diagnostic stages describe reachable recorded failures without implying that 429 capacity refusals appear in this history.",
+  "acceptance": [
+    "Remove the unreachable RpcCapacity variant and assignment while preserving the existing 429 RPC-limit response, its bounded refusal reason and all relay wire, retry and authority behaviour.",
+    "Relevant existing behavioural checks and the normal review/gate evidence accompany the cleanup; add no enum/prose-pinning test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

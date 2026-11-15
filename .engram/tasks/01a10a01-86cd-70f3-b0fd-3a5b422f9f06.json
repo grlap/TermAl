@@ -1,0 +1,27 @@
+{
+  "id": "01a10a01-86cd-70f3-b0fd-3a5b422f9f06",
+  "external_ref": null,
+  "title": "Restore working-directory and pipe context in dedicated provider spawn errors",
+  "outcome": "Dedicated Claude/ACP launch errors preserve the working directory and identify unavailable stdin/stdout/stderr so failed local configuration can be diagnosed.",
+  "acceptance": [
+    "Restore working-directory and pipe context in dedicated provider spawn errors is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

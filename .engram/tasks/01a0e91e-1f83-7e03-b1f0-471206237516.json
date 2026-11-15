@@ -1,0 +1,28 @@
+{
+  "id": "01a0e91e-1f83-7e03-b1f0-471206237516",
+  "external_ref": null,
+  "title": "Shell-line segmenter ignores a backslash-escaped quote outside quotes, which can hide a cd from shell following",
+  "outcome": "engram_shell_commands (src/engram_check_paths.rs) splits a line at `;`, `&&`, `||` and groups only outside quotes, but it tracks quotes without honouring a backslash escape outside them. In bash, `echo \\\"; cd /x; echo \\\"` runs `cd /x`. The segmenter reads `\\\"` as opening a double quote and so treats `; cd /x; echo ` as quoted text. The cd is then invisible both to the followed path (engram_shell_move) and to the lost path (engram_lost_move). TermAl keeps presuming the shell where it was, which can credit or bound wrongly. Pre-existing: found out of scope by the Claude reviewer of PI-26a round 2 (delegation-e3533fd0, session-8362, 2026-09-28), not introduced by that change.",
+  "acceptance": [
+    "A line whose quoting TermAl cannot read the same way under every shell it may run in counts as a change TermAl cannot follow (Lost, and unbounded for write places), rather than as no change",
+    "engram_shell_commands (or its successor) honours a backslash escape outside quotes the way bash does, so `echo \\\"; cd /x; echo \\\"` is read as three commands, the second a cd; a regression test covers the followed and the lost reading of such a line"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

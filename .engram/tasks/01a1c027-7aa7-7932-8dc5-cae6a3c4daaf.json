@@ -1,0 +1,24 @@
+{
+  "id": "01a1c027-7aa7-7932-8dc5-cae6a3c4daaf",
+  "external_ref": null,
+  "title": "link_event never coalesces, so repeated install failures can evict the terminal cause the history keeps",
+  "outcome": "Consecutive identical install failures coalesce with a count, as the durability history's refusal() does, so a long hold with repeated attempts cannot rotate out the first terminal record. Source: Claude session-17028 review of a06f2c92, src/federation_link_diagnostics.rs:376. Eviction is visible today through linkEventsEvicted; the real retry cadence wasn't established.",
+  "acceptance": [
+    "link_event never coalesces, so repeated install failures can evict the terminal cause the history keeps is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

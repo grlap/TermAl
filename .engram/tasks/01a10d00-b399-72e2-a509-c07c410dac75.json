@@ -1,0 +1,61 @@
+{
+  "id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "external_ref": null,
+  "title": "Extend committed-input verification to initialized pinned Git submodules",
+  "outcome": "The existing git-commit lane admits clean initialized pinned submodules, including nested children, using recursive submodule status, filter-config guards, one root dirt check and unchanged root HEAD; status visibility limitations are documented and tested.",
+  "acceptance": [
+    "A clean checkout with submodules is admitted to the existing committed-input lane (git-commit:<full SHA-1 root commit>, no wire change) when root top level matches, recursive submodule status reports every child initialized at its pin, root and each reported child have no configured clean/smudge/process filter, one root porcelain status with inherited status.showUntrackedFiles=all and ignore-submodules=none is empty, and root HEAD is unchanged across the reads. Launcher, early read and verification delivery agree before and after the run.",
+    "Tracked and untracked child dirt, off-pin or uninitialized children, configured filters, dirty root and new root commit are refused or ineligible with named reasons. Clean nested pinned children are admitted. Tests demonstrate the documented limitation that edited assume-unchanged or skip-worktree files may be invisible to status and count as clean.",
+    "Source capture derives no full file or index list and makes no ls-files calls in either reader; it uses recursive submodule status, config reads and one root status, without changing budgets, timeouts, wire, stored records, evaluations or seals.",
+    "Joint rows: a disposable clean clone of a real Questly commit, on Linux and on Windows, and of a real PhoenixCodeNav commit with its two children, on Windows, each earns a committed-input record that Engram's evaluate and done accept, and the refusals in criterion 2 hold there. Closes together with Engram's w-7828ac63767b.",
+    "The standing rule before landing: review pair, FULL, Windows check."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10cfc-06d2-7f81-82e0-8e72f7e16778"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed recursive pinned-submodule committed-input admission at 6a0bc8c5 with source-only review pair, exact-tree FULL, accepted current48 Windows Rust verification and 39 passing real-consumer joint rows.",
+    "completed_at": "2026-11-06T03:48:33.069085800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

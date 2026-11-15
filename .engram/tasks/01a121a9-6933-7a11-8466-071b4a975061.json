@@ -1,0 +1,27 @@
+{
+  "id": "01a121a9-6933-7a11-8466-071b4a975061",
+  "external_ref": null,
+  "title": "Decide whether a projection-only wait (carried gate) outranks 'starting the next turn' in the activity strip and badge, and pin it with a test",
+  "outcome": "The precedence between a projected wait and unpaused queued prompts on an idle session is a recorded decision, pinned by a unit test in AgentSessionPanel.waiting-indicator.test.ts.",
+  "acceptance": [
+    "Decide whether a projection-only wait (carried gate) outranks 'starting the next turn' in the activity strip and badge, and pin it with a test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "session-status",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

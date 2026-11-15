@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4dc-7a63-b98f-d7642ca1b0ac",
+  "external_ref": "tm-d2n",
+  "title": "Overview builds a full-transcript O(N) projection on first paint of long sessions",
+  "outcome": "overviewMessages is now the full client-held transcript (was the 20-message tail, which sat below the 30-message gate and built no projection at all). buildEstimatedRows runs estimateConversationMessageHeight per message; for assistant text that is several full-string regex passes (markdown normalize, wrapped-line count, split(/\\n\\s*\\n/), three global countMarkdownPatternMatches, countFencedCodeBlockLines).\n\nCold cost ~tens of ms for 600 messages; hundreds of ms for a few thousand. Mitigations that do work: the metadataCacheRef WeakMap makes it once-per-message, and useDeferredValue + idle rail activation keep it off the first paint — so this is a regression in TOTAL main-thread work, not input latency. But useDeferredValue renders restart when urgent updates arrive, so under sustained streaming the deferred projection can thrash, compounding with the per-delta getLayoutSnapshot() in the messageCount-conflation bug.\n\nAction: profile with a ~5000-message session. If it bites, bucket/cap the projection input or throttle the rebuild rather than leaning on useDeferredValue alone.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

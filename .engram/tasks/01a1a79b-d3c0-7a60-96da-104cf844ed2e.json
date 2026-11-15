@@ -1,0 +1,32 @@
+{
+  "id": "01a1a79b-d3c0-7a60-96da-104cf844ed2e",
+  "external_ref": null,
+  "title": "Restore the Node late child index negative control after tagged preflight batching",
+  "outcome": "A dedicated injected untagged index response reaches the late child index recheck, independently of the tagged preflight control, and fails when the retained late read is removed.",
+  "acceptance": [
+    "Restore the Node late child index negative control after tagged preflight batching is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "commit-input-v1",
+    "greg-directed",
+    "low",
+    "review-followup",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

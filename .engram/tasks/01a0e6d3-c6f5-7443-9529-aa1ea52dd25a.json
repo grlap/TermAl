@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6f5-7443-9529-aa1ea52dd25a",
+  "external_ref": "tm-uq67",
+  "title": "Represent legacy missing server identity in wait-delta TypeScript types",
+  "outcome": "Optional review5 hardening: current producer schema requires serverInstanceId on the four wait record delta types, but the transport deliberately accepts missing identity from older backends and repairs through state snapshots. Consider serverInstanceId?: string with explicit narrowing before local watermark/reducer use, or a distinct legacy wire-input type. No runtime defect found; missing/empty identity integration tests already cover behavior. Keep current/retired/unproven admission semantics.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

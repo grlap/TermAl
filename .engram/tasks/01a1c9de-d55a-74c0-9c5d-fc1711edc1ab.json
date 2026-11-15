@@ -1,0 +1,37 @@
+{
+  "id": "01a1c9de-d55a-74c0-9c5d-fc1711edc1ab",
+  "external_ref": null,
+  "title": "After a host restart, follow-up to a completed Codex child is refused as \"archived manually\" (terminal-release barrier not durable)",
+  "outcome": "A follow-up to a completed Codex delegation child whose thread TermAl itself archived at terminal release still works after a host restart, while a genuinely manual archive is still refused.",
+  "acceptance": [
+    "Whether the archive came from TermAl's own terminal release or from a manual Archive is decided from durable state, so it survives a host restart; a follow-up after a restart unarchives and proceeds for a TermAl terminal release.",
+    "A genuinely manual archive is still refused with the existing 'unarchive it before sending another prompt' message.",
+    "A behavioural test covers: terminal release, then host reload, then a follow-up that succeeds; and a manual archive, then host reload, then a follow-up that is refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "delegation",
+    "restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Durable exact-thread/profile automatic archive provenance survives reload and allows follow-up; manual archives retain explicit-Unarchive refusal. Landed b1e8769a on origin/master, installed Central/DL560. Fresh independent Claude17534 evaluation2b01afafcf014ba287e81286fa3ff589 recorded first attempt, all3 judgmentPASS, evaluatedcut190/revision1/exactcleanb1e8tree5161, no stale. Current result receipt Recorded/passed3 confirms settlement; full3164bytes complete/summaryFallbackfalse read. A review-only attempt read was unavailable for this evaluator; supported current packet/full reads supplied receipt, no second evaluation. Pair17512/17513 adopted through exact10row carry proof; authorGREEN69/0 and integrationFULL test9244ed15 same-tree passed all6restartcases. Evidence3bfb56b07f5642b980380dc1e07125db/ec47adbe90814063a0b7370c2e145485/7b174ca7fd694bf0b8f4379d260cf2d0/62127963444b450fa56907237c58da49 is cited by evaluator, no author links substituted for judgment. Five no-action source-test obligations may seal untested; no owner nativecredit invented. Legacy archives lacking provenance still require explicitUnarchive; three filedLows stayopen. Brief omissions1clippedoldentry60fe69b879074cbfbd45b1d7954c90b7/fourolderunread preserved; completecitedevidence supports all3judgments. Own3authorrefs deleted; remote3authorworktrees cleaned perOpus988. Localroot/fc17-only evidence cleanup follows seal; review-f699 pair exports retained for openLows until lastcloses. No hostrestart claimed.",
+    "completed_at": "2026-11-11T20:20:52.637524Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

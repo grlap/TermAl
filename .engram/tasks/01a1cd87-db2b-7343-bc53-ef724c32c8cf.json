@@ -1,0 +1,31 @@
+{
+  "id": "01a1cd87-db2b-7343-bc53-ef724c32c8cf",
+  "external_ref": null,
+  "title": "Reserve admitted-call overrun before enabling optional naming maintenance",
+  "outcome": "Reserve admitted-call overrun before enabling optional naming maintenance",
+  "acceptance": [
+    "Optional naming maintenance can be admitted only with enough allowance for its final issued-call overrun and the mandatory control tail.",
+    "A scripted-clock maintenance overrun leaves mandatory naming phases funded; the current production configuration remains explicitly covered without a real minute wait."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance",
+    "engram-adapter",
+    "greg-directed",
+    "limits",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1a601-4d39-7d00-887e-f4f5c323af91",
+  "external_ref": null,
+  "title": "Recheck named-root identity after a definitive source-capture refusal",
+  "outcome": "A definitive source refusal belongs to the named root actually measured. If the named path or repository changes during the off-lock capture, leave it as transient absence instead of installing another tree's permanent refusal.",
+  "acceptance": [
+    "A deterministically ordered named-path or repository swap during a refused capture returns transient absence and retains the bounded retry behavior; unchanged-root refusal still preserves its definitive reason.",
+    "The post-refusal check enforces canonical named-root identity and the expected repository common-directory key, without weakening existing success checks or source/credit authority.",
+    "Focused regressions cover the changed capture path and existing definitive and transient controls; the exact final input is reviewed and passes the required gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "declared-tests",
+    "engram-host-adapter",
+    "found-by-review",
+    "source-capture",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a242-50a6-7291-b3f7-c7e344197d8e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

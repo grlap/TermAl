@@ -1,0 +1,28 @@
+{
+  "id": "01a1c231-f7ce-79f2-8e1e-157a413313f2",
+  "external_ref": null,
+  "title": "Decide first-send handling of historical acceptance targets after fingerprint capture retirement",
+  "outcome": "Choose and implement an explicit policy for unsent historical targets carrying a content-v1 fingerprint once that fingerprint can no longer be captured, preserving exact Pending/Unconfirmed replay and all stored evaluations.",
+  "acceptance": [
+    "The chosen behavior for a first submission of an old target is documented and tested against changed, unchanged and unavailable source, without recapturing content-v1 or rewriting stored records.",
+    "Already Pending and Unconfirmed submissions continue replaying their exact original argv and digest."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1753c-a483-7e61-bc84-ff3935fdf4bd",
+  "external_ref": null,
+  "title": "Clear ordinary handoff permission after a proven provider enqueue rejection",
+  "outcome": "A rejected ordinary provider enqueue releases its process-local permission and accurately explains known non-delivery without enabling ambiguous replay.",
+  "acceptance": [
+    "A deterministic closed-provider-channel regression verifies the rejected ordinary enqueue clears its process-local permission, remains safe against duplicate delivery, and reports its known-unsent outcome.",
+    "Relevant focused tests and independent review validate the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16519-1276-7c53-8bf5-a108efba750a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

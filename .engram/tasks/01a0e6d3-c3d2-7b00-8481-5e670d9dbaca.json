@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3d2-7b00-8481-5e670d9dbaca",
+  "external_ref": "tm-3y5h",
+  "title": "Bound Engram boot recovery with an overall deadline and per-phase timing",
+  "outcome": "Greg priority (2026-09-01). At HEAD 18e36dd recover_engram_sessions_after_boot splits targets into batches of ENGRAM_BOOT_RECOVERY_CONCURRENCY = 8 and joins each whole batch; read_work_binding runs 2 Engram CLI commands per target with ENGRAM_WORK_BINDING_COMMAND_TIMEOUT = 6 s each plus a 250 ms retry loop on 'database is locked'; there is no overall recovery deadline, so worst case grows with target count times 12 s. Required: an overall recovery budget (configurable, documented), per-phase timing emitted to the log (per target: which command, how long, outcome) so a slow boot is attributable without guessing, and graceful degradation when the budget is exhausted (mark the remaining sessions recovery-pending instead of blocking; they retry lazily on first use). Acceptance: recovery can never hold the boot path longer than the budget; trace lines present in logs; unit tests for budget exhaustion and lazy retry. Related: tm-pl7k (bounding work-binding CLI reads on the dispatch path) is deliberately NOT a prerequisite — Greg does not want that limitation now. Implementer: Termal::Codex; verification by a different agent (Termal::Fable) per Greg.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Boot recovery is bounded, landed in aeaa20b (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

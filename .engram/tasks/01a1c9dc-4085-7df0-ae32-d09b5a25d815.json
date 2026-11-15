@@ -1,0 +1,29 @@
+{
+  "id": "01a1c9dc-4085-7df0-ae32-d09b5a25d815",
+  "external_ref": null,
+  "title": "Diagnostic eprintln! panics the host when stderr cannot be written (12 panics in termal-state-lock-diagnostics, 2026-11-11 08:29:53Z)",
+  "outcome": "Background diagnostic logging never panics when stdout or stderr is unavailable; the failed write is dropped (or counted), and the host keeps running.",
+  "acceptance": [
+    "The state-lock diagnostics reporter and other background-thread diagnostic writes use a non-panicking stderr write, so an unwritable stderr drops the message instead of panicking.",
+    "A behavioural test with a writer that fails shows that the reporter keeps running and records no panic.",
+    "The remaining eprintln!/println! sites that run on long-lived background threads are listed on this item, each one either converted or recorded with a reason."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "logging",
+    "robustness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

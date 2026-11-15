@@ -1,0 +1,31 @@
+{
+  "id": "01a0f1b9-2953-7e63-9e8e-17d1e6039614",
+  "external_ref": null,
+  "title": "Bound real-launcher fixture fingerprint work and preserve its stderr diagnostics",
+  "outcome": "Bound real-launcher fixture fingerprint work and preserve its stderr diagnostics",
+  "acceptance": [
+    "The disposable real-launcher fixture avoids whole-repository deletion diffs during its readiness guards and keeps evidence private to the disposable repository.",
+    "The fixture drains/reports launcher stderr on failure and has an explicit maintained contract for the launcher helper files it copies, without inflated timeouts or blind retries."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "review-low",
+    "terminal",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

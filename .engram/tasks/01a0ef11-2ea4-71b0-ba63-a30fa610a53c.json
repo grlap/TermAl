@@ -1,0 +1,32 @@
+{
+  "id": "01a0ef11-2ea4-71b0-ba63-a30fa610a53c",
+  "external_ref": null,
+  "title": "Host sends outcome unknown for a check that printed passing tests and exited 0, so bound criteria cannot be credited",
+  "outcome": "A check that ran alone in its worktree, printed passing tests and exited 0 is sent to Engram as succeeded; when the host downgrades a check to unknown, the record says which rule did it and which session or command was the other writer.",
+  "acceptance": [
+    "A check that failed with a non-zero exit of its own is sent as failed, not unknown, when no downgrade rule applies; a test shows it.",
+    "A writable session whose place the host does not know no longer makes every check in every worktree unknown, or the item records with reasons why that rule stays and what an agent does to get a check credited on a host with many active sessions; a test covers the chosen behaviour.",
+    "The cause of outcome unknown on producer observation 7449dfc5de674fa2a77fdfab5463d6a5 (w-110b0d3981fb, check of 21:19:16Z on 2026-09-29) is named from evidence, not inferred from code alone: which condition fired, and if overlap, which session or place counted as the other writer.",
+    "When the host sends unknown, the verification note's text says unknown and names the rule (overlap, no passing-test evidence, snapshot mismatch) and, for overlap, the other writer; a test pins the text.",
+    "docs/features/engram-host-adapter.md describes the resulting behaviour."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "overlap",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

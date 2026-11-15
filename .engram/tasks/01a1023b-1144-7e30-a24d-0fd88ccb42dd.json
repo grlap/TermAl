@@ -1,0 +1,29 @@
+{
+  "id": "01a1023b-1144-7e30-a24d-0fd88ccb42dd",
+  "external_ref": null,
+  "title": "A Codex session's read-only PowerShell command in a worktree whose full gate is carried voids the gate's credit; only Claude's Bash lines get the read-only exception",
+  "outcome": "A Codex (or other non-Claude) session can read source in a worktree while its own full gate is carried there, through a form the host can prove reads only, without voiding the gate's credit. Until then, the rule and the supported route are stated where Codex agents read them.",
+  "acceptance": [
+    "A Codex session's read-only PowerShell command in a worktree whose full gate is carried voids the gate's credit; only Claude's Bash lines get the read-only exception is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

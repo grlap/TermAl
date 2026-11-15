@@ -1,0 +1,30 @@
+{
+  "id": "01a176cd-9f5c-78e0-b8d3-5b8b686d9fe8",
+  "external_ref": null,
+  "title": "Onboarding image test reopens a freshly copied executable for append and fails with a Windows sharing violation (os error 32)",
+  "outcome": "federation_onboarding_running_image_identity_survives_rename_replacement creates its replacement image without reopening a just-written executable, so external scanners holding a new .exe cannot make it fail, while it still proves exactly the same onboarding identity behaviour.",
+  "acceptance": [
+    "The test creates the replacement image in a single create-and-write of the exact intended bytes (the original image plus the trailer), with no reopen of a just-written executable; every existing assertion (original running image identity, distinct replacement bytes, both modes) is unchanged.",
+    "No retry loop, sleep, timeout change, ignore or skip is added, and production code is unchanged.",
+    "A focused run of the federation_onboarding_image tests passes on the exact final input, the independent review pair finds no Medium or higher, and the maintained full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "test-fixture",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

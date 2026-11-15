@@ -1,0 +1,24 @@
+{
+  "id": "01a1c375-abf8-7fc1-b467-a5f9d865a684",
+  "external_ref": null,
+  "title": "Align the UI reviewer batch limit with the six read-only reviewer fan-out",
+  "outcome": "ui/src/delegation-commands.ts MAX_REVIEWER_BATCH_SIZE, its sync comment and the delegation sessions brief agree with the backend's read-only reviewer limit (6), or explicitly document that the batch helper keeps the general limit of 4. spawn_reviewer_batch behaviour for batches of 5 and 6 read-only reviewers is tested.",
+  "acceptance": [
+    "Align the UI reviewer batch limit with the six read-only reviewer fan-out is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

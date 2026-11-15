@@ -1,0 +1,57 @@
+{
+  "id": "01a11d9d-2bd0-7af1-b87b-5656beda1d33",
+  "external_ref": null,
+  "title": "A fan-in wake whose turn fails on a provider error is lost: the session sits in error and nobody is told",
+  "outcome": "When the turn that delivers a registered fan-in (or any mailbox wake) fails on a provider error such as 'Selected model is at capacity', the wake is not consumed. It stays pending and is retried on the next admission, or it is surfaced to the session's coordinator as a typed failure, so the work doesn't silently stall.",
+  "acceptance": [
+    "C1: A registered fan-in or mailbox wake remains recoverable if the provider rejects or fails the turn carrying it. Its identity and originating wait/message remain associated with the failure; the host does not silently treat a stored/admitted wake as successfully consumed merely because dispatch was attempted.",
+    "C2 (test): For a confirmed provider rejection before the carrying turn is accepted, the same wake remains pending and is delivered once on the next eligible admission through existing queue/admission guards. Duplicate failure notifications or concurrent admission attempts do not create another wake, provider request, or continuation. Successful delivery/consumption clears the retained recovery state.",
+    "C3 (test): When the carrying turn started, delivery is unknown, or safe retry cannot be established, the host does not automatically replay the wake or provider request. It surfaces a typed recovery-failure notice to the session's existing registered coordinator, identifying the target session, originating wait/message, failure classification and whether delivery was accepted, unaccepted or unknown, so the stall is actionable. Missing coordinator routing is reported explicitly rather than choosing or impersonating a recipient.",
+    "C4 (test): Failure recovery preserves existing Stop, pause, cancellation, runtime/generation and durable mailbox-acknowledgement fences. An acknowledged mailbox message or canceled/superseded registered wait is not resurrected. This change does not reconstruct requests or add a provider retry loop.",
+    "C5 (test): Fail-first regression controls cover fan-in and mailbox wakes rejected before acceptance, next-admission delivery, duplicate failure/admission events, successful consumption, and started/unknown/manual-hold cases. The maintained full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "fan-in",
+    "provider-error",
+    "wakes"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

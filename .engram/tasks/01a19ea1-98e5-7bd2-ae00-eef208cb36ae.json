@@ -1,0 +1,30 @@
+{
+  "id": "01a19ea1-98e5-7bd2-ae00-eef208cb36ae",
+  "external_ref": null,
+  "title": "Named-root binding path flattens Engram transport failure evidence (EOF/deadline, PID, observed exit) into a generic bad_gateway string",
+  "outcome": "When an Engram request on the named-root binding or source-root path fails, the user-visible and recorded error keeps the structured causal failure the transport captured: EOF vs deadline, PID, observed exit state and unknown application outcome. An over-budget reply is reported with that structure instead of a generic \"reply arrived after its budget\". The exact pending intent and key and the unknown outcome are preserved, with no blind write retry.",
+  "acceptance": [
+    "When an Engram request on the named-root binding or source-root path fails, the surfaced and recorded error keeps the transport's structured causal failure: EOF vs deadline, PID and generation, observed exit state, and unknown application outcome. It is not flattened into a generic bad_gateway string. An over-budget reply carries that structure instead of a generic 'reply arrived after its budget'. Tested.",
+    "For every supervised Engram child (identified by PID and generation), TermAl keeps a durable record of either its observed exit code or the host's own kill/termination reason. The record survives cleanup, includes the phase of any active or queued request, and never labels a process observed running at EOF as a proven crash, nor host cleanup as the original cause. Tested.",
+    "The exact pending intent and key and the unknown outcome are preserved, with no blind write retry. No raw request, token or panic prose is logged. Tested."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

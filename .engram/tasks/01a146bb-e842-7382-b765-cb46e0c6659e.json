@@ -1,0 +1,28 @@
+{
+  "id": "01a146bb-e842-7382-b765-cb46e0c6659e",
+  "external_ref": null,
+  "title": "Rename the misleading named-root retry test",
+  "outcome": "Rename named_root_reclamation_startup_discard_blocks_completed_selection to describe that a cold-start budget failure keeps the process and the completed selection recovers on retry.",
+  "acceptance": [
+    "The retry test name accurately describes the asserted keep-process-and-recover behavior, with its assertions unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "beads-removal",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2d2-0c6c-7590-93e9-78f1b409aeca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

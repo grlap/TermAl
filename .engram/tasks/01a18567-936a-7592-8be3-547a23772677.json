@@ -1,0 +1,27 @@
+{
+  "id": "01a18567-936a-7592-8be3-547a23772677",
+  "external_ref": null,
+  "title": "Read-only sed checker refuses a bracket expression with a repeated leading caret ([^^]), which master allowed",
+  "outcome": "claude_sed_bracket_end consumes at most one leading negation caret, so `[^^]` and `[^]]` parse as sed parses them. `sed -n '/[^^]/p' f` and `sed 's/[^^]/x/g' f` are accepted again on all four read-only paths, with positive tests that also keep `[^]]`.",
+  "acceptance": [
+    "Read-only sed checker refuses a bracket expression with a repeated leading caret ([^^]), which master allowed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "read-only-checker",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

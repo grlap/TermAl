@@ -1,0 +1,34 @@
+{
+  "id": "01a18060-7c30-7b43-bbb0-1c7ebf109bbb",
+  "external_ref": null,
+  "title": "Bound Git subprocess capture and paginate status and diff output",
+  "outcome": "Git read and mutation-result APIs remain usable on repositories with large status/diff/output without capturing an unbounded process stream.",
+  "acceptance": [
+    "Status/diff and commit/push/sync/file-action output are bounded during subprocess capture, before String/Vec and diff-identity duplication; reuse existing Git owners.",
+    "Status and diff expose explicit totals/completeness and stable file/hunk retrieval; mutation results use bounded truthful acknowledgements with no automatic repeat of committed operations.",
+    "Existing Markdown enrichment10MiB readers and stderr budgets remain enforced; UI badges/tree/diff views no longer imply a partial result is complete.",
+    "Bounded tests cover large logical output with small limits, escapes and mutation reconciliation; independent review and full gate pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "design-pending",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "panic",
+    "response-size"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18052-8b84-7e10-8213-9af00ebbaa71",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

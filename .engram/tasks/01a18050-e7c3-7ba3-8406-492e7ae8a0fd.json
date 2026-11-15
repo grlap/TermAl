@@ -1,0 +1,33 @@
+{
+  "id": "01a18050-e7c3-7ba3-8406-492e7ae8a0fd",
+  "external_ref": null,
+  "title": "Contain HTTP and SSE output at a 64 MiB encoded ceiling and stop whole-history clones before pagination",
+  "outcome": "No HTTP response or SSE frame the host produces can grow past 64 MiB of encoded output. An overflow is an explicit, bounded failure that clients handle without reconnect loops, and a session-history page no longer clones every resident message body. This is the containment slice of its parent; the parent keeps the exact attribution of the historical >4 GiB buffer and the post-restart observation.",
+  "acceptance": [
+    "Encoded output for all HTTP responses, including generic Axum Json<T> response serialization and explicit response producers, and for each SSE frame is bounded at 67,108,864 bytes. JSON producers reuse one shared bounded writer; non-JSON finite responses are bounded by their existing producer/response owner before successful publication. The writer rejects an append that would exceed the ceiling before allocating/appending those excess bytes; counts JSON escaping, UTF-8 and SSE framing; uses checked arithmetic; discards partial output; and distinguishes limit failure from other serializer errors. The SSE ceiling is per frame, not per connection lifetime. Unit tests with a small injected budget cover the exact boundary, one byte over, escaped and multibyte output, without multi-GiB allocation.",
+    "An oversized HTTP response returns 500 with the existing error envelope carrying code output_limit_exceeded, limitBytes, phase response_encoding and a fixed bounded message, with no partial success body; success status/header decorators cannot override that failure. For mutation responses this reports response-encoding failure, never rollback: mutationOutcome is committed only when the existing owner knows completion, accepted when only acceptance/enqueue is known, and unknown otherwise. Clients/proxies preserve the typed failure, do not automatically repeat the mutation, and use existing read/status/receipt reconciliation. Tests show the code reaches the wire, the status survives decoration, and an already-completed mutation takes effect exactly once despite the output failure.",
+    "An SSE overflow is an ordered loss signal that triggers the existing bounded authoritative recovery, not a log line and a silently dropped revision. Rejected state/diff emission invalidates the emitted base, does not acknowledge the rejected generation, preserves pending alignment demand, and signals loss even without a later mutation; no subsequent diff relies on a rejected base. Recovery preserves existing transcript invalidation/repair semantics. When the initial or recovery snapshot itself cannot fit, the server sends one small terminal outputLimit event and ends the stream. The SharedWorker, native fallback and remote SSE consumers keep the last good view as stale, expose the failure, and do not reconnect, resync or recreate automatically until explicit retry/reopen. Tests cover bounded successful recovery, diff-base/generation handling and terminal handling without a reconnect loop.",
+    "A session-history page request no longer deep-clones every resident message body under StateInner. It reuses MessageSequence's shared immutable ownership and materializes only the requested page, while preserving pinned SQLite/cursor consistency, rollback and missing-cursor behaviour, and the revision and body-sequence stamps. Tests show page consistency without whole-history body clones.",
+    "Overflow diagnostics name the producer or route family, configured limit and known revision/session context in capped fields, never payload contents; repeated overflows are coalesced without unbounded diagnostic storage. Early-stop sizes are identified as observed/attempted lower bounds rather than invented exact final sizes. The final scope inventory covers generic and manual JSON, other finite HTTP response producers and decorators, initial/recovery SSE, worker and synchronous fallback, workspace batches, marked/unmarked full cuts, legacy pairs and stateDiff; it records how each reaches the shared limit or an existing smaller limit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "panic"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1803c-a572-74e0-8240-fd84f21f9a4b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

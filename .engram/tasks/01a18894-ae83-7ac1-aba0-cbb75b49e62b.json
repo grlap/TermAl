@@ -1,0 +1,27 @@
+{
+  "id": "01a18894-ae83-7ac1-aba0-cbb75b49e62b",
+  "external_ref": null,
+  "title": "Pin the frozen-base summary parity test's admitted-count census",
+  "outcome": "Strengthen the finite frozen-base parity regression against accidental admission-set shrinkage by recording an exact admitted-count census or a justified minimum, while retaining all explicit CLEAN exception-use checks and source-independent base oracle.",
+  "acceptance": [
+    "Pin the frozen-base summary parity test's admitted-count census is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c509-74e2-815c-752a2a221fc3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

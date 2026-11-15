@@ -1,0 +1,31 @@
+{
+  "id": "01a1c7d3-d726-7701-8d47-4ac60649cb0e",
+  "external_ref": null,
+  "title": "Naming a source root is refused because the 256-entry named-root journal is full while only 16 named roots are visible; the retained entries are not live roots, so nothing can be released",
+  "outcome": "Naming a source root for a new claim is not refused while the journal is occupied by transitions that no longer need retention. Entries of claims that ended (completed, released or retired items) free their slots without a manual sweep, and a refusal that remains names the entries holding slots and the action that frees them.",
+  "acceptance": [
+    "Diagnosis records a source-backed reproduction of journal-capacity refusal and a host API census identifying the retained classes, explicitly separating observed counts from hypotheses; diagnostics read host memory only and expose no command arguments, transcript text, source payload or live-store contents.",
+    "When capacity is occupied by settled obsolete history with no remaining publication, reconciliation, evaluator, root or runtime-capture custody, naming a fresh claimed root succeeds and journal compaction survives persistence/reload without reusing generations; behavioral regression coverage exercises the admission and reclamation paths.",
+    "Unpublished retirement notices, unresolved naming or canonical reconciliation, queued/running or Pending/Unconfirmed evaluator attempts, live bound roots, and exact in-flight/cached runtime source references retain their required journal custody; tests show each protection and reclamation after its last real reference ends.",
+    "If protected entries still exhaust capacity, naming fails without discarding or altering their retry/proof custody and reports the journal limit, retained-class counts and an applicable next action; no journal-limit increase or live-state rewrite substitutes for reclamation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "evaluation",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

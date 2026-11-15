@@ -1,0 +1,56 @@
+{
+  "id": "01a104aa-7bbd-7602-a9b7-098007e9ffa6",
+  "external_ref": null,
+  "title": "termal_name_source_root given an unrecognised parameter (for example 'root' instead of 'path') silently acts as a clear instead of refusing the call",
+  "outcome": "A naming request with an unknown or misspelled parameter is refused with a message naming the parameter before side effects. Valid work/path naming and documented work-only clearing retain their existing behavior.",
+  "acceptance": [
+    "Preserved fail-first evidence on the unchanged product shows a termal_name_source_root MCP request carrying an unknown field (for example 'root' in place of 'path') forwarded to the host as an implicit clear. The holder's note distinguishes the incident report, the source diagnosis and the executed witness.",
+    "An MCP naming request that carries any field other than the documented ones is refused before any side effect, with a message naming the offending field. The claim's named root, its generation, any pending intent and its evidence basis are unchanged. The HTTP route's existing refusal of unknown fields is kept and covered by a control.",
+    "Valid calls behave as before: work with path names the root, and work without path clears it, as documented. Authority, worktree validation, the next-turn and sealed-revision timing, publication and budget behaviour are unchanged. The tool's description states that unknown fields are refused.",
+    "The full five-stage gate passes on the exact frozen input, reviewed by independent read-only Codex and Claude children with no outstanding in-scope Medium or higher. Holder notes cite the run directory, the fingerprint and the host verification."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered MCP unknown-field refusal before naming POST; valid documented omission clear unchanged. Feature commit dfdc48e6596e5a81cf2d0fff42d0969dda3371c8, exact gate9f1a330c/hostbe66312, independent pair3ab643d5+fdb11063 and evaluation874564f08918414e82757f7547e90b03 4/4. Integration owner reports landed master47516f56722e03f923ccde6abfd5eb9d2b4c489c via FULL note5db156677f9143a389e540d58f1d3867 and mailbox87 adc137a5, acknowledged. Owner integration gatee80a13e7 and pairb188322e/e1a96752 are attributed owner evidence, not reproduced here. Install/restart pending owner schedule; deferred Lowdocs w-b6665106f6c5. No holder push/install/restart.",
+    "completed_at": "2026-10-04T07:41:24.503159600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

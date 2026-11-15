@@ -1,0 +1,38 @@
+{
+  "id": "01a0f4aa-71fb-7ee0-a98c-741e66d09202",
+  "external_ref": null,
+  "title": "A read-only Codex reviewer child on Windows cannot call Engram's read words: \"MCP tool call requires approval, but approval policy is never\"",
+  "outcome": "A read-only Codex delegation can make the Engram read calls its brief and the project instructions require at startup (next with peek, memories, show), while every Engram write stays refused and its sandbox stays read-only. Found 2026-09-30 at 23:32Z on the first live read-only Codex child after 27bf0b6 was restarted (delegation-93fb3d3e-2cc5-4100-9b7e-9be61996414c, session-9197). The child ran in the read-only sandbox on Windows PowerShell 5.1, as intended, and its write was refused. But its Engram next(peek) and memories calls both returned \"MCP tool call requires approval, but approval policy is never\". Before 27bf0b6 such children ran with danger-full-access, and nothing stopped these calls. Under the read-only sandbox, Codex asks for approval on MCP calls, and the child's approval policy is never. Likely direction, to be confirmed from Codex's configuration: mark Engram's read-only tools as approval-free in the child's MCP configuration (or its thread config), rather than loosening the sandbox or the approval policy. The Claude counterpart is w-8dadab6ed326.",
+  "acceptance": [
+    "A read-only Codex delegation on Windows, run live on the landed build, completes Engram next with peek and memories without an approval refusal; its commands and results are recorded in a note.",
+    "A test pins the configuration that lets a read-only Codex child call Engram's read words and not its write words.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The same live child is still refused a file write, and an Engram write word (for example note) is refused or unavailable to it; recorded in the same note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "engram-interop",
+    "read-only-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f4b9-c4d0-7831-9965-27f08e988f1e",
+  "disposal_reason": "Duplicate: Termal::Opus2 filed the same regression as w-27f08e988f1e (P1) from Engram::Opus's failed reviewer at about 23:46Z. My probe evidence (delegation-93fb3d3e, 23:32Z) and proposed criteria are in a note there.",
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a158da-3691-7e12-ba4b-82781fd94408",
+  "external_ref": null,
+  "title": "Correlate concurrent reference-publication diagnostic lines with the failing request",
+  "outcome": "Allow diagnostic stages from two same-key contenders and the existing one typed503 replay to be attributed to their own operation, without influencing authority, production behavior or retry policy.",
+  "acceptance": [
+    "Test-only diagnostic lines carry stable request/operation correlation across the relevant asynchronous and blocking boundaries; a thread id alone is not claimed sufficient if execution migrates.",
+    "A deterministic concurrent test associates failure stage/error lines with the correct contender/replay, without weakening the existing201/descriptor/marker assertions or adding retries/timeouts.",
+    "The exact-input independent review pair and maintained full gate satisfy repository landing policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

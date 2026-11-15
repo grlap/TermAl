@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "external_ref": "tm-ncc6",
+  "title": "TermAl-managed test runs: launcher runs owned, supervised, persisted and shown by the host, with wake-on-completion for the requesting session",
+  "outcome": "Requested by Greg via Engram::Opus (2026-09-23, mailbox #1): 'what is confusing me is waiting for test results and test runs visibility. I love the idea of running tests and agents NOT actively monitoring, but this needs to go through termal. I would see the test runs, could see the logs, termal would handle msg boxes etc.' Priorities: correctness first; agents work without interruption unless a step genuinely needs his decision.\n\nEVIDENCE OF THE GAP (Engram::Opus, 2026-09-22/23): no TermAl view of runs/stages/logs (Greg had to ask for a PID); a full gate died with a TermAl restart leaving results.json 'running' forever; a second run survived but its completion notification was lost and the agent re-attached by hand (Wait-Process); the no-self-notify rule forces worker sessions or foreground waits; run ids/fingerprints/PIDs travel as mailbox prose.\n\nSOURCE OF TRUTH KEPT: scripts/test-launcher.mjs semantics (tm-uex8): one directory per run under Git's review-runs (request.json, input.json = review-freeze snapshot, results.json, one log per stage, execution.lock); success only from real process exits; a killed/unfinished run is unknown, never a pass; input fingerprint checked before and after, drift fails; first failure stops later stages (unrun); source/index unchanged during a run; windowsHide on every spawn (tm-zdlg).\n\nDESIGN (summary; details in the child tasks)\n1. Backend model: a TestRun record in TermAl state (coordination store): runId, root/worktree, preset (full|focused|live) + stage plan, requester session, expected fingerprint, state (queued|running|passed|failed|unknown|canceled), pid, started/ended, runDir. results.json and the logs on disk stay the record of truth for stages; TermAl mirrors and indexes, never re-derives success.\n2. Supervision: TermAl spawns the launcher worker itself (hidden, process-tree/job object like terminal commands), keeps pid + runDir, and reconciles at boot: a run whose worker is gone without terminal results becomes 'unknown' (never pass), a live worker is re-attached by pid+runDir; one run per worktree (execution.lock kept as the on-disk guard).\n3. Agent tool API (delegation MCP): termal_start_test_run{preset, args[], cwd, title} -> {runId, runDir, expectedFingerprint} and END TURN; termal_get_test_run; termal_list_test_runs; termal_cancel_test_run. Because the host owns the wake, the requester may be the waiter (the CLI's no-self-notify rule is a CLI-only limitation).\n4. Wake handling: completion is a durable activation of the requesting session exactly like a delegation-wait resume (reuse the wait/resume machinery: persisted wait, refresh on completion, queued behind an active turn, boot recovery, exactly once, Stop respected per tm-oixt), carrying a bounded summary (state, per-stage exit/time, first failure diagnostics, run dir) - never the logs. Mailbox 'notify' stays for external/non-hosted coordinators.\n5. HTTP + UI: routes to list/get/cancel/rerun runs and to stream a stage log (bounded tail + follow, reusing the terminal stream infrastructure); a Test Runs workspace tab (same pattern as Work): list with state/preset/requester/input identity/duration, run detail with stages and timings, live log viewer, history, cancel, rerun-same-request, and a session badge 'waiting for test run'.\n6. Migration: scripts/test-launcher.mjs remains usable standalone; TermAl-hosted agents use the tool; summary/notify CLI modes remain.\n\nSEQUENCING: after tm-uex8 (launcher adoption) lands; alongside tm-43f4 (teach the yield); respects tm-oixt (Stop) and tm-zdlg (hidden windows). Design, tracker tasks and a clickable prototype are the deliverables of this pass; implementation needs Greg's word.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a11edf-65a9-7ef2-96c0-419f62b71162",
+  "external_ref": null,
+  "title": "A non-terminal Engram error envelope carries no control-process evidence although the worker holds the live process",
+  "outcome": "A request-level status:error envelope (EngramTransportError::remote, which keeps the control process alive), such as control_unavailable or store_corrupt, records the control process's identity and observed state on its causal failure, and does not report them as unavailable. A process-fixture test covers a non-terminal error envelope.",
+  "acceptance": [
+    "A non-terminal Engram error envelope carries no control-process evidence although the worker holds the live process is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

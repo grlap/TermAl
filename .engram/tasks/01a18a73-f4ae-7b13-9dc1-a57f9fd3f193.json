@@ -1,0 +1,39 @@
+{
+  "id": "01a18a73-f4ae-7b13-9dc1-a57f9fd3f193",
+  "external_ref": null,
+  "title": "Retire the pre-cut-B work-authority revoke path",
+  "outcome": "No live pre-cut-B work-authority revocation remains; original retired-grant history stays readable and passive, with no fabricated confirmation, hidden deletion, or gating of ordinary work.",
+  "acceptance": [
+    "TermAl has no product path that runs engram authority revoke, retries that removed command, or requires a work-authority grant; its native command fixture rejects an attempted revoke.",
+    "Historical pre-cut-B retired-grant ledger entries, including revokeConfirmed:false, remain unchanged passive data across load and repeated boot. No revocation confirmation is invented and no retirement entry or original cleanup warning is silently removed; ordinary work is not gated on that history. The persisted shape and existing reader floor remain unchanged.",
+    "docs/features/host-architecture.md sections 2.7 and 5.3 accurately distinguish removal of work-authority revoke at 06bffb05 from later removal of turn gating, and describe the current passive-history contract without a live revoke command.",
+    "Behavioral tests cover loading and repeated boot of persisted retirement history, preservation of its fields and warning, and exactly-once ordinary prompt delivery without control/revoke invocation or retirement rewriting."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "cross-project",
+    "engram-host",
+    "persisted-shape"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Reconciled the already-landed revoke retirement to the current approved passive-history contract. Independent evaluation77ab244ac6fd46c8ab99b9b22646a001 passed all4 criteria of revision2 at clean EB78. No new source changes, migration or test rerun; original retirement entries and warnings remain readable and unchanged.",
+    "completed_at": "2026-11-14T06:45:54.669162600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1bd34-271f-7d43-a097-0a9084ce3fb5",
+  "external_ref": null,
+  "title": "Runner batch wrappers must not report PASS with no completed steps, and holds must not stop a wrapper by signal",
+  "outcome": "A hand-written remote batch script reports PASS only when every step ran and passed, and a boundary hold stops a batch between steps without killing the running launcher.",
+  "acceptance": [
+    "The runner dispatch template and its batch script shape report a non-pass whenever fewer steps completed than were listed, and a boundary hold is taken through a flag the script checks between steps, never by signalling a process."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "dispatch",
+    "runner",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

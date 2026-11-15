@@ -1,0 +1,32 @@
+{
+  "id": "01a18aec-f76a-7201-ba0d-f3e88c34cf55",
+  "external_ref": null,
+  "title": "An ordinary prompt queued behind an unsettled closing checkpoint is never woken, and its wake is reported as behind an active turn",
+  "outcome": "For an idle local turn-gated root whose unsettled original checkpoint is eligible for the existing original-result recovery tick, a queued ordinary prompt is automatically woken after durable settlement, including recovery of a lost completion notification. Other unresolved checkpoints remain visibly held with Resume available; automatic triggering of certified-replay-only settlement is tracked separately.",
+  "acceptance": [
+    "For an idle local turn-gated root with an ordinary prompt queued behind an original checkpoint eligible for the existing original-result recovery tick, that tick attempts the exact retained operation without another user action, using its existing per-call budget, shared retry-slot cap, backoff and attempt-capacity policy. After durable confirmed settlement, the existing retry tick idempotently ensures the eligible durable ordinary head has its existing AdmissionRetry owner, including after restart or a failed completion-to-registration handoff. Admission requires that owner's normal durable acknowledgement and fresh current admission checks. Existing holds, original history and refusal classifications are preserved; neither intake nor reconstruction resets existing retry budgets or invents authority. Certified-replay-only cases, including CertifiedNotApplied-only lineage not selected by original-result recovery, retain their existing visible hold and Resume path; their automatic trigger is excluded from this slice and recorded as a separate open P1.",
+    "The wake disposition for that case names the checkpoint wait (a distinct value, such as heldBehindUnsettledCheckpoint) instead of queuedBehindActiveTurn; queuedBehindActiveTurn is reported only when the session has an active turn.",
+    "The session view offers the existing Resume action (POST /api/sessions/{id}/queue/resume) when an idle session holds queued prompts behind an unsettled checkpoint, even though its queue is not paused, and the waiting indicator says it is waiting on a checkpoint, not 'is starting the next turn'.",
+    "A deterministic regression: an idle turn-gated root whose closing checkpoint is unsettled receives a mailbox wake and a user send. It shows that on master e58fe489 both stay queued indefinitely with disposition queuedBehindActiveTurn, and that with the fix the certified settlement is attempted with no further action, the head is admitted once it succeeds, and the disposition names the checkpoint wait; no sleeps, retries or timeout changes.",
+    "The UI change is covered by vitest, and npx tsc --noEmit is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "mailbox",
+    "restart",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

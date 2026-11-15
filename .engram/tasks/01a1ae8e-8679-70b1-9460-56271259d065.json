@@ -1,0 +1,30 @@
+{
+  "id": "01a1ae8e-8679-70b1-9460-56271259d065",
+  "external_ref": null,
+  "title": "Name the child path in rev5 submodule refusals where Git already provides it",
+  "outcome": "A committed-input refusal for a submodule init, pin or mapping failure names the child path when Git's own output already carries it, without any extra Git call.",
+  "acceptance": [
+    "When `git submodule status --recursive` reports a '+', '-' or 'U' row, the refusal names that row's child path.",
+    "When the status command itself fails and Git's bounded stderr names a path (for example 'no submodule mapping found in .gitmodules for path …'), the refusal includes that path.",
+    "No additional Git invocation is added, and the refusal category and fail-closed behaviour are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "submodules",
+    "usability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

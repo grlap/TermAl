@@ -1,0 +1,28 @@
+{
+  "id": "01a1c8f0-64f8-7103-b7e2-cf2b48d150c6",
+  "external_ref": null,
+  "title": "Remove redundant launcher registration-context revalidation",
+  "outcome": "Note scripts/test-launcher.mjs:675-681 catch re-runs validateRegistrationContext on the same env after new unconditional early validation667. Comment describes obsolete ordering; keep one legible validation order with ordinary error precedence unchanged.",
+  "acceptance": [
+    "Redundant catch revalidation is removed or reorganized while ordinary and standalone partial-identity refusals retain their observable behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-follow-up",
+    "review-note",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

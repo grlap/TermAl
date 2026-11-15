@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3e0-76f0-a9ea-d87d7a3f554b",
+  "external_ref": "tm-lwwl",
+  "title": "Extract EngramSessionState and its Default from engram_host_adapter.rs",
+  "outcome": "From tm-winf round-10 review (Claude, Note). engram_host_adapter.rs is ~6,700 lines, more than twice the ~3,000-line Rust threshold; tm-winf added session-state fields (running_command_keys, withheld_command_keys, next_turn_check_sequence, shell_directory, active_turn_checks) and checkpoint plumbing there. Extracting EngramSessionState with its Default into its own fragment (header comment per CLAUDE.md split rules, pure code move) is a low-risk step. Related: tm-ydbw, tm-4soy.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3df-7ae2-9176-fb2b0d02457c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

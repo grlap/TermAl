@@ -1,0 +1,28 @@
+{
+  "id": "01a17414-a967-7200-83e2-b3f999eaf850",
+  "external_ref": null,
+  "title": "A retained remote wake intent is never reclaimed when its queue pass fails before reaching a settled receipt",
+  "outcome": "A retained remote wake intent is never reclaimed when its queue pass fails before reaching a settled receipt",
+  "acceptance": [
+    "A retained remote wake intent is never reclaimed when its queue pass fails before reaching a settled receipt is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-low",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

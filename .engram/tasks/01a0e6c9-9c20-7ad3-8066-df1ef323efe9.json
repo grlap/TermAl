@@ -1,0 +1,41 @@
+{
+  "id": "01a0e6c9-9c20-7ad3-8066-df1ef323efe9",
+  "external_ref": null,
+  "title": "A Claude turn begun by a background-task notification gets no turn record, so its edits never become mutations",
+  "outcome": "A Claude turn begun by a background-task notification gets no turn record, so its edits never become mutations",
+  "acceptance": [
+    "A Claude Code turn that the runtime starts by itself after a background-task notice has no proven pre-effect runtime boundary (Termal::Opus2's live probes of 2026-10-02 and Architect2's note 2e8c540c: the runtime begins it without a host prompt, so the host can detect it only after it has started). It is therefore never admitted, retroactively or otherwise (no turn_evaluate, turn_begin or checkpoint for it), and in a session bound to claimed work it is recorded through Engram's execution_observe as an unadmitted_turn. In a session with no claimed work binding it reports nothing to Engram, and the host's transcript notice for the turn says so.",
+    "Continuity drift that the host detects between two checkpoints of the same workspace and run reaches the Engram store through the producer representation agreed with Engram, so a checkpoint whose turn reports source_changed=false travels with that explanation; a test shows it.",
+    "A source edit or test run in a runtime-started turn reaches the store either as granted evidence of a mediated turn or as observed, uncredited evidence of a detected turn, and never as credit under another turn's grant; a test shows both."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

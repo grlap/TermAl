@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c812-7e73-b72a-51dfb2f86849",
+  "external_ref": "tm-zzpb",
+  "title": "Complete shared-live-events documentation links and persistence module map",
+  "outcome": "Parent-verified post-fix review follow-up: docs/architecture.md links to docs/features/shared-live-events.md, but the brief has no return link and docs/features/README.md omits it. Add the index entry and relevant reciprocal architecture/workspace links. src/persist.rs header names persist_sqlite_overview.rs but omits persist_sqlite_messages.rs; name the latter as owner of transcript physical layout, rowid conversion and differential writes. Documentation only; no demonstrated runtime defect.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

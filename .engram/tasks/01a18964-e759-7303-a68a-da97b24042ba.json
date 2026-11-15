@@ -1,0 +1,25 @@
+{
+  "id": "01a18964-e759-7303-a68a-da97b24042ba",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance with agent=Auto from a Kimi session returns HTTP 400 requiring Claude or Codex instead of resolving an allowed evaluator",
+  "outcome": "termal_evaluate_acceptance with agent=Auto from a Kimi session returns HTTP 400 requiring Claude or Codex instead of resolving an allowed evaluator",
+  "acceptance": [
+    "Automatic acceptance-evaluator selection from Kimi, Cursor, Gemini or OpenCode never selects an unsupported evaluator. It chooses a ready, nonblocking Codex or Claude in the documented deterministic order, with Codex as the supported fallback when neither is ready; existing Claude/Codex parent selection behavior remains unchanged.",
+    "Explicit request, eligible reuse and supported project defaults retain their precedence; explicit unsupported evaluator agents remain refused, and vendor-specific model overrides are not carried to an automatically selected different vendor. Tool/help text describes automatic selection accurately. Deterministic tests cover unsupported-parent ready/missing/blocked/empty-readiness cases and the request path, while preserving existing evaluator admission and source-root preflight behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

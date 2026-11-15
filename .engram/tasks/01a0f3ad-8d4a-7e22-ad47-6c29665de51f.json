@@ -1,0 +1,27 @@
+{
+  "id": "01a0f3ad-8d4a-7e22-ad47-6c29665de51f",
+  "external_ref": null,
+  "title": "Host architecture brief: align step 12's \"revalidate later interference before composing\" with the sealed cut of section 4.7 and step 10b",
+  "outcome": "Host architecture brief: align step 12's \"revalidate later interference before composing\" with the sealed cut of section 4.7 and step 10b",
+  "acceptance": [
+    "In docs/features/host-architecture.md, step 12's proof no longer asks the checkpoint to revalidate the stream after its sealed cut: it composes through the seal S, retains the grant, root and owner-state fence validation separately, and contradicts neither section 4.7's last bullet nor step 10b's proof; a review pair without a Medium or higher on the change"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

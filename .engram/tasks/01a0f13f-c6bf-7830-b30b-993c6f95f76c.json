@@ -1,0 +1,27 @@
+{
+  "id": "01a0f13f-c6bf-7830-b30b-993c6f95f76c",
+  "external_ref": null,
+  "title": "Carried gates: review-round-8 Lows — silent loss on a refused report, watcher fence scope, unknown-exit detached launch, child wording, stale-evaluation citation, test gaps",
+  "outcome": "Carried gates: review-round-8 Lows — silent loss on a refused report, watcher fence scope, unknown-exit detached launch, child wording, stale-evaluation citation, test gaps",
+  "acceptance": [
+    "Carried gates: review-round-8 Lows — silent loss on a refused report, watcher fence scope, unknown-exit detached launch, child wording, stale-evaluation citation, test gaps is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

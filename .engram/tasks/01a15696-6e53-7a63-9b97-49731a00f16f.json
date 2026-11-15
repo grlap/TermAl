@@ -1,0 +1,28 @@
+{
+  "id": "01a15696-6e53-7a63-9b97-49731a00f16f",
+  "external_ref": null,
+  "title": "Naming supersession retry detects the superseded refusal by matching its message text",
+  "outcome": "The naming's bounded re-prepare on a superseded authority image recognizes the supersession through a typed marker, not by comparing ApiError.message to ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR, so a later message edit or a new site that reformats the text cannot silently turn the retry into an immediate refusal.",
+  "acceptance": [
+    "prepare_engram_authority_retrying_supersession_until decides to retry from a typed superseded marker (an error variant or flag set by confirm_engram_authority_image_until at each place that raises the superseded refusal), never from the message text.",
+    "A regression changes the superseded message wording without touching the marker and the naming still retries and completes; the existing naming_supersede tests pass unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "named-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

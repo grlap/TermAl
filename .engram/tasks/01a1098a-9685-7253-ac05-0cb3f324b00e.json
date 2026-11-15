@@ -1,0 +1,28 @@
+{
+  "id": "01a1098a-9685-7253-ac05-0cb3f324b00e",
+  "external_ref": null,
+  "title": "An abort retry's boot recovery after a restart runs outside the host-wide automatic-retry cap",
+  "outcome": "An abort retry's boot recovery after a restart runs outside the host-wide automatic-retry cap",
+  "acceptance": [
+    "An abort-retry head's boot recovery after a restart holds a host-wide retry slot (eager pass and lazy recovery alike), or defers to its own due attempt when the cap is full; a test with more than K restarted abort-retry heads shows at most K recoveries in flight."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "boot-recovery",
+    "engram-host-adapter",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

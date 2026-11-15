@@ -1,0 +1,28 @@
+{
+  "id": "01a1d85b-b083-7c51-a550-821f288c8682",
+  "external_ref": null,
+  "title": "Cover queued and human opening commit-failure rollback of deferred source selection",
+  "outcome": "A behavior test proves queued or human opening commit failure restores the previous binding and root and the unapplied pending choice, then a later successful opening selects the requested claim.",
+  "acceptance": [
+    "Inject an opening commit failure after deferred selection application; verify previous binding/root and unapplied pending choice restored, and verify a later successful opening selects the requested claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a14ade-2177-7c43-b933-02e04a9bc421",
+  "external_ref": null,
+  "title": "Handoff ledger: treat an offer queued behind a pause latched after queueing as a blocked primary",
+  "outcome": "Handoff ledger: treat an offer queued behind a pause latched after queueing as a blocked primary",
+  "acceptance": [
+    "Handoff ledger: treat an offer queued behind a pause latched after queueing as a blocked primary is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "greg-directed",
+    "reliability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14a88-8e97-7391-a2a5-d9f93ea08fd2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

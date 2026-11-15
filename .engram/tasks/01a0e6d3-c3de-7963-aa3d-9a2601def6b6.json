@@ -1,0 +1,41 @@
+{
+  "id": "01a0e6d3-c3de-7963-aa3d-9a2601def6b6",
+  "external_ref": "tm-9ik9",
+  "title": "Split src/tests/engram_host_adapter.rs below 2,500 lines (Engram w-3b2ed0980172)",
+  "outcome": "TermAl tracker item for Engram work item w-3b2ed0980172, reconciled 2026-09-26. State at 317b286: src/tests/engram_host_adapter.rs is 16,549 physical lines (17,847 at the 09-21 baseline, 16,581 at 9103e30). No split work exists. Acceptance, from Engram: the same 4 criteria as tm-xc0b (host-observed inventory at most 2,499 lines per file, a shared size check, independent-session acceptance, pure moves with every test and assertion kept). Order: after the production-file split (tm-xc0b), one at a time, as the Engram note requires. Depends on the shared size test tm-xc0b.1.",
+  "acceptance": [
+    "A host-observed automated test proves src/tests/engram_host_adapter.rs and every module extracted from it are each at most 2,499 physical lines at the final source revision. Evidence lists every covered path and before/after count; include blank/comment lines and a nonempty final unterminated line. Newly extracted modules must not escape the inventory.",
+    "A lightweight size check for this file family runs in normal validation and fails at 2,500 lines, passes at 2,499, counts LF/CRLF consistently, and refuses an empty or failed inventory. Reuse one shared checker if already available; do not build a new framework per task.",
+    "Independent-session final acceptance cites the fresh host-observed line-count test evidence. Completion must remain blocked when that bound evidence is missing, failed or stale; demonstrate that gating safely on an isolated fixture rather than relaxing the live task. A plan evaluation or author-written gate note is not a substitute for the observed size result.",
+    "Split only this file's responsibilities into ordinary modules without behavior, schema/SQL or public-interface changes. Preserve existing tests/assertions and pass relevant regressions plus required project gates/review. No minification, duplicate implementation, deleted tests or transferring the oversized body to another oversized file."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "beads-migrated",
+    "file-size",
+    "refactor",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a0e6d3-c3e0-76f0-a9ea-d889be50979e"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

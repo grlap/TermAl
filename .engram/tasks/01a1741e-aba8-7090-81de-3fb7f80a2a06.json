@@ -1,0 +1,28 @@
+{
+  "id": "01a1741e-aba8-7090-81de-3fb7f80a2a06",
+  "external_ref": null,
+  "title": "Receiver recovery re-drives the turn-start path every pass for a retained remote wake while its root is busy",
+  "outcome": "Receiver recovery re-drives the turn-start path every pass for a retained remote wake while its root is busy",
+  "acceptance": [
+    "Receiver recovery re-drives the turn-start path every pass for a retained remote wake while its root is busy is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-low",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

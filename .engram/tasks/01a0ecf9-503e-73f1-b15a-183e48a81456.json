@@ -1,0 +1,28 @@
+{
+  "id": "01a0ecf9-503e-73f1-b15a-183e48a81456",
+  "external_ref": null,
+  "title": "Remote-create race fixture panics when the product abandons its create response: \"test response write side should shut down: ConnectionReset (10054)\"",
+  "outcome": "The remote-create race tests' fake server no longer fails when the product legitimately abandons its create response, while every other use of write_test_http_response stays strict and the product-side assertions still judge the outcome.",
+  "acceptance": [
+    "Remote-create race fixture panics when the product abandons its create response: \"test response write side should shut down: ConnectionReset (10054)\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "gate-failure",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-DONE. The fixture fix landed with the limits change in 0a7bc74 (ancestor of master f7db2c58); src/tests/mod.rs write_test_http_response_peer_may_abandon. Closed by evidence.",
+  "completion": null
+}

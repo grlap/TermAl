@@ -1,0 +1,34 @@
+{
+  "id": "01a0f475-e354-71d1-a291-92c391ba7a73",
+  "external_ref": null,
+  "title": "thread/started records a Codex thread id without a runtime check: a late notification can bind a default-home thread to a session switched to the read-only sandbox",
+  "outcome": "Low from the round-3 Claude review of the read-only Codex sandbox change (delegation-775f3965-37a6-4698-a6b8-e41bd8f6ae67), plausible but not confirmed. src/codex_events.rs (about line 632) handles thread/started by calling set_external_session_id with no runtime-token check. The profile model assumes a thread is created only on the runtime whose profile was recorded when the session attached. The settings guard refuses a profile-crossing sandbox change only while a turn runs. The race: Stop while thread/start is in flight; the session goes idle; the user switches it to read-only (allowed, with runtime_reset_required set); a late thread/started from the old default app-server then records the thread. On Windows the session then holds a default-home thread with the read-only sandbox, the combination the guard refuses, and its next turn fails every command (writes are still refused, so enforcement holds). Whether a detached session still receives that notification depends on shared-session detach timing. Fix direction: record thread/started through set_external_session_id_if_runtime_matches with the runtime token, or check that the sandbox fits the profile when a thread id is recorded.",
+  "acceptance": [
+    "A test delivers thread/started from a runtime the session is no longer attached to (after a profile-crossing sandbox switch) and shows the thread id is not recorded, or that the sandbox-to-profile fit is restored; the ordinary path still records the thread."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

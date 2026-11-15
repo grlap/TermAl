@@ -1,0 +1,36 @@
+{
+  "id": "01a0f34d-d403-7ac3-942a-a1086dac045a",
+  "external_ref": null,
+  "title": "The watcher's 256-directory fallback fences every carried gate before the .tmp/ scratch exemption is applied",
+  "outcome": "A watcher batch whose paths all lie under a worktree's own `.tmp/` does not fence carried gates, however many directories it touches; the fallback counts only directories that still need routing.",
+  "acceptance": [
+    "A batch of more than 256 directories with at least one source path still fences every carried check; a test pins it.",
+    "A test delivers a batch of changes in more than 256 directories, all under a gate worktree's `.tmp/`: the carried check is not fenced.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

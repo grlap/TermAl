@@ -1,0 +1,27 @@
+{
+  "id": "01a1216e-bfc7-7292-aea4-cbc97624058c",
+  "external_ref": null,
+  "title": "Remote proxy sessions never show Waiting: carry the remote summary's waiting field through the proxy record",
+  "outcome": "A remote proxy session whose remote host reports a wait shows Waiting locally and in termal_list_sessions, as a local session does.",
+  "acceptance": [
+    "Remote proxy sessions never show Waiting: carry the remote summary's waiting field through the proxy record is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "remote",
+    "session-status"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

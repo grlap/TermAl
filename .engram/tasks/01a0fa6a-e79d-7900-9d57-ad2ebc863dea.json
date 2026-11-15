@@ -1,0 +1,30 @@
+{
+  "id": "01a0fa6a-e79d-7900-9d57-ad2ebc863dea",
+  "external_ref": null,
+  "title": "Cover actual body-delta consumer decisions and fork adoption in transcript model schedules",
+  "outcome": "Cover actual body-delta consumer decisions and fork adoption in transcript model schedules",
+  "acceptance": [
+    "Cover actual body-delta consumer decisions and fork adoption in transcript model schedules is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-e086-7d92-941d-99f7adc36268",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

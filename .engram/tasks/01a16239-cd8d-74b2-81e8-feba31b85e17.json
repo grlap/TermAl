@@ -1,0 +1,37 @@
+{
+  "id": "01a16239-cd8d-74b2-81e8-feba31b85e17",
+  "external_ref": null,
+  "title": "Allocate R2 direct-prompt schema and minimum-reader slots",
+  "outcome": "Record exact unused primary and coordination schema slots, their ownership and mixed-version compatibility constraints for the authorized R2 direct-prompt design.",
+  "acceptance": [
+    "Inspect current primary and coordination schema version reservations and record the exact unused slot selected for each R2 direct-prompt vertical, with evidence that no existing reservation conflicts.",
+    "Record the primary and coordination minimum-reader compatibility and incompatible-reader rollback refusal required for mixed host versions, with slot ownership and provenance.",
+    "Send the allocation and compatibility record to Coder and Advisor; make no source, migration, live-grant, build, install, or restart changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a161d4-c882-7b71-b84c-a8af3a34d80a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

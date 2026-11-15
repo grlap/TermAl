@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c640-7403-b80d-d9585293f927",
+  "external_ref": "tm-menr",
+  "title": "Stateful real-process fixture tests give a 2 s budget that also covers PowerShell startup",
+  "outcome": "Seen 2026-09-27 in full gate test-35574516 (tm-5gi4 round 16, worktree .tmp/wt-source-revision, input 499c5af + b4ee3a6d). Rust stage 20:09:22-20:14:34Z, 2954 passed, 2 failed. Both failures:\n- tests::engram_host_adapter::control_transport::real_process_fixture_persists_idempotency_and_unknown_grant_semantics\n- ...::real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery\nBoth panicked at src/tests/engram_control_transport.rs:465 (process_fixture_bind) with EngramTransportError { kind: Deadline, message: 'Engram admission budget exhausted during process startup' }.\n\nHistory: each test passed in all 180 of its other recorded runs, and both failed together here, which points to one shared stall.\n\nMechanism: ProcessEngramControlTransport::request counts process_for (spawning powershell.exe on the stateful fixture and waiting for its handshake) against the call's timeout. These tests pass Duration::from_secs(2) to all 29 calls. So their outcome depends on the machine starting a PowerShell process within 2 s. They test idempotency and stale-grant semantics, not latency, and no call asserts a Deadline.\n\nThe file's own lifecycle test (real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn) already does it right: protocol calls use DEADLOCK_GUARD, and the deliberate 100 ms deadline is applied only after process_for has acquired the startup handshake. The engram_held_claims reader test says the same: 'This tests the CLI protocol, not shell startup latency'.\n\nLoad context, not a cause: Engram docs-agent-contract full gate test-64ba4291 ran 20:09:42-20:14:57Z over the whole Rust stage. Per Greg's decision, gates are not coordinated, so the test must not depend on a quiet machine.\n\nClassification: test defect. The budget is incidental, but the outcome depends on scheduling.\nFix: a named STATEFUL_FIXTURE_CALL_BUDGET = DEADLOCK_GUARD for those calls. It is a hang guard, not a latency claim. No product change.\nFollow-up: audit other tests that give real-process calls short budgets.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

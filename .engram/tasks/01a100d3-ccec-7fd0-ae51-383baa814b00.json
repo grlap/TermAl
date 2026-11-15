@@ -1,0 +1,27 @@
+{
+  "id": "01a100d3-ccec-7fd0-ae51-383baa814b00",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance clips a note the requester explicitly associated with a criterion, so that criterion can only be insufficient; explicit associations should be delivered whole or the request refused before an evaluator starts",
+  "outcome": "termal_evaluate_acceptance clips a note the requester explicitly associated with a criterion, so that criterion can only be insufficient; explicit associations should be delivered whole or the request refused before an evaluator starts",
+  "acceptance": [
+    "termal_evaluate_acceptance clips a note the requester explicitly associated with a criterion, so that criterion can only be insufficient; explicit associations should be delivered whole or the request refused before an evaluator starts is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a145cc-d2c4-77f0-9ebc-94f5dee40694",
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: duplicate — Explicit selected-proof clipping is the same defect as the retained P1 full-record promise item. Source: src/acceptance_evaluation.rs:1740. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

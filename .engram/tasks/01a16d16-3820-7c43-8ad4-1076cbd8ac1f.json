@@ -1,0 +1,36 @@
+{
+  "id": "01a16d16-3820-7c43-8ad4-1076cbd8ac1f",
+  "external_ref": null,
+  "title": "Host refuses test credit for watcher events on files whose bytes and mtimes predate the run (two occurrences 2026-10-24)",
+  "outcome": "Host refuses test credit for watcher events on files whose bytes and mtimes predate the run (two occurrences 2026-10-24)",
+  "acceptance": [
+    "RED-first regressions demonstrate that directory-only metadata notifications for an existing plain directory such as .claude do not by themselves refuse an otherwise unchanged launcher run; the tests exercise the watcher-to-credit path, and genuine child-file events remain observable.",
+    "Real source mutations remain fail-closed: edits (including write-then-restore), creation, deletion or rename of tracked .claude files and other source files still refuse credit, and a directory replacement, symlink/reparse point or unknown/unreadable path is not granted the metadata-only exemption. No blanket .claude ignore and no final-hash-only waiver is introduced.",
+    "The change is delivered as a frozen patch with focused watcher/carried-check regressions passing on that exact source and a fresh read-only Codex+Claude pair with no outstanding Medium-or-higher finding. The item records the incident evidence, the tested mechanism, and whether the Claude-runtime-writer hypothesis was established or remains unproven; full landing gate and integration remain Merger's responsibility. The item also states, for each of the four recorded occurrences, whether this change explains it; the file-level may-write refusals on source files (occurrences 2 and 3) are split into their own item if not explained."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Frozen five-path watcher-directory metadata patch030a/rawab41 delivered to Merger, RED3P1F, qualified GREEN8 and broad257P0F on identical source, fresh full Codex+Claude pair with no Medium+. Independent Sonnet14445 evaluation ddbef6a4577f431d9d1ace7012c4d9c7 is fresh3/3PASS. Authoritative packet including commands/files and all2052B prose read, then full native evaluation read before done. Tests inject raw notify events through shared converter/EngramHost into carried-check settlement; no native production watcher/Claude-writer/historical-cause proof. Occurrences1/4 shape-match only; file-level2/3/5 split757f; three Lows filed. Full final-input gate and integration remain Merger's. No landing or running-build claim.",
+    "completed_at": "2026-10-24T12:33:46.902404300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

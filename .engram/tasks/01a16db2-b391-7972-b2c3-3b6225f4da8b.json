@@ -1,0 +1,30 @@
+{
+  "id": "01a16db2-b391-7972-b2c3-3b6225f4da8b",
+  "external_ref": null,
+  "title": "A carried check's pending opening snapshot permanently invalidates its closing snapshot; source-capture refusal omits owner identity",
+  "outcome": "Preserve pending opening provenance through a carried end, keep failed or differing captures fail-closed, and correlate source-capture refusal notices with their owner and run.",
+  "acceptance": [
+    "RED-first deterministic regressions reproduce the confirmed source-capture completion/publication defect on the unchanged product and pass after its minimal fix. A capture still pending publication cannot be mistaken for a completed missing snapshot, and a check whose unchanged start and finish snapshots were successfully captured remains eligible without rerunning its producer.",
+    "Real capture failure, deadline expiry, source mismatch, mutation, overlap and owner/grant replacement remain fail-closed. Pending versus completed-None capture states stay distinguishable; no fabricated snapshot, endpoint-hash waiver, timeout inflation or automatic test retry is introduced.",
+    "Source-capture refusal notices identify the exact check, available run identity, source root and owning session and are delivered only to that owner after the applicable grant/claim revalidation. Deterministic tests cover two sessions and a stale/replaced owner; no command secrets are added to the notice.",
+    "The item records both reported occurrences, distinguishes the reproduced mechanism from any unproven historical cause, and delivers a frozen patch with focused capture/credit/notice regressions passing on that exact source and a fresh read-only Codex+Claude pair with no outstanding Medium-or-higher finding. Full landing gate and integration remain Merger's responsibility."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

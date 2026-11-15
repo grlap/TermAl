@@ -1,0 +1,30 @@
+{
+  "id": "01a1bec9-eb46-7852-baa9-dc5a5711547e",
+  "external_ref": null,
+  "title": "Keep project memories tidy as we go: durable rules in memory, working state on items",
+  "outcome": "Agents know the simple practice from the instructions they already read, so project memories stay tidy without another bulk cleanup, a new gate, a hard limit or an extra system.",
+  "acceptance": [
+    "AGENTS.md and CLAUDE.md carry the 'Keeping project memories tidy' text both projects' coordinators concurred on, word for word, under their Engram work tracker sections, and no test reads those files.",
+    "Engram's coordinator has adopted the same text for Engram in its own instructions.",
+    "Greg is told exactly what was put in place and when each part took effect."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "docs",
+    "greg-reported",
+    "memory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

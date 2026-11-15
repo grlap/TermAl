@@ -1,0 +1,32 @@
+{
+  "id": "01a1a37e-1475-7453-b74a-ecc2a2db0eeb",
+  "external_ref": null,
+  "title": "Define exclusion-profile validation outcomes for unmatched patterns and no-gitlink roots",
+  "outcome": "Define exclusion-profile validation outcomes for unmatched patterns and no-gitlink roots",
+  "acceptance": [
+    "The contract explicitly states and tests the outcome for a valid exclusion pattern matching no child and for malformed profile configuration in a no-gitlink repository, with shared producer semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "architecture",
+    "cross-project",
+    "docs",
+    "docs-only",
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1a23f-d694-7041-b135-ccbea5f6c63c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete requirement, not a passed implementation: Greg's 2026-11-03 22:29Z word, relayed Fable2 #1664: 'Chwila .codenav powinno być w gitignore. To produkuja testy. Nie widze potrzebny wyjątków.' The exclusion profile is removed entirely by docs candidate bf4c54fb; therefore unmatched-pattern and malformed-profile eligibility semantics no longer exist in this design. Coordinator explicitly directed cancellation in #1667 and parent note ad2ef672598f4445aa767dafec9df0e8. Preserve this item's original review provenance and historical criterion; no claim of test execution or acceptance PASS.",
+  "completion": null
+}

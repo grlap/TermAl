@@ -1,0 +1,29 @@
+{
+  "id": "01a13609-e6b9-7850-a266-b8de14a14441",
+  "external_ref": null,
+  "title": "The derived session.prompt_deliveries view is persisted in the session row beside the receipt map",
+  "outcome": "The derived session.prompt_deliveries view is persisted in the session row beside the receipt map",
+  "acceptance": [
+    "PersistedSessionRecord::from_record clears the derived session.prompt_deliveries view for local sessions, as it does session.pending_prompts, and the load path rebuilds the view unconditionally from the receipt map, so a stale persisted view is never loaded as-is.",
+    "A test round-trips a session with receipts and one with an empty receipt map, asserting the persisted row carries no view and the loaded view matches the map."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "persistence",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

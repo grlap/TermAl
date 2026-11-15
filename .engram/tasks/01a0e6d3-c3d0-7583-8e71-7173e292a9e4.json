@@ -1,0 +1,37 @@
+{
+  "id": "01a0e6d3-c3d0-7583-8e71-7173e292a9e4",
+  "external_ref": "tm-3nt1",
+  "title": "Reviewer protocol forbids all tracker reads, conflicting with projects' read-only startup recovery",
+  "outcome": "Reported by Engram::Opus (2026-09-26, #291): Engram read-only reviewer delegation 74090f3b (child session-7838, parent session-7284, around 22:09 UTC). TermAl's injected reviewer protocol (src/delegations.rs:61) says: 'Do not include tracker identifiers and do not inspect or mutate the tracker.' The child also got its project's start-and-resume guidance (Engram's AGENTS.md), which requires read-only recovery reads at session start: next --peek, memories, and full memory reads. The reviewer did the read-only recovery, made no tracker writes, and flagged the contradiction. Fix options: (a) reword the protocol so read-only startup recovery reads are allowed, and only tracker writes and task reads beyond recovery are forbidden; or (b) explicitly exempt reviewer leaves from the project's startup recovery. Either way, the 2 instructions should no longer contradict each other. Also check the /review-code and /review-changes wording, which also say reviewers must not inspect Beads.",
+  "acceptance": [
+    "A read-only reviewer child of each vendor TermAl can spawn as a reviewer (Claude, Codex, Kimi) can call Engram's read-only tools — next with peek, memories, show — and is refused every Engram tool that writes; a test per vendor's read-only gate shows the allowed read and the refused write.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The reviewer protocol TermAl injects and the /review-code and /review-changes command text say which tracker reads a reviewer may make and that it may make no tracker write; they no longer contradict a project's read-only start-up recovery."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

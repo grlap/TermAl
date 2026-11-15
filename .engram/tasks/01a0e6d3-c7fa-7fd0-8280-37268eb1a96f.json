@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7fa-7fd0-8280-37268eb1a96f",
+  "external_ref": "tm-yq2d",
+  "title": "Stop leaves Codex work running in the same session",
+  "outcome": "In the active session, after the user issued Stop, Codex/delegated work continued running and later produced output. Investigate cancellation propagation from the UI Stop action through the parent run, delegated runs, process supervision, and late-result delivery. Preserve evidence from session-4982 and ensure stopped work cannot keep consuming compute or append results afterward.",
+  "acceptance": [
+    "Pressing Stop terminates the active Codex run and all owned delegated/process work; no additional assistant/review output is generated after cancellation except a terminal canceled status; verified in the app with a real multi-delegation session."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

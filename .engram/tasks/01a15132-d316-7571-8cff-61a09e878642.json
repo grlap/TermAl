@@ -1,0 +1,36 @@
+{
+  "id": "01a15132-d316-7571-8cff-61a09e878642",
+  "external_ref": null,
+  "title": "Cover synchronous Confirmed outcomes in the common dedicated cleanup contract",
+  "outcome": "Cover synchronous Confirmed outcomes in the common dedicated cleanup contract",
+  "acceptance": [
+    "A portable test calls DedicatedCleanupLease::stop_and_reap on a dedicated owner returning Confirmed and asserts the result, cleared pending state and exact stop call count; include an Unresolved-to-Confirmed retry control if supported.",
+    "The authorized focused check and maintained full gate pass, and the independent review pair has no outstanding in-scope Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "platform",
+    "process-cleanup",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-eca0-70a0-b9a7-c1af4362f3ef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1668f-2d12-7b83-87b8-f1bdc0953545",
+  "external_ref": null,
+  "title": "Federation reference publication can mask a retired authority fence with a path-inspection error",
+  "outcome": "A reference publish whose captured authority has been retired reports the stale-link conflict even when pre-open state-path inspection also fails, while current-authority publications still fail closed on path errors.",
+  "acceptance": [
+    "A deterministic regression retires the captured publication authority while publication is paused and confirms the request returns the stale-link conflict without publishing, even if the pre-open path inspection fails.",
+    "A current publication authority with a state-path inspection error remains fail-closed, reports the unresolved I/O failure, and publishes no reference.",
+    "The publication authority is still revalidated at the final commit fence; early classification does not permit stale publication or bypass path-redirection checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "reference-publication",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Created while investigating the earlier H1/H2 hypothesis before Fable2's superseding #1778 classification. The observed gate failure is classified environment/resource; no separate product item is warranted from that run. Cancel to remove the speculative unassigned issue.",
+  "completion": null
+}

@@ -1,0 +1,72 @@
+{
+  "id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "external_ref": null,
+  "title": "Host-owned wakes: resume a session on the typed outcome of its own closing checkpoint, and a session-scoped host timer wake",
+  "outcome": "TermAl itself wakes a root session (a) with the typed outcome of that session's own exact closing (TurnTerminal) checkpoint for the claim and turn it registered on: acknowledged (which may carry no check record), refused with its code, or unknown. It never claims that a record landed. And (b) at a bounded, session-scoped host timer that asserts nothing. Both are durable-wait registrations bound to the admitted owner (claim, grant, turn generation), persisted, delivered first in first out under the existing admission and Stop rules, consumed with a named disposition on Stop, removal, owner loss or persist failure, never auto-renewed. They are host state that never fences a carried check. Firing creates one durable queued prompt per registration; sending that prompt to the local runtime channel is at most once. A crash can leave an explicitly reported handoff-unknown disposition without replay of that prompt. The host durably retains that uncertainty and presents a truthful notice naming the registration to its owning session, as well as exposing it to the operator. Provider receipt and model execution are not guaranteed. They replace mailbox relay wakes and sleep self-wakes (live-workarounds 5 and 6 retire on landing). Governing design: Architect1's RECONCILED RULING 01dbfac7, with Architect2's second check 2b3b5849 closed.",
+  "acceptance": [
+    "Preserved fail-first evidence on the unchanged product demonstrates the missing host-owned registration or delivery capability through the actual MCP/closing-checkpoint or host-tick path, with a positive control showing that the relevant boundary was reached. The holder records predicted failures, native results and preserved artifact identities, distinguishing the reported workflow gap, source hypotheses and executed diagnosis. Compilation failure alone is not a behavioral witness.",
+    "Two root-only host registrations are exposed through the real MCP path. A checkpoint registration requires an admitted owner and binds session/project, work/run/claim, current grant, turn generation and applicable runtime/reset ownership; an ineligible or ownerless request is explicitly refused; a delegation child's request is refused as ineligible. Only the TurnTerminal checkpoint of the bound turn generation produces one truthful typed outcome: acknowledged (including empty reports or a still-pending carried run), refused with its code, or unknown, preserved before card flattening. Authoritative record locators are included only when obtained from a receipt/readback; otherwise the prompt directs evidence inspection and never asserts a record landed. Wrong owner/grant/turn/claim/purpose cannot consume a newer registration; unknown status neither resolves a grant nor lifts a hold.",
+    "Successful registration is acknowledged only after durable persistence. Successful firing durably couples consumption and creation of one queued host-authored prompt by registration identity. Before sending that prompt to the local runtime channel, the host durably reserves the exact registration and queued prompt and then revalidates its owner and admission. The host makes at most one such send per registration. A recovered reservation whose send outcome is uncertain is durably disposed without replay of that prompt, with a handoff-unknown disposition and a durably retained host uncertainty notice naming the registration. The notice tells the owning session that the original wake may or may not have been delivered and will not be replayed; it neither repeats the original wake payload as an instruction nor asserts the checkpoint succeeded or a verification record landed. The notice is independently eligible for presentation under existing session admission, FIFO and Stop rules; it does not wait for the original wake to execute or for another agent to relay it. Crash recovery must retain or reconstruct this notice from the exact disposition until its presentation is accounted for. Repeated presentation of the same truthful uncertainty notice after an uncertain notice handoff is permitted and must retain the same registration/notice identity; it is not a second firing of the original wake. Successful channel acceptance proves neither provider receipt nor model execution. Deterministic crash controls distinguish recovery before reservation, uncertainty after reservation and before send, and uncertainty after channel acceptance and before durable disposition, and prove that the original uncertain reservation is never replayed and that the owning session can receive its uncertainty notice after recovery when admission permits. A failed durable transition acknowledges neither registration/consumption nor dispatches a new wake. At most one pending registration of each kind per scope: one checkpoint registration per bound owner, one timer per session and project. A duplicate pending registration of the same kind returns its original identity, payload and due time; a different requested owner/payload/due time cannot be reported as a newly accepted registration or alter the existing one. Restart recovers or disposes the exact registered owner rather than migrating it to a fresh turn. Boot retains Engram owner recovery, mailbox wakes, then wait/workflow dispatch. Idle and active-turn controls prove actual next-turn handoff, FIFO behind older prompts, and preservation of Stop/Resume and retained-observation admission.",
+    "Checkpoint registrations have named, observable dispositions for matching Settlement, owner/claim loss, unavailable owner, a checkpoint skipped or impossible to attempt, Stop, session removal and local persistence failure; none silently dangles or attaches to an unrelated turn. The matching Settlement disposition is 'retired by a matching Settlement checkpoint, with its reason'. Timer cancellation applies only to its session/project scope, not an unrelated claim change. Stop/removal/unavailability/claim-loss cancellations queue no prompt; a failed durable disposition queues no prompt and remains recoverable with its failure named. Deterministic controls cover wrong-owner callbacks, scope changes and persistence failure followed by restart, preserving any newer registration and existing holds. A recovered uncertain handoff remains durably inspectable by registration identity with its session/project scope, checkpoint owner or timer due time, terminal disposition and reason. An existing-session operator-visible status projection and a session-scoped read-only tool lookup expose the same disposition without requiring that wake to execute. In addition to those inspection surfaces, the owning session receives the truthful host uncertainty notice specified in criterion 3 when admission permits; an idle eligible session must not require an unrelated prompt to discover the uncertainty. The notice and inspection surfaces state that original delivery may or may not have occurred, that the old wake prompt will not be replayed, and that the operator or agent must inspect the conversation and relevant evidence before explicitly choosing any new action. Recovery never automatically creates a replacement wake registration or lifts an admission hold. The uncertainty notice is host metadata and remains subject to criterion 6's no-interference requirement. Failed disposition or notice persistence is reported as unresolved and remains recoverable rather than being advertised as durable retirement or presentation. Tests exercise the public inspection surfaces and actual session-notice dispatch after restart, including persistence failure, repeated recovery, an idle eligible session, active-session FIFO and a Stop-held session. Stop can cancel wake delivery without deleting an unresolved admitted head or settling its remote authority; the existing admission cancellation/recovery owner retains that exact state until its own disposition permits removal. The durable inspectability above is bounded for fully accounted-for records only. A retired wake record enters bounded history only after an exact current accounting witness of its last transition, including notice presentation, is established and no queue, admission, publication, recovery, notice-presentation or persistence duty remains; a compaction that fails or is uncertain keeps the full record and its retry obligation. Its summary is kept in a separate collection under its own fence and carries no routing token, connection, runtime handle or original payload, at most 32 per session and 256 per host including deleted sessions, ordered by a persisted accounting sequence, with no time-to-live and no tombstones. A record that still carries any such duty is never evicted to meet a bound. A removed session's unresolved, persistence-failed or handoff-unknown duty, a HandoffPending one included, is kept under a typed disposition, recoverable under its original scope; removal never records a notice as presented. Orphan duties and removed-session history appear as a redacted host-level part of the existing operator state response, not within a session; no new UI rendering is in scope. A lookup of an evicted record states that it is unavailable and may have aged out or never existed, and never that it was delivered or cancelled or that its checkpoint succeeded; a lookup only reads and never dispatches, renews a timer, clears a hold or changes retention order. Tests cover eviction at both bounds, redaction keeping handoff-unknown, the lookup wording, each kind of pinned duty as a negative control, failed and uncertain compaction keeping the full record, compaction racing writers and crashing with readback, repeated boot and ticks without change writing nothing, and no replay caused by eviction.",
+    "The timer is session/project-scoped and names no claim. Each explicit registration has an absolute host-wall-clock due time between 30 seconds and six hours after the observed registration time; out-of-range requests are explicitly refused without replacing an existing timer. It rides the unconditional existing test_run_tick with injectable observed wall time, not EngramBudgetClock, agent sleep/background work, indexed-run presence or rescan-due scheduling, and adds no worker. Before due it queues nothing; at/after due it durably queues one prompt asserting only due-time passage and registration identity. Duplicate/restart behavior preserves original due time and payload; firing or cancellation never auto-renews it. Tests drive before/at/after boundaries and ticks with no indexed runs. Due is judged on the injected observed wall time against the absolute due time; the prompt states only that the observed time reached the due time and names the registration.",
+    "Both registrations are host metadata, not provider outstanding/orphan work or source mutation, and never fence a carried check. Tests exercise actual MCP registration, carried-run settlement and host verification: arrange terminal evidence before the settling checkpoint or chain the existing run wait with a checkpoint registration, then separately assert no interference fence, truthful pending/acknowledged outcome and later verification credit. Positive controls retain the fences for ordinary outstanding/orphan work and source changes; no general tool-name exemption, weakened hazard admission, grant authority or changed evaluation timing is introduced.",
+    "The holder documents the actual MCP dispatch, closing-checkpoint ownership/purpose propagation and boot owner-recovery/dispatch inventory, including all previously unread branches chosen by the implementation, and ties the required witnesses to those production routes. Operator/tool documentation distinguishes outcome wakes from verification credit and timers from run-settlement waits, records the agreed bounds and cancellation/durability semantics, and provides an explicit retirement-on-landing plan for live-workarounds 5, 6 and the carried-gate-silently-fenced relay/self-wake practice. Existing test-run waits remain a separate trigger; unrelated wait persistence and producer wire protocols are not redesigned, and no deployed/restart proof is inferred from source or unit tests.",
+    "The maintained full five-stage gate passes, freshly compiled from the exact frozen input, with preserved run directory, before/after fingerprint, temp-guard results and passed host verification at the judged source revision. Independent read-only Codex and Claude reviewers cover that input with no outstanding in-scope Medium or higher; independent acceptance uses explicit criterion evidence. The holder cites exact gate, review and evaluation identities; the integration owner separately validates/reviews any changed integration input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 8,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "agent-runtime",
+    "agent-workflow",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

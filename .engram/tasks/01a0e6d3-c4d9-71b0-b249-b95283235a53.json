@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4d9-71b0-b249-b95283235a53",
+  "external_ref": "tm-ct6r",
+  "title": "Re-arm Engram delivery after Stop arbitration deadline",
+  "outcome": "If DeferredByRuntimeStop exceeds its 11 s guard, preparation becomes Rejected while runtime_stop_in_progress is still true; guarded rejection declines cleanup. A later failed Stop can leave an Active live runtime with a current pending marker but no delivered prompt.",
+  "acceptance": [
+    "A Stop that resolves after the arbitration guard cannot strand a current prompt: successful Stop remains superseded; failed Stop resumes delivery or produces an explicit durable failure. Add a deterministic late-resolution regression."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

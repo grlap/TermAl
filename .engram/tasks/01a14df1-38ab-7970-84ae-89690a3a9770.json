@@ -1,0 +1,27 @@
+{
+  "id": "01a14df1-38ab-7970-84ae-89690a3a9770",
+  "external_ref": null,
+  "title": "Cover the carrier reader's production store-scoped owner-binding lookup with a locked-reader test",
+  "outcome": "Cover the carrier reader's production store-scoped owner-binding lookup with a locked-reader test",
+  "acceptance": [
+    "Cover the carrier reader's production store-scoped owner-binding lookup with a locked-reader test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "handoff",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3bf-77a2-b316-64dd366316c0",
+  "external_ref": "tm-2fc",
+  "title": "Codex/Claude sessions lose TermAl MCP after restart — boot resumes runtimes before the HTTP server is listening + base_url is set",
+  "outcome": "SYSTEMATIC, confirmed in code + reproduced by the user (CodexMCP / session-3309 had zero TermAl MCP\ntools after a restart; the agent reported the bridge absent).\n\nBOOT ORDER (src/main.rs run_server):\n  126: let state = AppState::new(cwd)?;           // boot work runs here\n  132: let listener = TcpListener::bind(address)?; // HTTP server binds\n  139: state.set_local_http_base_url(http://{bound}); // base_url set ONLY NOW\n\nAppState::new -> new_with_paths (src/app_boot.rs) ends with runtime-resuming work BEFORE the server is\nup: seed_hidden_claude_spares (357), reconcile_delegation_waits_after_boot (358),\nresume_pending_orchestrator_transitions (368), dispatch_orphaned_queued_prompts (371). Any of these can\nresume a Codex session, which launches/attaches the SHARED Codex app-server and bakes the MCP config from\nlocal_http_base_url() — still the DEFAULT (set_local_http_base_url hasn't run) — pointing at a backend\nthat isn't listening yet (bind is at main.rs:132). The MCP config is passed on thread/start AND\nthread/resume (src/codex.rs:1004,1015), but the shared app-server comes up with the TermAl MCP bridge\nunable to reach the backend. Because ONE app-server hosts every local Codex session, ALL of them lose\nMCP — including sessions the user resumes later. Claude spares (357) have the same exposure via\ntermal_delegation_mcp_claude_config_json.\n\nFIX: bring the HTTP listener up + set_local_http_base_url BEFORE any boot-time runtime resume/spawn. I.e.\nsplit AppState::new into (a) pure load (no resume/spawn) and (b) a post-listen boot step that runs\nseed_hidden_claude_spares + reconcile_delegation_waits_after_boot + resume_pending_orchestrator_transitions\n+ dispatch_orphaned_queued_prompts, invoked from run_server AFTER main.rs:139. Setting base_url earlier is\nnecessary but NOT sufficient — the backend must be LISTENING before the shared Codex app-server / Claude\nspares spawn their MCP bridges. Add a regression test asserting no runtime spawn/resume happens before the\nbase_url is set / listener is bound.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Runtimes resume after listen (src/app_boot.rs:855-882), landed in fa13d81 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1104c-2345-7b40-b8df-c9405bcc25d6",
+  "external_ref": null,
+  "title": "Classify nullable Codex reviewer runtimeStatus as unavailable rather than Invalid",
+  "outcome": "Low in Pair7 Codex src/codex_reviewer_mcp.rs:217 and Claude :232. The installed protocol permits null/absence; current parser folds it into Invalid. Preserve fail-closed startup behavior; choose bounded unavailable/recheck semantics explicitly and add null/absence/malformed controls. Inventory only: no assigned implementation owner or scheduled trigger. Holder must establish concurred acceptance before evaluation.",
+  "acceptance": [
+    "Classify nullable Codex reviewer runtimeStatus as unavailable rather than Invalid is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

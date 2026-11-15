@@ -1,0 +1,33 @@
+{
+  "id": "01a1bfd9-2570-78e2-ac09-2ba206577ec5",
+  "external_ref": null,
+  "title": "Exercise recorder silence through real caller paths and coalescing boundaries",
+  "outcome": "Behavioral tests detect recording regressions in actual idle/predicate callers and outside-hold or later-window coalescing, without source-text pins or real waiting.",
+  "acceptance": [
+    "Real relay-row, monitor/supervisor, mirror and directory-context scenarios discriminate quiet checks from extra refusal observations or inflated counts.",
+    "Observable refusal sequences cover consecutive versus non-consecutive outside-hold events, durable=true repeats and distinct later hold windows with bounded records.",
+    "Tests use controlled IO/time or existing phase synchronization, preserving authority/transport behavior and avoiding source-text or Markdown assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "diagnostics",
+    "federation",
+    "mailbox",
+    "needs-triage",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bef1-e409-7fd1-bc50-ae58cd9cf533",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

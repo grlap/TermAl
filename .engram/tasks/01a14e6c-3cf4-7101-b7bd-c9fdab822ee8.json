@@ -1,0 +1,41 @@
+{
+  "id": "01a14e6c-3cf4-7101-b7bd-c9fdab822ee8",
+  "external_ref": null,
+  "title": "termal_review_freeze_check reports a missing manifest or root as a bare \"os error 2\" without naming the path it could not open",
+  "outcome": "termal_review_freeze_check reports a missing manifest or root as a bare \"os error 2\" without naming the path it could not open",
+  "acceptance": [
+    "When the compiled review-freeze checker (termal review-freeze-check, and the termal_review_freeze_check tool that wraps it) cannot open its manifest or root, stderr names the exact path that was not found and which argument it came from (root or manifest), and the result stays verified=false with a non-zero exit; a test shows both the missing-manifest and the missing-root case.",
+    "Successful checks keep their exact stdout contract (the fingerprint plus one LF) unchanged; a test shows it."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "review-freeze"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a192eb-9e83-77c0-9b55-c17ed893adeb",
+  "external_ref": null,
+  "title": "Delegation refresh for a child session holds the state lock ~330 ms across lookup, wait refresh and commit housekeeping",
+  "outcome": "refresh_delegation_for_child_session (delegations.rs:~1748) does only the minimal mutation under StateInner (indexed lookup, the lifecycle delta, the exact persisted delta), without a linear delegation scan, a refresh of ALL waits, or full commit housekeeping, and without simply moving commit_locked after unlock.",
+  "acceptance": [
+    "Under the state lock, a child-session delegation refresh finds its delegation without a linear scan, refreshes only the waits it can affect, and persists through the existing exact persisted-delta commit path; it does not run full commit housekeeping or the global snapshot capture for this change, and commit_locked is not simply moved after the lock is released.",
+    "Tests show delegation lifecycle deltas, wait refresh results, detached-child runtime handling and persisted state are equal to the current implementation's for representative cases, including boot and lifecycle callers, and that ordering relative to concurrent commits is unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "delegation",
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 7f122638; exact Mac FULL/pair and push ef95429c recorded; remaining acceptance/evidence accounting, no new delegation-refresh implementation.",
+    "completed_at": "2026-11-08T19:22:11.589775700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

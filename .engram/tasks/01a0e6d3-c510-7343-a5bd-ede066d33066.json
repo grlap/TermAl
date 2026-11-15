@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c510-7343-a5bd-ede066d33066",
+  "external_ref": "tm-gn5b",
+  "title": "Stop recording uncertain Engram begins on paths an acknowledged settlement already answered",
+  "outcome": "Round-9 review of tm-8b7y (Claude delegation-71d21352) noted two deliberately conservative recordings that cost one extra session_status plus rebind (and, for a finished delegation child, one boot-recovery target until the bind settles it): (1) dropped_engram_intent_grant treats every engram_interrupted intent as possibly owning a lost begin, although the cold-recovery path (engram_queued_admission.rs, interrupt after status reports the grant begun) checkpoints that grant before marking the head interrupted, so a later cancel of that retained prompt records 'unknown' or the intent's begun grant needlessly; (2) the Err branch after turn_begin in prepare_engram_turn_delivery_off_lock records the grant for every EngramTransportError kind, including structured remote error replies. Both are safe (a status settles them). Refine only with evidence that is definitive: e.g. note settlement on the intent once the recovery checkpoint is acknowledged, and identify which remote begin error codes prove the begin was never applied before excluding them. Keep the conservative default where the reply cannot prove it.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

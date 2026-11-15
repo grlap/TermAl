@@ -1,0 +1,38 @@
+{
+  "id": "01a1ac9d-e250-7900-ab4e-5f01ad87280f",
+  "external_ref": null,
+  "title": "Live Engram refuses TermAl verification records with only a generic reason: the sender discards Engram's reason, and a command over 8192 bytes always fails",
+  "outcome": "When Engram refuses a verification record, TermAl keeps and shows Engram's actual reason, and a check whose command Engram's contract can't accept is named as such before or at sending, so an eligible passing run never loses its credit without a stated cause.",
+  "acceptance": [
+    "The retained evidence for the live refusal of the short Node run test-5e23cba3-aa36-4053-8e4c-04ed8f75b74c (command 72 bytes) is matched against Engram's refusal rules and the result is recorded, separating facts from inference. If the cause cannot be recovered because the original reason was discarded, that limit and the rules excluded by the retained facts are recorded explicitly; any established product defect is fixed or filed with an owner. Classifying live refusals once reasons are preserved is w-bdfc7fd643b8.",
+    "TermAl's verification-record sender retains Engram's refusal reason in the run's record and summary instead of only 'verification_record_refused' (today discarded at src/engram_verification_record.rs:1273-1275); a test covers a typed refusal reaching the summary.",
+    "A check whose command exceeds Engram's registered-verification limit (8192 bytes, validated before association) gets a named reason naming that limit, with no truncation, rewriting or weakened limit; a test covers a long-selector command. Whether Engram's limit should change is decided with Engram::Fable and recorded.",
+    "No stored evaluation, verification or seal is changed; no record is replayed or resent to obtain credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed refusal-reason retention and named8192-byte command-limit diagnostics with typed-to-real-summary and actual producer regressions. Clean independent whole7pair, Windows focused58+live1 passed/native settled, exactcombinedN24 FULL green. Historical5e23 cause explicitly unknown because original reason discarded, rule-outs recorded under coordinator-concurredC1; livepostrestartfollowup separatew-bdfc7fd643b8. Evaluation unavailable/noactivecontract, no passedverdictfabricated. Installation pending integrationowner; no stored historicalcredit rewritten/replayed.",
+    "completed_at": "2026-11-05T19:06:52.726397800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

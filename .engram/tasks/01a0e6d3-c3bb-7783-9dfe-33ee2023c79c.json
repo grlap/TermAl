@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3bb-7783-9dfe-33ee2023c79c",
+  "external_ref": "tm-1u06",
+  "title": "REPL Codex turn inherits ENGRAM_* from the TermAl process environment",
+  "outcome": "src/turns.rs run_codex_turn spawns its own one-shot Codex app-server (per-cwd 'repl' CODEX_HOME) without clearing inherited ENGRAM_HOME/ENGRAM_ACTOR_ID/ENGRAM_SESSION_ID, so a TermAl process that itself carries an Engram identity (operator smoke test, shell launched from an Engram-enabled session) leaks that identity into the REPL agent's shell. The interactive path already scrubs the shared app-server at spawn and supplies exact per-thread values via shell_environment_policy.set; REPL mode should apply the same scrub (and, if REPL ever becomes Engram-eligible, the same thread-scoped injection). Found by the Claude reviewer during the tm-kxku.1 final review; outside that changeset's 12-file ownership, so tracked separately. Acceptance: REPL Codex child environment has none of the three variables unless explicitly injected; test on Windows and Unix; normal gates.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

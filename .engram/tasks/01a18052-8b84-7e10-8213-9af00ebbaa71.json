@@ -1,0 +1,39 @@
+{
+  "id": "01a18052-8b84-7e10-8213-9af00ebbaa71",
+  "external_ref": null,
+  "title": "Audit HTTP and SSE producers whose serialized objects can grow without bound, and plan pagination or bounded projections",
+  "outcome": "Every HTTP response and SSE frame producer whose serialized object can grow without a limit is identified, with its data bound or lack of one, and each unbounded producer has a prioritized remedy (pagination, bounded projection, or another data bound). Remedies outside the minimal P0 containment are filed as separate follow-up items, so the 64 MiB cap stays a safety fuse, not the whole strategy.",
+  "acceptance": [
+    "A recorded inventory on this item lists every HTTP route and SSE event producer that serializes a host-owned collection or transcript. Each entry gives the source of its size (sessions, messages, workspace items, test runs, mailboxes, board, federation and so on), whether the source is bounded today and by what, and a size estimate or worst case from the code.",
+    "Each unbounded or weakly bounded producer has a proposed remedy (pagination, a bounded projection or summary, or a hard data bound) and a priority, with the priority paths named first.",
+    "Remedies that the minimal P0 containment (w-492e7ae8a0fd) does not deliver are filed as separate tracker items, linked from this item with their priority. Remedies it does deliver are marked as covered there.",
+    "The audit is read-only: no source edits, tests or live-store access."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "panic"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1803c-a572-74e0-8240-fd84f21f9a4b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; Read-only audit delivered at87377afe source basis (no code commit), inventories/remedies/filings in holder notes; old evaluator no-sighting hold only; reconcile links, not another audit implementation.",
+    "completed_at": "2026-11-08T19:21:46.883061100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

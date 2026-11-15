@@ -1,0 +1,31 @@
+{
+  "id": "01a16534-0d24-7881-8ebe-11f5eab5c235",
+  "external_ref": null,
+  "title": "federation_reference_publication_other_key_settling_is_retryable_not_stale fails on Windows with \"Access is denied (os error 5)\" inspecting the test state's termal.sqlite-wal (500 instead of 201)",
+  "outcome": "The test tests::federation_native_binding_proof::references::publication::federation_reference_publication_other_key_settling_is_retryable_not_stale passes deterministically on Windows under the full gate: the publish path does not fail with a 500 when inspecting the state path `…\\termal-test-state-<id>\\termal.sqlite-wal` meets a transient \"Access is denied (os error 5)\" (a WAL file held by SQLite or a concurrent reader on Windows), or the test fixture does not race the WAL file it inspects.",
+  "acceptance": [
+    "A note records the failure mode from the 2026-10-22 gate test-d469702d (src/tests/federation_native_binding_proof/references/publication.rs:245, assertion 500 != 201; diagnostics REFERENCE_PUBLICATION_DIAGNOSTIC stage=publish.path_before_open io=PermissionDenied on termal.sqlite-wal under the worktree's .tmp test state) and classifies its cause: product (publish path treating a transient Windows WAL access denial as unresolved) or test fixture (the fixture inspecting the WAL file while SQLite holds it).",
+    "The confirmed cause is fixed without weakening the assertion, inflating timeouts or retrying blindly; the test passes in the full gate on Windows on the exact committed tree, and cargo test --bin termal is green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "gate-failure",
+    "pre-existing",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a18566-868e-7f62-8969-7b6b52b807ea",
+  "external_ref": null,
+  "title": "Distinguish preexisting test-run attribution ineligibility from an execution-owner race",
+  "outcome": "Prospective attribution uses a truthful reason when a disabled session, resetting project or unsupported session shape was already ineligible before capture; executionOwnerChanged is reserved for an actual currentness race. Exact reasons are covered by deterministic existing-owner tests.",
+  "acceptance": [
+    "Distinguish preexisting test-run attribution ineligibility from an execution-owner race is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-followup",
+    "test-credit",
+    "test-runs",
+    "verification-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a183bd-a8cb-7f22-a511-600257272d37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

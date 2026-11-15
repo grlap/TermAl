@@ -1,0 +1,36 @@
+{
+  "id": "01a1b898-d751-7352-8c2c-8e9863bf342d",
+  "external_ref": null,
+  "title": "Relay mailbox page read with a locator that looks exact returns 409 \"native mailbox has no saved association for this caller and mailbox (home=local)\" while the exact-message read works",
+  "outcome": "A domain-bound caller can page-read a relay mailbox it belongs to whenever an exact-message read on the same mailbox succeeds for it. Otherwise the refusal names the real difference, and locators that TermAl itself hands out (notifications, list results, read-message results) always name the right mailbox.\n\nObserved by Engram::Merger (Central, session-11859) at about 00:36Z and 00:38Z on 2026-11-08 (#352, #354). It used a relay locator taken from the queued notification for runner message #69, which it said matched the exact per-message status for #68. termal_read_mailbox returned `409 Conflict: native mailbox has no saved association for this caller and mailbox (home=local); local association metadata is not repaired by this read; retry alone will not restore it`. The exact per-message read worked.\n\nThe locator decodes to home host 8c5466d3, store 01ef8ab9…, id mailbox-2112d813-13c9-44cb-a99f-470f6b15e866. The id Fable2 recorded for that runner mailbox on 2026-11-07 ends …2a11215f51ab instead. That discrepancy is unconfirmed; evidence has been requested from the Merger.\n\nSource analysis (Sol-03d4 #2872): the exact-message read ALSO checks mailbox_relay_association(actor, message.mailbox_id) (src/mailbox_relay_local_history.rs:119–140). So the two reads can only differ in the mailbox id they use, the caller, the store, the build, or an intervening row change.\n\nThis case was split out of w-009fe89b37b8, whose original remote-home scope is fixed by 42d37234. That candidate changes this branch's message to a 404 unknown_native_mailbox_locator but recovers nothing.",
+  "acceptance": [
+    "The cause is recorded from the available evidence: the failing page reads used a locator whose decoded id is mailbox-2112d813-13c9-44cb-a99f-470f6b15e866; a page read with the canonical locator (id …2a11215f51ab) succeeded for the same caller; and the TermAl-generated notifications in session-11859's history carried the canonical locator, with no occurrence of the failing id. The original exact-message call's literal arguments and response were not retained, and that limit is stated explicitly. The record names the outcome as a caller-side non-canonical locator, not an association or locator-generation defect, and says the item is reopened if a wrong locator is ever observed in a TermAl-generated notification or response.",
+    "If TermAl builds or returns a wrong locator, every place that produces one emits the canonical locator, with a deterministic regression test. If association state is the defect, the page read succeeds for any caller that the exact-message read accepts, with a test. If neither applies, the refusal names the specific mismatch. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Caller-side noncanonical locator diagnosed from available evidence; canonical page read and canonical TermAl notifications verified by coordinator, earlier exact-message literals absent. Landed404 mismatch diagnostic covered by registered fdd8PASS23 and receivedverification2b947, combinedpair0Medium+ andbothFULLs green. Originala231FAILdueconfirmedEngramreplacement preserved; freshf34validationpassed. Reopen on actualwrongTermAl-producedlocator evidence. No acceptance evaluation exists.",
+    "completed_at": "2026-11-08T01:33:33.139266Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "01a15816-a61c-72c3-a44e-5e1d6303a647",
+  "external_ref": null,
+  "title": "Keep explicit cleanup ownership through invalid process-group conversion",
+  "outcome": "Address R1 Low: invalid-pgid conversion failures must not silently skip both cleanup and unresolved diagnostic retention; preserve the no-signal-after-reap contract.",
+  "acceptance": [
+    "A regression or documented unreachable invariant covers failure before cleanup admission so the child is not silently skipped by both cleanup and retention."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "bounded-reads",
+    "cross-machine",
+    "design-pending",
+    "diagnosis",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "remote-mailbox",
+    "review-follow-up",
+    "s2",
+    "test-failure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Failed process-group admission retains the exact cleanup owner before propagating the original error. Exact tree319bc4c8766fab4d60f061f13822d316183bb4e2 landed8077d3b3a53cfb89dcebc847f5e4c6d74218049e by Opus2 fast-forward22:25:42Z; parent independently verified ls-remote and commit tree/sole parent5fabca19. Own focused and full gate passed, native same-tree cleanup25/0 and onboarding38/0 passed, counted Codex/Claude R2 pair clean of Medium+, five reviewed blobs preserved by byte-exact carry. Independent evaluation f0278df039774cb8b103bcf9fb72d872 passed1/1. Test ref deleted22:15:57Z. Installation pending coordinator window, not claimed. Deferred Low adapter-wiring coverage remains w-90f6c6ad9915.",
+    "completed_at": "2026-10-20T22:28:07.864932700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "external_ref": null,
+  "title": "The last message of a session is not displayed in the conversation view (Codex and Claude sessions)",
+  "outcome": "The newest message of a session is always shown in its conversation view once the session has produced it, for every agent runtime, without the user reloading or switching panes.",
+  "acceptance": [
+    "A regression test fails without the fix and passes with it, at the layer where the cause lies.",
+    "T1. A deterministic generated model test drives the production owner, master body reducer, summary reconciliation, pure HTTP tail-adoption decision and the owner's needsTailRead predicate for one local session attached to the tail, beside an independent reference server. The reference records immutable captured bodies/positions, body sequence and metadata stamps. Server operations cover creation, append, text delta/replacement, in-place update, insertion, summary-before-own-delta commits and metadata commits; client operations cover tail reads and creation/fork adoption, older pages, detaching/reattaching navigation, visibility, and generic rejected read completion, retry-timer delivery and backstop polling opportunities. The generator enumerates every legal delivery order of explicitly bounded small scenarios plus longer fixed-seed schedules, without clock or unseeded randomness. Captured summaries and HTTP answers may arrive after newer admitted answers; ordered or dropped frames are generated. T1 enumerates orders of environment events over a single local, mounted session; every tail read is issued by production's shared four-condition gate, at a task end, when its pending retry timer fires, or at a backstop polling opportunity; history pages are separate requests under master's rules whose landing drops the certificate; a rejected read is the generic error path. The model includes the existing single hydration slot and pending capped retry timer, never unconditional rescue reads. The unmounted hook, 404/409 recovery answers, first unloaded hydration and older prefetch are not modelled. After each delivery, while certified and attached, every resident body touched by the stream since the last admitted tail snapshot equals the reference server version at appliedSeq and its position; within a server instance known numeric metadata stamps never decrease for local sessions with an admitted paired body response, while absent or null stamps and excluded sessions retain master global admission; paired local tail reads never advance the global revision; unchanged snapshots preserve Session/list/store-slice identity and cause no publication. After external changes quiesce, while the hook remains mounted and the session visible, attached and eligible, assuming browser ticks continue, blocking flights/retry timers settle, and a subsequent read returns an admissible response covering the last observed sequence, standing demand is eventually served and that response closes it. Missing edge notifications alone cannot strand demand. There is no fixed completion-time or fixed-attempt bound without corresponding scheduler and response bounds. Schedules rejected past the fast retry cap are included under these progress assumptions; no convergence is claimed against a server that only answers stale. Include a fully loaded attached transcript with a dropped text delta whose bounded paired tail read restores the complete text under D6, with aligned-prefix preservation and no-overlap/boundary-id-mismatch tail-only controls. Preserve the real App delayed/dropped final Markdown/table/checkpoint-card regressions across ref, store and render, plus canonical completion and unpaired/remote master-parity rows. Record separate source-revert adequacy runs showing the generator fails when each surviving rule is removed: next-sequence hole detection, kept-delta replay above an admitted tail sequence, summary-ahead task-end demand, task-end read initiation through the shared four-condition gate, release of the sole read flight on generic rejection, central same-instance known-older-stamp rejection within the admitted-paired-local domain (including captured old summary after a newer paired tail), incomparable unknown-stamp admission, paired-tail global-revision non-advancement, and unchanged-summary identity preservation. Remote opaque-epoch ordering, detached/full-window spatial certification, loss eviction, range repair, held-page admission and the separate certification operation are explicitly outside this slice, with superseded-contract provenance, not waived checks. Include replacing history navigation that lands attached: any body-window replacement outside the owner's eligible paired tail adoption drops the certificate and autonomously requests one existing-flight tail read; pure extensions beside retained resident bodies preserve the certificate. Record a separate source-revert adequacy run showing the generator fails on stale body/certificate safety when that invalidation is removed.",
+    "T2. A boundary test enforces that per-session proof state is private to the owner: only a successful eligible local body-bearing tail/creation/fork adoption and successful placement of the next local body delta may establish or advance its certificate; raw Session proof fields or ordinary page merges are not certificates. The proof exposes one pure needsTailRead predicate and uses the existing hydration single flight, with no separate certifying/replacing/range-read registry, held-page waiter or client epoch-retirement ledger. All resident Session metadata publications pass the owner commit gate, where the same-instance known-older-stamp guard, scoped to local sessions with an admitted paired body response and comparing only two known numeric stamps, is exercised for summaries, action responses, non-body deltas and targeted responses, with instance-reset, incomparable absent/null-stamp, remote, foreign-epoch and never-paired controls. Session-read global-revision effects are controlled only by the pure HTTP decision and mechanical adapter: eligible paired local tail reads leave it unchanged; excluded/unpaired cases retain master effects. The boundary inventory covers all HTTP session-read callbacks, not only adoptFetchedSession. Ordinary master history-page merges are expressly allowed and must not certify retained bodies. Public tests assert no direct Session/ref/store/render publication bypass and unchanged identity. Owner-originated tail reads start at one call site, the requester; a retry timer for such a read only delays the requester, and is scheduled only while demand holds. When a flight of any origin ends without asking for a retry or a recovery resync, the requester runs once for that session. Hydration of any other origin keeps master's retry and master's choice between tail and page (except the shared-timer case filed as w-a087e5c52d33). Real-hook tests with fake timers show no request when the timer fires after demand closed, the pane was hidden or the window was detached, exactly one when demand stands, and master's retry for an excluded session, exactly one tail read after an older page lands while demand stands, and, after a stale answer that an already-delivered summary is ahead of, exactly one tail read when the retry timer fires; a recorded source-revert run shows they fail when the timer restarts hydration directly. The backstop is a sibling operation on that interval. It is independent of every policy return of handleLiveSessionResumeWatchdogTick: resync in flight or pending, no active streaming session, drift and cooldown checks. The backstop invokes the requester for each currently visible session no more than once per 3-second polling period. All invocations use the shared gate. This bounds requests introduced by the backstop; existing event, hydration, recovery and retry paths retain their own scheduling and are not covered by a global one-read-per-period claim. After external changes quiesce, while the hook remains mounted and the session visible, attached and eligible, assuming browser ticks continue, blocking flights/retry timers settle, and a subsequent read returns an admissible response covering the last observed sequence, standing demand is eventually served and that response closes it. Missing edge notifications alone cannot strand demand. There is no fixed completion-time or fixed-attempt bound without corresponding scheduler and response bounds. The callback of the existing one-second interval runs the backstop first, then the existing handleLiveSessionResumeWatchdogTick unchanged. The backstop inherits only the cancelled/unmounted guard and acts on every third actual interval firing, counted by one hook counter, not per session or by a clock. No interval or global rate limiter is added. W12 covers no demand, a session absent from the current visible-session set, or a detached window: no GET. W15 covers a visible pane with eligible attached demand while document.visibilityState is hidden or navigator.onLine is false: a backstop read at the next acting firing. Browser timer suspension provides no wall-clock service guarantee.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed on Greg's word (\"you could close that now, this is hard to repo / if I see any issues I will file a new bug\", note 13ee75cf), carried out by Termal::Opus2 at the coordinator's direction while the holder Coder was busy. The fix landed as train 16 (a234b12: the per-session transcript body sequence with epoch, the lagged marker and the client repair authority) and train 17 (1d66ad9, adding the child w-a087 hydration retry). It is deployed to ui/dist (index-Dez8f6EJ.js from 1d66ad9). The criteria for Greg's own confirmation and for a capture-established cause were withdrawn on his word (note 0f867529). What stays unverified is stated in note 53071a67: no capture-established cause, and no confirmation from Greg on a running build. The problem was intermittent, and he will file a new bug if it returns. The required children w-37947c46aafc and w-08e3c624fe59 were cancelled under the coordinator's authorization and are waived: train 16's design replaced them. The remaining four criteria (regression test, T1, T2, full gate) passed independent evaluation 261bf474. The evidence index is ded6b911, with the superseded-contract provenance in 93b48781. The credited verification is 8585380f (six files, 208 passed, master 1d66ad9).",
+    "completed_at": "2026-10-02T22:37:58.353806Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

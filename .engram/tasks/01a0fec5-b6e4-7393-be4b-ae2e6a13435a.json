@@ -1,0 +1,39 @@
+{
+  "id": "01a0fec5-b6e4-7393-be4b-ae2e6a13435a",
+  "external_ref": null,
+  "title": "Fence null-stamp captured summaries below a session's admitted paired-read revision",
+  "outcome": "A captured snapshot from before the session's first mutation cannot roll back session metadata after an admitted newer paired body read, without coupling body reads to the global revision ledger.",
+  "acceptance": [
+    "A captured pre-first-mutation null-stamp summary delivered after a newer admitted paired body response has a fail-first regression with ref, store and render assertions and accepted-instance-reset/excluded-session controls.",
+    "An independently concurred per-session revision-floor design preserves global membership and unrelated state while refusing older per-session metadata below the last admitted paired-read revision, including absent or null mutation stamps.",
+    "Focused regressions, a full gate and a fresh complete independent read-only review pair pass on the exact input before completion."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "architecture-follow-up",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

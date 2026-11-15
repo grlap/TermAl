@@ -1,0 +1,32 @@
+{
+  "id": "01a19f9a-8279-7ec0-92d4-819e9ab322ed",
+  "external_ref": null,
+  "title": "Make owned Chrome-profile cleanup and its documentation agree on Windows",
+  "outcome": "Make owned Chrome-profile cleanup and its documentation agree on Windows",
+  "acceptance": [
+    "Owned-profile removal handles brief Windows handle retention with bounded retries while retaining the resolved-path ownership check.",
+    "Documentation states cleanup's best-effort limits and failure output identifies any retained owned profile."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "greg-reported",
+    "performance",
+    "review-low",
+    "ui",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f45-4449-7d20-86da-ee3a64e5d7d0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a169ed-f584-7e73-b047-165974546951",
+  "external_ref": null,
+  "title": "Move own-abandonment diagnostic retirement into its owning module",
+  "outcome": "Own-abandonment diagnostic retirement lives with the prune, cap and mismatch routes in engram_launch_diagnostics.rs while preserving the exact enabled, Current, runtime/turn and window semantics.",
+  "acceptance": [
+    "The bounded own-abandonment diagnostic retirement loop is moved from engram_turn_checks.rs into a helper owned by engram_launch_diagnostics.rs, without behavior changes.",
+    "Existing own-abandonment, disabled-session/project, runtime/turn ownership and launch-window tests still pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "launch-correlation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

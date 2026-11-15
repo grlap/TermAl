@@ -1,0 +1,27 @@
+{
+  "id": "01a15747-67d9-74c1-ab34-4c12f6badafc",
+  "external_ref": null,
+  "title": "Acceptance evidence selection refuses a whole proof note over 16 KiB with no stated bound or reference route",
+  "outcome": "A holder whose proof note is larger than the evaluation brief's 16 KiB read bound gets a refusal that states the bound and the note's size and names the supported route (select a smaller whole note that cites the large note by locator, which the evaluator then reads in full itself). Alternatively the bound is raised if the brief can carry it. Proof records are never truncated.",
+  "acceptance": [
+    "Acceptance evidence selection refuses a whole proof note over 16 KiB with no stated bound or reference route is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

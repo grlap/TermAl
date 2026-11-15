@@ -1,0 +1,30 @@
+{
+  "id": "01a19c71-d6cd-7f63-b809-a2ceaa6bceb6",
+  "external_ref": null,
+  "title": "Mailbox front revalidation can drop a delivered row that is not a pure Mailbox prompt (user-source or expanded content)",
+  "outcome": "Front mailbox revalidation removes a queued row only when it is a genuine Mailbox-source prompt whose content is the unexpanded mailbox wake, never a User-source row or a row with expanded_text that merely carries a mailbox label.",
+  "acceptance": [
+    "read_front_mailbox_revalidation (and its apply step) requires QueuedPromptSource::Mailbox and no expanded_text before treating a front row as the delivered mailbox boundary.",
+    "A User-source or expanded-content row that carries a mailbox label is never discarded by revalidation, and its content is delivered or kept intact.",
+    "A regression test covers both the unstructured-user and the expanded-content variants without weakening the existing mailbox revalidation assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "mailbox",
+    "pre-existing",
+    "queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1a61e-d737-7050-be26-07632d39a9fd",
+  "external_ref": null,
+  "title": "Align remaining context-nudge timing wording with advisory background delivery",
+  "outcome": "All context-nudge documentation and related comments distinguish requesting an advisory read from delivering an already cached page.",
+  "acceptance": [
+    "The host adapter and architecture descriptions plus related comments say an uncached nudge is requested by a dispatch and delivered by a later prompt; 'next prompt carries it' is retained only where a page is already available.",
+    "The distinction covers first prompts and explicit compact-hook failure without changing compact-hook ticket semantics or asynchronous prompt delivery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,64 @@
+{
+  "id": "01a10a99-3247-7c23-8ee0-e16e68f70aad",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance refuses selected evidence with one generic 409 that names neither the refused locator nor the reason (non-holder record, omitted body, truncated summary, wrong locator)",
+  "outcome": "A refused criterion-evidence selection names each refused locator with its specific reason and a remedy. Examples: a non-holder note or observation is not citable, so quote it in a holder note on the current run; an omitted body or truncated summary is not whole, so cite a smaller record. The caller can fix the request in one step, without retrying by elimination. Accepted and refused semantics stay unchanged.",
+  "acceptance": [
+    "C1 (test): On every selected-evidence path that refuses a whole-record/citability selection, the response identifies each refused requested locator and its specific reason and corrective remedy; separate witnesses cover wrong returned locator, body_omitted, summary_truncated and non-holder (quote in a current-run holder note). A single request with multiple invalid selected records reports them together, within the existing selection/read bounds.",
+    "C2 (test): Other selected-record validation failures (another task, malformed record, missing body and body over the existing 16 KiB bound) identify the requested locator, reason and remedy while retaining their existing HTTP error class. No diagnostic exposes evidence body text or routing credentials.",
+    "C3 (test): Diagnostics do not change accepted/refused semantics: valid whole holder records still reach the evaluator once with unchanged evidence; existing non-holder disclosed-drop paths still drop with disclosure, not a new refusal; invalid records cannot produce a partial evaluator. Existing authority/basis revalidation, record/criterion limits and shared deadline remain effective.",
+    "C4 (unbound fail-first): A holder note cites a host-recorded failed check of the new diagnostic witnesses on unchanged production code, including a multi-invalid selection, and describes the observed missing locator/reason/remedy.",
+    "C5 (test): The maintained full gate passes on the exact reviewed input.",
+    "C6: The independent Codex/Claude read-only review pair has no outstanding in-scope Medium or higher finding on the exact gated input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented actionable per-locator evidence refusal diagnostics while preserving existing semantics. Independent acceptance evaluation passed 6/6 at the gated source revision; exact-input full gate passed 5/5 and independent Codex/Claude review found no Medium+ issues. Commit 4bdfb2877e24d714b00329b998b0818160d45259 is pushed and verified on origin/master. Installation is pending coordinator GO-INSTALL.",
+    "completed_at": "2026-10-13T17:49:33.223886700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

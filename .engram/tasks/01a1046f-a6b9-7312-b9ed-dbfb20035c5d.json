@@ -1,0 +1,53 @@
+{
+  "id": "01a1046f-a6b9-7312-b9ed-dbfb20035c5d",
+  "external_ref": null,
+  "title": "Budget-clock B4b: the small Engram test modules choose their budget clock through the slice-1 boundary",
+  "outcome": "The small B4 modules choose their Engram budget clock through the slice-1 boundary before Engram is enabled. The modules are delegation_followup_admission.rs, engram_codex_profile_exit.rs, engram_unqueued_bind_budget.rs, engram_phase_compat.rs (engram_project), engram_work_binding_refresh.rs (binding_root_state and BindingRoot::new) and engram_turn_observations.rs (start_mediated_turn_with_script). The engram_root_dispatch.rs deadline_ms hit at :164 is classified. B4a (w-f607a5f78af2) already covers root_fixture. No production change.",
+  "acceptance": [
+    "Scope at c98d041: the tests reached by these fixture sites. delegation_followup_admission.rs: 3 enable sites. engram_codex_profile_exit.rs: 1. engram_unqueued_bind_budget.rs: 1. engram_phase_compat.rs: engram_project, 3 tests. engram_work_binding_refresh.rs: binding_root_state, BindingRoot::new with 12 sites and 3 direct tests. engram_turn_observations.rs: start_mediated_turn_with_script. Each chooses its budget clock through the slice-1 boundary before Engram is enabled and before any target or worker snapshot: select_test_scripted_engram_budget_clock, or declare_test_real_engram_budget_clock with its reason in a comment. install_test_engram_budget_clock no longer appears in these fixtures. engram_root_dispatch.rs's deadline_ms at :164 is classified in a note.",
+    "A note lists each converted test's deadline, backoff, elapsed and wait sources and its assertions. It also gives a transitive inventory of the callers of every changed shared fixture (engram_project, binding_root_state and BindingRoot::new, start_mediated_turn_with_script).",
+    "Each converted test passes on its chosen clock. A budget-expiry assertion either advances the same scripted clock across its causal boundary, with an unadvanced positive control, or declares Real with its reason. Each changed fixture asserts the clock is unread before enable. No expectation is weakened, no timeout grows, and no retry is added.",
+    "No production change. A shared fixture used outside this scope stays unchanged unless the inventory covers every caller.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a102f3-27ce-76a3-9b8c-8fb4c2131717",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The small B4 Engram test modules now choose the scripted budget clock through the guarded slice-1 boundary before Engram is enabled. The shared test helper select_scripted_engram_budget_clock_before_enable asserts that the clock is unread, then selects it. The modules are delegation_followup_admission (3 tests), codex_profile_exit, unqueued_bind_budget, phase_compat (engram_project), work_binding_refresh (binding_root_state) and turn_observations (start_mediated_turn_with_script, where the unguarded install was removed). Test-only, 7 files. Acceptance 11a7d50c passed 5/5. Landed in train 34 as master 2933a6a (a merge of fc94d2b onto 0f36360). The integration gate test-2c9636dd passed and the integration pair was clean.",
+    "completed_at": "2026-10-04T06:19:49.057784600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

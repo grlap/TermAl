@@ -1,0 +1,29 @@
+{
+  "id": "01a16dce-ecc3-7cf0-af18-6196d52e7385",
+  "external_ref": null,
+  "title": "Diagnose Windows notify overflow and document or close lost-event credit risk",
+  "outcome": "Diagnose Windows notify overflow and document or close lost-event credit risk",
+  "acceptance": [
+    "Diagnose Windows notify overflow and document or close lost-event credit risk is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "review-follow-up",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

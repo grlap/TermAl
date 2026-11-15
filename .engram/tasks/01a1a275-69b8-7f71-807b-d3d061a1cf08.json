@@ -1,0 +1,30 @@
+{
+  "id": "01a1a275-69b8-7f71-807b-d3d061a1cf08",
+  "external_ref": null,
+  "title": "Include the existing xUnit captures in the documented finite .NET matrix",
+  "outcome": "The captured .NET matrix points readers to both the earlier xUnit/VSTest evidence and the newer NUnit/MSTest/MTP captures.",
+  "acceptance": [
+    "The captured-shape documentation links the existing xUnit v2/xunit.runner.visualstudio3.1.4/net10.0 fixture evidence and states finite-version coverage without broadening support claims."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "dotnet",
+    "greg-directed",
+    "review-low",
+    "team-pilot",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a111ee-c262-71e1-a59e-59d270b393d3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a165d0-e57a-7010-a227-f4f6094f827b",
+  "external_ref": null,
+  "title": "Remove owned Sol-8e1f Cargo targets under the disk cleanup hold",
+  "outcome": "Remove owned Sol-8e1f Cargo targets under the disk cleanup hold",
+  "acceptance": [
+    "Only target subdirectories of this session's .tmp worktrees ending -8e1f are removed after resolving and checking their paths and confirming no owned test runs there; worktrees, indexes, frozen inputs and evidence remain, and freed space is reported to Fable2."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "cleanup",
+    "disk"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

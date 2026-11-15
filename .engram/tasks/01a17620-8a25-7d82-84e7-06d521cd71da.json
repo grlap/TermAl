@@ -1,0 +1,29 @@
+{
+  "id": "01a17620-8a25-7d82-84e7-06d521cd71da",
+  "external_ref": null,
+  "title": "Define an operator recovery disposition for unresolved closing checkpoint duties",
+  "outcome": "A reviewed operator recovery contract covers Unknown ordinary and missing-session Teardown duties without lending authority, erasing unresolved producer work, or releasing unrelated exclusions.",
+  "acceptance": [
+    "Document the owner-approved operator recovery or disposition contract for Unknown ordinary and missing-session Teardown checkpoint duties, including authorization and exact duty/receipt preservation.",
+    "Implement only the approved contract through existing lifecycle and authority owners, with positive recovery and negative stale-owner/unrelated-duty/restart controls.",
+    "Obtain the required independent reviews and exact-input tests for the implemented scope."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-control",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

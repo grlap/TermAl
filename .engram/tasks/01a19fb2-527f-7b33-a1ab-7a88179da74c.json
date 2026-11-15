@@ -1,0 +1,26 @@
+{
+  "id": "01a19fb2-527f-7b33-a1ab-7a88179da74c",
+  "external_ref": null,
+  "title": "Host console log: rate-limit known-benign periodic runtime notifications by explicit allowlist",
+  "outcome": "The unhandled ACP and Codex notifications that actually flood the host console are identified from the timestamped log on the running host. Only those methods, named one by one as known-benign periodic notifications, are rate limited. Every other runtime diagnostic, including any whose payload could report an error, is never suppressed.",
+  "acceptance": [
+    "Host console log: rate-limit known-benign periodic runtime notifications by explicit allowlist is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-console"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

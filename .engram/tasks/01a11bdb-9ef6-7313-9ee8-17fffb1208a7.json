@@ -1,0 +1,41 @@
+{
+  "id": "01a11bdb-9ef6-7313-9ee8-17fffb1208a7",
+  "external_ref": null,
+  "title": "Built-in test recognition takes `bash w.sh -c 'cargo test'` as a cargo test: engram_unwrap_shell_command accepts any words before the -c flag",
+  "outcome": "A shell-wrapper line is recognised as a built-in test only when the wrapper itself runs the script: words before the script flag that make the shell run something else (a script file, `-File`, chained commands) are not read as a wrapper.",
+  "acceptance": [
+    "`bash w.sh -c 'cargo test'`, `pwsh -File w.ps1 -Command 'cargo test'` and `bash --version ; true -c 'cargo test'` are not recognised as cargo test checks, each with a control that fails before the change.",
+    "Ordinary built-in wrappers that the recognition takes today (for example `bash -lc 'cargo test'` and `pwsh -Command cargo test`) keep their recognition and fingerprint unchanged, shown by the existing recognition tests passing unchanged."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "test-recognition"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

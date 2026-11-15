@@ -1,0 +1,31 @@
+{
+  "id": "01a15b41-193c-7191-abcd-058da74caabc",
+  "external_ref": null,
+  "title": "Cover incomplete wake-reservation diagnostics after more than 1000 historical obligations",
+  "outcome": "Cover incomplete wake-reservation diagnostics after more than 1000 historical obligations",
+  "acceptance": [
+    "Cover incomplete wake-reservation diagnostics after more than 1000 historical obligations is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "gate-load",
+    "greg-directed",
+    "mailbox",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15a23-842a-7c72-b323-c931b0f63084",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

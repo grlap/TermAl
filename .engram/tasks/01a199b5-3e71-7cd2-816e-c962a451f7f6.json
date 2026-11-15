@@ -1,0 +1,38 @@
+{
+  "id": "01a199b5-3e71-7cd2-816e-c962a451f7f6",
+  "external_ref": null,
+  "title": "Replace obsolete gating test oracles with ordinary EO and history safety coverage",
+  "outcome": "Migrate or explicitly retire assigned gated-operation oracles and fixtures under physical deletion, preserving meaningful ordinary delivery, persistence and stored-history guarantees.",
+  "acceptance": [
+    "Migrate or explicitly retire assigned gated-operation oracles and fixtures under physical deletion, preserving meaningful ordinary delivery, persistence and stored-history guarantees.",
+    "No tests are ignored or blanket-disabled to obtain green (ignores: 0 added, 9 removed). Displaced tests have group-level dispositions, not per-assertion ones: of 1425 names gone from 5dd913d2 at 87f49ed0, 144 are renames (84 of them matched by name only), 1029 are retired with the gated operations they drove, judged by the identifiers in their bodies and by filename, and 252 were read by name and are gone with their machinery, replaced under new names or deliberately reversed. A hash-chosen sample of 40 of the 1029 was read in full, and 166 retired tests matching compaction, eviction, capacity, retention or cleanup terms were reviewed, mostly by name. That found one ordinary behaviour that lost its test and its code, compaction of settled observation reports, tracked by w-afeb934a4b3c. These checks reduce the gap and don't close it: a fact asserted only inside a retired test that wasn't read could still be lost (note 57f8ede9, .evidence/w-c962). Tests for ordinary safety and readability remain in the suite, and new EO and current-operation cases are added.",
+    "The integrated candidate covering these owned paths passes focused checks. It landed as 87f49ed0 on Greg's explicit word „robimy commit, wystarczy tego”, without a complete Codex/Claude pair: C3 R2 and C4 R3 Codex failed coverage, on C4 R3 Claude found no Medium, C5 was not reviewed (notes 9ddd7b7f, fc1c07ef, bc95be13). The missing Codex review is tracked by w-96004958e8cc."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Gated test oracles are retired or migrated, with group-level dispositions and stated limits. One ordinary behaviour was found to have lost its test and code, tracked by w-afeb934a4b3c. Landed in 87f49ed0 on Greg's word without a complete review pair; the missing Codex review is w-96004958e8cc.",
+    "completed_at": "2026-11-04T07:40:54.227049900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

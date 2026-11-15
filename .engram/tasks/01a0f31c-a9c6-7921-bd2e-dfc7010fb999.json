@@ -1,0 +1,44 @@
+{
+  "id": "01a0f31c-a9c6-7921-bd2e-dfc7010fb999",
+  "external_ref": null,
+  "title": "Split the brief-rendering tests out of src/tests/acceptance_evaluation.rs (5,437 lines) and cover the clip's remaining branches",
+  "outcome": "The pure brief-rendering tests (acceptance_evaluator_brief_*, acceptance_brief_cut_notice_*) with their fixtures live in a sibling test module that shares show_receipt and full_receipt, as a pure move in a commit of its own; and, in a separate commit, the clip is tested on a multibyte body over 600 characters, on a body the marker would not shorten, on an entry both clipped by the host and cut by the tracker, and on a left-out line with more than 64 locators.",
+  "acceptance": [
+    "A test asserts the exact clipped line for a multibyte body over 600 characters, including both byte sizes in the marker.",
+    "Tests cover a body over 600 characters that the marker would not shorten, an entry both host-clipped and tracker-cut, and the brief's left-out line with more than 64 locators.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "The move is a pure code move in its own commit: no renamed test, no changed assertion; the new file's header says what it owns, what it does not, and the file it was split from."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

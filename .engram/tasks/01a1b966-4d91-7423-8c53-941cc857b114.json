@@ -1,0 +1,31 @@
+{
+  "id": "01a1b966-4d91-7423-8c53-941cc857b114",
+  "external_ref": null,
+  "title": "Document or preserve physical Git metadata workload of the bulk review-identity capacity fixture",
+  "outcome": "Clarify the accepted object-store and reflog differences between ordinary Git construction and the bulk capacity fixture, or preserve the required physical metadata workload, without weakening behavioral coverage or increasing observation budgets.",
+  "acceptance": [
+    "Document or preserve physical Git metadata workload of the bulk review-identity capacity fixture is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "gate-time",
+    "greg-directed",
+    "review-followup",
+    "test-fixture",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b83d-85bc-7d33-969a-6f845d667984",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,50 @@
+{
+  "id": "01a0f335-e0b1-7560-bea5-a776ab739655",
+  "external_ref": null,
+  "title": "A read-only Kimi child's gate refuses the tracker's reads that a read-only Claude child is now allowed",
+  "outcome": "A read-only Kimi child that is not an evaluator may make the same tracker reads that record nothing as a read-only Claude child (the one list in src/engram_mcp_config.rs), under Kimi's own gate rules: the complete streamed arguments observed, the summary matching the tool, approve once. Every other tracker call stays refused.",
+  "acceptance": [
+    "Every tracker word that writes, `next` without a peek, a context generation and an unknown argument are refused for a read-only Kimi child; a test lists each.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "kimi_read_only_permission_decision allows `mcp__engram__<read word>` calls judged by the shared list, only when the host admits tracker reads for the session and the observed arguments and summary match; a test covers allow and each refusal."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-interop",
+    "kimi",
+    "read-only-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered Kimi shared nonrecording tracker-read admission with exact observed argument/title/summary and approve-once/Stop/runtime fences preserved. Nine registered Central tests passed; clean independent pair and exact-input full gate passed; contribution landed/pushed unchanged and binary installed. Running host restart/live Kimi execution not claimed or required by these implementation criteria.",
+    "completed_at": "2026-11-05T09:40:54.566550200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

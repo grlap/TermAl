@@ -1,0 +1,30 @@
+{
+  "id": "01a0f916-9fad-75a1-a3e1-08e3c624fe59",
+  "external_ref": null,
+  "title": "Finish replacing-navigation read tokens on every terminal loader path",
+  "outcome": "Finish replacing-navigation read tokens on every terminal loader path",
+  "acceptance": [
+    "Finish replacing-navigation read tokens on every terminal loader path is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Coordinator e07d441d02c343a0a21949b908f9c51b authorizes cancellation, not completion. Architect1 1c7927235c884b56a8ec0ca98f88d352 and Fable concurrence 7adbe386f2c1466983e95725bdb96a59 delete proof-token registries and separate certifying operation under D2/D3/D5. Normal navigation cancellation and sole hydration flight release remain parent T1/App requirements; those are not waived.",
+  "completion": null
+}

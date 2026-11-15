@@ -1,0 +1,31 @@
+{
+  "id": "01a19ef4-0b38-71a2-98fc-37914d5c871a",
+  "external_ref": null,
+  "title": "Measure test-suite costs and propose coverage-preserving optimizations",
+  "outcome": "A ranked measured inventory of Rust module, Node launcher and Vitest test costs identifies supported cause hypotheses and concrete coverage-preserving changes for coordinator approval before implementation.",
+  "acceptance": [
+    "Record exact source/run identities and available duration evidence for Rust modules, Node launcher suites and Vitest files; distinguish artifact-derived times from new focused measurements and separate elapsed time from overlap/resource effects.",
+    "Rank major measured costs, give falsifiable hypotheses covering process spawn, Git fixture setup, sleeps/polls, serial locks and repeated setup as applicable, and propose optimizations that preserve assertions and coverage.",
+    "Return the measurement report and proposed fixes to Fable2 within the authorized read-only phase. New runs are focused, sequential and coordinated; no product/test fixes, skipped tests, weakened assertions or timeout changes occur before phase-two approval."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "measurement-first",
+    "performance",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

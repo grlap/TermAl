@@ -1,0 +1,28 @@
+{
+  "id": "01a10034-3844-7513-9f2f-db49d8deaafe",
+  "external_ref": null,
+  "title": "An orchestrator stop or deadlock clears an admitted Engram-retained orchestrator prompt from the queue without abandoning its pending dispatch, so the final handoff can still deliver it",
+  "outcome": "Clearing an orchestrator's queued prompts on a stop or deadlock never leaves an admitted, Engram-retained head deliverable. Either the admitted retained head is preserved, as the public Stop variant does, or its pending dispatch is abandoned, so every change of the queue head moves a field the final handoff guard checks.",
+  "acceptance": [
+    "An orchestrator stop or deadlock clears an admitted Engram-retained orchestrator prompt from the queue without abandoning its pending dispatch, so the final handoff can still deliver it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "orchestrator"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

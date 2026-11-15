@@ -1,0 +1,30 @@
+{
+  "id": "01a1bd2a-0b58-7e52-a38b-c66cb6a85556",
+  "external_ref": null,
+  "title": "Complete shared acceptance submit fixture coverage before producer integration",
+  "outcome": "Shared identity producer integration has behavioral fixtures through actual submission and declared-target admission for every disposition, without live stores or reconstructing identities from summaries.",
+  "acceptance": [
+    "Scripted submit fixtures cover fresh shared match, conflict and unavailable recapture, and durable Refused and Recorded dispositions, checking private custody, bounded public projection and invocation arguments.",
+    "Unknown/restart replay preserves the original complete identity and immutable locator, while unchanged historical fingerprint submissions retain their established behavior.",
+    "All uncovered branches are reconciled with the parent migration and exact input review and focused validation evidence is recorded before producer integration."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "source-id",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

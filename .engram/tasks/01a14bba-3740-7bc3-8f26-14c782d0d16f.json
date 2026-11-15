@@ -1,0 +1,42 @@
+{
+  "id": "01a14bba-3740-7bc3-8f26-14c782d0d16f",
+  "external_ref": null,
+  "title": "Remote foundations M1: central-domain identity and configuration, satellite registry (membership/capacity), enrollment records and explicit session placement — feature disabled",
+  "outcome": "Remote foundations M1: central-domain identity and configuration, satellite registry (membership/capacity), enrollment records and explicit session placement — feature disabled",
+  "acceptance": [
+    "Persisted identity: a host_id minted once and a host_generation; a configured central-host role (one central TermAl host per coordination domain); host-qualified session ids with a non-reused session creation identity. Fail-first tests prove equal local session ids on two hosts stay distinct, and aliases or payload-supplied ids cannot impersonate a host or session.",
+    "A satellite registry at the central host records per satellite: host_id, generation, platform/OS and arch, transport endpoint, pair capability reference, binary/toolchain identity, declared capacity (max sessions; build/gate slots) and state enrolled/verified/active/draining/revoked, with no satellite count hard-coded. Tests cover state transitions, revoke, and that only verified/active satellites with free capacity are placement-eligible.",
+    "Explicit session placement binds a session to one satellite with a placement generation. Stale enrollment, stale placement and link ABA, and detected or explicitly declared clone/restore continuity loss, reject coordinated admission with the retryable stale-authority error, never retarget (tests). A declared restore is quarantined even at the same path; epoch reset and fresh verification alone never release uncertain reservations or authorize replacement execution. Record the limit that an undeclared byte-identical same-path rollback/clone with the same credentials and no independent continuity witness is not automatically detectable by M1.",
+    "The whole capability is behind a disabled-by-default setting: with it off, all existing local session and mailbox behaviour and tests are unchanged.",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14b98-032e-7f70-922a-93105e5592c0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered disabled-by-default M1 federation foundations: persisted qualified host/session identity, exact enrollment/configuration and transport fencing, registry verification/state transitions, atomic explicit placement capacity and retained reservations, durable detected/declared continuity quarantine. Exact tree dd85526f5363b7c6be6b145e9fa12a75e316433b reviewed and fully gated; focused36 plus three targeted mutation REDs and restored same-test GREEN host-recorded. Fresh independent evaluation70c25071ed4a4a00b5e5648ce28b8d58 passes5/5 at revision7/currentcontent8f96. Merger TRAIN-5 integration handoff follows; no push/install/restart or remote execution claimed.",
+    "completed_at": "2026-10-18T01:48:12.917978Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a12d49-92d9-7843-a57b-5a3da416fdea",
+  "external_ref": null,
+  "title": "Update Work visualizer documentation for inline item expansion",
+  "outcome": "Make the Work feature brief describe the inline details behavior delivered by the layout change.",
+  "acceptance": [
+    "The feature brief describes details beneath the clicked task (a spanning next row in Table) and single selected label occurrence.",
+    "The documented closing paths cover repeat click, Escape, ancestor/group collapse, view switch and filtering away the selected row; obsolete side-drawer language is removed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "ui",
+    "work-visualizer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12d06-1388-74c0-a9f1-fe9f38a75440",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

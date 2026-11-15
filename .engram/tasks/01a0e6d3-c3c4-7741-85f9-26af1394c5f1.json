@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3c4-7741-85f9-26af1394c5f1",
+  "external_ref": "tm-2ure",
+  "title": "Extract and harden opt-in transcript scroll tracing",
+  "outcome": "The current diff adds scroll trace helpers and several diagnostics to the already oversized SessionPaneView.scroll.ts. The enablement check reads localStorage synchronously on hot scroll paths, only one diagnostic reaches the bounded flight recorder, and the copy hook is reassigned on every event. Extract the trace concern into a focused module, cache enablement safely, route all trace sites through one recorder, and update the operator-facing source comment for the window globals.",
+  "acceptance": [
+    "Scroll tracing lives in a focused module, disabled hot paths do not read localStorage per frame, all intended events reach the bounded recorder, the copy helper is installed once, and comments accurately document enablement and globals."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

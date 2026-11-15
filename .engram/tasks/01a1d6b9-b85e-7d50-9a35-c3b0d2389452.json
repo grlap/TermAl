@@ -1,0 +1,36 @@
+{
+  "id": "01a1d6b9-b85e-7d50-9a35-c3b0d2389452",
+  "external_ref": null,
+  "title": "Resume cancels a pending session Delete in memory without stamping the row, so a host restart restores the Delete and blocks dispatch again",
+  "outcome": "Cancelling a pending observation Delete through Resume is persisted (row stamped and committed) and published, so it survives a host restart and the UI matches memory.",
+  "acceptance": [
+    "One helper used by all three sites (session_lifecycle.rs resume path ~544-550, cancel_observation_delete_for_resume ~1599-1611, human_queue_choices.rs:133) clears observation_delete_requested, restores the preview, stamps the session row and commits it, rolling back on a commit error.",
+    "A regression test: a Delete retained with SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED, then Resume (including a Resume that then returns 409 busy), then reload from SQLite, shows observation_delete_requested=false and dispatch not blocked."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "persistence",
+    "review-medium",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Resume now cancels a retained observation Delete through one stamping, committing, publishing helper, with rollback on persistence failure. Regression tests cover public/local busy Resume and durable reload. Landed eb78d349; independent evaluation92822ea1 passed both criteria.",
+    "completed_at": "2026-11-14T03:40:07.273980500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

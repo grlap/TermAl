@@ -1,0 +1,29 @@
+{
+  "id": "01a1a903-3276-7460-acaa-90520db13cc0",
+  "external_ref": null,
+  "title": "Work down Central's remaining worktrees and .tmp entries after the first cleanup",
+  "outcome": "The large population the first cleanup left as review or unknown is reduced to what a recorded need keeps. A review row means nobody has established an owner, and it stops being the normal state of most of the tree.",
+  "acceptance": [
+    "From the consolidated inventory and a fresh cleanup report, each remaining Central worktree and top-level .tmp entry is either removed through the safe route (fresh path, process, named-root, reachability and reference checks, no force) or kept with an accountable owner and the event ending the need. Batches are by owner or provenance, not row by row.",
+    "Rows that can't be established after those checks stay unknown with the reason, and their count is reported. Unknown is never removal authority. Dirty or unmerged work goes to its owner, not to deletion. No live store is opened and no stored evaluation or verification changes.",
+    "What was removed and the counts before and after are recorded, and Greg is told the result through Engram::Asistant."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

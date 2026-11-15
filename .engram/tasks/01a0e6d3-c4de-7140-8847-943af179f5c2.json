@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4de-7140-8847-943af179f5c2",
+  "external_ref": "tm-d3jn",
+  "title": "Engram obligation waiver accepts minted 32-hex record ids",
+  "outcome": "Engram now mints a record id as a random UUID (32 lowercase hex); ids written earlier are 64 hex. The obligation-waiver path in src/engram_host_adapter.rs validates receipt.resolution, current_definition and expectedDefinition with is_lowercase_sha256 (64 hex only), so it would refuse every obligation created by the new Engram build. Add an Engram record-id check that accepts 32 or 64 lowercase hex and use it at those three sites. is_lowercase_sha256 stays strict: src/review_freeze.rs uses it for the review-freeze fingerprint, which is a real SHA-256. Acceptance: waiver request and response with a 32-hex definition/resolution are accepted; other lengths and non-hex are refused; review-freeze fingerprint validation unchanged; cargo check clean; cargo test --bin termal green.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a re-check, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. No obligation-waiver code remains in src/ on master f7db2c58, so the validator it names is gone.",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a186d4-07be-75f2-83a0-2e53e3cadb34",
+  "external_ref": null,
+  "title": "Engram project settings: derive Save & enable's disabled state from its unavailable reason, and polish the turned-off copy",
+  "outcome": "In ui/src/EngramProjectSettingsPanel.tsx, Save & enable's disabled state is derived from describeSaveUnavailableReason (saveDisabled = reason !== null), so a disabled button always has a reason and an enabled one never does. The turned-off guidance, the Save reason and the footer sentence no longer repeat one another. The failed-Verify reason does not point at \"errors above\" when none are listed.",
+  "acceptance": [
+    "Engram project settings: derive Save & enable's disabled state from its unavailable reason, and polish the turned-off copy is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "UI",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

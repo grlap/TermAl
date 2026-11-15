@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4fb-7503-856c-7f8a8349ea25",
+  "external_ref": "tm-eqio",
+  "title": "Combine send and delegation actions in composer split button",
+  "outcome": "Replace the separate reviewer/explorer delegation controls beside the session composer with a compact Send split-combobox. The primary action executes the selected mode, while the disclosure menu lets users choose Send, Delegate Reviewer, or Delegate Explorer. Preserve keyboard accessibility, disabled/busy semantics, agent capability restrictions, and existing delegation behavior.",
+  "acceptance": [
+    "Composer exposes one right-aligned split Send control with selectable Send, Delegate Reviewer, and Delegate Explorer actions; the current selection is visible and executed by the primary button; Reviewer remains unavailable for unsupported agents; keyboard and screen-reader behavior is covered; existing send/delegation tests and the full UI quality gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

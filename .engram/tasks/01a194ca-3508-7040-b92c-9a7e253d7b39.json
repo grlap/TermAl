@@ -1,0 +1,36 @@
+{
+  "id": "01a194ca-3508-7040-b92c-9a7e253d7b39",
+  "external_ref": null,
+  "title": "Windows B: review-attempt export directory rename refused with EPERM in three fingerprint-stage tests",
+  "outcome": "The review-attempt exporter's immutable directory publication either works on Windows B or its refusal is explained by a named, evidenced cause, so the fingerprint stage does not fail there for an unexplained reason.",
+  "acceptance": [
+    "The cause of the EPERM directory rename on Windows B is classified from discriminating evidence as product, test/runner, or environment.",
+    "If product or test: a fix lands with a test that reproduces the refusal deterministically, and scripts/export-review-attempt.test.mjs passes on Windows B in a launcher run on the fixed tree. If environment: the condition is named with evidence and its remedy is recorded as Greg's decision."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "test-gate",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Classified as product: the exporter's one-shot directory rename failed on a brief Windows hold. Fixed with a bounded wait on Windows sharing errors, a matching wait in fixture removal, and deterministic real-handle tests. The holder is not named. Landed in 7f8d1b63 with Windows B FULL test-78f5f61f green.",
+    "completed_at": "2026-11-04T09:09:43.196477200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

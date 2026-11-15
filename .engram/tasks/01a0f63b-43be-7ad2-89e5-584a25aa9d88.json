@@ -1,0 +1,27 @@
+{
+  "id": "01a0f63b-43be-7ad2-89e5-584a25aa9d88",
+  "external_ref": null,
+  "title": "WorkspacesPanel test \"opts the overflow menu out of the global panel rise-in animation\" costs 0.3–12 s and times out at 10 s under load: it injects themes/index.css with 32 @imports into JSDOM",
+  "outcome": "Found by Termal::Opus2 on 2026-10-01. Full gate test-84976842-931f-41fa-b2db-99a0ea4a9e22 ran in .tmp/wt-eval-brief right after a host restart, while other sessions were resuming their own gates. Its vitest stage failed on one test:\nsrc/panels/WorkspacesPanel.test.tsx > WorkspacesPanel > \"opts the overflow menu out of the global panel rise-in animation\" (line 2023), timed out after 10 s, taking 12 292 ms.\n\nThe failure is unrelated to the change under test. The same input passed three times before (test-212d4a57, test-fcea4a66, test-a17144ca), with the whole file at about 18 s each time; this run the file took 30.9 s. Across past gate logs this test's recorded duration varies from 311 ms through 3 104 ms to 12 292 ms, a 40-fold spread for an unchanged test.\n\nLikely cause, for diagnosis: installProductionPanelCascade (the test file at line 178) injects ui/src/themes/index.css as a <style>. That file is 997 bytes of 32 `@import` rules, so JSDOM may try to resolve and load 32 stylesheets. Its cost then depends on the resource loader and machine load rather than on the assertion. The test was introduced in f4ede4b (2026-09-12).\n\nClassification: a test defect. The test's own cost is unbounded relative to its fixed 10 s timeout, and the product is fine. Per the project testing principle the cause is to be fixed, not the timeout raised. Fix direction: inject only the rules the assertion needs (the theme's panel rules, or a stub stylesheet without @import), or stub JSDOM's stylesheet loading, so that the test is CPU-light and deterministic.",
+  "acceptance": [
+    "The test no longer injects a stylesheet with @import rules (or JSDOM resource loading is stubbed for it), and it asserts the same rise-in opt-out; its duration in a full gate stays under 1 s, shown in the vitest log of a passing gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "tests",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c809-7121-b216-a1a341c1f477",
+  "external_ref": "tm-zju9",
+  "title": "Test launcher: a fresh git worktree without ui/node_modules fails as a raw runner ENOENT; name the missing install instead",
+  "outcome": "Run test-2e26a3fa (worktree TermAl-wt-kimi, 2026-09-26): the full gate failed before any stage with 'runner: ENOENT: no such file or directory, stat ...\\\\TermAl-wt-kimi\\\\ui\\\\node_modules\\\\typescript\\\\bin\\\\tsc'. Cause (confirmed): a new git worktree has no ui/node_modules (untracked); package-lock identical to main. Fixed by 'npm ci' in the worktree's ui/. Classification: environment (worktree setup), not product/test. Improvement: the launcher's preflight should detect a missing ui/node_modules (or missing native tool) and report 'UI dependencies are not installed in <root>/ui; run npm ci there' as a clear runner error, without installing anything itself (the launcher never installs). Related worktree hygiene: tm-nrmy.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6ea-8384-7ae2-815b-f39fd2916d7a",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate. Missing ui/node_modules preflight; covered by w-f39fd2916d7a.",
+  "completion": null
+}

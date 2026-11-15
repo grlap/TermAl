@@ -1,0 +1,36 @@
+{
+  "id": "01a0fa1e-6911-7222-a87f-c6a595a4a670",
+  "external_ref": null,
+  "title": "Add a step-driven regression test for the acknowledgement-refresh versus send race in refresh_acknowledged_mailbox_wakeups",
+  "outcome": "refresh_acknowledged_mailbox_wakeups snapshots the covered queued wakes and reads each boundary row off the state lock. Under the lock it then re-checks prompt id, message id and sequence. That re-check is the only guard against rewriting, as \"Nothing is unread\", a head that a concurrent send moved to a newer boundary N+1 with unread mail. A deterministic test drives that interleaving: take the covered snapshot, let a send advance the head, then apply. It asserts that the head keeps the N+1 unread text and that the public pending-prompt projection matches. This likely needs the refresh split into read and apply phases, as dispatch-time revalidation already is.",
+  "acceptance": [
+    "A test takes the refresh's covered snapshot, then has a send advance the same mailbox's queued head to a newer boundary before the refresh applies. It asserts the head keeps the newer unread text and boundary, and that the pending-prompt projection matches. The test fails if the re-check under the lock is reduced to prompt-id matching only.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "test-coverage",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,39 @@
+{
+  "id": "01a1bf2d-5987-72e3-a9c4-6f7dfc06dce6",
+  "external_ref": null,
+  "title": "Make settled prompt revocation and observation retries return without new writes",
+  "outcome": "An exact retry of a committed prompt-permission revocation, observation or confirmation returns the settled retained state without a new federation version or persistence write; new revocation still uses its current authority and version fences.",
+  "acceptance": [
+    "A lost-reply retry of an already committed revocation can recover its revoked identity using the original request version without reviving or retargeting it.",
+    "Duplicate authenticated observation and confirmation leave federation version and durable state unchanged; conflicting or stale identities remain refused.",
+    "Behavioral controls cover local revocation and real authenticated observe/confirm duplicates before production routes mount."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "greg-reported",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1741f-92e2-7ba2-921c-e1b088ba9d33",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

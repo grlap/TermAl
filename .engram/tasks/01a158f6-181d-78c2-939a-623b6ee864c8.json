@@ -1,0 +1,28 @@
+{
+  "id": "01a158f6-181d-78c2-939a-623b6ee864c8",
+  "external_ref": null,
+  "title": "Exercise actual Mermaid ESM and fallback renderers in regression smoke tests",
+  "outcome": "Add meaningful real-library smoke coverage for both normal ESM Mermaid and bundled fallback rendering: valid parser/Cytoscape-backed diagrams, representative output/error handling, and a bounded hostile-input control. Keep current wrapper tests; state what is actually executed and avoid claiming that sandboxed final SVG isolates parent-realm parsing/rendering or that smoke tests prove absence of XSS.",
+  "acceptance": [
+    "Exercise actual Mermaid ESM and fallback renderers in regression smoke tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

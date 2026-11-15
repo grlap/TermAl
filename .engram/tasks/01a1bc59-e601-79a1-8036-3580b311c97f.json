@@ -1,0 +1,37 @@
+{
+  "id": "01a1bc59-e601-79a1-8036-3580b311c97f",
+  "external_ref": null,
+  "title": "Add the shared coder-test-execution skill to TermAl, byte-identical with Engram's copy, with a pointer so both runtimes find it",
+  "outcome": "TermAl carries the final reviewed coder-test-execution skill byte-identical with Engram, using one canonical .agents body and a thin .claude discovery pointer. Existing authority is unchanged; no AGENTS.md or CLAUDE.md edits and no Markdown-pinning tests.",
+  "acceptance": [
+    "TermAl contains the final reviewed Engram skill bytes at .agents/skills/coder-test-execution/SKILL.md and .claude/skills/coder-test-execution/SKILL.md: one canonical body and the thin Claude discovery pointer, with the relative link resolving to that body.",
+    "The copy preserves the shared neutral workflow and existing project authority, adds no project-specific commands or new approval, commit, push or tracker permission, and makes no edits to AGENTS.md or CLAUDE.md. No test reads or pins repository Markdown or instruction text.",
+    "Record source-byte identity, frontmatter and link validation, the required independent review pair with no outstanding in-scope Medium-or-higher finding, and the exact final full gate before landing under the existing standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "docs",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed byte-identical shared coder-test-execution skill and thin Claude discovery pointer in combo16, with existing project authority unchanged.",
+    "completed_at": "2026-11-08T21:25:33.121826800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

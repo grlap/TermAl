@@ -1,0 +1,29 @@
+{
+  "id": "01a0f826-9392-79c0-aa86-ecff9a4c6c73",
+  "external_ref": null,
+  "title": "Preserve master reconnect-confirmation guards for certified body frames",
+  "outcome": "A stale or forward-gap certified body frame cannot cancel pending bad-event/reconnect metadata recovery where master would retain it; per-session body application remains independent.",
+  "acceptance": [
+    "Preserve master reconnect-confirmation guards for certified body frames is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-7c46-7c92-becf-4dc70d773c8a",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

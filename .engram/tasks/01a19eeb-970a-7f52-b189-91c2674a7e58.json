@@ -1,0 +1,38 @@
+{
+  "id": "01a19eeb-970a-7f52-b189-91c2674a7e58",
+  "external_ref": null,
+  "title": "URGENT: Linux build fails after w-3fe8 — E0282 in bounded_read_process.rs unix path (closure error type ambiguous)",
+  "outcome": "`cargo build --release` succeeds on Linux (DL560) at the master commit that contains the fix. The bounded-read result closure in run_bounded_read_process_input_observed has an explicit anyhow error type, with the same behaviour on every platform. The warning about the unused host_workdir in work_visualizer_process.rs:94 on non-Windows builds is also resolved.",
+  "acceptance": [
+    "Linux `cargo check --bin termal` and `cargo check --tests` finish with no error on TermAl master (x86_64-unknown-linux-gnu).",
+    "Windows still compiles: `cargo check --bin termal --tests` finishes with no error.",
+    "No behaviour change in the bounded read process or the work-read launch command."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "build",
+    "cross-platform",
+    "greg-reported",
+    "regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 47fdba2f; supersedes314f180c, Linux check/check-tests/no-run + Windows check/pair recorded; combined landing evidence needs linking. Real Mac release is outside the three exact accepted criteria.",
+    "completed_at": "2026-11-08T19:23:00.057621500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0f0ba-2388-7a40-a96c-166b9e96b0f0",
+  "external_ref": null,
+  "title": "review-changes.md Step 5 template still groups Medium with Low; split it by the landing threshold",
+  "outcome": "A Low from review delegation-f1125e2c on w-2f9eeafd38d9. The consolidated report template in .claude/commands/review-changes.md Step 5 has the buckets \"Critical/High\", \"Medium/Low\" and \"Notes\". Under Greg's 2026-09-30 rule, Medium and higher block a landing and Low does not, so the grouping hides the line that decides the landing.\nSplit the buckets into \"Critical/High/Medium (block the landing)\" and \"Low (file if left unfixed)\", keeping \"Notes\".\nThis is a command file that limits authority, so (a), (b) and (c) apply.",
+  "acceptance": [
+    "The Step 5 template in .claude/commands/review-changes.md separates findings that block a landing (Critical, High, Medium) from Lows to file and from Notes, in wording both coordinators concurred on, and an agent-command test pins it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "review-cadence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

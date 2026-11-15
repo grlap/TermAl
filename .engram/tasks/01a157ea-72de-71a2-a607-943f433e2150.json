@@ -1,0 +1,30 @@
+{
+  "id": "01a157ea-72de-71a2-a607-943f433e2150",
+  "external_ref": null,
+  "title": "Cover publication-marker uncertainty after production native installation",
+  "outcome": "Distinguish prepared-reference row persistence failure from marker-stage commit/ack uncertainty in the M5 composition evidence.",
+  "acceptance": [
+    "A composition case drives real marker-stage uncertainty, for example the existing reference_publication_ack_lost hook, after production native installation, and verifies exact reference recovery without reinstall or retarget.",
+    "The existing app_state-trigger case is accurately named/documented as prepared-row persistence failure; focused tests pass and review confirms the two cuts are distinct."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

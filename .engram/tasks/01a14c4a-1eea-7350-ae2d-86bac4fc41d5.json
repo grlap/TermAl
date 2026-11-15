@@ -1,0 +1,27 @@
+{
+  "id": "01a14c4a-1eea-7350-ae2d-86bac4fc41d5",
+  "external_ref": null,
+  "title": "Docs (optional): remaining review Notes on supervised-pilot-onboarding.md",
+  "outcome": "Docs (optional): remaining review Notes on supervised-pilot-onboarding.md",
+  "acceptance": [
+    "supervised-pilot-onboarding.md no longer overstates 'nothing else is written' (around :66), states that ui\\dist.previous is left untracked, makes the §7/§3 MCP respawn wording consistent, and rewords §8's 'first box' phrasing; or a note records why a given Note is left as is."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

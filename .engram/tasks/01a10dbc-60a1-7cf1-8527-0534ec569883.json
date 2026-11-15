@@ -1,0 +1,28 @@
+{
+  "id": "01a10dbc-60a1-7cf1-8527-0534ec569883",
+  "external_ref": null,
+  "title": "Preserve a replayed admission retry when it re-parks during dedicated reset",
+  "outcome": "A replay already in flight when dedicated reset claims its fence retains a retry if it parks again during temporary cleanup, while explicit user Stop and stale authority retain their existing semantics.",
+  "acceptance": [
+    "Preserve a replayed admission retry when it re-parks during dedicated reset is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "engram-retry"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

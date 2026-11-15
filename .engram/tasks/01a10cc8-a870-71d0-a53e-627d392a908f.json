@@ -1,0 +1,27 @@
+{
+  "id": "01a10cc8-a870-71d0-a53e-627d392a908f",
+  "external_ref": null,
+  "title": "Establish the first dedicated cleanup failure preview before preserving sidebar output",
+  "outcome": "Establish the first dedicated cleanup failure preview before preserving sidebar output",
+  "acceptance": [
+    "Establish the first dedicated cleanup failure preview before preserving sidebar output is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "agent-workflow",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

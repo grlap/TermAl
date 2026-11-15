@@ -1,0 +1,29 @@
+{
+  "id": "01a1bbdd-8231-70e1-b27b-d715d3406069",
+  "external_ref": null,
+  "title": "Remove or make reachable the native relay UpgradeRequired refusal reason",
+  "outcome": "Remove or make reachable the native relay UpgradeRequired refusal reason",
+  "acceptance": [
+    "The relay diagnostic model no longer advertises an unreachable UpgradeRequired reason, or an authenticated version-skew request receives correctly correlated safe upgrade guidance without weakening request validation.",
+    "A behavior test covers the chosen version-skew result; existing status, MAC, authority, 404 and outcome-uncertainty behavior is retained."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

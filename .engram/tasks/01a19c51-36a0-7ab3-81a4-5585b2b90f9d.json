@@ -1,0 +1,33 @@
+{
+  "id": "01a19c51-36a0-7ab3-81a4-5585b2b90f9d",
+  "external_ref": null,
+  "title": "w-3fe8 H5: a legacy unmarked queued prompt becomes a never-runnable hand-off after restart (FIFO break or stranded entry)",
+  "outcome": "After a restart, a legacy queued prompt that is not Engram-retained loads as runnable and dispatches in FIFO order in every session. Only Engram-retained entries without a known promotion disposition fail closed as unknown hand-offs; no gate or grant is revived.",
+  "acceptance": [
+    "Load restores master's ordinary semantics on the w-3fe8 candidate: an entry without a known disposition is failed closed as an unknown hand-off ONLY when it is Engram-retained (hand-off, bind or evaluate envelope, interrupted, or waiting) and its transcript position is unknown after eviction; ordinary and legacy entries load runnable, with file:line",
+    "A deterministic test: a legacy unmarked ordinary queued prompt in a session with an evicted transcript head survives reload and dispatches in FIFO order before a later entry, and the orphaned-workflow barrier still counts it; a retained legacy entry with the same shape still fails closed and is never replayed",
+    "The fix lands inside the w-3fe8 final candidate through its review pair and full gate, with no gate, grant or latch revived"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "persistence",
+    "w-3fe8-regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "BY DESIGN, per Fable2's ruling (C) (#3885/#3886). 'Unknown is never replayed' is the reviewed w-ba8d contract. Witness 1: master engram_human_review_regressions.rs human_prompt_ordinary_fallback_refuses_unknown_disposition_handoff_or_replaced_owner, case 'missing_disposition', refuses a plain unmarked ordinary head in the OFF lane. The w-3fe8 candidate deliberately extends that to all sessions. Witness 2: c3ea engram_human_review_regressions.rs unknown_queue_history_projects_uncertainty_and_only_resumes_a_known_unsent_successor ('unknown_disposition'). Also tests/engram_retained_disposition.rs trimmed_unknown_promotion_stays_unknown_and_never_replays. The broadening comes from recovery slice w-14df8701db1f (recovery-r4.json patch lines 15283–15328, 'never replay missing evicted evidence'). Restoring runnable behaviour (option A) carries a duplicate-send risk. The affected population is narrow: pre-2026-09-22 rows still queued with an evicted transcript head. They load visibly as Ambiguous and are neither lost silently nor sent twice. The trial edit in .tmp/wt-h5-8111 was REVERTED (persisted_state.rs is back at blob 656dea03); nothing was frozen, committed or handed. The refinement for sessions with no Engram history is filed as Low w-147112cc0fba.",
+  "completion": null
+}

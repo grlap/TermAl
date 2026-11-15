@@ -1,0 +1,30 @@
+{
+  "id": "01a14a97-7f81-7c41-9b9a-7c0dffd7d0ca",
+  "external_ref": null,
+  "title": "Telegram forwarding uses a durable cursor and bounded after-cursor reads, so responses outside the 20-message tail aren't silently skipped",
+  "outcome": "Telegram forwarding never silently skips assistant output when the tracked message falls outside the default 20-message REST tail. It reads after a durable cursor with explicit gaps, delivers in order, and avoids duplicates.",
+  "acceptance": [
+    "Telegram forwarding uses a durable cursor and bounded indexed after-cursor/turn reads with explicit gaps. With >20 nontext/new messages and cursor outside tail, restart, partial-chunk failure and duplicate delivery, eligible responses are delivered in order without silent rebasing loss or duplicate acknowledged chunks; no full transcript hydration.",
+    "The focused regressions and the full gate pass on the final input, and an independent read-only review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "residency",
+    "telegram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c408-7451-8bb4-8b005a6c4687",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

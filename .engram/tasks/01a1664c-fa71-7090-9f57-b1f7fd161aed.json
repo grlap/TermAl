@@ -1,0 +1,29 @@
+{
+  "id": "01a1664c-fa71-7090-9f57-b1f7fd161aed",
+  "external_ref": null,
+  "title": "Delegation child sessions are not directly reachable in the TermAl UI: an operator can't find or act on a child (e.g. a stale reviewer) by its id without hunting through the parent",
+  "outcome": "Delegation child sessions are not directly reachable in the TermAl UI: an operator can't find or act on a child (e.g. a stale reviewer) by its id without hunting through the parent",
+  "acceptance": [
+    "Delegation child sessions are not directly reachable in the TermAl UI: an operator can't find or act on a child (e.g. a stale reviewer) by its id without hunting through the parent is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "control-plane",
+    "delegation",
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

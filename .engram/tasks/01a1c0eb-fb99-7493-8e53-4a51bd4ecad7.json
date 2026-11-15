@@ -1,0 +1,24 @@
+{
+  "id": "01a1c0eb-fb99-7493-8e53-4a51bd4ecad7",
+  "external_ref": null,
+  "title": "Unconfirmed-root test pins three full notice sentences verbatim",
+  "outcome": "The phrase loop in src/tests/engram_unconfirmed_root_reasons.rs:205 is dropped or reduced to minimal discriminating terms, per the no-tautological-tests rule, and the 'repaired authority' step runs a real remedy instead of restoring saved fields by hand. Source: Claude session-17047 review of 8f544b45, rated Low because the rest of the test checks behaviour.",
+  "acceptance": [
+    "Unconfirmed-root test pins three full notice sentences verbatim is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

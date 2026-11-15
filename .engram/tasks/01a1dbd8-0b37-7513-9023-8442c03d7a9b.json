@@ -1,0 +1,28 @@
+{
+  "id": "01a1dbd8-0b37-7513-9023-8442c03d7a9b",
+  "external_ref": null,
+  "title": "Make the remote proxy change-view capture cheaper under StateInner",
+  "outcome": "Capturing a mirrored proxy's change view before and after a broad-snapshot apply costs no more than the fields it compares: no clone of the transcript reference vector, prompt history or pending prompts that the apply restores verbatim, and no second metadata clone.",
+  "acceptance": [
+    "Make the remote proxy change-view capture cheaper under StateInner is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "review-low",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

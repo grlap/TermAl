@@ -1,0 +1,28 @@
+{
+  "id": "01a14b56-b343-7eb1-8cba-dbdcd135c9da",
+  "external_ref": null,
+  "title": "Make admission phase indexing exhaustive when the phase enum grows",
+  "outcome": "A new admission timing phase cannot silently leave the fixed aggregate arrays too short and panic on span creation or completion.",
+  "acceptance": [
+    "Admission phase indexing and aggregate array lengths share an exhaustively checked definition, so adding a phase requires updating the mapping at compile time.",
+    "Focused coverage confirms every defined phase can start, finish and appear in totals without an index panic."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "observability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

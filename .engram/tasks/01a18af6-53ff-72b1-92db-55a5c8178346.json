@@ -1,0 +1,27 @@
+{
+  "id": "01a18af6-53ff-72b1-92db-55a5c8178346",
+  "external_ref": null,
+  "title": "Move the delegation-root boot regression test out of the oversized delegations.rs",
+  "outcome": "Move the delegation-root boot regression test out of the oversized delegations.rs",
+  "acceptance": [
+    "Move the delegation-root boot regression test out of the oversized delegations.rs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "from-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

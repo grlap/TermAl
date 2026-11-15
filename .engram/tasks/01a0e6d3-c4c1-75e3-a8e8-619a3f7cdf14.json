@@ -1,0 +1,62 @@
+{
+  "id": "01a0e6d3-c4c1-75e3-a8e8-619a3f7cdf14",
+  "external_ref": "tm-baq",
+  "title": "Keep Telegram prompt-target selectors in parity",
+  "outcome": "Add a shared predicate or parity coverage if latest_project_prompt_target_session and find_latest_telegram_project_prompt_session diverge beyond their SessionRecord vs /api/state projection split.",
+  "acceptance": [
+    "C1 (a shared parity matrix with an oracle).\n- A new test module, src/tests/prompt_target_parity.rs, holds one table of cases.\n- Each case lists sessions once (id, project, parent delegation, status) and its expected target id, or none.\n- Each case is projected into the digest's input (that project's sessions only, in order) and into Telegram's /api/state input (all projects' sessions, in order).\n- For every case, the test asserts that both selectors return the SAME id, or both none, AND that this equals the case's expected oracle.",
+    "C2 (the matrix's coverage). Cases cover:\n- each shared status (Active, Idle, Approval, Stopping, Error) as the newest session;\n- a delegated child newer than an eligible parent;\n- only delegated children, and only errored sessions, which give none;\n- empty input, which gives none;\n- ordering: the newest eligible session wins over older eligible ones, and ineligible newer ones are skipped;\n- project filtering: another project's sessions interleaved, including as the newest overall, appear only in Telegram's input and are never chosen.",
+    "C3 (the real projection differences are kept, not papered over).\n- A separate test states each difference with its own oracle:\n  - Telegram's `Unknown` status, its serde fallback with no digest counterpart, is a prompt target;\n  - Telegram filters by project_id itself, while the digest receives an already project-scoped list.\n- The module header names these differences.",
+    "C4 (test-only, a mechanical carry).\n- The change is the new module plus ONE registration line at the end of the mod list in src/tests/mod.rs.\n- src/api.rs and src/telegram_digest.rs are unchanged, as is all production code.\n- Every existing test still passes.",
+    "C5 (validation and landing).\n- The full gate passes on the exact tree submitted for landing.\n- The review pair has no outstanding finding of Medium or higher on it.\n- The item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

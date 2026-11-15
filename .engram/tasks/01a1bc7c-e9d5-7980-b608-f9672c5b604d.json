@@ -1,0 +1,28 @@
+{
+  "id": "01a1bc7c-e9d5-7980-b608-f9672c5b604d",
+  "external_ref": null,
+  "title": "Clarify whether the Sessions section badge follows Host scope",
+  "outcome": "The section badge has a consistent scope relative to Host-filtered status counts.",
+  "acceptance": [
+    "The badge scope is explicitly chosen and its observable count agrees with that scope when a Host is selected."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b4ac-b691-77a3-9373-2050f215638d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

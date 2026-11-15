@@ -1,0 +1,27 @@
+{
+  "id": "01a1cc11-3d02-7f02-be3b-d943694ed8d8",
+  "external_ref": null,
+  "title": "DL560 cleanup: leftover small dirs of released author/run roots (Codex 6 refuses recursive rm)",
+  "outcome": "Every leftover directory recorded on this item is removed from DL560 by a session whose tooling allows a path-checked recursive delete inside the repository, or by Greg's sweep, and the removal is recorded here.",
+  "acceptance": [
+    "Every absolute path recorded in this item's notes is absent on DL560, each removal was path-checked to lie inside /home/greg/github/TermAl/.tmp/, and the removal is recorded in a note with the date and the remover."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "dl560",
+    "housekeeping"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1b8cb-d12f-71f1-a042-953eab3ee0e5",
+  "external_ref": null,
+  "title": "Make the EngramSourceId Debug summary match its comment (print counts only, or reword the comment)",
+  "outcome": "src/engram_source_id.rs's Debug impl for EngramSourceId (around line 198) either prints only counts, or its comment no longer claims that identity data never reaches Debug output. Today it hides paths and entries but still prints commit and tree, which are source_id fields. No production path formats it with {:?} today. Source: Note from Claude review delegation-b4a7d2c3 of combined candidate b40ec035.",
+  "acceptance": [
+    "Make the EngramSourceId Debug summary match its comment (print counts only, or reword the comment) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "content-v1",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a14657-0279-7793-ad95-df1caf3fe6a3",
+  "external_ref": null,
+  "title": "A Codex session whose old thread has no rollout recovers onto a fresh thread and loses its earlier history",
+  "outcome": "A Codex session whose old thread has no rollout recovers onto a fresh thread and loses its earlier history",
+  "acceptance": [
+    "A Codex session whose old thread has no rollout recovers onto a fresh thread and loses its earlier history is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "session-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

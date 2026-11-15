@@ -1,0 +1,30 @@
+{
+  "id": "01a19212-00e0-7bb0-abe3-12929170dd78",
+  "external_ref": null,
+  "title": "Check outgoing Engram idempotency keys are well formed and freeze how retained keys replay",
+  "outcome": "Every idempotency key TermAl sends on the Engram host channel passes one producer-side well-formedness check (charset and byte length named in one contract). Keys retained in durable state and resent on replay follow a frozen, documented contract, so Engram w-e0e8bb1cfd18 can tighten its acceptance without breaking replays.",
+  "acceptance": [
+    "One TermAl function owns the well-formedness rule for outgoing Engram idempotency keys: an allowed character set and a maximum byte length that Engram's current acceptance also admits. Every request constructor on the Engram host channel calls it before sending. A key that fails is refused locally with a typed error naming the request kind and is never sent.",
+    "Every current producer is covered: the checkpoint key with its observation and evidence suffixes, the verification bind key, the source-root bind, the named-root binding, termal-observe, and the evaluate and begin keys. Tests at the longest real inputs show each one passes the rule, and a test shows an over-long or out-of-charset key is refused before the send.",
+    "A written contract (docs, cross-linked from the Engram control feature brief) freezes how retained keys replay. A key persisted by an earlier build is resent byte-identical, with its original request, and is never recomputed or re-validated into a different key. Tests show a retained key that passed the rule when it was written replays unchanged after restart."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "wire-contract"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a16ce7-2b60-7fb0-9b58-87bddaf012ce",
+  "external_ref": null,
+  "title": "Claude gate write guard tests: Unresolved and Network targets, run_missing state, credit after a holder's denied write",
+  "outcome": "Claude gate write guard tests: Unresolved and Network targets, run_missing state, credit after a holder's denied write",
+  "acceptance": [
+    "Claude gate write guard tests: Unresolved and Network targets, run_missing state, credit after a holder's denied write is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a18a7b-1a49-7121-807c-5d287f58a811",
+  "external_ref": null,
+  "title": "Delete the dead pre-cut-B work-authority machinery after the revoke retirement",
+  "outcome": "Remaining executable pre-cut-B work-authority machinery is removed; the persisted retirement ledger and its type are left unchanged here and retired under their own item.",
+  "acceptance": [
+    "No production work-authority grant carrier, revoke target, revoke command builder or revoke-specific retry remains. Historical grant input continues to be rejected; active readiness and work-context command fixtures remain available.",
+    "The unreferenced src/tests/fixtures/watch-engram-authority.ps1 script and any remaining executable tests or helpers used only by the removed work-authority revoke path are removed. Behavioral coverage of active host commands is retained."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "engram-host",
+    "persisted-shape"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Removed obsolete authority watcher and stale seam examples; live pre-cut-B work-authority machinery absent, active readiness/work-context behavior preserved. Landed through combo103; independent evaluator18046 fresh rev2 evaluationffb95cff30ce435b82c680b243a21e70 passes both criteria on clean847e6c59/treeef1986cb. Read both full verdicts and completed first next turn before any root commands; no repeated test or evaluation.",
+    "completed_at": "2026-11-14T16:11:42.802794200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

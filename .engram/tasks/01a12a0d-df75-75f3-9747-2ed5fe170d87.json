@@ -1,0 +1,29 @@
+{
+  "id": "01a12a0d-df75-75f3-9747-2ed5fe170d87",
+  "external_ref": null,
+  "title": "Decide whether an Engram Defer or a long non-failure wait should restart the 240 s admission budget",
+  "outcome": "The policy is decided and either implemented or documented. Today the 240 s admission budget starts at a head's first acceptance for control admission and lasts until delivery, but it is enforced only from the first prepared-Begin hold. So a head that waited longer for another reason, such as an Engram Defer (not a failure) or another recovery, gets no automatic re-admission on its first prepared-Begin failure.",
+  "acceptance": [
+    "Decide whether an Engram Defer or a long non-failure wait should restart the 240 s admission budget is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "design-pending",
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

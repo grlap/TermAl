@@ -1,0 +1,48 @@
+{
+  "id": "01a14b8b-2a37-78e2-a8df-349c2a6c0450",
+  "external_ref": null,
+  "title": "Creating a session in a remote proxy project with the remote workdir is refused locally (\"is not a directory\")",
+  "outcome": "POST /api/sessions for a project bound to an SSH remote never validates the supplied workdir against the LOCAL filesystem. Either the remote workdir is forwarded and validated on the remote host, or the documented contract is that remote-project session creation omits workdir and derives the remote root, and a supplied path gets a clear error naming that contract.",
+  "acceptance": [
+    "A regression creates a session in a remote-bound proxy project with a workdir that exists only on the remote: it is not refused by local path validation, and the remote host validates it (or the request is rejected with an explicit remote-project contract error, not 'is not a directory').",
+    "Local projects keep their existing local workdir validation unchanged (regression).",
+    "docs/features/project-scoped-remotes.md states the remote session-creation workdir contract; the full gate passes on the exact committed tree with a clean independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "multi-machine",
+    "remote"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

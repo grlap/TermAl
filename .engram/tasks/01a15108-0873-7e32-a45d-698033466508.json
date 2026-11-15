@@ -1,0 +1,35 @@
+{
+  "id": "01a15108-0873-7e32-a45d-698033466508",
+  "external_ref": null,
+  "title": "Keep unpublished federation mailbox references hidden after restart",
+  "outcome": "Keep unpublished federation mailbox references hidden after restart",
+  "acceptance": [
+    "Keep unpublished federation mailbox references hidden after restart is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14e57-ba33-7180-8413-d9f08fe63a7a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

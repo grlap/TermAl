@@ -1,0 +1,29 @@
+{
+  "id": "01a1be74-f761-76f3-a5dc-55041ed129e5",
+  "external_ref": null,
+  "title": "Distinguish retained verification bodies from pre-freeze record-format injection",
+  "outcome": "A fresh owner-backed verification run cannot select a historical Commit wire format merely from a pre-existing body file, while genuine retained historical bodies replay unchanged.",
+  "acceptance": [
+    "Fresh source-backed registrations select complete owner source format independently of an unproven pre-existing Commit body.",
+    "Historical bodies with established replay provenance remain byte-preserved; behavior fixtures discriminate fresh planted format from genuine retained replay without adding authority or credit conditions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "source-identity",
+    "verification-record"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

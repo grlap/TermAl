@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c52c-7530-8e72-a2d1c4f9c45e",
+  "external_ref": "tm-i0mu",
+  "title": "Consolidate Kimi admission and busy-state policy expressions",
+  "outcome": "Deduplicated non-blocking final review Lows, follow-up to tm-c9ly: src/delegations.rs:549 use a named Kimi readOnly refusal constant or shared policy with OpenCode; src/session_config.rs:217 and src/session_crud.rs:3653 document or eliminate guard ordering dependence before the concrete Kimi arm; ui/src/kimi-prompt-settings-card.tsx:46 and prompt-settings-cards.tsx:523-526 share the busy-state predicate. These are consistency/maintenance concerns, not observed admission failures. Merely changing includes to explicit comparisons does not itself make future statuses exhaustive; prefer a shared policy and tests. Preserve exact canonical model ACK and mandatory manual approvals.",
+  "acceptance": [
+    "One documented source of each shared policy; unsupported Kimi settings/readOnly remain refused and active/approval/stopping controls remain fenced; regression tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

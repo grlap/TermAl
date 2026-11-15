@@ -1,0 +1,30 @@
+{
+  "id": "01a18480-8a86-7d83-9125-ea2ee488172a",
+  "external_ref": null,
+  "title": "A follow-up on the same review delegation replaces the only parent-visible structured result of the earlier attempt",
+  "outcome": "When a parent sends a follow-up to a completed read-only review delegation, the earlier attempt's authoritative structured result (packet, result, raw page) stays retrievable by the parent, for example through termal_get_session_result with an attempt selector or a distinct per-attempt result id. A later attempt does not replace the only parent-visible copy. Producer guidance makes per-attempt immutable export the default, so an in-place overwrite of an archive cannot silently destroy cited evidence.",
+  "acceptance": [
+    "After a same-delegation follow-up, the parent can retrieve each retained terminal review attempt's structured result and paged output by attempt plus immutable resultId. A repaired terminal cut of the same attempt receives a distinct resultId; previously published ids remain unchanged. Attempt-only selection returns the latest confirmed version and its resultId; all subsequent pages and exports pin that identity. Concurrent newer attempts cannot alter or mix those views, and default current-attempt behavior remains documented.",
+    "Historical retrieval enforces existing parent/delegation authorization and validated attempt provenance, never promotes old truth into the active attempt or changes its waits/lifecycle; unavailable or corrupt history is explicit and never substituted with another attempt.",
+    "Scripted follow-up, retry and real-persistence restart/failure witnesses prove earlier result/output custody, stable paging and bounded-capacity refusal without silent loss; legacy missing history is reported honestly, not reconstructed as authoritative from a newer transcript.",
+    "The standard export path/guidance preserves distinct immutable per-attempt artifacts and manifests, rejects differing overwrite, and demonstrates that a second export leaves the first cited packet and page hashes unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "evidence-retention",
+    "review-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

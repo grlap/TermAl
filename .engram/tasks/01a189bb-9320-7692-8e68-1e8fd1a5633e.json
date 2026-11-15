@@ -1,0 +1,30 @@
+{
+  "id": "01a189bb-9320-7692-8e68-1e8fd1a5633e",
+  "external_ref": null,
+  "title": "Report duplicate typed or legacy completion attribution without falsely claiming a missing start",
+  "outcome": "Repeated terminal delivery, including a supported legacy mirror if emitted, has truthful diagnostic attribution while preserving conservative original-command proof, credit and deduplication boundaries.",
+  "acceptance": [
+    "Report duplicate typed or legacy completion attribution without falsely claiming a missing start is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-7",
+    "host-recording",
+    "post-import",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-0ee9-7970-9657-3e6804fa2785",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

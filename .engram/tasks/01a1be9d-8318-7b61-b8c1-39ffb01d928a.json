@@ -1,0 +1,27 @@
+{
+  "id": "01a1be9d-8318-7b61-b8c1-39ffb01d928a",
+  "external_ref": null,
+  "title": "Define naming recovery proof equality for renewal and unrelated run-feed advances",
+  "outcome": "Naming recovery either deliberately refuses volatile-only canonical read changes with accurate recovery guidance, or compares the stable named-root fact while preserving all authority fences.",
+  "acceptance": [
+    "Define naming recovery proof equality for renewal and unrelated run-feed advances is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "named-root",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be12-2a94-7573-99d2-e40047ef7d1b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

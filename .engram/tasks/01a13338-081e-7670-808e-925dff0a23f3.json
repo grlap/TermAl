@@ -1,0 +1,28 @@
+{
+  "id": "01a13338-081e-7670-808e-925dff0a23f3",
+  "external_ref": null,
+  "title": "Test that an acceptance evaluation judges a workspace only on a named source root",
+  "outcome": "A test covers acceptance_evaluation_judged_source and its use on both request paths (independent and same-session): a Named place yields the measured workspace, a Workdir place yields none, and both paths set task.judged_workspace. Today the workspace tests set it directly, so an inversion that marks records on a workdir, hiding records Engram admits, would pass. Review-pair Low from Claude /review-code delegation-d4287a70 on w-f8f8e04dffbb (freeze 1a4bbe3b), src/acceptance_evaluation_api.rs.",
+  "acceptance": [
+    "Test that an acceptance evaluation judges a workspace only on a named source root is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "follow-up",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

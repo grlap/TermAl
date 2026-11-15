@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c67c-7ae1-beb3-288b9734603b",
+  "external_ref": "tm-o5e",
+  "title": "Harden GitStatusPanel background refresh lifecycle",
+  "outcome": "Background Git-status reconciliation can outlive an unmounted panel and publish stale status to its parent; it also clears user-visible action errors at refresh start, derives inconsistent cache/dedup scope keys across load paths, and keeps polling while the window is visible but unfocused. Make background loads lifecycle-safe, preserve displayed errors unless a user action supersedes them, use one canonical panel scope key, and avoid unnecessary unfocused polling.",
+  "acceptance": [
+    "A deferred load resolved after unmount emits no state/callback; action and commit errors survive interval/focus/visibility reconciliation; all load paths use one scope key; polling is gated or slowed while unfocused; focused regression tests cover each behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

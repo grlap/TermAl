@@ -1,0 +1,28 @@
+{
+  "id": "01a18049-fc53-7010-89db-b3f202f28d7c",
+  "external_ref": null,
+  "title": "Resumed reconnect-fallback deadline is not clamped against the wall clock stepping backwards",
+  "outcome": "Resumed reconnect-fallback deadline is not clamped against the wall clock stepping backwards",
+  "acceptance": [
+    "A resumed reconnect-fallback delay never exceeds RECONNECT_STATE_RESYNC_MAX_DELAY_MS even if the wall clock moves backwards between scheduling and recreation, covered by a test; the app-live-state.ts backoff comment names every reset trigger."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "sse",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

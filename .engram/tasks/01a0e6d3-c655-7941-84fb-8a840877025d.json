@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-8a840877025d",
+  "external_ref": "tm-ncc6.9",
+  "title": "Retention: bounded history of run evidence with an explicit prune action",
+  "outcome": "HOW\n- Policy constants in src/test_runs.rs: keep the last N runs per root (N=20 proposed) plus any run referenced by an open review/tracker note (referenced runs are marked via a 'pinned' flag on the record; pinning is explicit).\n- Prune candidates = terminal runs beyond N, not pinned, never running/unknown; computed on request, listed in the tab with sizes.\n- POST /api/test-runs/prune {runIds} deletes only listed candidates after re-validation; UI button with confirm; never automatic.\n- Ties to tm-uex8.9 (launcher evidence retention) and tm-gglr (marker-only directories: treat a run dir without results.json and without a live worker as unknown evidence, prunable only when explicitly listed).\n\nDEPENDS ON: tm-ncc6.2, .7.\n\nREVIEW FIXES (F12): DEPENDS ON tm-uex8.9 (the retention policy is decided there; this task implements the host-side prune only). Remove the tm-gglr tie (it concerns %TEMP% test roots, not review-runs). Never prune a dir whose results.json.pid is alive; deletions confined to the resolved review-runs path (no symlink following); prune never runs automatically (no timer, no boot hook).\n\nOUTPUT TO FILE (Greg, 2026-09-23): HOST_LOG files under <review-runs>/host/ are pruned together with their run (same candidate rules); never while the pid is alive.",
+  "acceptance": [
+    "- Candidate computation excludes running, unknown, pinned and live-pid runs and keeps the newest N per root (unit test with a mixed fixture; N from tm-uex8.9).\n- Prune deletes only listed candidate directories inside the resolved review-runs path; a symlinked entry is skipped; a second identical prune is a no-op.\n- A boot with N+5 terminal run dirs deletes nothing and registers no timer (test)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a169ed-f5c5-7cc0-b81e-b45e27848f8d",
+  "external_ref": null,
+  "title": "Use typed ACP completion command for missing-authority launch diagnostics",
+  "outcome": "A missing-authority ACP full-gate completion with no rawInput.command reports its actual missing authority instead of falsely claiming that its command changed, while retaining the original unmatched window.",
+  "acceptance": [
+    "Diagnostic completion distinguishes absent actual command from display title and from an explicit changed or unrecognized command.",
+    "Tests cover missing actual ACP command, explicit matching/changed command, disabled and foreign observations, original root/start retention and qualified-pipe refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "launch-correlation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

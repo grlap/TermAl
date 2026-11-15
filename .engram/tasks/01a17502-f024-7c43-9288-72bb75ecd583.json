@@ -1,0 +1,38 @@
+{
+  "id": "01a17502-f024-7c43-9288-72bb75ecd583",
+  "external_ref": null,
+  "title": "Central-to-satellite native relay wakes are never admitted: the satellite records central as enrolled, and wake admission requires an active home peer",
+  "outcome": "A routine mail that a central-host session sends to a remote-root proxy (the native relay route) wakes the satellite's native target session, in the real deployment where only central has activated the pair. A wake that cannot be admitted is visible on the home side, not retried forever without trace.",
+  "acceptance": [
+    "A two-host regression with the real topology (the satellite records central as enrolled, only central activates) delivers a central-homed relay wake to the satellite's native root as a queued turn; it is RED on master before the fix",
+    "Revocation, a changed enrollment, quarantine, a replaced target and link loss still hold the wake; the existing relay_review tests stay green, except that the one relay_review_r2 reconnect assertion that encoded this defect (holding the wake after a reconnect until the satellite side was re-activated) is changed to expect the re-drive on the fresh lease, disclosed on the item and reviewed explicitly by the pair",
+    "A refused home wake is observable: a bounded log line and a read-only diagnostic, metadata only, with the obligation's last refusal and attempt count; plus a test",
+    "docs/features/native-mailbox-relay.md states which side's membership gates wake admission"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mailbox-relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 6365481c; real enrolled-central topology tests/refusal diagnostics + FULL9239386b; a4266e7a records later actual satellite wakes. Closure/evidence mapping, not new admission code.",
+    "completed_at": "2026-11-08T19:21:44.991761500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a0ef55-2fb4-7120-aea5-c97f4e840563",
+  "external_ref": null,
+  "title": "Codex session's command refused before execution with 'CreateProcess Rejected … blocked by policy' for a delete inside its own worktree",
+  "outcome": "It is known which layer refused the command (the Codex runtime's own execution policy, TermAl's host, or the operating system), whether the refusal is intended, and what an agent is told to do instead.",
+  "acceptance": [
+    "If the layer is TermAl: the rule is cited and either kept with its reason recorded or changed under its own item. If it is the Codex runtime: the item records the rule as far as it can be known and whether a TermAl session setting (approval policy, sandbox mode) affects it.",
+    "The item states what an agent does when it meets the refusal, in words that can be copied into agent instructions.",
+    "The layer that produced 'rejected: blocked by policy' is named with evidence: a source reference in TermAl, or the Codex runtime's documentation or source, or a reproduction outside TermAl."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "approvals",
+    "codex",
+    "field-report"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The layer is the Codex runtime's exec policy. Under approval policy \"never\", a dangerous unmatched command (a Windows delete cmdlet with -Force, del /f, rd /s) is Forbidden and reads \"rejected: blocked by policy\"; under on-request (TermAl auto-approve) it prompts and TermAl accepts. The agent instruction is recorded and concurred (Fable2 #5270). The fix is Greg's existing auto-approve standard. Independent evaluation passed all three criteria.",
+    "completed_at": "2026-11-13T15:24:34.869677600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

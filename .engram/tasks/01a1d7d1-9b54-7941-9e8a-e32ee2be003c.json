@@ -1,0 +1,30 @@
+{
+  "id": "01a1d7d1-9b54-7941-9e8a-e32ee2be003c",
+  "external_ref": null,
+  "title": "A session's explicit claim selection (work_binding) is runtime-only and is not preserved across a host restart",
+  "outcome": "After a host restart, a session whose holder explicitly selected a held claim (by naming its worktree) opens its next turn on that selection, or on a documented, deterministic fallback, instead of whatever the restore rule happens to re-derive; a consumed selection is never resurrected over a later focus change.",
+  "acceptance": [
+    "A behavioural test restarts the host (state round-trip) between an acknowledged explicit naming of claim B and the session's next turn, and the next turn opens on B with the change stamped and committed",
+    "A behavioural test shows a selection already consumed by an opening is not resurrected after a restart over a later focus change back to A",
+    "Old writers and readers stay compatible with any persisted form, per the schema ledger; existing named-root and binding tests stay green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "named-roots",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

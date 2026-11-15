@@ -1,0 +1,38 @@
+{
+  "id": "01a174be-7c75-7001-93cb-ee6648196897",
+  "external_ref": null,
+  "title": "Host keeps a durable metadata-only lifecycle and heartbeat record that survives resets and classifies how the previous instance ended",
+  "outcome": "After any unexplained TermAl exit, restart or Windows reset, the next boot can say how the previous instance ended (clean shutdown, panic with location, or unclean with its last heartbeat) and what its write rate, memory and lock-hold counters were in its final minutes, using only metadata, so incidents like w-74eebce675c3 and w-3be56ef0b931 leave evidence instead of staying unknown.",
+  "acceptance": [
+    "D1. At boot the host appends one metadata-only lifecycle record to a bounded file in its own state directory (instance id, pid, binary sha256, start time). From that file it classifies how the previous instance ended: clean shutdown, panic, or unclean with its last heartbeat time. It shows the classification in /api/diagnostics.",
+    "D2. While serving, it appends a flushed heartbeat each minute with counters only: bytes persisted since the last heartbeat, process working set and commit, the longest StateInner hold, and the writer's tick wall time. The file is size-bounded with rotation, and adds one small append per minute.",
+    "D3. A panic hook records the thread, file:line and a truncated message before the default hook runs, and a clean shutdown writes a final record. No message bodies, prompts, store contents or paths outside the state directory are written.",
+    "D4. Deterministic tests cover the clean, panic and unclean classifications, the size bound, and the absence of session content. Then the independent pair and the full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "diagnostics",
+    "greg-reported",
+    "host-incident"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a16f0d-3986-7760-bccc-74eebce675c3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 16635a20; D1-D4 map77cdb4e8 + deterministic journal tests/pair/FULLb9331c43; old no-sighting refusal only; no new instrumentation needed.",
+    "completed_at": "2026-11-08T19:21:44.592983Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

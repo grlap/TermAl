@@ -1,0 +1,38 @@
+{
+  "id": "01a1741f-a074-73a3-93a1-5e760250aa2b",
+  "external_ref": null,
+  "title": "Direct remote prompt, part 4: HTTP/MCP/CLI complete-body caller facade, T1-T12 tests, race and compatibility tests, docs",
+  "outcome": "Direct remote prompt, part 4: HTTP/MCP/CLI complete-body caller facade, T1-T12 tests, race and compatibility tests, docs",
+  "acceptance": [
+    "Implements w-a8af3a34d80a criteria 1 and 5 for the caller surface (HTTP, MCP and CLI facades for send_remote_prompt_for_caller, with complete validated body, provenance and exact target) and the T1-T12 deterministic tests assigned by the interface DRAFT v1 split, plus the docs, with signatures confirmed by Termal::Coder before cross-lane code",
+    "Delivered as a reviewed-ready patch on the lead's carried base to Termal::Coder, who integrates it into the single w-a8af package. There is no separate READY to Merger2"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "greg-reported",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a161d4-c882-7b71-b84c-a8af3a34d80a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

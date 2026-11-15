@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4de-7140-8847-940234534ed8",
+  "external_ref": "tm-d3hm",
+  "title": "Preserve conversation scroll offset across workspace tab switches",
+  "outcome": "Switching from one workspace tab to another and then returning changes the conversation viewport offset. The previously visible message/position must remain stable; tab activation must not re-run tail attachment, stale geometry restoration, or history navigation against the inactive pane. Diagnose the tab/pane lifecycle and preserve a stable viewport anchor across tab switches, including virtualized height changes.",
+  "acceptance": [
+    "Switching A -> B -> A restores the same visible conversation position without jumping; attached-to-tail panes remain attached while detached/history panes retain their anchor; incoming messages and measurement changes while inactive do not corrupt restoration; focused regression tests cover tab switching for detached and tail-attached panes; relevant UI gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

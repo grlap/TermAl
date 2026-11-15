@@ -1,0 +1,30 @@
+{
+  "id": "01a1ba27-94f4-7db2-8897-ea4ddb733d1a",
+  "external_ref": null,
+  "title": "Preserve operator monitoring interruption when a declared background task settles",
+  "outcome": "A later declared artifact settlement preserves an operator's monitoring-interruption state and diagnostic.",
+  "acceptance": [
+    "Record the intended interaction between monitoring_interrupted_at and a later declared task completion, and preserve the operator interruption flag and detail according to that contract.",
+    "A deterministic regression interrupts monitoring on an open declared background row, delivers the original task completion with a valid artifact, and checks the observable state, interruption flag and diagnostic; existing ordinary completion remains covered."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "greg-reported",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

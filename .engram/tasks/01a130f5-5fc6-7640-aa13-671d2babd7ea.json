@@ -1,0 +1,42 @@
+{
+  "id": "01a130f5-5fc6-7640-aa13-671d2babd7ea",
+  "external_ref": null,
+  "title": "A carried test's end taken during the running turn is dropped from that turn's transcript, and no test pins the transcript outcome",
+  "outcome": "The transcript outcome is decided and pinned when a carried Codex test's end arrives with no turn id or tagged with the running turn and the Engram host takes it: either the end stays out of the running turn's transcript, as now, or it also reaches the recorder (handle_codex_app_server_item_completed) after the host took it. A test asserts the chosen transcript outcome.",
+  "acceptance": [
+    "A test delivers a carried test's end with no turn id and one tagged with the running turn, and asserts the chosen transcript outcome as well as the carried check's end.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

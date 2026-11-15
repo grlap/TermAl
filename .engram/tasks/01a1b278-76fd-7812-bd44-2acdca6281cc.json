@@ -1,0 +1,31 @@
+{
+  "id": "01a1b278-76fd-7812-bd44-2acdca6281cc",
+  "external_ref": null,
+  "title": "Fit pinned source-owner verification inside the registration deadline before launcher cutover",
+  "outcome": "Pinned registration and immutable ACK replay use the owner-approved verification path within the existing registration deadline, without redundant source measurements, guessed capabilities or weakened executable provenance.",
+  "acceptance": [
+    "Before a launcher emits sourceOwner, agree the minimal registration verification with the source_id decision owner; preserve exact configured executable, byte pin, supported source schema, request identity, replay and claim/durability guards without inventing capability evidence or silently extending deadlines.",
+    "Focused coverage uses a realistic bounded probe duration to discriminate whether registration leaves sufficient time for claim read and durability, preserving explicit deadline refusal and historical rows; report measured behavior rather than treating source-observation timing as reproduced registration failure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "registration",
+    "review-followup",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

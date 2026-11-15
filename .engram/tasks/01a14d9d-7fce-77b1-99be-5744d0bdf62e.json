@@ -1,0 +1,41 @@
+{
+  "id": "01a14d9d-7fce-77b1-99be-5744d0bdf62e",
+  "external_ref": null,
+  "title": "M5 prep: fail-first RED source package for the first independent increment of equal agent APIs",
+  "outcome": "M5 prep: fail-first RED source package for the first independent increment of equal agent APIs",
+  "acceptance": [
+    "A frozen RED source package on master 7f5580e7 (tree hash plus manifest under .evidence) covers the smallest independently landable first increment of M5, mapping it to the M5 criteria it advances with at least one fail-first test each, with no production behaviour change.",
+    "Every concrete dependency on M2, M3, M4 or O1 interfaces is named by exact symbol and recorded on the parent, or the package states that none exists.",
+    "A focused run of the package records the intended failures (assertion failures, not compilation failures) and is noted with its run id."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "prep",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14bba-d1c2-7610-8c8e-8c0a4f62bbc0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered frozen test-only M5 prep A-2 on base7f5580e7/treeb77dead4 with manifests and exact dependencies. Focused test-95e3e6b4 compiled: 5 intended assertion failures/2 passes, unchanged fingerprint9c92a5ca. Independent evaluation a8bc46047f304fe9b8fff5ec4ba4b08a passed all3 narrowed prep criteria. No product GREEN/full-gate/fullM5 or commit/push/install/restart claim. Bound package B and remote termal_send_to_session RED remain deferred until M2; parent stays open. Retain frozen worktree and raw evidence for parent follow-on work.",
+    "completed_at": "2026-10-18T08:49:17.812866700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

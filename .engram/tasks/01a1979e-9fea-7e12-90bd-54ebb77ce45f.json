@@ -1,0 +1,24 @@
+{
+  "id": "01a1979e-9fea-7e12-90bd-54ebb77ce45f",
+  "external_ref": null,
+  "title": "Discriminating test for the Stop retirement stamp before the Engram checkpoint",
+  "outcome": "A test shows that Stop's retirement of a promoted receipted head (session_lifecycle.rs, the commit_locked \"failed to persist stopped admission retirement\") is selected by the production delta persist at the retirement commit boundary. The observation must come BEFORE the Engram checkpoint preparation re-stamps the session (engram_host_adapter.rs session_mut_by_index at checkpoint_operation, then commit_locked). It keeps the deterministic shutdown-time watermark cut (a watcher holding the test ACP runtime's turn_lifecycle mutex until the Stop's Cancel) and the queue-retirement and Rejected-receipt checks. It fails without the retirement's own stamp and passes with it, with no timing dependence. If no deterministic observation point exists without a new test hook, record that and add the smallest test-only hook at the retirement commit. The existing a_stop_retirement_reaches_the_delta_persist_before_its_checkpoint passes with and without the stamp, because the checkpoint preparation stamp masks it, so it is not discrimination evidence. Source: the stamp audit, pair-3 RED run test-95d6f099.",
+  "acceptance": [
+    "Discriminating test for the Stop retirement stamp before the Engram checkpoint is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Not needed (Fable2 #1555). The Stop-retirement stamp cannot be demonstrated by a test: Engram checkpoint preparation stamps and commits the session (engram_host_adapter.rs:5609/5626) before the checkpoint request, and production persistence is an asynchronous delta wake, so neither commit was ever a durability fence before the checkpoint. The fix is reclassified F, reading-backed defence only, with the reasoning recorded on w-32a6b3d92774. Filed before #1555 arrived; cancelled on it.",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1338a-4b56-7ab2-aeee-9d1116f63cf1",
+  "external_ref": null,
+  "title": "Document deferred Cargo target-sibling watcher candidates and their accepted boundary",
+  "outcome": "The Engram host-adapter feature documentation agrees with the Cargo target-sibling watcher implementation, including deferred terminal judgement and its residual ambiguity.",
+  "acceptance": [
+    "The watcher-fence list and Cargo's build directory paragraph in docs/features/engram-host-adapter.md describe exact root target[A-Za-z0-9]{6} candidates, judging target/ only at carried-gate terminal settlement, path-named refusal without a target directory, and fail-closed overflow at 256 candidates.",
+    "The documentation replaces the obsolete claim that the host makes no exception and states that an ordinary exact-shaped root name or descendants of a matching directory can be exempt while target/ exists; persistent non-ignored source remains subject to the settlement source-basis comparison."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

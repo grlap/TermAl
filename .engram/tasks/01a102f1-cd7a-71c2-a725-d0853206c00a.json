@@ -1,0 +1,53 @@
+{
+  "id": "01a102f1-cd7a-71c2-a725-d0853206c00a",
+  "external_ref": null,
+  "title": "Budget-clock migration B1b: engram_host_adapter.rs gap region (about lines 4100-9100), callers of real_fixture_engram_settings and others that may reach a budget",
+  "outcome": "An audited migration, through the state-owned clock boundary from slice 1, of the tests in src/tests/engram_host_adapter.rs between B1's recorded end boundary and B2's start (about lines 4100-9100 at 593c783). That range is in no batch of the agreed decomposition (note 7c38dafc on the parent, with Architect2's f842da36): B1 ends near 4100 and B2 starts at 9100. It includes about 80 callers of real_fixture_engram_settings (:3742). Many are settings-only, but some, such as the MCP grant-clear and dispatch tests, may reach a budget. Same method and limits as B1: classify each test as reaching a budget or not, convert those that do (scripted clock chosen before Engram is enabled, or a declared Real with a reason), use assert_engram_budget_clock_unread for settings-only tests where it adds value, keep the negative scheduling and timeout assertions, no blanket Real, no weakened expectations, no production change. Criteria are to be agreed before this batch starts.",
+  "acceptance": [
+    "Every test in the B1b region of src/tests/engram_host_adapter.rs is classified as reaching an Engram budget or not. Region: from runtime_mcp_composition_records_the_exact_installed_engram_descriptor (:4308 at 2972c0d) through enablement_rejects_real_doctor_output_without_required_assurance (:9154); it ends before assert_terminal_case_checkpoints_once (:9198), where B2 begins. A test that reaches a budget chooses its clock through the slice-1 boundary before Engram is enabled and before any target or worker snapshot: either the shared scripted clock, or a declared Real with its reason in a comment. A test that calls real_fixture_engram_settings or sets deadline_ms but reaches no budget ends with assert_engram_budget_clock_unread. Floor: the region holds at least the 72 tests, the 76 real_fixture_engram_settings calls, and the direct deadline_ms sites :7224, :8309, :8315, :8987 and :9060 at 2972c0d; the inventory note maps each to its position at the batch's base.",
+    "A note lists, for each converted test, its deadline, elapsed and wait sources and its assertions. A note inventories the transitive test callers of every shared fixture the batch changes, including indirect clock selection and existing time hooks.",
+    "Every converted expiry test does one of two things. Either it advances the same scripted clock across the causal boundary, with an unadvanced positive control asserted in that test, or it declares Real. The separate negative scheduling and timeout assertions are kept, and no expectation is weakened.",
+    "No blanket Real declarations and no production change. enable_test_project_engram, real_fixture_engram_settings and every other fixture used outside the region stay unchanged. Edits stay within the B1b region and the fixtures it owns. B1b owns the helpers between B1's boundary test and the region start (fixture_authority_revoke_args_path through engram_mcp_runtime_family_fixture_with_seam, :4115-:4307 at 2972c0d). It changes one of them only if criterion 2's transitive-caller inventory shows no caller outside the B1b region, or lists and converts each such caller within this batch.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Budget-clock migration B1b for the engram_host_adapter.rs gap region (73 tests between B1's end and B2's start):\n- 39 tests that read the budget clock select the shared scripted clock through the slice-1 boundary before Engram is enabled. The runtime-family fixture gained a FixtureBudgetClock argument; all its callers are in the region.\n- 30 tests hold a state but read no budget clock, and end with assert_engram_budget_clock_unread.\n- 4 pure tests are untouched.\n- No Real declaration, no production change, and no assertion removed.\nCommit 9bafcea (freeze f137beda, gate test-10816527, review pair e522a184/ba6f4b92, evaluation 06b022e8 5/5) landed on master in train 27 as d6ea73c0edd02c4c68b41b12b3ec89acf5cc17ec, pushed and verified by Opus2 (train gate test-a9b1bcad PASS). Test-only, so no build is needed. Related out-of-scope item: w-89b5368864c7.",
+    "completed_at": "2026-10-03T22:55:33.416700200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

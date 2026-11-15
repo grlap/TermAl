@@ -1,0 +1,25 @@
+{
+  "id": "01a1a4a6-d17b-7d91-a4d8-cdf0240bf513",
+  "external_ref": null,
+  "title": "Recovery hold boundary tests don't pin the gates' own predicate or the 100-call median index",
+  "outcome": "Changing a recovery hold gate back to second_worst or maximum, or changing the median index so exactly 50 slow calls of 100 fail, turns a boundary test red. For example one RecoveryHoldMeasure method used by both gates and the boundary tests, and a 50-versus-51 case at 100 calls.",
+  "acceptance": [
+    "Both hold gates and the boundary tests use one shared predicate, shown by a recorded failing run when the predicate reads a different field",
+    "A timing-free case pins 50 versus 51 slow calls of 100"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

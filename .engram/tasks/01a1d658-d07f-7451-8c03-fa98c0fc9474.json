@@ -1,0 +1,28 @@
+{
+  "id": "01a1d658-d07f-7451-8c03-fa98c0fc9474",
+  "external_ref": null,
+  "title": "Strengthen stranded observation regression with a never-reported predecessor",
+  "outcome": "The stranded-observation regression proves that retirement queues no report or source measurement even when host_turn_ref de-duplication cannot suppress a duplicate.",
+  "acceptance": [
+    "A behavioral regression uses an earlier turn that was never closed or reported, preserves its exact trace without relabelling it, and proves the successor terminal transition archives it without creating a closing job, observation report or source-owner measurement.",
+    "A later ordinary turn still freshly sights the same acknowledged named root, and a current-generation trace retains normal closing behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

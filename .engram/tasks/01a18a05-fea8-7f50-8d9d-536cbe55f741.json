@@ -1,0 +1,28 @@
+{
+  "id": "01a18a05-fea8-7f50-8d9d-536cbe55f741",
+  "external_ref": null,
+  "title": "Mac native relay rows deferred with 409 'federation link changed' at boot (notifications 64/65, boot boundaries 2/64/65): verify reconciliation after reconnect",
+  "outcome": "It is established from the Mac's own state whether the native relay rows deferred at its boot were reconciled after the federation link came back. If so, this is closed as designed reconnect behaviour; otherwise the stuck rows are named with evidence.",
+  "acceptance": [
+    "Mac native relay rows deferred with 409 'federation link changed' at boot (notifications 64/65, boot boundaries 2/64/65): verify reconciliation after reconnect is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "native-relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Not a defect: designed reconnect behaviour, verified on both hosts (note 970d8490). The Central and Mac relay-wake diagnostics both read 0 pending and 0 refused, and the deferrals all predate the 23:27:34Z re-authentication. Cancelled per Fable2 #4024 because acceptance evaluations are deferred.",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a164ae-e144-7892-b4e1-8edf6a5154f1",
+  "external_ref": null,
+  "title": "Clarify Test Runs documentation about selected details during history scrolling",
+  "outcome": "The feature brief distinguishes retaining rendered selected details from keeping the details pane visible during scrolling.",
+  "acceptance": [
+    "Clarify Test Runs documentation about selected details during history scrolling is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "review-followup",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

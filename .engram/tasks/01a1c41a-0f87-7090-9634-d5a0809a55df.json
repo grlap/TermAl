@@ -1,0 +1,31 @@
+{
+  "id": "01a1c41a-0f87-7090-9634-d5a0809a55df",
+  "external_ref": null,
+  "title": "Make the fmt Lint live witness distinguish rustfmt output from formatter setup failure",
+  "outcome": "The live negative formatting witness fails if rustfmt did not process the source, while continuing to prove storage and settlement of a genuine check-only formatting failure as Lint.",
+  "acceptance": [
+    "The live witness discriminates actual rustfmt diff output for its deliberately unformatted source from missing rustfmt or toolchain/setup failures, using observable behavior without retries or timeout inflation.",
+    "The live witness still checks the unchanged source, failed fmt plus five unrun stages, stored Lint/failed verification and settlement without Test producers."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "formatting",
+    "launcher",
+    "procedure",
+    "review-low",
+    "test-precision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c175-8d31-76b2-931d-645c42b2ccec",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

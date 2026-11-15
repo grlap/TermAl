@@ -1,0 +1,28 @@
+{
+  "id": "01a101e5-72eb-7241-baaf-b7b48f4dc1c9",
+  "external_ref": null,
+  "title": "review-freeze-fingerprint's isolated `git diff --cached` output changes over time for an unchanged index, so a freeze fingerprint can drift without any content change",
+  "outcome": "scripts/review-freeze-fingerprint.mjs gives the same trackedIndexDiffSha256 and trackedHeadDiffSha256 for the same index and worktree content whenever it runs, or the cause of the drift is identified and the fingerprint made independent of it.",
+  "acceptance": [
+    "review-freeze-fingerprint's isolated `git diff --cached` output changes over time for an unchanged index, so a freeze fingerprint can drift without any content change is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "review-freeze",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a15c24-a969-73b1-bf96-5a1ddc7754c4",
+  "external_ref": null,
+  "title": "Acceptance-evaluation reuse (reuseDelegationId) is never eligible after a byte-identical carry to a fresh worktree, because eligibility requires an unchanged evaluator working directory",
+  "outcome": "A holder whose item was carried byte-identically to a fresh worktree can re-evaluate in the same evaluator session (reuseDelegationId) when the item and claim are the same. The working-directory check accepts a carried root, with the carry shown by an exact input-identity proof, instead of refusing every evaluator from before the carry. Nothing is reused across different inputs, items or claims.",
+  "acceptance": [
+    "Acceptance-evaluation reuse (reuseDelegationId) is never eligible after a byte-identical carry to a fresh worktree, because eligibility requires an unchanged evaluator working directory is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "throughput"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

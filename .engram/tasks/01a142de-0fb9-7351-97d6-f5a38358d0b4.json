@@ -1,0 +1,50 @@
+{
+  "id": "01a142de-0fb9-7351-97d6-f5a38358d0b4",
+  "external_ref": null,
+  "title": "P0 host hang: terminal-callback runtime-reset dispatch deadlocks on the runtime's own sessions mutex while global state is held (waiters grew 88→102)",
+  "outcome": "P0 host hang: terminal-callback runtime-reset dispatch deadlocks on the runtime's own sessions mutex while global state is held (waiters grew 88→102)",
+  "acceptance": [
+    "A deterministic owned-child regression drives an actual terminal Codex callback, in both the normal and the deferred-completion path, into a queued dispatch with runtime_reset_required, through the shared-session detach and re-attach. It completes with no re-entry on the runtime sessions map, delivers exactly one Prompt to a successor with the correct profile, and leaves sibling sessions and global state live. The success, failure and non-reset controls are kept.",
+    "When a newer turn of the same runtime is inserted between the extraction and the application of a deferred terminal action, the stale action refuses every lifecycle, capacity, delivery and cleanup effect, and the replacement mapping survives.",
+    "The shared-Codex test suites and the full gate pass on the exact pair-reviewed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "hang",
+    "runtime",
+    "session-lifecycle"
+  ],
+  "assigned_to": "Engram::Coder session-8581",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The P0 host deadlock is fixed. Shared Codex terminal callbacks now extract a SharedCodexTerminalEffect under the runtime sessions guard and apply it only after the guard is dropped. Each effect carries its owner: runtime token, generation and Arc attachment identity. Stale effects refuse every lifecycle, capacity, delivery and cleanup action. One shared_codex_error_is_retryable predicate drives both identity capture and the handler, so no Failed effect is dropped silently.\n- Committed as 08b977122b416be8d6547ffce71190c825504f1f on train-3a 415dc9bc in .tmp/wt-f5a3-9474. The push is Opus2's, through Fable2.\n- Review: round-2 pair Codex 4bc0d9ed and Claude 4d4e53d0, clean on freeze 06994ec9. The Low is filed as w-2d3c404c8d05.\n- Gate: the byte-identical carry, then full gate test-6218b3dc PASS.\n- Credited GREEN: test-0cb5a029, 203/0.\n- Independent evaluation 7373793b: all three criteria PASS.",
+    "completed_at": "2026-10-16T06:04:18.646973700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

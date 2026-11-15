@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7ad-7e80-ab9b-e747ea3d6250",
+  "external_ref": "tm-w5td",
+  "title": "A turn the runtime starts on its own (Claude background completion) gets no Engram grant or checkpoint, so its source change surfaces a turn late",
+  "outcome": "Reported by Engram::Opus via Termal::Codex (mailbox-2286e8bc #36), 2026-09-27; not independently verified here. Between about 02:17 and 02:20:25Z, a Claude-native background-completion turn in session-7284 fast-forwarded Engram main from 6c81fdd to ab89a34. TermAl did not dispatch that turn, so there was no grant, no begin-time basis, no checkpoint and no execution_observation. The next TermAl-dispatched turn requested acceptance for w-66dd168b589c at about 02:20:37Z (evidence basis 47). Its close reported the new source at position 48 (about 02:20:40Z), after the cut. So evaluator delegation-95522b48 got 409 'source changed after basis 47' although every criterion passed; the retry, delegation-72a2a1b1 on basis 48, worked. Earlier observations were positions 37-41, ending 02:10:23Z.\nThe void itself is covered by tm-5gi4 phase 1 (the declared content revision equals the later sighting on the same worktree). What remains is the observation gap: a runtime-originated turn mutates source outside any mediated grant, and its change is attributed to the next dispatched turn. Direction to decide: detect runtime-originated turns and open a grant, or checkpoint them, or record a host-side observation at their end; or at least report their change with provenance instead of folding it into the next turn. Engram::Opus suggested a fresh durable observation right before the basis capture, failing closed if the checkpoint fails.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a1bc2b-7bd4-78e3-8250-885b6f9b5f0f",
+  "external_ref": null,
+  "title": "Transient native mailbox relay unavailability DL560→Central (503 send, 423 read) on d3499b97; recovery worked, cause unknown",
+  "outcome": "The cause of the brief cross-machine mailbox relay outages seen from DL560 on 2026-11-08 is identified or bounded: the home-side state, load, or a relay defect. If it is a defect, it is fixed so that ordinary sends and reads don't fail transiently under normal load.",
+  "acceptance": [
+    "Record a code-first comparison of relay-principal-* and host-qualified native-session sends, tracing principal resolution, conversation/home selection, peer/client reuse and applicable request budgets against the incident build. Distinguish any real path differences from the two-sample correlation.",
+    "Trace the reported 423 and exact 'native mailbox relay response unavailable' 503 to their producing boundaries, including applicable budgets and pre/post-append uncertainty. Record the three supplied occurrences and existing load evidence without live probes, store queries or other sessions' mailbox reads, and do not claim a runtime cause absent supporting evidence.",
+    "If a defect is confirmed, record the causal evidence and Kimi-concurred plan before edits, repair the existing owning mechanism without weakening authentication, outcome-unknown or same-key recovery semantics, and provide meaningful focused checks, the required independent review pair and exact final full gate before landing. If no defect is established from the authorized evidence, record a bounded no-change disposition, excluded explanations, remaining missing evidence and the responsible supported follow-up instead of inventing a cause or changing behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "needs-triage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed code-first relay failure triage with a bounded no-change disposition: common authenticated RPC path and budgets traced; specific historical home refusal cause remains unavailable, and supported recurrence evidence owner recorded.",
+    "completed_at": "2026-11-08T18:57:41.309326300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

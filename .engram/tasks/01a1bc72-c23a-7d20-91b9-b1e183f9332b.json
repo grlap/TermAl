@@ -1,0 +1,30 @@
+{
+  "id": "01a1bc72-c23a-7d20-91b9-b1e183f9332b",
+  "external_ref": null,
+  "title": "Offer replacement-root directory recovery only when current central authority is available",
+  "outcome": "A missing or mismatched directory-row diagnostic does not direct the caller to another root when the current central condition would refuse that root as well.",
+  "acceptance": [
+    "Replacement-root guidance is conditional on current central authority succeeding; unavailable, continuity-lost, quarantined or non-durable conditions retain honest condition-specific recovery without changing the original refusal status, kind or binding.",
+    "Behavioral fixtures combine a missing or mismatched row with unavailable central authority, then healthy authority, and show guidance follows the current condition while original caller identity and fences remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "diagnostics",
+    "federation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b88a-c57e-7263-97e0-19cbb9ece8de",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

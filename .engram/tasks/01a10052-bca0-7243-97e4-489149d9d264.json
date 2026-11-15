@@ -1,0 +1,29 @@
+{
+  "id": "01a10052-bca0-7243-97e4-489149d9d264",
+  "external_ref": null,
+  "title": "The acceptance sighting preflight sends its control read over the shared host-reader connection: one sidecar id for every project",
+  "outcome": "The named_root_sighting_read preflight (src/acceptance_named_root_sighting.rs) is the first control request sent over the Work view's host reader connection (session id termal-work-view). On the real ProcessEngramControlTransport this spawns a long-lived control sidecar keyed by that id alone. With two projects, the second project's read terminates the first project's sidecar (config mismatch) and a read in flight there fails, so that evaluation is refused as unknown. Nothing shuts the sidecar down except the idle timeout. The fix gives the host reader's sidecar a per-project identity (or a documented lifecycle), corrects the code comment that calls it the tracker reads' connection (those are CLI commands), and confirms with Engram that a sidecar started without session_bind registers no tracker session.",
+  "acceptance": [
+    "Concurrent sighting preflights for two projects do not terminate each other's control sidecar; a test shows both reads complete.",
+    "The comment describing the read's connection is accurate, and the sidecar's lifecycle is documented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

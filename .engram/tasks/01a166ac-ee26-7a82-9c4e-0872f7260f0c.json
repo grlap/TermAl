@@ -1,0 +1,28 @@
+{
+  "id": "01a166ac-ee26-7a82-9c4e-0872f7260f0c",
+  "external_ref": null,
+  "title": "Align unsent-Begin recovery documentation with the narrow prepared-recovery routing predicate",
+  "outcome": "Document late-preparation and existing prepared-Begin recovery separately from the globally enforced admission budget, without changing product routing.",
+  "acceptance": [
+    "Align unsent-Begin recovery documentation with the narrow prepared-recovery routing predicate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "engram-host-adapter",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a102ff-799a-7001-9822-e8b92275ec3f",
+  "external_ref": null,
+  "title": "Correct the DetailOnly delegation-attempt change documentation",
+  "outcome": "Update DelegationAttemptChange::DetailOnly documentation to describe its current parent-card publication and persistence behavior.",
+  "acceptance": [
+    "Correct the DetailOnly delegation-attempt change documentation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "deferred-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

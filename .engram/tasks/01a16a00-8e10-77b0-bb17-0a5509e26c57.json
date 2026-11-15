@@ -1,0 +1,27 @@
+{
+  "id": "01a16a00-8e10-77b0-bb17-0a5509e26c57",
+  "external_ref": null,
+  "title": "Uncarried NotCodex closure line misstates Claude as reporting no late command end; say this carry path supports only Codex checks",
+  "outcome": "The NotCodex uncarried reason states the actual policy: carrying past a turn's close is implemented only for Codex checks. It no longer claims a provider capability that is false. The matching wording assertions are updated.",
+  "acceptance": [
+    "Uncarried NotCodex closure line misstates Claude as reporting no late command end; say this carry path supports only Codex checks is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

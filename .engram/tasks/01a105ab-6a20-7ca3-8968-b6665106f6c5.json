@@ -1,0 +1,27 @@
+{
+  "id": "01a105ab-6a20-7ca3-8968-b6665106f6c5",
+  "external_ref": null,
+  "title": "Document the MCP named-source-root refusal of unknown fields",
+  "outcome": "The feature documentation accurately states that termal_name_source_root refuses any field other than work/path before forwarding, while preserving documented omission-based clearing.",
+  "acceptance": [
+    "Document the MCP named-source-root refusal of unknown fields is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "delegation-mcp",
+    "documentation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

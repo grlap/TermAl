@@ -1,0 +1,28 @@
+{
+  "id": "01a1401e-b324-7810-833c-330d8e8561a8",
+  "external_ref": null,
+  "title": "Name Claude in the stand-in spawn assertion's failure message in review_changes_pins_two_review_resume_wait_flow",
+  "outcome": "Name Claude in the stand-in spawn assertion's failure message in review_changes_pins_two_review_resume_wait_flow",
+  "acceptance": [
+    "The failure-reason string of the stand-in spawn assertion in src/tests/agent_commands.rs (review_changes_pins_two_review_resume_wait_flow) names an unavailable Codex or Claude, not only Codex",
+    "cargo test --bin termal review_changes_pins_two_review_resume_wait_flow passes"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

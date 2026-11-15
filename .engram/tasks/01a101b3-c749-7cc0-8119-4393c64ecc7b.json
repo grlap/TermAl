@@ -1,0 +1,30 @@
+{
+  "id": "01a101b3-c749-7cc0-8119-4393c64ecc7b",
+  "external_ref": null,
+  "title": "Document the live bind-retry witness phases and acknowledgement tick invariant",
+  "outcome": "Optional readability follow-up from frozen one-path 1820 review. src/tests/engram_root_recovery_live.rs:455 retry_live_bind_without_resume passes due as now for its first acknowledgement tick and asserts no dispatch; correctness relies on engram_bind_retry_step returning Acknowledged before due handling (one step per tick). Add a short doc/comment naming ACK, pre-due Wait, eligible Due exact replay and evaluate retirement, or clarify the tick timestamp's intent. No behavioral defect established; do not relax assertions or change scheduler semantics.",
+  "acceptance": [
+    "Document the live bind-retry witness phases and acknowledgement tick invariant is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "live-suite",
+    "regression",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1009a-1027-7242-b145-0726c4641d50",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

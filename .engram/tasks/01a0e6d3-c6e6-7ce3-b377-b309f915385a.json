@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6e6-7ce3-b377-b309f915385a",
+  "external_ref": "tm-u3xq",
+  "title": "Share live updates across browser tabs so prompt sends retain HTTP capacity",
+  "outcome": "User reports prompt sending stuck and supplies full WinDbg thread dump for PID 42048. Main awaits Tokio; workers idle or IOCP, background workers await queues, no prompt runtime visible. Live health HTTP 200 in 1 ms; state HTTP 200 in 257 ms. Identify affected session and browser/request state before changing code.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The same feature as w-a88874257e88, landed in 511cd20 (ancestor of master f7db2c58); ui/src/live-events.worker.ts. Closed by evidence.",
+  "completion": null
+}

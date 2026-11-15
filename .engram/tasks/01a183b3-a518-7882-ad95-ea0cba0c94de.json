@@ -1,0 +1,52 @@
+{
+  "id": "01a183b3-a518-7882-ad95-ea0cba0c94de",
+  "external_ref": null,
+  "title": "Historical SQLite compatibility: cover checkpoint reader-floor rejection and rollback",
+  "outcome": "Cover checkpoint-result reader-floor rejection and rollback branches",
+  "acceptance": [
+    "A valid adopted containment image with Refused only in its frozen existing checkpoint is rejected under the predecessor header by the expected diagnostic, while the canonical checkpoint operation and session mirror remain compatible with that header.",
+    "Both load and writer openers cover the checkpoint-result reader-floor step, with a fault injected into the schema header advance proving unchanged raw metadata units, session rows, generation and legacy provenance.",
+    "The focused checks execute the new branch witnesses and preserve the current successful migration and canonical Refused rejection controls."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "control-plane",
+    "engram-control",
+    "gating-removal-audited",
+    "persistence",
+    "reader-floor",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

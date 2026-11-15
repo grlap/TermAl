@@ -1,0 +1,29 @@
+{
+  "id": "01a148ad-4e9b-7822-b466-38c8df59e347",
+  "external_ref": null,
+  "title": "Codex session's Bash command runner cannot resolve node (exit 127) while PowerShell can",
+  "outcome": "A Codex session that TermAl hosts on Windows runs the documented one-call launcher command with node resolved, whichever runner it picks. Or TermAl documents and steers the supported runner, so that recorded focused checks don't fail before launch.",
+  "acceptance": [
+    "The runner and PATH source behind the 07:03Z exit 127 is identified and recorded: WSL bash or Git Bash, and whether TermAl's spawn environment or Codex's runner choice causes it.",
+    "Either a fix makes `node` resolvable for the launcher command in the runner Codex uses under TermAl on Windows, with a regression or a recorded live check, or the docs/test.md and AGENTS.md guidance names the supported runner for Codex on Windows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "environment",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

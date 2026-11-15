@@ -1,0 +1,30 @@
+{
+  "id": "01a1dae9-ede6-7e10-a850-06f3c0e4467d",
+  "external_ref": null,
+  "title": "Launcher experiment: run the Rust and Vitest FULL stages concurrently on DL560 with isolation (save ~11 min per FULL)",
+  "outcome": "On DL560 only, a full launcher run executes its Rust-test and Vitest stages concurrently under one run id, with per-stage isolation, and produces results identical to the sequential run on the same commit while finishing measurably sooner. Windows and Central keep sequential stages.",
+  "acceptance": [
+    "A design note names every shared resource between the two stages (ENGRAM_HOME, temp dirs, ports, Git/engram fixtures, CARGO_TARGET_DIR, process groups) and how each is isolated or serialized, including the node behavior group that spawns git/engram (known to interfere: Central test-5f2735f7 55/1).",
+    "The concurrent mode is opt-in, limited to Linux/DL560, keeps one aggregated result with per-stage logs and exact source_id before/after, disables fail-fast so diagnostics stay complete, and leaves Windows/Central behaviour unchanged.",
+    "On one frozen commit, a sequential and a concurrent run give identical per-stage results and source_id with zero new failures; the measured elapsed saving is recorded; no test is weakened, retried or given a longer timeout."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "dl560",
+    "performance",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

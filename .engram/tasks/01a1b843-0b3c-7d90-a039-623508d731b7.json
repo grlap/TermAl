@@ -1,0 +1,33 @@
+{
+  "id": "01a1b843-0b3c-7d90-a039-623508d731b7",
+  "external_ref": null,
+  "title": "Speed up the six engram_host_adapter / persist_delta Rust tests that each run over 60 s, without losing coverage",
+  "outcome": "Greg asked („Moze Kimi z zespołem popracowac aby usprawnic testy?”) for the slowest tests to be sped up. Six of the ten Rust tests that exceeded 60 s in Central FULL test-1397710a (Kimi #144) should run materially faster while asserting the same behavior. They are:\n- turn_checks::build_checks::engram_build_focused_rejects_stale_foreign_and_mismatched_artifacts\n- turn_checks::focused_node_checks::engram_node_invalid_artifacts_cannot_be_rescued_by_summary_or_counts\n- source_root_naming::authority::reclamation::recovery::named_root_reclamation_published_notices_do_not_exhaust_the_journal\n- source_root_naming::source_root_review_released_removed_sessions_make_progress_past_journal_capacity\n- source_root_naming::source_root_review_successive_claim_displacements_do_not_fill_the_journal\n- persist_delta::state_lock_parallel::modeled_parallel_mailbox_resume_and_writer_stay_within_agreed_bounds\nThis is a sibling of w-a8f887b04a4e (fingerprint-tests) and w-6f845d667984 (review_identity).",
+  "acceptance": [
+    "Before and after durations of the six named tests are measured fresh on the same host, at a quiet moment coordinated with the integration owner. The measurement separates the test's own work from lock or fixture waiting, because the log reports only a >60 s threshold. The results are recorded on the item, and the after durations are materially shorter.",
+    "Every existing assertion and behavior is still checked, including journal-capacity limits, parallel-model bounds and artifact rejection cases. Speed comes only from sharing immutable fixtures, from cheaper construction of the same inputs, from smaller but behavior-equivalent capacity setups that still reach the same limit, or from lighter process boundaries that exercise the same behavior. There are no deletions of behavioral coverage, no relaxed limits, skips, retries or timeout changes, and no parallelization that weakens isolation.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-time",
+    "greg-directed",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a164ff-dc1b-71f3-bda3-de6021f4b32f",
+    "01a1b688-ad23-7cf2-bee7-c8c63c3decfa"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

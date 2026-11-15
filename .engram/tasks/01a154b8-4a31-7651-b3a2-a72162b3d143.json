@@ -1,0 +1,29 @@
+{
+  "id": "01a154b8-4a31-7651-b3a2-a72162b3d143",
+  "external_ref": null,
+  "title": "Reclamation pass re-reads live, unexpired claims' roots every 30 s; key the canonical re-read cooldown to the claim's expires_at",
+  "outcome": "Reclamation pass re-reads live, unexpired claims' roots every 30 s; key the canonical re-read cooldown to the claim's expires_at",
+  "acceptance": [
+    "After a canonical read shows a root's claim active and unexpired, the automatic pass does not read that root again before the claim's expires_at (bounded below by the existing cooldown), unless a local event (a naming, a release, a binding change, a refused claim) makes it due sooner; a test shows a live claim's root read once across several passes, then again after its expiry",
+    "Roots with closed, lapsed or refused claims keep their existing retirement behaviour and timing; the full five-stage gate passes with an independent review pair and no outstanding Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "follow-up",
+    "named-roots",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

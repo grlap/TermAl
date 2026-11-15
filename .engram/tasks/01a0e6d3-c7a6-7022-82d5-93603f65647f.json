@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c7a6-7022-82d5-93603f65647f",
+  "external_ref": "tm-vjr",
+  "title": "After restart, killed Codex sessions reappear as empty phantom shells (ignore-set pruned against capped/scoped discovery scan)",
+  "outcome": "SYSTEMATIC (not a race), confirmed by delegated code review + direct inspection of the live\n~/.termal/termal.sqlite. Explains BOTH user symptoms with one root cause.\n\nMEASURED (sqlite): 661 session rows. 22 top-level Codex sessions have messages=[] , messageCount=0,\nmessagesLoaded=true, codexThreadState set, and preview EXACTLY \"Ready to continue this Codex thread.\"\n— the re-imported-orphan-thread marker. Their names are real prompts (\"review rincon legal system\",\n\"where are you ?\", \"q: I've a repro...\", \"can you improve the...\", \"resume\"). Real sessions are intact\n(CodexMCP=12048 msgs, LegalCodex=5830, Termal=2438). The persisted ignore set has 328 entries (was 354).\n\nSYMPTOMS EXPLAINED:\n - \"after restart I see sessions that weren't visible before\" = these 22 phantoms re-appearing.\n - \"I don't have the full conversation\" = opening a phantom shows an EMPTY shell (0 msgs, \"Ready to\n   continue this Codex thread\") even though it's named after a real conversation. TermAl does not\n   backfill the Codex transcript on import; the phantom just looks like a lost conversation.\n\nROOT CAUSE (src/state_boot.rs:72-78, import_discovered_codex_threads):\n   self.ignored_discovered_codex_thread_ids\n       .retain(|id| discovered_thread_ids.contains(id));\n The ignore set (which suppresses killed threads from rediscovery; kill_session adds to it at\n session_lifecycle.rs:167-169, persisted in the app_state blob) is pruned to ONLY threads present in\n the CURRENT discovery scan. But that scan is (a) CAPPED at 500/home\n (src/codex_discovery.rs:29 MAX_DISCOVERED_CODEX_THREADS_PER_HOME, applied as `... order by updated_at\n desc limit 500` at codex_discovery.rs:203-218) and (b) SCOPE-filtered by workdir/projects\n (codex_discovery.rs:32-50, 250-257). So a killed thread outside the top-500-by-recency window OR\n outside the current workdir scope is absent from `threads` -> the retain DELETES its suppression entry\n and re-persists the shrunken set. On a later boot when that thread re-enters scope/recency, discovery\n finds it no longer suppressed and re-imports it as a VISIBLE top-level phantom (state_boot.rs:124-159).\n \"not in the current scan\" is wrongly treated as \"deleted from disk.\"\n\nWHY UNTESTED: killing_local_codex_session_prevents_rediscovery_after_restart\n(src/tests/session_lifecycle.rs:782-829) only exercises the case where the killed thread is STILL in the\ndiscovered list; the drop-out case (capped/scoped) is never tested.\n\nFIX DIRECTION: prune the ignore set only against threads actually ABSENT from the underlying threads.db\n(an uncapped, unscoped existence check), not against the capped/scoped `threads` result — or never\nauto-prune. Add a regression test for the >500 / out-of-scope drop-out case.\n\nRelated: tm-91c (unsuppressed orphan threads from a failed thread/start — same re-import surface,\ndifferent trigger). Ruled out: hidden Claude spares (never persisted; from_inner filters !hidden at\npersisted_state.rs:117) and real killed non-Codex sessions (durably tombstoned via removed_session_ids).",
+  "acceptance": [
+    "Ignored IDs survive capped, scoped and empty discovery and remain suppressed when later rediscovered, including after a persisted reload.",
+    "Existing explicitly allowed or owned threads and ordinary new imports keep their behaviour, without new live-store access or an unbounded scan.",
+    "Focused regressions show the intended RED then GREEN; the independent Codex/Claude final pair has no in-scope Medium+; and the standard gate passes on the landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a175c8-4b8f-7552-a76d-c4de327b7d43",
+  "external_ref": null,
+  "title": "Keep nested automatic mailbox RPC work within the inbound handler deadline",
+  "outcome": "A slow qualified peer is reported unavailable during satellite discovery rather than aborting the domain directory; Ensure keeps retained-outcome recovery.",
+  "acceptance": [
+    "Nested Describe/Catalog/Install work respects the incoming handler's remaining deadline without increasing timeouts or weakening current authority.",
+    "A hanging peer regression proves unavailable-host reporting and healthy local discovery; interrupted Ensure retains one recoverable reservation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

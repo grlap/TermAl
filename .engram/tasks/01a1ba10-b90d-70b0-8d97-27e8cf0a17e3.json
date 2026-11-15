@@ -1,0 +1,30 @@
+{
+  "id": "01a1ba10-b90d-70b0-8d97-27e8cf0a17e3",
+  "external_ref": null,
+  "title": "Clarify verification refusal diagnostics when automatic output withholds remote labels",
+  "outcome": "The verification adapter's field/reason diagnostic contract and automatic code-only refusal presentation agree without allowing remote request or source_id echoes into automatic agent context.",
+  "acceptance": [
+    "Clarify verification refusal diagnostics when automatic output withholds remote labels is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "greg-reported",
+    "review-low",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b9c2-867d-7371-88d4-7c5db7d2b5a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

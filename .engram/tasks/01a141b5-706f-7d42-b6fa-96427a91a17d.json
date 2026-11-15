@@ -1,0 +1,33 @@
+{
+  "id": "01a141b5-706f-7d42-b6fa-96427a91a17d",
+  "external_ref": null,
+  "title": "Work windowing: resolve deferred presentation, accessibility and reveal follow-ups",
+  "outcome": "Resolve the six non-blocking Low groups from Work full-set paging R1 on the landed implementation: accurate docs; satisfied/hidden relation wording; virtualized accessibility and quieter progress; replacement-trigger coverage or removal; cancelled pending reveals; consistent invalidation recovery wording and branch coverage. Preserve the existing data, selection and query-generation contracts.",
+  "acceptance": [
+    "Work visualizer documentation describes the measured windows and unbounded serial chain, includes lifecycle among presentation filters, and explains that All exposes Proposed while Open matches Engram's default listing.",
+    "Default Open prerequisite and hierarchy wording remains truthful and makes satisfaction distinguishable when closed related rows are loaded but filtered out; targeted witnesses cover the wording.",
+    "Tree and table window positions/counts describe the logical collection to assistive technology; label grouping retains accessible structure, and progress announcements do not chatter on every serial page.",
+    "The replacement-trigger adoption path has a reachable regression witness or is removed as unnecessary, while logical selection and focus remain stable as pages arrive.",
+    "Removing a pending reveal target clears both tree and window pending state so a later return cannot steal focus; a deterministic removal/reappearance witness proves it.",
+    "Invalidated-list recovery uses consistent action terminology and covers first-page 409 plus non-409 generation mismatch without an automatic restart loop."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "review-followup",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14181-a00c-7792-87c1-270c4b1fa8bc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

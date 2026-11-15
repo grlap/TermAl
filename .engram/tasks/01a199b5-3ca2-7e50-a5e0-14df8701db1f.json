@@ -1,0 +1,38 @@
+{
+  "id": "01a199b5-3ca2-7e50-a5e0-14df8701db1f",
+  "external_ref": null,
+  "title": "Delete gated retry recovery and settlement; retain historical records as data",
+  "outcome": "Physically delete assigned begin/admission/bind/abort retry, settlement, containment and reconciliation implementations; reduce retained historical state to passive data reading/validation.",
+  "acceptance": [
+    "Physically delete assigned begin/admission/bind/abort retry, settlement, containment and reconciliation implementations; reduce retained historical state to passive data reading/validation.",
+    "Historical evidence and unknown-operation/user-content records stay truthfully readable without executable replay/accounting/admission routes; ordinary durable-cut and resource cleanup duties remain owned.",
+    "The integrated candidate covering these owned paths passes focused checks. It landed as 87f49ed0 on Greg's explicit word „robimy commit, wystarczy tego”, without a complete Codex/Claude pair: C3 R2 and C4 R3 Codex failed coverage, on C4 R3 Claude found no Medium, C5 was not reviewed (notes 9ddd7b7f, fc1c07ef, bc95be13). The missing Codex review is tracked by w-96004958e8cc."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Gated retry, recovery and settlement implementations are deleted and retained history is passive data. Landed in 87f49ed0 on Greg's word without a complete review pair; the missing Codex review is w-96004958e8cc, and test-only residue is w-327a67e8f9df.",
+    "completed_at": "2026-11-04T07:03:51.120202700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

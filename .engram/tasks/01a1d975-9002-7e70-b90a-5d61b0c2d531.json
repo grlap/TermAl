@@ -1,0 +1,43 @@
+{
+  "id": "01a1d975-9002-7e70-b90a-5d61b0c2d531",
+  "external_ref": null,
+  "title": "Strengthen same-path recovery negative tests and refusal assertions",
+  "outcome": "The predecessor-generation admission tests explicitly cover a held requester without control_binding, an unheld requester and a different claim identity, distinguish the Commit-only body case from empty criterion bindings, and assert each intended refusal path rather than only CONFLICT.",
+  "acceptance": [
+    "Behavioral request/spawn tests cover held-without-control-binding, unheld and different-claim predecessor requests, which refuse without mutating historical registration or creating credit; the Commit-only case is named accurately, and empty criterion bindings alone grant no admission.",
+    "Each source, receipt/digest/body, identity and newer-terminal negative case asserts its expected existing refusal prefix; received/settled same-path positive cases and historical Commit-only protection still pass."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

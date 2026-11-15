@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c548-74b3-9082-26e5aecc3606",
+  "external_ref": "tm-kh32",
+  "title": "Extract Engram context-nudge lifecycle from oversized adapter modules",
+  "outcome": "The cut-B change adds context-nudge and obligation-waiver state machines to already oversized production and test modules. Extract cohesive context/waiver protocol, validation, lifecycle fencing, and focused tests into dedicated module boundaries while preserving behavior and avoiding duplication of generation and reset invariants.",
+  "acceptance": [
+    "Production context/waiver ownership is documented in focused modules; related tests are split along the same seams; no behavior or wire contract changes; full Rust and UI gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

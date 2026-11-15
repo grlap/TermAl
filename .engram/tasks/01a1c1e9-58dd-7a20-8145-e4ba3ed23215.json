@@ -1,0 +1,31 @@
+{
+  "id": "01a1c1e9-58dd-7a20-8145-e4ba3ed23215",
+  "external_ref": null,
+  "title": "Integrate combo29 on 0ab3319e: author test refs, bounded Engram stderr, terminal fixture observations",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo29 on 0ab3319e: author test refs, bounded Engram stderr, terminal fixture observations is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo29c is on master as d53b3c7a03646f38a1d7ca43902c2e4e46619650 (tree e619480d). It contains three parts:\n- Sol-a7bb's r6 remote-terminal fixture observations;\n- Sol-c593's author-test-ref instruction text (audited; audit (c) names ec32acf4);\n- Sol-d50d's whole selected proofs.\n\nGate: the Windows B FULL test-6d35df9c passed and was eligible, with equal fingerprints (linked note). It landed by fast-forward from 0ab3319e, pushed at 21:24:05Z. The test ref is deleted.\n\nInstalls:\n- Central: d53b, sha 9a8feb81, at 21:45Z.\n- DL560: d53b, sha 20db9100, at 21:53Z.\nBoth were later superseded by the d6a3 and 9075 installs.\n\nAfter Greg's 00:15Z restart, Central runs master 9075802d, which contains d53b3c7a (exe 0e955adf, relinked by cargo run). The DL560 confirmation FULL on master has been dispatched.\n\nNo acceptance evaluation exists: evaluation is OFF for TermAl, so this closes self_asserted.",
+    "completed_at": "2026-11-10T00:19:55.474383300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c541-79a3-a37b-764c4f269d2f",
+  "external_ref": "tm-jzce",
+  "title": "Normalize history flags after overlap reconciliation completes a transcript",
+  "outcome": "Preserve-head reconciliation can merge a resident prefix with an incoming tail into a complete 0..messageCount window while independently retaining hasOlderHistory or hasNewerHistory from a partial response. The UI can then report messagesLoaded=true yet continue requesting history. Normalize both flags when the merged resident window is complete and add an overlapping-window regression.",
+  "acceptance": [
+    "When reconciliation produces a complete transcript window, messagesLoaded is true and both history-availability flags are false. Focused tests cover resident-prefix plus incoming-tail completion and prevent redundant history demand."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch 10f6b1ad, spot-checked by Termal::Fable2): CLOSE-DONE. A complete merged transcript forces loaded=true and both availability flags false (ui/src/session-reconcile.ts:511,543,549), with the exact overlap regression at session-reconcile.test.ts:2591. Closed by evidence.",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a19f3b-8787-77e3-97c3-9926e7b3309a",
+  "external_ref": null,
+  "title": "Federation operator API: observe link and attestation diagnostics per peer and recover a peer without restarting Central",
+  "outcome": "Central exposes a documented federation operator API covering four things:\n- per-peer link, attestation and worker state, with the last terminal reasons (stage, reason, ioKind, elapsed time, SSH exit class) and the owned OS operations still unresolved;\n- a supervised recover/re-arm action for a quarantined or failed peer, which proves the owned SSH child is reaped before reconnecting and refuses with a typed reason when it isn't;\n- relay-queue visibility, meaning deferred notifications per peer with counts and last error;\n- an audit record of every operator action.\nNo fictitious SSH accounting and no deletion of live state. Tests cover each action's success and refusal paths.",
+  "acceptance": [
+    "Federation operator API: observe link and attestation diagnostics per peer and recover a peer without restarting Central is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "api",
+    "federation",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

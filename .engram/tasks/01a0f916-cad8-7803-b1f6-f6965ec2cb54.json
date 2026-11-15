@@ -1,0 +1,39 @@
+{
+  "id": "01a0f916-cad8-7803-b1f6-f6965ec2cb54",
+  "external_ref": null,
+  "title": "Keep stale-global sequenced body placement from rolling back session metadata",
+  "outcome": "Keep stale-global sequenced body placement from rolling back session metadata",
+  "acceptance": [
+    "One same-server-instance metadata stamp guard at the owner commit gate rejects known older metadata from every publication source independently of body placement, only for local sessions with an admitted paired tail, creation or fork body response in the current instance. The guard compares two known numeric stamps; absent or null stamps are incomparable and retain master's global admission. An accepted new server instance resets that domain. Remote, foreign-epoch and never-paired sessions retain master behavior.",
+    "Public local-attached regressions place a next body sequence whose global revision is stale without rolling back newer status, preview, settings, queue or mutation stamp, and deliver a previously captured older summary after an admitted newer paired tail with the same result in ref, store and render. Global membership and unrelated facts still adopt through the global gate.",
+    "The exact corrected input passes focused regressions, the full five-stage gate and a fresh complete independent Codex/Claude pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fe83-807c-70e0-a589-de0f898443db",
+  "disposal_reason": "Greg closed the parent P0 w-1b692f268123 at about 21:25Z on 2026-10-02 (note 13ee75cf). This required child continues as standalone work in w-de0f898443db, so it no longer blocks the parent. Coordinator: Termal::Fable2.",
+  "completion": null
+}

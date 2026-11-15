@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6d4-7d50-afaa-9dbda82f0b1b",
+  "external_ref": "tm-sr3g",
+  "title": "Diagnose freeze-verifier Git deadline failures during full Rust gate",
+  "outcome": "Parent gate-failure exception during user-requested repeat review, 2026-09-22. Full run .git/review-runs/test-7c6d0f5a-d71b-4f87-979b-540118c8825d/results.json failed exit101; cargo-check, TypeScript, fingerprint/launcher tests exit0; Rust exit101; Vitest unrun. Unchanged before/after fingerprint105d17771f7afa7df75efb3448832b9f7f8303b8fe850f159601b6d5f792e505. Original rust-tests.log: tests::review_freeze::review_freeze_matches_and_rejects_untracked_index_worktree_and_head_drift panicked src/tests/review_freeze.rs:922:46; review_freeze_never_runs_git_filters_or_repository_node panicked fixture:900:48; both Result unwrap Err bounded read deadline exceeded. Diagnosis established: ReviewFreezeGit::new starts one20s deadline (src/review_freeze_process.rs:4), shared by setup and captures; run_bounded_read_process exits at src/bounded_read_process.rs:104 before a Git process is observed exited. Failure occurs before semantic drift/filter assertions; no evidence of incorrect digest or unsafe filter execution. Exact slow Git command is missing from propagated error. Resource/environment contention is a hypothesis, NOT confirmed root cause: TermAl Rust ran19:37:05.535-19:40:22.34Z; one-shot failure process inspection found Engram launcher113760 started19:38:25.345Z and cargo test106276 started19:38:28.862Z (test-25d351ef-8f83-4110-8202-d8b929926972). Prelaunch process check had no active gate/compiler besides long-lived cargo run --release host; window notice queued behind peer active turn. No CPU/process timing was captured at the failing Git call. Next: after peer completion, run the two exact tests through the containment wrapper once as a serialized focused diagnostic, capture per-Git/budget evidence if failure remains, then classify product/test/environment without labeling flaky, increasing timeout, or retry-until-green. Original full gate remains failed; no reviewers or resumed Vitest until required gate succeeds. Preserve original failed temp run C:/Users/grzeg/AppData/Local/Temp/termal/tests/run-2TbvsD. No source/test changes or cleanup authorized.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d3-c3bb-7783-9dfe-33bee3bec3f0",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DUP. The deadline was doubled under w-33bee3bec3f0 (landed in 0a7bc74).",
+  "completion": null
+}

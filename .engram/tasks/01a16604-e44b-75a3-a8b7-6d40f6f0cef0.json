@@ -1,0 +1,41 @@
+{
+  "id": "01a16604-e44b-75a3-a8b7-6d40f6f0cef0",
+  "external_ref": null,
+  "title": "Measure and bound failure-card growth while a persistent bind failure is retried inside the admission window",
+  "outcome": "While a queue head's bind keeps failing (deadline_exceeded with the circuit opening, or control_store_busy), its automatic bind retry runs inside the 240 s admission window. A w-ac230a24d0d8 test (persistent_bind_failures_end_at_the_budget_with_their_exact_identity, run test-393027da on 8cfc5739 plus that change) counted 65 Engram control cards for 7 session_bind requests in the deadline_exceeded case. So cards appear on ticks that send no bind, probably when the open circuit or backoff defers the attempt or postpones the bind retry. The test drives a scripted clock in a 64-iteration loop, so the ratio may overstate the live 2 s tick. A live or clock-faithful measurement is needed first: count the cards per minute for a head whose bind keeps failing. If they repeat without a new attempt, post at most one card per real attempt and keep the hold readable.",
+  "acceptance": [
+    "While a queue head's bind keeps failing inside its admission window, TermAl posts at most one failure card per session_bind it actually sends; an automatic retry step that sends no bind adds no card. A test driving a persistent bind failure records each step's binds and cards and asserts this.",
+    "The full five-stage gate passes on the exact committed tree, and an independent read-only review pair of different vendors (Codex and Claude, or Kimi standing in for one unavailable reviewer under the commit rule) has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cards",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

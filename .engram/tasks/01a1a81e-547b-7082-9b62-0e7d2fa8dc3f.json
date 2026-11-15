@@ -1,0 +1,30 @@
+{
+  "id": "01a1a81e-547b-7082-9b62-0e7d2fa8dc3f",
+  "external_ref": null,
+  "title": "Align cleanup roles and in-use safeguards across instructions and test documentation",
+  "outcome": "Agents receive consistent cleanup ownership and in-use/path safeguards when reading standing instructions or docs/test.md.",
+  "acceptance": [
+    "The cleanup role wording in docs/test.md and the standing instructions is consistent, while existing active-claim, process, run-evidence and path/reparse protections remain intact.",
+    "The documentation explicitly states which in-use and reparse-point safeguards apply to whole-worktree removal as well as build-output removal, without granting automatic deletion or weakening existing retention protections.",
+    "Any instruction or authority-text change follows the existing exact-wording concurrence, Greg-notification and final-diff audit requirements."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "documentation",
+    "safety"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

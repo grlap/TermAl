@@ -1,0 +1,28 @@
+{
+  "id": "01a16627-3667-72c2-af70-e135aa67abcf",
+  "external_ref": null,
+  "title": "Keep a detached launch observation accurate before its launch acknowledgement arrives",
+  "outcome": "The observation persistence tick does not describe an unacknowledged, still-running detached launcher as having already returned a launch result.",
+  "acceptance": [
+    "Keep a detached launch observation accurate before its launch acknowledgement arrives is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

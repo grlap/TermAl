@@ -1,0 +1,57 @@
+{
+  "id": "01a128c7-e807-70d0-9825-5b823829eb80",
+  "external_ref": null,
+  "title": "A transient Engram control failure that recovered automatically still shows as an unresolved \"control degraded\" alarm card",
+  "outcome": "Per Greg's direction of 2026-10-11 (memory greg-decision-2026-10-11-transient-admission-self-recover, addendum): when an Engram control card reports a transient failure with an automatic retry scheduled (for example turn_begin dispatch_budget_exhausted), and a later card shows the same logical prompt admitted, the conversation view no longer leaves a prominent unresolved degraded or error card. The failure is coalesced into, or explicitly marked as, recovered, with the recovery duration and attempt count, for example \"recovered automatically after 4 s (attempt 1)\". The detailed diagnostics (operation, code, latencies) stay available in an expandable event-history surface. A failure that is not followed by recovery keeps its current prominent presentation, as does one whose retry was exhausted or whose outcome is truly unknown. Tests cover the recovered, still-retrying and exhausted cases. One logical prompt is preserved, with no duplicate delivery; the backend part is already covered by the exact begin replay and w-cfcf10b68c9b.",
+  "acceptance": [
+    "When a degraded Engram dispatch card is followed, for the same logical prompt, by a later dispatch card that admits it, the conversation shows the degraded card as recovered: a compact status reading 'Recovered automatically after N s (attempt k)', where N is the time between the failure and the admission and k is the number of failed attempts for that prompt before it, instead of the 'Engram control degraded' alarm. The original operation, code, latency and causal-failure details stay available in an expandable section of that card.",
+    "A degraded dispatch card with no later admission of the same prompt (still retrying, exhausted, or of unknown outcome) keeps its current prominent presentation, and an admission of a different prompt never marks it recovered.",
+    "Pairing uses an explicit logical-prompt identity that the host writes on both cards, not message order. Cards written before this change, which lack that identity, render exactly as today.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "autonomy",
+    "conversation-view",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

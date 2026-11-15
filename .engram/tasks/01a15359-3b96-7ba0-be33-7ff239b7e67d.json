@@ -1,0 +1,37 @@
+{
+  "id": "01a15359-3b96-7ba0-be33-7ff239b7e67d",
+  "external_ref": null,
+  "title": "codex_terminal_reset child test can leave its TestTempRoot behind: runtime threads holding AppState clones die at process exit without Drop",
+  "outcome": "tests::codex_terminal_reset::shared_codex_terminal_reset_child never leaves its TestTempRoot (termal-test-state-*) behind: the fixture's runtime threads are joined or dropped, or the root's cleanup receipt is awaited, before the child process returns, so the test temp guard stays green deterministically.",
+  "acceptance": [
+    "The child test joins or drops every runtime thread holding an AppState clone (or awaits the TestTempRoot cleanup receipt) before returning, so the leftover is impossible by construction rather than by timing.",
+    "A regression or harness assertion shows the child's TestTempRoot is removed before the process exits, across repeated runs of all 9 reset-child invocations.",
+    "The full five-stage gate passes on the exact committed tree with an independent review pair and no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "nondeterminism",
+    "rust-tests",
+    "test-temp-guard"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "tests::codex_terminal_reset::shared_codex_terminal_reset_child can no longer leave its TestTempRoot behind. The child registers TestTempRoot::observe_cleanup() right after building its fixture, drops the fixture after its assertions, and waits on the removal receipt (recv_timeout(TEST_PHASE_DEADLOCK_GUARD), expecting Ok(Ok(()))) before the process may exit. libtest can therefore no longer exit while a continuation still holds an AppState clone (the turn/start response waiter, codex.rs:2152-2158), and a permanent holder fails loudly instead of leaking. Landed in dd4ccaf3 together with the named-root capacity change.",
+    "completed_at": "2026-10-19T12:47:01.992772700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a10735-2eb6-7cc0-8544-764eae05a6a3",
+  "external_ref": null,
+  "title": "Report host-wake disposition failure without misreporting a committed Stop or removal",
+  "outcome": "A committed Stop or session removal reports its completed operation accurately while preserving and exposing a failed host-wake disposition as unresolved and recoverable.",
+  "acceptance": [
+    "Report host-wake disposition failure without misreporting a committed Stop or removal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-follow-up",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

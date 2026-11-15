@@ -1,0 +1,24 @@
+{
+  "id": "01a18147-c004-7763-9df7-299e2a24fece",
+  "external_ref": null,
+  "title": "Launcher toolchain provenance: multiline TOML strings in Cargo config and unreadable probe logs",
+  "outcome": "Launcher toolchain provenance: multiline TOML strings in Cargo config and unreadable probe logs",
+  "acceptance": [
+    "Launcher toolchain provenance: multiline TOML strings in Cargo config and unreadable probe logs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

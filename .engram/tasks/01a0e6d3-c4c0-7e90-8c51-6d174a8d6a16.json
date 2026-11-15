@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4c0-7e90-8c51-6d174a8d6a16",
+  "external_ref": "tm-b9va",
+  "title": "Cover wait-repair retry backoff growth, cap and reset",
+  "outcome": "Review8 Claude Note: add fake-timer tests to createWaitSnapshotRepairRetry that fail repeatedly, verify exponentially growing gaps through RECONNECT_STATE_RESYNC_MAX_DELAY_MS and the cap, then complete and verify initial delay resets. Current tests cover initial scheduling, offline doubling, take, complete cancellation and dispose, but not the full timing sequence.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

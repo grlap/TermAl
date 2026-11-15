@@ -1,0 +1,25 @@
+{
+  "id": "01a17a6d-ae67-7801-8888-eb1e3a594349",
+  "external_ref": null,
+  "title": "noContinuation acknowledgement is refused on native relay mailboxes while host guidance offers it for all mailboxes",
+  "outcome": "noContinuation acknowledgement is refused on native relay mailboxes while host guidance offers it for all mailboxes",
+  "acceptance": [
+    "Either a native relay mailbox acknowledgement accepts noContinuation with the same meaning as a local mailbox, or the host guidance and tool description state that relay mailboxes do not support it and what an agent should do instead; the two agree.",
+    "A focused check covers acknowledging a native relay mailbox receipt with and without noContinuation and matches the documented behaviour."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

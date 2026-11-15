@@ -1,0 +1,29 @@
+{
+  "id": "01a18ba3-66ce-7f02-8b53-185518d99000",
+  "external_ref": null,
+  "title": "Windows B: rustc crashes during cold compiles (0xc0000374 heap corruption, 0xc0000005 access violation)",
+  "outcome": "Windows B: rustc crashes during cold compiles (0xc0000374 heap corruption, 0xc0000005 access violation)",
+  "acceptance": [
+    "The cause of the Windows B rustc crashes is identified with discriminating evidence (hardware memory test, toolchain reproduction, or scanner exclusion), or Windows B is retired as a runner.",
+    "Windows B completes a defined number of consecutive cold full compiles of the termal test binary without a rustc crash, as agreed by the coordinator before the run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "environment",
+    "runner",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

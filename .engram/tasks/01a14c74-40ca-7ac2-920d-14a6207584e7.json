@@ -1,0 +1,29 @@
+{
+  "id": "01a14c74-40ca-7ac2-920d-14a6207584e7",
+  "external_ref": null,
+  "title": "A focused cargo test run that fails with recognised counts (exit 101, 0 passed / N failed) is recorded as result indeterminate / producer unknown instead of failed",
+  "outcome": "A focused cargo test run that fails with recognised counts (exit 101, 0 passed / N failed) is recorded as result indeterminate / producer unknown instead of failed",
+  "acceptance": [
+    "The failing path is identified with file:line: why a focused launcher run `node scripts/test-launcher.mjs focused -- cargo test --bin termal <filter>` that exits non-zero with recognisable libtest counts (0 passed, N failed) is typed as result indeterminate / producer_outcome unknown rather than failed.",
+    "A regression: such a run produces a host verification record with result failed and the counts, so fail-first (RED) evidence is host-typed; a run with no recognisable counts or a cut output still records as it does today.",
+    "docs/test.md states how a failing focused run is recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a183d1-bbfd-70e2-a100-f3baaac8307f",
+  "external_ref": null,
+  "title": "Supported maintenance path when an Unknown checkpoint's recovery-attempt storage (65,536) is exhausted",
+  "outcome": "When an Unknown original checkpoint exhausts its finite recovery-attempt storage (65,536 allocated attempts), an operator has a supported, explicitly designed maintenance and representation path. It preserves custody and explicit capacity backpressure, never reuses PossiblySent attempts, and has a classified persistence floor if it needs one.",
+  "acceptance": [
+    "Supported maintenance path when an Unknown checkpoint's recovery-attempt storage (65,536) is exhausted is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "b16-followup",
+    "engram-host-adapter",
+    "operability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

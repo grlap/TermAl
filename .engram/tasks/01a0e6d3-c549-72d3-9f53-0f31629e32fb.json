@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c549-72d3-9f53-0f31629e32fb",
+  "external_ref": "tm-knb9",
+  "title": "Correct stale workspace PUT documentation claiming revision conflict rejection",
+  "outcome": "src/workspace_queries.rs put_workspace_layout doc comment claims a request revision check and 409 rejection. PutWorkspaceLayoutRequest has no revision precondition and the implementation replaces the same-ID layout with an incremented revision: last write wins, as the feature guide documents. Correct the misleading method contract in a separate narrow changeset; no backend semantic change. Found during saved-workspace new-tab preflight.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

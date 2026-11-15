@@ -1,0 +1,32 @@
+{
+  "id": "01a17be8-3ba4-7933-88fc-0a7b05b85d68",
+  "external_ref": null,
+  "title": "Document the Windows fingerprint ctime exception and metadata-restoration limit",
+  "outcome": "Clarify the approved Windows metadata-only ctime exception and its residual limit without expanding integrity machinery or changing the approved behavior.",
+  "acceptance": [
+    "The existing fingerprint documentation or source comment states that Windows omits only ctimeNs while retaining dev, ino, mode, size, mtimeNs, byte-count and streamed-content hashing, and POSIX retains ctime comparison.",
+    "The same documentation distinguishes bytes hashed during the read from a same-size post-read rewrite that restores mtime, without claiming atomic content capture or adding new checks/retries/configuration changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "fingerprint",
+    "gate-failure",
+    "review-low",
+    "tests",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17bc6-0876-75c1-aad4-f8b6179166d8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

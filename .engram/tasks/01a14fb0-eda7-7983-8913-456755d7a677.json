@@ -1,0 +1,30 @@
+{
+  "id": "01a14fb0-eda7-7983-8913-456755d7a677",
+  "external_ref": null,
+  "title": "Make superseded-basis transport quarantine diagnosable and explicitly recoverable",
+  "outcome": "An operator can diagnose a runtime transport quarantine captured before a transport change or re-enrollment, and has a documented safe recovery path without bypassing cleanup or newer quarantine fences.",
+  "acceptance": [
+    "Expose or document the quarantined enrollment/transport basis and distinguish it from the current basis without exposing credentials.",
+    "Specify and independently review the recovery contract for a superseded-basis quarantine; exact prior cleanup and newer-quarantine identity fences remain mandatory, with admission and reservations unchanged.",
+    "Regression coverage and required exact-input gate/review accompany any behavior change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

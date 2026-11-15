@@ -1,0 +1,29 @@
+{
+  "id": "01a14320-28da-7833-9aa6-2d3c404c8d05",
+  "external_ref": null,
+  "title": "Test gaps after the terminal-effect deadlock fix: refusal-log path, reviewer-MCP generation fence, typed-capacity willRetry stays non-terminal",
+  "outcome": "Test gaps after the terminal-effect deadlock fix: refusal-log path, reviewer-MCP generation fence, typed-capacity willRetry stays non-terminal",
+  "acceptance": [
+    "Tests cover (a) the logged refusal when an effect has no captured owner, (b) the reviewer-MCP finish generation fence, and (c) a typed-capacity willRetry:true error staying non-terminal; each fails without the guarded behaviour",
+    "The shared-Codex suites and the full gate pass"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "runtime",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

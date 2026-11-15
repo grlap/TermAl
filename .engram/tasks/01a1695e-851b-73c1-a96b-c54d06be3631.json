@@ -1,0 +1,56 @@
+{
+  "id": "01a1695e-851b-73c1-a96b-c54d06be3631",
+  "external_ref": null,
+  "title": "A later turn's run of the same id-less Codex/ACP command line is folded into an earlier unended observed row: the live run shows no row of its own",
+  "outcome": "Each run of a recognized test that a later turn starts gets its own host-observed test-run row, even when an earlier turn's run of the same id-less command line is still unended; a runtime's repeated start of the same run within its turn (ACP) still deduplicates; and each row is finalized only by its own run's end.",
+  "acceptance": [
+    "C1 (a run of its own). When a recognized test starts under a key (Ambient provenance: Codex, ACP) for which an unended host-observed row exists from an EARLIER turn generation, the start creates its own row for the current turn. A repeat start within the SAME turn generation, as ACP re-sends, still deduplicates to the existing row.",
+    "C2 (an in-turn end ends its own turn's row). An end observed through the in-turn path with Ambient provenance, keyed by its command line, finalizes only the unended row of the current turn generation when one exists, never an earlier turn's row; ends with an id stay keyed by their unique id. Claude provenance stays as now, already turn-filtered.",
+    "C3 (a late end ends the row of the turn it is tagged with). A late end through the reported-end path, tagged with a Codex turn id, finalizes and annotates only the unended row started in the TermAl turn that Codex turn ran in, resolved from a bounded in-memory mapping recorded when commands start under that turn. With no tag, or a tag that can't be resolved (unknown, evicted, or lost to a restart), a late end keyed by its command line touches no row; a late end of an item with an id keeps finalizing and annotating the row of that id, as now. This replaces w-1b4f's blanket line-key skip with a precise filter. The tell and the carried-test take are unchanged.",
+    "C4 (tests, through the real shared app-server path): 2 and 3 overlapping turns of the same id-less line each get their own row; turn 1's late end, tagged turn-1, ends only turn 1's row, in both cases; turn 2's in-turn end ends only turn 2's row; an ACP-style repeat start in the same turn makes no second row; the lone late end, with no turn running, ends its own row (the carried pin); a late end with an unresolvable tag changes no row. The existing w-d0b8d75c4ad6 tests (observed rows reach a terminal state) pass unchanged, and a row whose late end can't be resolved is still closed by the existing w-d0b8 terminal paths rather than left running.",
+    "C5 (validation). The review pair has no outstanding finding of Medium or higher; focused checks pass on the frozen input; it lands after w-2dcd."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "observed-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

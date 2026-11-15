@@ -1,0 +1,55 @@
+{
+  "id": "01a168ff-da1d-74d0-b347-d2e6ff3722d0",
+  "external_ref": null,
+  "title": "Refuse unknown top-level arguments before state-changing delegation MCP operations",
+  "outcome": "Refuse unknown top-level arguments before state-changing delegation MCP operations",
+  "acceptance": [
+    "For exactly these eleven delegation MCP tools—termal_spawn_session, termal_cancel_session, termal_resume_session, termal_followup_session, termal_resume_after_delegations, termal_resume_after_test_runs, termal_send_to_session, termal_read_mailbox, termal_acknowledge_mailbox, termal_board_set, termal_evaluate_acceptance—a request containing a top-level argument outside that tool's accepted argument set is refused with the offending field named before the requested operation performs HTTP I/O or any local mutation. Misspelled optional fields cannot be silently converted into omission/default behavior; the existing caller-eligibility checks remain authoritative.",
+    "Each of those tools advertises additionalProperties:false, and its runtime accepted-key check agrees with its input schema. Preserve the mailbox read handler's currently accepted optional readKey by listing it explicitly in that schema and allowlist; retain existing bridge-owned receipt issuance, read-key replay/validation and authority rules. Do not apply argument-name restrictions inside arbitrary user data such as board value, prompts or messages.",
+    "Deterministic bridge tests cover unknown top-level keys for all eleven tools and demonstrate zero requested-effect HTTP calls, including misspelled spawn cwd/writePolicy, evaluator reuseDelegationId/criterionEvidence, mailbox afterSequence/receipt/noContinuation, and board value alongside delete:true. Positive controls preserve valid omissions, JSON-null versus absent board values, explicit deletion, numeric versus receipt ACKs, caller restrictions, exact replay keys and mailbox readKey behavior. Existing nested write-policy and submission validation is retained.",
+    "Focused validation and the maintained full gate pass on the exact final input, reviewed by fresh independent read-only Codex and Claude whole-input children with no outstanding in-scope Medium or higher. The change does not revise valid default behavior, cancellation/resume authority, HTTP endpoint contracts, source-root naming/clearing/release, queued review-input identity semantics or repository authority instructions. The nine observational/polling tools identified in the inventory remain explicitly outside this fix."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording",
+    "mcp-tools"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

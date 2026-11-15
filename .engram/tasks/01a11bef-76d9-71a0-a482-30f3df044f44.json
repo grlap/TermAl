@@ -1,0 +1,28 @@
+{
+  "id": "01a11bef-76d9-71a0-a482-30f3df044f44",
+  "external_ref": null,
+  "title": "Pin Build pre-start replay reason and observed exit in regression assertions",
+  "outcome": "The pre-start replay regression must discriminate interval rejection and retained observed exit0 using rejected_terminal. Assess the duplicate focused native-outcome test and make its test-count-inference claim discriminate rather than duplicate weaker coverage.",
+  "acceptance": [
+    "Pin Build pre-start replay reason and observed exit in regression assertions is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

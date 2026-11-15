@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6bc-7b72-a3b4-6ee99a82a38e",
+  "external_ref": "tm-rfv3",
+  "title": "Replace Engram failed-Stop race polling with synchronization",
+  "outcome": "The deterministic failed Stop during in-flight begin regression currently polls awaiting_runtime_stop_resolution every 5 ms with a 2 s hang guard. It passes under contention and is not classified as flaky, but a channel/condvar hand-off would remove the final wall-clock loop from the adapter module.",
+  "acceptance": [
+    "The test uses an explicit synchronization hand-off for the deferred-by-Stop transition, retains a bounded hang guard only for deadlock detection, and still proves failed Stop resumes delivery while successful Stop supersedes cleanly."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

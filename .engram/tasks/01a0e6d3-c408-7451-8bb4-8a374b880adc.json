@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a374b880adc",
+  "external_ref": "tm-7cu.29",
+  "title": "Retain the last measurable transcript anchor across spacer-only frames",
+  "outcome": "captureLatestVisibleMessageAnchor now writes null over a valid anchor when the DOM is transiently spacer-only. Page-height reconciliation then loses anchorOffsetDelta and can apply a zero layoutHeightDelta for the first visible page, leaving detached readers uncompensated when an at-or-above page changes height. Separate an explicit authoritative anchor clear at the navigation seam from a momentarily unmeasurable capture, retain the last good anchor during transient gaps, and add a positive correction regression after a pane-owned upward write.",
+  "acceptance": [
+    "Transiently unmeasurable slots do not erase a valid anchor; explicit navigation can clear it intentionally; measurable post-write page changes still produce the expected detached-anchor correction without replaying a stale pre-write position."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c799-7781-8c49-ee394b05711d",
+  "external_ref": "tm-v923",
+  "title": "Leave Codex webSearch items out of Engram test-check overlap tracking",
+  "outcome": "Codex webSearch items go through command_started/command_completed, so note_engram_command_started counts them as commands: they mark open test checks overlapped (outcome unknown) and add a running key, though a search cannot write the worktree. Conservative, but it downgrades evidence. Give non-shell items a recorder path that skips the Engram notes (or mark only for commandExecution and file changes). Raised by the Claude round-5 /review-code of tm-winf steps 2+3.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

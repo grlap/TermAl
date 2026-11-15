@@ -1,0 +1,24 @@
+{
+  "id": "01a1c33c-7a05-7460-bfb0-36cc9076a5ec",
+  "external_ref": null,
+  "title": "Engram control fixture: refuse a reparse-point test-root component in the final-path alias branch",
+  "outcome": "src/tests/fixtures/engram-control-fixture.ps1 refuses a home whose <userTemp>\\termal or <userTemp>\\termal\\tests component is a reparse point, in both the lexical and the final-path containment branches, mirroring the Rust ensure_plain_test_directory check. A real Engram home behind a junctioned test-root component is refused without writes. A regression with a junctioned component shows the refusal.",
+  "acceptance": [
+    "Engram control fixture: refuse a reparse-point test-root component in the final-path alias branch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

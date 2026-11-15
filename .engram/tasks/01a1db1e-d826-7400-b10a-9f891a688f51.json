@@ -1,0 +1,39 @@
+{
+  "id": "01a1db1e-d826-7400-b10a-9f891a688f51",
+  "external_ref": null,
+  "title": "Telegram forwarding repeats \"session not found\" forever for a stale armed session id",
+  "outcome": "A Telegram-armed session id that definitively no longer exists is disarmed after its first not-found failure, so the forwarding loop stops logging the same failure on every poll and across restarts. Transient errors keep the session armed.",
+  "acceptance": [
+    "The stale armed id behind the repeated `telegram> failed to forward assistant message: session not found` line is confirmed from the persisted bot state and logs (read-only; never opening the TermAl host store), and the code path is identified (src/telegram_forwarding.rs forwarding loop around lines 185-199, per Fable2's lead).",
+    "On a definitive session-not-found result the forwarding loop disarms that id and persists the disarm; transient errors (e.g. load failures, timeouts) keep it armed. A behavioural test drives a persisted armed list containing a deleted session id through two polls and observes one failure followed by disarm and no repeat, plus a transient-error case that stays armed.",
+    "Clean review pair and landing under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "post-restart",
+    "startup",
+    "telegram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Telegram forwarding disarms and persists a definitively deleted local session after its first not-found failure, clearing its armed membership/cursor/footer/matching selection. Exact endpoint+404+local-cause code prevents false disarm for remote/transient failures. Delivered via reviewed0562a423 carried byte-identically as landed296758a6. Independent acceptance6c26f08794c64d51befc8b18fa0b4c92 (Claude18112/delegationcc1e6154,revision2/cut113) fresh PASS3/3, all full verdicts and complete child output read. Post-evaluation HEAD/tree/fullstatus separately exact2967/f07d/empty, all exit0. Low route-level test follow-up312ae2d4c30b remains optional.",
+    "completed_at": "2026-11-14T23:45:40.687476500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

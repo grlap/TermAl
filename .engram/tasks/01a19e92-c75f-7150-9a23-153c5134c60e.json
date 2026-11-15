@@ -1,0 +1,28 @@
+{
+  "id": "01a19e92-c75f-7150-9a23-153c5134c60e",
+  "external_ref": null,
+  "title": "Full gate: test-temp cleanup leftovers should not fail an otherwise green expensive FULL",
+  "outcome": "When every stage of a full gate passes and the only problem is test-temp leftovers in the run root (scripts/test-rust.sh's cleanup guard), the launcher reports a distinct non-red outcome naming the leftover entries and the tests that created them, and retains them. The integration owner may count that run as the landing gate after recording the entries on the item and filing the cleanup as its own item. Leftovers outside the product temp root, and any test failure, still fail the gate.",
+  "acceptance": [
+    "Full gate: test-temp cleanup leftovers should not fail an otherwise green expensive FULL is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "gate",
+    "greg-directed",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

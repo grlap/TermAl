@@ -1,0 +1,29 @@
+{
+  "id": "01a10d1f-4940-7b01-98b4-b6b7b7d9371e",
+  "external_ref": null,
+  "title": "Refresh the final sidebar preview after a success joins dedicated cleanup",
+  "outcome": "Refresh the final sidebar preview after a success joins dedicated cleanup",
+  "acceptance": [
+    "Refresh the final sidebar preview after a success joins dedicated cleanup is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "delegation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

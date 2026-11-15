@@ -1,0 +1,39 @@
+{
+  "id": "01a16966-c223-7a92-8832-650b6e028a5e",
+  "external_ref": null,
+  "title": "Attribute the 23 s turn_evaluate on 2026-10-23 (dispatch_budget_exhausted) to a demonstrated blocking stage: TermAl local work, Engram RPC/evaluate, or a lock/queue wait",
+  "outcome": "An evidence-backed attribution of where the 23,271 ms \"evaluate\" of BarA2's 15:25:01Z turn_evaluate (and the similar Sol-license stalls) was spent. TermAl-side stages (StateInner/queue waits, admission fence, control-call scheduling, process/IPC) are separated from the Engram-side evaluate (RPC, store lock or transaction, CPU), and the dominant stage is identified, with lock or queue ownership where one is implicated. It also determines whether project-6 turn-gated control alone, with no full gate running, reproduces evaluate latency near the 20 s budget. No fix is claimed complete until the blocking stage is demonstrated.",
+  "acceptance": [
+    "A note maps, with file:line, exactly what the card field latencyMs.evaluate measures (start and end points) and which TermAl and Engram sub-steps fall inside it.",
+    "For the 15:25:01Z BarA2 card (message-1641860) and at least one other dispatch_budget_exhausted or deadline_exceeded card on instance 84dfc92c, the evaluate time is split into measured TermAl-side and Engram-side portions from recorded evidence (host diagnostics, Engram-side timing or logs, persistence-writer ticks), with any lock, queue or transaction owner named. Where existing telemetry cannot split it, the missing measurement point is named as a follow-up instead of being inferred.",
+    "An observation window with NO full gate running records project-6 turn_evaluate latencies for normal lane turns (read-only, no synthetic load), and states whether evaluate approaches the 20 s budget without a gate.",
+    "The conclusion states whether w-faa1cc114a84 (measured hold) addresses the demonstrated stage, or whether a different fix item is needed, and that item is filed with provenance."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gate-load",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Research complete; no fix is claimed. All four criteria passed in independent evaluation 2eeaf1f5.\n\nC1 — what latencyMs.evaluate measures: evaluate_engram_turn_off_lock, engram_host_adapter.rs:8533 to :8959. It reports 0 on the replay and prepared-begin paths, and the heal re-evaluate is added later at :6244. A systematic sweep on 852c0a98 lists every StateInner, commit or persist, durability fence and Engram RPC on the path (note e16472b1; .evidence/w-650b/evaluate-path-sweep-852c0a98.txt).\n\nC2 — the split:\n- With no gate (Sol-03d4, 15:52:27Z): ≥ 16,637 of 16,946 ms was TermAl-local evaluate preparation (StateInner, commit_locked under it, the writer durability fence); Engram side ≤ 309 ms.\n- BarA2's 15:25:01Z card is unsplit (bind phase, before the evaluate), so its stage stays unattributed until missing point M1 exists.\n\nC3 — no-gate window, 15:47:10Z to 15:55:12Z: evaluate reached 16.9 s and 21.5 s without a gate, and in every grant the admission fence was 50–99% of evaluate.\n\nC4 — w-faa1 does not address the measured stage. The existing fix chain does: w-de6021f4b32f, w-1fcaa9b93d12 and w-b17b985f5dbc. Measurement gaps are filed as w-2e3605d69cdd (M1, M2); M3 is tracked as w-ccfc6536a372 and w-c52bf4dc777e; the Engram-side gap is Engram w-938caf265e2f.",
+    "completed_at": "2026-10-23T16:23:53.569926100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

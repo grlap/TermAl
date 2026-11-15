@@ -1,0 +1,28 @@
+{
+  "id": "01a0f50b-0e52-7d31-97ad-5bd8d769f1f0",
+  "external_ref": null,
+  "title": "Host architecture brief: section 5.2's facade groups omit the exit and host-line helpers EngramHost exposes",
+  "outcome": "Host architecture brief: section 5.2's facade groups omit the exit and host-line helpers EngramHost exposes",
+  "acceptance": [
+    "docs/features/host-architecture.md section 5.2 and the operation list of section 9.2 account for every operation src/engram_host.rs exposes: the facade's groups include the interpretation of a runtime's exit (codex, claude, acp) and the two carried-gate host lines (lost to a restart, lost to a reset), or the brief says why they are facade surface outside the three groups; a review pair without a Medium or higher on the change"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "docs",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

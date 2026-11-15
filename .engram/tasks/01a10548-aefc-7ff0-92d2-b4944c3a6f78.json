@@ -1,0 +1,27 @@
+{
+  "id": "01a10548-aefc-7ff0-92d2-b4944c3a6f78",
+  "external_ref": null,
+  "title": "An acceptance-evaluation request was refused with 409 'engram work show notes continuation: catalog cut, counts or cursor changed'; one identical request a minute later succeeded, and the cause is unknown",
+  "outcome": "An evaluation request reads the item's notes from one stable cut: either it succeeds, or it is refused with a cause naming what changed. A note written concurrently, or one still settling, never fails the request with an opaque catalog-cut conflict.",
+  "acceptance": [
+    "An acceptance-evaluation request was refused with 409 'engram work show notes continuation: catalog cut, counts or cursor changed'; one identical request a minute later succeeded, and the cause is unknown is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0f6aa-ec8d-7260-9ff5-31f8b36aceac",
+  "external_ref": null,
+  "title": "Avoid evicting certified streaming bodies for action summaries ahead of SSE delivery",
+  "outcome": "Investigate channel-aware treatment of same-epoch HTTP action summaries ahead of applied bodySeq; preserve safety while avoiding transient transcript eviction and redundant covering reads.",
+  "acceptance": [
+    "Avoid evicting certified streaming bodies for action summaries ahead of SSE delivery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "deferred-review",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-633a-7a40-beb8-9db7c33fb130",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

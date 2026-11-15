@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c402-7ed2-9d67-8b5017b8fd2a",
+  "external_ref": "tm-6sks",
+  "title": "Expose structured review received before delegation cancellation",
+  "outcome": "When a user cancels after a validated structured reviewer envelope has already been accepted, cancellation must remain authoritative and the envelope must not be synthesized into a contradictory Canceled result. Retain the submitted envelope and add an honest read/UI surface that shows 'result received before cancellation' without changing either lifecycle status or envelope fields.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

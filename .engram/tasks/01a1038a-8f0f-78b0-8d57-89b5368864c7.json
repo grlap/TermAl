@@ -1,0 +1,26 @@
+{
+  "id": "01a1038a-8f0f-78b0-8d57-89b5368864c7",
+  "external_ref": null,
+  "title": "Project-reset checkpoint claim waits against a real-time deadline outside the budget clock; two tests depend on it under load",
+  "outcome": "claim_engram_project_reset_checkpoints (src/session_crud.rs:3353) sets its deadline from real time: std::time::Instant::now() + ENGRAM_CONTROL_SETTLE_TIMEOUT, which is ENGRAM_MAX_CALL_TIMEOUT_MS (20 000) + 1 000 ms. claim_engram_project_reset_checkpoints_until (:3375) then polls with `std::time::Instant::now() >= deadline` and a 5 ms sleep (:3446-3454). Neither the deadline nor the poll goes through the state-owned Engram budget clock that slice 1 introduced.\n\nTwo tests in src/tests/engram_host_adapter.rs (the B1b region) take this default path and depend on real time:\n- project_reset_checkpoint_claim_waits_for_a_lifecycle_owner_without_takeover (claim at about :6082 at freeze f137beda);\n- project_reset_checkpoint_claim_waits_for_bind_to_publish_its_grant (claim thread at about :6283).\nIn each, the test releases the lifecycle owner or publishes the grant while the claim polls. If load delays that step past about 21 s of wall time, the claim returns the candidate as timed out and the test fails. The margin is large, but the wait is load-sensitive.\n\nThe two tests named for timeouts (strict_project_reset_checkpoint_timeout_does_not_append_a_degraded_card, project_reset_checkpoint_claim_times_out_a_stuck_bind_without_dropping_it) pass an already-elapsed Instant::now() to the _until variant, so they are deterministic.\n\nOut of B1b's scope: B1b changes no production code, and the claim's deadline is not a budget-clock read.\nFix direction: run this claim's deadline and poll on the state's budget clock (or on an injected deadline the two tests can script), so the tests release the owner or grant under a scripted clock with no wall-time dependence. Keep the production 21 s behaviour.",
+  "acceptance": [
+    "The project-reset checkpoint claim's default deadline and its poll no longer depend on wall time in tests: either they read the state's Engram budget clock, or the deadline is injectable, and production keeps ENGRAM_CONTROL_SETTLE_TIMEOUT.",
+    "project_reset_checkpoint_claim_waits_for_a_lifecycle_owner_without_takeover and project_reset_checkpoint_claim_waits_for_bind_to_publish_its_grant run with no real-time deadline: a test-controlled delay of any length before the release or publish cannot time out the claim, and a separate scripted expiry case still returns the candidate as timed out.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

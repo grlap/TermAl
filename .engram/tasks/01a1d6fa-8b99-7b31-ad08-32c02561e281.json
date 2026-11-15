@@ -1,0 +1,33 @@
+{
+  "id": "01a1d6fa-8b99-7b31-ad08-32c02561e281",
+  "external_ref": null,
+  "title": "Exercise body-dependent requests on boot-deferred transcript sessions",
+  "outcome": "Exercise body-dependent requests on boot-deferred transcript sessions",
+  "acceptance": [
+    "Behavioral coverage sends or dispatches a prompt on a boot-deferred idle session and verifies prior prefix and new message persist and reload.",
+    "Review remaining approval, input, fork, rollback, create-delegation, last-message and queue-drain paths and add discriminating coverage where cold-state behavior is otherwise untested."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "greg-reported",
+    "lazy-transcript-tails",
+    "performance",
+    "post-restart",
+    "review-low",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

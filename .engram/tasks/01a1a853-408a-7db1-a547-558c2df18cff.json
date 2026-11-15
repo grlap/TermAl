@@ -1,0 +1,36 @@
+{
+  "id": "01a1a853-408a-7db1-a547-558c2df18cff",
+  "external_ref": null,
+  "title": "Selected-resume test can capture its selection while the durability settlement thread is still running, and fails 409 in a landing gate",
+  "outcome": "human_prompt_reusable_selected_ordinary_resume_runs_its_wal_preserving_stored_history no longer fails intermittently. The confirmed cause is named and repaired, in the test if the test is wrong or in the product if a stale selection is a real user-visible defect, without a retry, a larger timeout or weaker assertions.",
+  "acceptance": [
+    "A diagnosis names what changes the selection between the test's capture and its resume, shown by a deterministic discriminating run, and says whether a real user can hit the same 409 after a held prompt's acknowledgement and whether that matters.",
+    "A deterministic regression holds the settlement thread at the discriminating point; the repaired path passes it without a retry or a larger timeout, keeps every existing assertion, and the original failed run stays on record.",
+    "Focused affected tests and the exact-input full gate pass on the repaired input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "landing-gate",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Diagnosed the intermediate-ACK selection race, made the positive test wait for actual settlement completion, and added a controlled stale-selection regression without product changes or weaker assertions. Landed2ce95425 after no-Medium+ source pair, focused affected tests and exact-tree FULL PASS.",
+    "completed_at": "2026-11-05T00:29:56.560619500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

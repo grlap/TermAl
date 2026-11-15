@@ -1,0 +1,27 @@
+{
+  "id": "01a0f95a-47bb-7f83-8d99-84481f03a9ac",
+  "external_ref": null,
+  "title": "Add route-level and MCP-bridge tests for held delegations: 202 spawn and follow-up, POST /resume, termal_resume_session, and the held exit of termal_wait_delegations",
+  "outcome": "The HTTP and MCP surfaces of held delegations are covered at the route and bridge level",
+  "acceptance": [
+    "Add route-level and MCP-bridge tests for held delegations: 202 spawn and follow-up, POST /resume, termal_resume_session, and the held exit of termal_wait_delegations is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

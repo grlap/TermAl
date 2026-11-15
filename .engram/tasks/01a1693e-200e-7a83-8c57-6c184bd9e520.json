@@ -1,0 +1,50 @@
+{
+  "id": "01a1693e-200e-7a83-8c57-6c184bd9e520",
+  "external_ref": null,
+  "title": "Id-less Codex late ends from a closed turn finalize host-observed test-run rows by command line, possibly the wrong run's",
+  "outcome": "A late end of an id-less Codex commandExecution item, tagged with a turn that is no longer running, never finalizes a host-observed test-run row that belongs to a different, still-running run of the same command line.",
+  "acceptance": [
+    "C1. A late end reaching the reported-end path (note_engram_reported_end) finalizes, and attaches launcher output to, only the host-observed test-run row started in the turn the end is tagged with; it never finalizes or annotates a row of any other turn, including the turn now running, whose own end path settles its rows. This holds for an id-less (line-keyed) item and an item with an id alike.",
+    "C2. A regression test through the real shared app-server path: turn 1 starts an id-less recognized test and closes with it still running; turn 2 starts the same command line; turn 1's late end, tagged with the closed turn, finalizes turn 1's observed row with its own exit and leaves turn 2's row running. A further case: a third turn starts the same line after turn 2 closes with its row still running, and turn 1's late end leaves both turn 2's and turn 3's rows unended.",
+    "C3. A lone id-less late end that arrives while no turn is running finalizes its own observed row, pinned by a test. The existing observed-terminal and reported-ends tests pass unchanged.",
+    "C4. The review pair has no outstanding finding of Medium or higher; focused checks pass on the frozen input; it lands after w-e11e."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "observed-runs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1695e-851b-73c1-a96b-c54d06be3631",
+  "disposal_reason": "Filed shape unreachable: start dedup (observe_test_command_description, test_run_observations.rs:303-347, Ambient has no turn filter at :345) folds a later turn's run of the same id-less line into the earlier unended row, so two unended rows never coexist and C1 holds by construction. RED attempt test-eb6cccd5 failed at its precondition (one row after two turns). The real defect, a live later run with no row of its own, is w-c54d06be3631, which carries this item's tests. Decision: Termal::Fable2, mailbox #456, option (a).",
+  "completion": null
+}

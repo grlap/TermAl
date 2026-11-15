@@ -1,0 +1,52 @@
+{
+  "id": "01a11ed8-c5d1-7150-a65c-0dd8aea5cfc3",
+  "external_ref": null,
+  "title": "Declared test commands are never recognized from Codex sessions on Windows: Codex's quoted absolute pwsh wrapper fails the wrapper rule",
+  "outcome": "The declared route recognizes Codex's ordinary double-quoted absolute Windows pwsh executable wrapper while preserving the existing inner-line rules and direct command behavior; arbitrary or ambiguous wrappers remain refused.",
+  "acceptance": [
+    "From source (the declared route's wrapper parsing) and a reproduction, show that Codex's Windows exec envelope `\"<absolute path>\\pwsh.exe\" -Command '<line>'` (a double-quoted absolute path containing spaces and backslashes) is what the wrapper rule rejects today.",
+    "The declared route accepts exactly that envelope: a double-quoted absolute Windows path whose final component is pwsh.exe, then -Command (or -c, with any of -NoProfile, -NonInteractive, -NoLogo before it, as for bare pwsh), then one single-quoted script word, which is judged by the existing line rules unchanged. A Windows-shaped positive test drives a Codex-shaped declared PASS through the recognizer.",
+    "Negative tests show these are still refused: a quoted powershell.exe, cmd.exe or any other executable; a quoted relative path; a quoted path not ending in pwsh.exe; other or extra options; a script that isn't one single-quoted word; mixed quoting. Direct (unwrapped) declared-command behaviour and the existing declared tests are unchanged.",
+    "The maintained full gate passes on the exact committed tree with a credited host record, and the Codex/Claude review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "declared-tests",
+    "host-recording",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed quoted drive-absolute Windows pwsh.exe declared-command recognition with unchanged option/script/inner-line rules, positive Codex-shaped PASS and refusal controls, and documentation. Exact committed tree1aeb9c06 passed maintained full gate with host11399e19, independent final Codex/Claude pair no Medium+, and fresh evaluation899482b3 all4PASS. Opus2 pushed/installed013e6b6f; author verified remote/tree and binary SHA256. Low comment follow-up recorded separately.",
+    "completed_at": "2026-10-09T05:34:43.285726100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

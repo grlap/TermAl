@@ -1,0 +1,27 @@
+{
+  "id": "01a1a394-627f-7892-a4ae-80425354330d",
+  "external_ref": null,
+  "title": "Require a real untracked-alias listing witness in content revision tests",
+  "outcome": "The tracked-only collision boundary test demonstrates an alias actually reported by Git.",
+  "acceptance": [
+    "Test asserts the alias appears in Git untracked listing with core.ignoreCase=false before asserting capture succeeds, or explicitly surfaces unavailable capability."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a31e-1803-7fa0-a1f5-81991023d2c1",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

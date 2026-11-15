@@ -1,0 +1,26 @@
+{
+  "id": "01a1d8df-712d-7301-864b-0bd3f903a8cd",
+  "external_ref": null,
+  "title": "C6 probe: OpenCode harness records ordinary evidence after the EO restart",
+  "outcome": "Root session Termal::OpenCode-C6 (session-17991, OpenCode on Central in project-6, opencode/big-pickle, opencodeApprovalMode ask) claims this item, names the clean detached worktree .tmp/wt-c6-opencode-central at 491dd015, and runs one registered focused test there in a later turn; the host records its turn observation, named-root sighting, verification record and credit result through Engram's ordinary writer, as evidence for criterion 6 of w-3fe8f4472e5d. The earlier Mac attempt (session-17989) is recorded as partial evidence, and both probe worktrees are removed afterwards.",
+  "acceptance": [
+    "Session-17991 holds a claim on this item and has named C:/github/Personal/TermAl/.tmp/wt-c6-opencode-central, a clean detached worktree at 491dd015, as its source root.",
+    "A registered test-kind run, `node scripts/test-launcher.mjs focused --input commit -- node --test scripts/check-doc-links.test.mjs`, in that root ends eligible, and its verification record, credit result and the session's turn observations appear on this item's run feed.",
+    "The evidence (run id, records, running build, the model used and the approval cards) is cited on w-3fe8f4472e5d for C6's OpenCode row, and the removal of the Central and Mac probe worktrees is recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

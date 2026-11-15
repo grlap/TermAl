@@ -1,0 +1,51 @@
+{
+  "id": "01a155c2-1214-72d0-be67-a3034d38a096",
+  "external_ref": null,
+  "title": "M5 integration increment 2: production native binding to fresh reference and canonical send",
+  "outcome": "Compose the production S4b placement/install and canonical registration with current native-binding proof, fresh typed mailbox-only reference publication, and actual canonical mailbox send. This is a bounded required integration child, not legacy UI-proxy/config continuity or full live one-central/two-satellite completion.",
+  "acceptance": [
+    "From an explicitly selected eligible unbound native root on a currently active, qualified enrolled peer, production S4b placement/PREPARE/INSTALL establishes the exact durable native binding and canonical registration. A pending, refused or unconfirmed install cannot publish a usable reference. The flow then uses the existing authenticated proof and durable local publication path to create a fresh typed mailbox-only reference, without a legacy adapter, second placement or injected binding evidence.",
+    "The actual termal_send_to_session facade resolves that fresh reference to the same canonical participant and mailbox as the ordinary directory target. The ordinary federated HTTP path receives the canonical id and still rejects unresolved raw proxy/native/reference ids. Existing ACL, self/root-session checks and central mediation remain unchanged; the new reference grants neither participant/sender identity nor executor routing, and old legacy handles remain unchanged and refused.",
+    "Lost install replies, pending placement, native recreation, changed authority/enrollment/configuration/link/placement, central outage, and local reference publication failure cannot expose an unconfirmed reference or retarget an old intent. Recovery uses the exact original operation at each stage and preserves a committed installation when only local publication remains unresolved. Current use is revalidated after reconnect/reload; historical receipt replay is never current send authority.",
+    "Deterministic integration drives the production S4b entrypoints, binding proof, reference publication, actual MCP facade and ordinary HTTP delivery in sequence, including same raw ids on different hosts, two TermAl instances on one machine, old-handle refusal, lost install reply and post-install local publication failure. Fixtures disclose simulated enrollment/qualification and transport; already-bound setup alone is not the positive provisioning witness. Exact dependency revisions and any unavailable production seam are recorded. Same-machine evidence is not reported as live Mac/Win2 or full one-central/two-satellite readiness.",
+    "Exact-input focused tests and the maintained five-stage gate pass, with a qualifying independent read-only review pair having no outstanding in-scope Medium-or-higher finding. The evidence distinguishes this provisioning-to-reference composition from the completed already-bound reference child and from the parent's remaining legacy/UI and live multi-host obligations."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "integration",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14e3f-a539-7dd2-ae91-fc620307cb7a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

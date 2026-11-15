@@ -1,0 +1,28 @@
+{
+  "id": "01a10945-c73b-7d82-a76c-216a74b5a82e",
+  "external_ref": null,
+  "title": "Strengthen the host-cwd fixture's lifecycle and immutable-authority witnesses",
+  "outcome": "Make the completed/failed host-control cwd witnesses exercise the control sidecar installed in the finished child's AppState, replace the echo-only immutable-authority assertion with a causal authority witness, and remove unreachable Unix script fixture code from the Windows-only test module.",
+  "acceptance": [
+    "Strengthen the host-cwd fixture's lifecycle and immutable-authority witnesses is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

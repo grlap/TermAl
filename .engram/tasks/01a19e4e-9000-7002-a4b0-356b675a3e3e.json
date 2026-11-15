@@ -1,0 +1,27 @@
+{
+  "id": "01a19e4e-9000-7002-a4b0-356b675a3e3e",
+  "external_ref": null,
+  "title": "Durability pending-naming tests replace fixture state without retiring the replaced test host",
+  "outcome": "Every test that swaps a fixture's AppState for a restarted one retires the replaced host (signal and join) before the swap, as the repairs test already does, so no replaced host outlives its test.",
+  "acceptance": [
+    "Durability pending-naming tests replace fixture state without retiring the replaced test host is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "temp-leak",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

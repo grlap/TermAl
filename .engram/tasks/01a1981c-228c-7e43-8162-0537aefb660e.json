@@ -1,0 +1,30 @@
+{
+  "id": "01a1981c-228c-7e43-8162-0537aefb660e",
+  "external_ref": null,
+  "title": "Greg's prompt to Engram::Advisor at about 17:07:35Z appears queued in the UI but is absent from the server's queue and transcript",
+  "outcome": "Greg's prompt to Engram::Advisor at about 17:07:35Z appears queued in the UI but is absent from the server's queue and transcript",
+  "acceptance": [
+    "The actual outcome of the 17:07:35Z send request is established from existing data (the request, its HTTP response or refusal, the server log, or the UI's optimistic state): whether the server refused it, accepted and lost it, rolled it back, or never received it",
+    "If it is a defect, it is fixed so that a prompt the UI shows as queued is either durably in the server's queue or visibly marked as failed with its reason; a test covers the found path",
+    "No replay, resend request to Greg, or deletion is used to reach this"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delivery",
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

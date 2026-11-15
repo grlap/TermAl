@@ -1,0 +1,44 @@
+{
+  "id": "01a14568-b30a-7f33-a676-76df8b61c0ee",
+  "external_ref": null,
+  "title": "Session list: add an \"Error\" status filter beside No filter / Working / Asking / Completed",
+  "outcome": "Session list: add an \"Error\" status filter beside No filter / Working / Asking / Completed",
+  "acceptance": [
+    "The session list's Status filter offers \"Error\" beside No filter, Working, Asking and Completed, with its own count. Selecting it shows exactly the visible sessions whose status is error; the other filters, their counts and the all-count behave as before.",
+    "When an error-state session already carries a provider or host error reason (for example a provider refusal message), the Error-filtered list shows that reason. No session lifecycle semantics or status values change.",
+    "Tests cover the Error predicate, the Error count and the rendered filter option; `npx tsc --noEmit` is clean and the affected vitest files pass."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "greg-requested",
+    "session-list",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented Error status filter/count on docked and standalone session lists, preserving visible/project/search scoping and existing filters; Error rows retain existing error preview. Commit41a3f25ecb59fa315b06d4bac914e588a8c48a50, exact reviewed/gated tree1a293899c1fa8f491e5be975231ffd6ac31c6118. Full gate2379b722 all5stagesPASS, recordedb9a79cb8; pair69e5a69f/84583b69 noMedium+, fulloutputsread; twofutureLows trackedw-5633bc355f1d. Independent evaluation6daf224995d34975ade813a08e0a09ed fresh3/3PASS, FULLoutput1519bytes complete:true read. Completed perFable2#229 before integration handoff; no push or distbuild yet, Opus2 owns publication. Existing preview firstline88character bound accepted, fulltypedreason separate.",
+    "completed_at": "2026-10-16T17:53:44.881134200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

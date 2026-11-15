@@ -1,0 +1,28 @@
+{
+  "id": "01a1cc43-7a98-70d1-bb5a-1ea9caaddf13",
+  "external_ref": null,
+  "title": "Integrate combo63 on b1e8769a: edfd 4fe61e6b (w-410a held-turn focus attribution carry), direct child of combo62",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 4fe61e6bd15ac026bfad60a54018096fb0937add (tree e6d7864757c62f14745d7bfb1b848d72e37a980b) is on origin/master, where master was moved to it by a fast-forward from b1e8769a5ff6e72ccd6436e36b5e12d9901d69de.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is e6d78647 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: for the six src paths the candidate's contribution against b1e8769a is byte-identical (equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 040ca4da's contribution against 210f6518, which the WHOLE-7 pair (Codex session 17487, Claude session 17488) reviewed with no Medium or higher finding, and the changed docs/features/engram-host-adapter.md was reviewed on this commit by a scoped read-only pair (Codex session 17531, Claude session 17532) with no Medium or higher finding.",
+    "The release binary built from tree e6d78647 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1cd0e-ea96-7b13-bb7b-593798cf7a0c",
+  "disposal_reason": "combo63's edfd w-410a held-turn attribution candidate 4fe61e6b failed its DL560 FULL (test-65647be8, diagnosis H1 confirmed) and never landed. edfd's fixed w-410a carry landed later as combo68 (046951e8, w-593798cf7a0c, done with seal 70a1b3a0), which supersedes this integration item. Test ref test/w-1ea9caaddf13-952799c2 (d16b080a) is deleted next.",
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1a4d4-646c-7310-8bef-f97d6a861ff7",
+  "external_ref": null,
+  "title": "Focused test-thread reporting: homedir failure can fail a passed run, CARGO_HOME handling differs from the launcher's, direct wrapper form reports unknown",
+  "outcome": "Reading a focused run's test-thread setting can never decide the run, Cargo's configuration directories are found by one shared helper with the same CARGO_HOME rules as the launcher's, a directly executed scripts/test-rust.sh reports its count or the doc is narrowed, and a test covers the direct cargo wiring at the launcher's call site.",
+  "acceptance": [
+    "A throw while reading the setting records unknown and leaves the stage's verdict unchanged, with a test",
+    "cargoConfigTexts and cargoConfigSelectsRustc share one directory listing, with Windows-spelling, empty and relative CARGO_HOME covered",
+    "focused -- scripts/test-rust.sh reports the wrapper's count, or docs/test.md no longer says it does",
+    "An end-to-end launcher test covers a direct cargo test's args, environment and configuration wiring"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

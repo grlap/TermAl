@@ -1,0 +1,27 @@
+{
+  "id": "01a0fb9a-7ee6-7710-a777-178ee8f5ad69",
+  "external_ref": null,
+  "title": "No near-limit acceptance-brief test for a Claude evaluator, whose brief carries the command-form paragraph",
+  "outcome": "A test builds a near-limit brief through build_acceptance_evaluator_brief_for_agent for a Claude evaluator. It asserts the byte bound MAX_ACCEPTANCE_BRIEF_BYTES, that the command-form paragraph is still present, that the cuts are truthful, and the agent-dependent too-large floor. The Claude/Codex command-form assertions sit in their own test, outside src/tests/acceptance_evaluation.rs.",
+  "acceptance": [
+    "No near-limit acceptance-brief test for a Claude evaluator, whose brief carries the command-form paragraph is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

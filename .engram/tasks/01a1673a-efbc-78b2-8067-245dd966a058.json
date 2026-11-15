@@ -1,0 +1,30 @@
+{
+  "id": "01a1673a-efbc-78b2-8067-245dd966a058",
+  "external_ref": null,
+  "title": "Revalidate the ordinary queue owner inside dispatch-card finish before marking its head",
+  "outcome": "Establish the reachable Cancel/ordinary-preparation interleaving and make a missing or replaced head return Superseded without a panic, state-mutex poisoning, or successor mutation.",
+  "acceptance": [
+    "Use deterministic synchronization to prove or refute Cancel between prepare_ordinary_engram_handoff's current-owner check and finish_engram_dispatch_record_with_defer_retry; distinguish an actual eligible NotStarted ordinary path from plain Backoff, which currently produces Unknown, and from retained/in-progress admissions that already fence Cancel.",
+    "If the gap is reachable, revalidate the exact queued owner under finish's own lock and return Superseded for a missing or replaced head; no provider enqueue, successor mutation, panic or poisoned state mutex may result. Preserve a positive control for the matching head.",
+    "Focused tests and the exact full gate pass, with independent review and no outstanding in-scope Medium or higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "concurrency",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a10d1a-a65a-7e21-9a99-5afc48641f64",
+  "external_ref": null,
+  "title": "On Engram's execution_observation_source_revision_mismatch checkpoint refusal, resend once without the turn's own observation but with its checks, so the turn's checks are kept while the close stays owed",
+  "outcome": "When Engram refuses a turn checkpoint with the typed code execution_observation_source_revision_mismatch (Engram w-66cb93d1d943), TermAl resends that checkpoint once without the turn's own quiet observation but with the turn's check records. The checks are recorded, and the close stays owed, so the next opening reports the change as an inter-turn observation with honest causality. TermAl never re-measures and resends a corrected observation. Other refusal codes keep today's generic path.",
+  "acceptance": [
+    "On Engram's execution_observation_source_revision_mismatch checkpoint refusal, resend once without the turn's own observation but with its checks, so the turn's checks are kept while the close stays owed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a1cc62-0c52-7593-b677-0bdaf876a103",
+  "external_ref": null,
+  "title": "Integrate combo64 on b1e8769a: 8e1f d27ef044 (w-56cd stdin watchdog budget carry), direct child of combo62",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit d27ef044c4987f3a64e14228ba589e859c50ab8d (tree 6ada18a56dd30cd0faf6976279bad5dcf47628d9) is on origin/master, where master was moved to it by a fast-forward from b1e8769a5ff6e72ccd6436e36b5e12d9901d69de.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 6ada18a5 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against b1e8769a is byte-identical (same two paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to b56e96a4's contribution against ddfcf786, which the WHOLE-2 pair (Codex session 17535, Claude session 17536) reviewed with no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree 6ada18a5 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo64 landed: 8e1f stdin d27ef044 (tree 6ada18a5) fast-forwarded master from b1e8769a and was pushed at 21:38:24Z, with origin verified. The FULL gate DL560 test-99b11b1e passed all six stages (Rust 7670/0, node 520/0, vitest 5095). It adopts the WHOLE-2 pair 17535/17536 under a byte-identical carry. Installed on Central (983a74a5) and DL560 (e4aa5f7e) with no restart. The test ref is deleted. Independent evaluation delegation-2bd03340: all 3 criteria passed.",
+    "completed_at": "2026-11-11T21:47:36.566519300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

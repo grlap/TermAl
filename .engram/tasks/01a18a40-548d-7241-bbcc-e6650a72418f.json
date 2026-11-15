@@ -1,0 +1,27 @@
+{
+  "id": "01a18a40-548d-7241-bbcc-e6650a72418f",
+  "external_ref": null,
+  "title": "End-to-end test: an unlisted Remote answer to a rebind's recovery checkpoint keeps the cached report",
+  "outcome": "A scripted mediated-turn test (for example a LostThenRecoveryUnresolved script, using remote_error_reply(\"storage_error\") on the rebind's recovery checkpoint) asserts that active_turn_report still holds the full report after the failed recovery, which covers the keep-and-log branch at the rebind-recovery call site end to end.",
+  "acceptance": [
+    "End-to-end test: an unlisted Remote answer to a rebind's recovery checkpoint keeps the cached report is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0f83d-343b-7462-93ff-b61c3a6ceacb",
+  "external_ref": null,
+  "title": "Keep tracker-cut stored-body omissions when a canonical projection is rendered",
+  "outcome": "An original-closure host projection is distinct from the stored record body. Rendering that projection must retain truthful omission metadata for a tracker-cut body; only an exact whole stored-body read rendered whole can clear the stored-body omission.",
+  "acceptance": [
+    "Both brief paths and response omission metadata retain a tracker-cut stored record locator when only its canonical closure projection is rendered, while a whole exact note body rendered once may clear that locator's tracker-cut omission; request-path regression tests cover both cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "repeated-problem",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0f464-f38b-7f82-a402-e57a7f7e8da0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c14d-a75b-7fe0-a7c9-b37ff939aa0a",
+  "disposal_reason": "Fable2 #1217 evaluation triage: current A defect at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825; only stranded beneath a completed parent, with no active blocker or unresolved prerequisite. Continue independently; priority and acceptance unchanged.",
+  "completion": null
+}

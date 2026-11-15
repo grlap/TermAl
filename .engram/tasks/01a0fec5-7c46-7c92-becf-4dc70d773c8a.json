@@ -1,0 +1,29 @@
+{
+  "id": "01a0fec5-7c46-7c92-becf-4dc70d773c8a",
+  "external_ref": null,
+  "title": "Preserve master reconnect-confirmation guards for certified body frames",
+  "outcome": "A stale or forward-gap certified body frame cannot cancel pending bad-event/reconnect metadata recovery where master would retain it; per-session body application remains independent.",
+  "acceptance": [
+    "Preserve master reconnect-confirmation guards for certified body frames is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

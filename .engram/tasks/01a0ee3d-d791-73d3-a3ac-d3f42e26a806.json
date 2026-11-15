@@ -1,0 +1,45 @@
+{
+  "id": "01a0ee3d-d791-73d3-a3ac-d3f42e26a806",
+  "external_ref": null,
+  "title": "termal_name_source_root clears the name when the path is given under an unknown argument name",
+  "outcome": "A call to termal_name_source_root that carries an argument the tool does not know is refused with the argument named, and never read as a request to clear the name.",
+  "acceptance": [
+    "A call with an argument name the tool does not define is refused, the refusal names the argument, and the stored name is unchanged; a test shows it for {work, root}.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The other delegation tools whose omitted argument has a destructive or state-changing meaning are listed in a note, each with the decision taken for it.",
+    "The tool's inputSchema sets additionalProperties to false."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "mcp-tools"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verified the already-landed unknown-source-root-argument refusal without source changes and completed the omission-sensitive delegation-tool inventory. Fresh host-credited2-test check eb954c855a4f4b35806c0654c630895d passed at the judged revision. Independent evaluator5a26ffad recorded evaluation85c3d6c5182841efaf2536ebfc128c70, all4criteria PASS, cut39/revision2. Historical exact landing gate/pair for47516f56 are attributed in5dd8fb7a; raw oldgate artifacts are unavailable and evaluator accepted quoted owner record. Eleven state-changing tool guards continue separately in root w-d2e6ff3722d0; nine observational tools deferred per coordinator. No new commit, gate, installation or restart. Initial completion with author links was refused because project policy uses evaluations; corrected completion omits author links and consumes the recorded evaluation.",
+    "completed_at": "2026-10-23T14:00:34.616595900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

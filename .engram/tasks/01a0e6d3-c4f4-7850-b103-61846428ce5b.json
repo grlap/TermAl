@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4f4-7850-b103-61846428ce5b",
+  "external_ref": "tm-e2t",
+  "title": "Harden OpenCode config deadline and rejection notices",
+  "outcome": "Fix the acknowledged OpenCode config apply path so it cannot report wholesale failure after state has already committed at the execution deadline, and bound JSON-RPC rejection details before persisting reset notices. Add deterministic regression coverage for post-commit deadline handling and oversized rejection messages.",
+  "acceptance": [
+    "Acknowledged committed config updates return success even if the execution deadline passes immediately afterward; no new stage begins after deadline; persisted dependent-reset notices cap untrusted JSON-RPC error detail; focused regressions cover both behaviors; relevant quality gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

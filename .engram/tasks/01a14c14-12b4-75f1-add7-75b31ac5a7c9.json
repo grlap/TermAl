@@ -1,0 +1,31 @@
+{
+  "id": "01a14c14-12b4-75f1-add7-75b31ac5a7c9",
+  "external_ref": null,
+  "title": "Overdue handoff recovery, slice 2: carrier-completion prerequisites and the land/push/install effect path with single execution and retained evidence across restart",
+  "outcome": "Overdue handoff recovery, slice 2: carrier-completion prerequisites and the land/push/install effect path with single execution and retained evidence across restart",
+  "acceptance": [
+    "A completed carrier (not only a registered test-run gate) with a durable next action is a handoff prerequisite and is automatically handed to a successor within a bounded time, even if its coordinator is idle or missed a wake (tests).",
+    "No land, push or install happens twice, and no evidence is dropped: tests drive the land/push/install effect path with single-execution counters and assert retained completion evidence across a host restart at each persistence cut.",
+    "The recovery owner and any overdue carrier or effect handoff are durable and observable (visible in host state or the UI and surviving a restart)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "handoff",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a14a88-8e97-7391-a2a5-d9f93ea08fd2"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

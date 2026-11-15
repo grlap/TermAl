@@ -1,0 +1,43 @@
+{
+  "id": "01a1db1b-2309-71b3-933e-ee06482f6d8e",
+  "external_ref": null,
+  "title": "TermAl host aborts the process on a failed heap allocation under low system commit instead of degrading",
+  "outcome": "When system commit is exhausted by another process, the TermAl host either survives (by refusing or deferring the work that needed the allocation) or exits in a recorded, recoverable way. It does not abort mid-operation with 0xc0000409 and lose every session's live state.",
+  "acceptance": [
+    "The allocation site(s) that failed at 17:08:27Z on 2026-11-14 (\"memory allocation of 2719744 bytes failed\", termal.exe 0xc0000409, Application Error event) are identified from evidence: the event, any crash dump or journal, and the code paths that allocate about 2.7 MB buffers on hot paths.",
+    "Either the avoidable large allocation on that path is bounded or made fallible (e.g. try_reserve with a refusal reported to the caller), with a behavioural test that injects allocation failure or a size cap and observes the refusal instead of an abort; or the item records, with evidence, why Rust's global-allocator abort cannot be avoided there and what the host does instead (for example persisting state so a restart loses nothing)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "central",
+    "greg-reported",
+    "memory",
+    "reliability",
+    "resource"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1db19-6bf0-7c21-97ee-e938ef8d73be",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a1db25-4aac-78b0-8603-aa7fb3f99200",
+      "kind": "manual",
+      "detail": "STOPPED by Greg (#1711, relayed by Opus2 #911 at 17:38:12Z): „Nie robicie nic z pamięcia narazie… Skupmy się na rowiezieniu sync i EO.” mimalloc and this item's retry wrapper are stopped. It resumes only when Greg lifts the stop.",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-11-14T17:40:16.668485200Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

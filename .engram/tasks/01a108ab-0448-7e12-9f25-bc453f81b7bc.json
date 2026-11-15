@@ -1,0 +1,30 @@
+{
+  "id": "01a108ab-0448-7e12-9f25-bc453f81b7bc",
+  "external_ref": null,
+  "title": "Keep checkpoint-wake owner identity independent of a temporary delivery hold",
+  "outcome": "A still-current Active checkpoint owner retains its wake while delivery is held; true owner loss remains a named cancellation.",
+  "acceptance": [
+    "Keep checkpoint-wake owner identity independent of a temporary delivery hold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

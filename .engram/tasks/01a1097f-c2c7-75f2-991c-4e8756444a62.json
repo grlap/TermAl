@@ -1,0 +1,26 @@
+{
+  "id": "01a1097f-c2c7-75f2-991c-4e8756444a62",
+  "external_ref": null,
+  "title": "Delegation summary note trigger: negation and severity-adjective checks span clauses ('High throughput verified; 0 issues.' gives a false note)",
+  "outcome": "In src/delegation_result_parser.rs (delegation_result_summary_reports_findings, around :221), the count check requires the count's clause to match its finding noun, but the negation words (no/not/zero/without) and the severity-adjective shortcut (actionable/critical/high/low/medium in the before-window) still look across clause boundaries. So 'High throughput verified; 0 issues.' with Findings: None yields a false, non-actionable inconsistency note. It is pre-existing in kind and costs only a note, never an actionable finding, since an explicit Findings: None wins.",
+  "acceptance": [
+    "Delegation summary note trigger: negation and severity-adjective checks span clauses ('High throughput verified; 0 issues.' gives a false note) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,66 @@
+{
+  "id": "01a129c6-e080-7840-b9e2-6efe708d7c6d",
+  "external_ref": null,
+  "title": "Durable, restart-safe owner wake and explicit acknowledgement for a declared test-run transition",
+  "outcome": "A run that declares a next transition wakes its declared owner through a host-persisted transition record and the existing run-wait/queued-resume path: exactly one logical sign-off and one resume prompt, durable across host restarts at every boundary, dispatched only after the persistence acknowledgement, never waking a stopped/paused/archived/deleted or unverified owner. The UI keeps a delivered transition visible until the exact owner explicitly acknowledges it. Design: Termal::Architect2's ruling, note b0588a1d on the parent. No polling, watchdog, timer or new telemetry.",
+  "acceptance": [
+    "A run that declares a next transition gets one host-persisted transition record, identified by its run incarnation and project, holding the frozen declaration, its state and the correlated queued resume prompt. The record and its pending run wait persist together; terminal settlement persists the queued prompt and consumes the wait atomically; the record is kept after the wait is consumed. A rescan after consumption, after a restart, or after the run directory disappears and reappears registers nothing new; a conflicting declaration or result becomes an explicit blocker, not another wake.",
+    "The owner's resume is dispatched only after the persistence acknowledgement for its transition and queued prompt, never after a failed commit. Deterministic barrier tests show exactly one logical sign-off and one resume prompt when the host is down before terminal indexing; on restart before the registration commit, after registration, and after the terminal enqueue but before dispatch; and at the ambiguous send/receipt boundary, reconciled through the existing dispatch identity. No polling, watchdog or timer is added.",
+    "An owner that is stopped, paused, archived or deleted, or whose launch provenance is unverified, is never woken or substituted; its transition shows an explicit blocked or cancelled disposition that a rescan does not undo. The --notify mail and the host wake never both wake the same session for one terminal event.",
+    "The UI keeps a delivered transition visible as awaiting the owner until the exact owner explicitly acknowledges it; delivery status and acknowledgement are distinct states. UI tests cover delivered-awaiting-acknowledgement and acknowledged.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "greg-direction",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a129b8-090f-7243-a6f4-a2a4c24f361e",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a12cb4-ec29-7fb0-bcf0-9b3a30fde03e"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a135eb-2c7d-7ec1-b8ef-3c4c27c76399",
+  "external_ref": null,
+  "title": "Rejected prompt-delivery receipts keep the full queued entry, attachments included, in the persisted session row with no expiry",
+  "outcome": "Rejected prompt-delivery receipts keep the full queued entry, attachments included, in the persisted session row with no expiry",
+  "acceptance": [
+    "A rejected receipt's retained QueuedPromptRecord (PromptDelivery.entry, src/prompt_delivery.rs) is bounded or expired, for example cleared on the oldest settled rejected receipts or replaced by a content reference, so attachments are not stored twice indefinitely; the retention rule is documented next to the receipt cap.",
+    "A test shows the retained entries stay within the documented bound across many rejected receipts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "persistence",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

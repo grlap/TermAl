@@ -1,0 +1,27 @@
+{
+  "id": "01a10875-efd3-7361-824c-8fd719f5c63f",
+  "external_ref": null,
+  "title": "Move the retry-cap and retry-head permit wiring out of engram_host_adapter.rs into the retry schedule modules",
+  "outcome": "Move the retry-cap and retry-head permit wiring out of engram_host_adapter.rs into the retry schedule modules",
+  "acceptance": [
+    "The retry slot and permit decisions live in engram_retry_schedule.rs or engram_admission_retry.rs, and engram_host_adapter.rs only calls them. The move is pure (no behaviour change) and the existing retry tests pass unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

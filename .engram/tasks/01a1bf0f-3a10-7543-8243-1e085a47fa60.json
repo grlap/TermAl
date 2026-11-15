@@ -1,0 +1,24 @@
+{
+  "id": "01a1bf0f-3a10-7543-8243-1e085a47fa60",
+  "external_ref": null,
+  "title": "Mailbox panel page rows can show a verified-wake cause beside 'No wake confirmed'",
+  "outcome": "A mailbox panel row never shows a verified-wake cause next to a contradicting state sentence: page reads use a cause-consistent summary, with page byte accounting recomputed, or the panel renders one. Pre-existing; found by review of combo24 at ui/src/panels/MailboxPanel.tsx:421 and src/federation_mailbox_reads.rs:270.",
+  "acceptance": [
+    "Mailbox panel page rows can show a verified-wake cause beside 'No wake confirmed' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

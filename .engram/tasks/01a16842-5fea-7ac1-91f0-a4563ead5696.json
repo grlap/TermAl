@@ -1,0 +1,27 @@
+{
+  "id": "01a16842-5fea-7ac1-91f0-a4563ead5696",
+  "external_ref": null,
+  "title": "A kept Claude Bash operation whose result never arrives holds a carried gate uncredited until its six-hour expiry",
+  "outcome": "A provisional Claude Bash operation whose runtime stays alive but whose result never arrives (a lost denial result, a call interrupted without a tool_result) resolves within a bounded time, for example at turn end or on a turn-generation change, instead of keeping its carried gate uncredited until the six-hour carried-check expiry refuses it.",
+  "acceptance": [
+    "A kept Claude Bash operation whose result never arrives holds a carried gate uncredited until its six-hour expiry is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

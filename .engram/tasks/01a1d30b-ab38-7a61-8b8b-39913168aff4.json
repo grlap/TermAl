@@ -1,0 +1,36 @@
+{
+  "id": "01a1d30b-ab38-7a61-8b8b-39913168aff4",
+  "external_ref": null,
+  "title": "A turn that dies after accepting a mailbox wake leaves the woken work unresumed until another wake arrives",
+  "outcome": "A turn that dies after accepting a mailbox wake leaves the woken work unresumed until another wake arrives",
+  "acceptance": [
+    "When a root session's runtime turn that was started by a mailbox wake ends in failure (runtime error, crash or host restart) before the woken message is acknowledged, TermAl re-delivers a wake for that unacknowledged message on the session's next available turn, or marks it with a visible typed state naming the remedy; a woken message is never silently left unprocessed. A behavioural test covers the failed-turn case and an acknowledged message is not woken again.",
+    "The change has a clean review pair and passes the full gate."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "mailbox",
+    "recovery-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

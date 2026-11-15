@@ -1,0 +1,27 @@
+{
+  "id": "01a1398a-0077-7820-8213-d5d669c43dd2",
+  "external_ref": null,
+  "title": "Test-run evidence risk stays pending after a refused checkpoint discards its report",
+  "outcome": "When a refused checkpoint drops or replaces a report, its test-run evidence associations reflect the lost/refused correlation rather than remaining pending forever; no unproven safe value is created.",
+  "acceptance": [
+    "Test-run evidence risk stays pending after a refused checkpoint discards its report is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

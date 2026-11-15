@@ -1,0 +1,36 @@
+{
+  "id": "01a1d6a0-8177-7e22-b4db-e022d1a8b6d6",
+  "external_ref": null,
+  "title": "Queued promotion no longer advances the session mutation stamp, so a dispatched queued prompt can stay pending in SQLite and replay after a host exit",
+  "outcome": "A promoted queued turn is always persisted (its row is re-stamped) before or with its dispatch, so a host exit cannot replay input already handed to the provider.",
+  "acceptance": [
+    "The locked queued-promotion transaction in src/turn_dispatch.rs (start_turn_on_record and the queue/receipt updates after it) refreshes the session mutation stamp (as session_mut_by_index did) before composing its persistence delta.",
+    "A regression test covers the case where the background writer's watermark already consumed the row during the off-lock context preparation, and proves the promoted row and its receipt/transcript reach SQLite."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "persistence",
+    "prompt-delivery",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Queued promotion re-stamps the session before composing its persistence delta. Ordinary and receipted watermark regressions pass. Landed in eb78d349 with clean source pair and exact-tree FULL; independent evaluation1762dada passed both criteria.",
+    "completed_at": "2026-11-14T03:23:26.383856800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

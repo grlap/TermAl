@@ -1,0 +1,29 @@
+{
+  "id": "01a1c0e3-16f2-7a13-b124-15ab6b82c8df",
+  "external_ref": null,
+  "title": "Clarify reviewer guidance for a supplied audit target without a change set",
+  "outcome": "Reviewer result guidance permits completing a non-diff audit with a supplied target and fails only when neither a change set nor another review target is supplied.",
+  "acceptance": [
+    "Clarify reviewer guidance for a supplied audit target without a change set is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "review",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c04e-9da0-7ac3-938a-941e0fdc6e2f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

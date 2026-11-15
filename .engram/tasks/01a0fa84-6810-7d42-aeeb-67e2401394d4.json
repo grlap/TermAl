@@ -1,0 +1,27 @@
+{
+  "id": "01a0fa84-6810-7d42-aeeb-67e2401394d4",
+  "external_ref": null,
+  "title": "Trigger Engram off-host backup push from TermAl at start, hourly while a project is active, and at its last session end",
+  "outcome": "Trigger Engram off-host backup push from TermAl at start, hourly while a project is active, and at its last session end",
+  "acceptance": [
+    "Trigger Engram off-host backup push from TermAl at start, hourly while a project is active, and at its last session end is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "engram-backup",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

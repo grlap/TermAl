@@ -1,0 +1,49 @@
+{
+  "id": "01a0e6d3-c544-7a62-b642-e34f8512a1b7",
+  "external_ref": "tm-kckh",
+  "title": "Take Engram turn-observation basis captures off the shared Codex app-server reader thread",
+  "outcome": "Found by round-2 review of tm-winf step 1 (Claude /review-code, Medium). Both review-freeze captures of a work-bound turn run synchronously on the thread that dispatches or closes the turn. For a shared Codex runtime that is the app-server stdout reader: codex_events.rs calls finish_turn_ok_if_runtime_matches -> checkpoint_successful_engram_turn_off_lock -> engram_execution_source_basis there, and the next queued prompt's begin capture runs there too through deliver_turn_dispatch -> prepare_engram_turn_delivery_off_lock whenever the service tier is already resolved (api.rs only moves unresolved Fast discovery to a worker). Each capture spawns eight Git processes in sequence and hashes untracked files under the shared REVIEW_FREEZE_TIMEOUT (20 s), so every other Codex session on that runtime stops receiving streamed events for the capture's duration (typically under a second; worst case ~40 s per turn transition on top of the existing <=10 s control calls). Documented as a known limit in docs/features/engram-host-adapter.md. Fix direction: take the captures on a dedicated worker thread as the Fast-discovery path does, or move the whole closing checkpoint and next-dispatch off the reader for work-bound sessions; keep the checkpoint ordering guarantees (capture before claim, claim before request, request before next dispatch). Related: tm-rknq (asynchronous Stop).",
+  "acceptance": [
+    "A Stop issued while a closing capture or checkpoint call is running gets its turn/interrupt reply within the interrupt wait and does not retire the shared runtime; a test shows it.",
+    "On a shared Codex runtime, a work-bound turn's closing source capture, its closing checkpoint's Engram control calls, and the next queued prompt's begin-time source capture no longer run on the app-server event reader: while they run, the reader keeps delivering other sessions' events and resolving their replies; a test holds a capture blocked and shows another session on the same runtime still receives an event.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The ordering guarantees hold after the move: the closing capture is taken before the checkpoint is claimed, the claim precedes the checkpoint request, and the request precedes the next prompt's dispatch; a test shows the order.",
+    "docs/features/engram-host-adapter.md no longer lists the reader stall as a known limit and states where the captures and checkpoint calls run."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

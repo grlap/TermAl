@@ -1,0 +1,28 @@
+{
+  "id": "01a0f50b-e363-7053-af92-65eb87e8061d",
+  "external_ref": null,
+  "title": "A carried gate is refused \"its claim was released, or its source root renamed or cleared\" when the release or rename came before the launch",
+  "outcome": "Reported by Engram::Opus (session-7284) through TermAl mailbox 37bcca97, message #156, 2026-10-01.\n\nA background full gate was launched at 2026-10-01T01:17:13.364Z in C:\\github\\Personal\\Engram\\.worktrees\\named-root-assessment (check 30df78b7…, item w-00e15db457da in the Engram project). It got no credit, with the reason \"its claim was released, or its source root renamed or cleared, before it settled\".\n\nNeither happened after the launch:\n- The claim on w-00e15db457da was taken at about 01:14:57Z and is still live.\n- Its root was named once, at about 01:15Z (TermAl generation 127), before the launch.\n- The session's previous item, w-89d029532bf6, was completed at 01:14:51Z, also before the launch, and its root was at generation 125.\n\nLikely cause: the release/rename fence compares against an event that comes before the launch, either the earlier item's completion or its root generation 125, instead of only against releases and renames between the launch and settling.\n\nWorkaround: none on the host side. Engram's landing relies on the launcher's own freeze check.",
+  "acceptance": [
+    "A carried gate launched after its claim was taken and its root named is not refused for a release, completion, rename or clear that happened before the launch, including another item's completion by the same session; a test covers it.",
+    "A release, rename or clear of the gate's own claim between launch and settling still refuses the credit, and the refusal line names which event it was and when; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

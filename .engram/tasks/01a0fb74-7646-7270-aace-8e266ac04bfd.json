@@ -1,0 +1,67 @@
+{
+  "id": "01a0fb74-7646-7270-aace-8e266ac04bfd",
+  "external_ref": null,
+  "title": "An adopted Claude runtime-started turn whose result is unresolved leaves the session Active until a user Stop (session-blocking)",
+  "outcome": "An interval the host adopted for a turn Claude Code started by itself ends when its own top-level result arrives, even if identities in it could not be resolved. The conditions: it kept its adopted generation, no host attempt was part of it or waits, and the session still runs that runtime and that adopted generation. The prompts queued behind it then run. No unknown identity is attributed to a prompt, and no grant is checkpointed or credited.",
+  "acceptance": [
+    "Through the production frame application, two adopted intervals each end on their result: one whose result names an unknown identity, and one made unresolved by an unknown lifecycle identity before its result. A prompt queued behind the turn is dispatched afterwards. A test shows it, and fails when the repair is reverted.",
+    "With a grant left open on the session, ending such an interval sends no checkpoint for that grant, keeps the grant open, and keeps the adopted provenance. The transcript says no prompt and no grant was credited. A test shows it.",
+    "Each of these leaves the session's current turn untouched: a waiting host attempt, a subagent's result, a late duplicate of an ended attempt, a successor generation, and a replaced runtime. Tests show them.",
+    "The full gate passes on the landed input.",
+    "The /review-changes pair has no outstanding in-scope Medium or higher finding on the reviewed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a1691c-e2fb-77e2-8adc-9fb8876da13e",
+      "kind": "manual",
+      "detail": "Waiting on C4. Release condition, per Fable2's decision 9cb3efff (which supersedes 7e629d93) and mailbox #778: one credited maintained full gate in the holder's worktree .tmp/wt-8e266-11465, on the master current at that time (852c0a98 now). It runs only on Fable2's literal GO, in a gate window she schedules after the host restart and after Merger's queued landings. Then a fresh evaluation, then done.\n\nAlready passing: C1–C3 and C5 (evaluations c82aeb80 and 2c933431). C1–C3 evidence: test-40797354 4/4, plus the fail-first witness test-ac5efed2.\n\nAcceptance is back to revision 4: C4 has its revision-2 text \"The full gate passes on the landed input.\" with check_kind=test restored.",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-23T14:14:23.174850600Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

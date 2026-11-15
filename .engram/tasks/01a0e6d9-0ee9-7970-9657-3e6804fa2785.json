@@ -1,0 +1,41 @@
+{
+  "id": "01a0e6d9-0ee9-7970-9657-3e6804fa2785",
+  "external_ref": null,
+  "title": "Every silent no-credit path of a host check reports its reason (host line, checkpoint card, durable per-host log)",
+  "outcome": "Every silent no-credit path of a host check reports its reason (host line, checkpoint card, durable per-host log)",
+  "acceptance": [
+    "Recognized test launches without a current work binding or active grant report the specific missing authority through the existing host notice, bounded run projection and durable observation/log owners, including Base enabled with turn-gated control disabled. An authorized checkpoint card may carry the diagnosis when one exists; the independent diagnosis does not require a checkpoint.",
+    "The diagnosis covers launcher full, launcher focused and recognized direct native tests. It belongs to the exact original command, runtime, turn and launch; later enablement or binding cannot relabel that launch as creditable. Completion without a correlated start reports unavailable provenance without inventing a start.",
+    "The change grants no work binding, grant, source basis, validated-unbound exemption or verification credit from registration, process exit or artifact PASS. Existing properly bound, granted and authoritatively checkpointed checks retain their real verification behavior; retained debt and dispatch exclusions are unchanged.",
+    "Diagnostic lifecycle handling remains bounded and deduplicated, preserves exact runtime/turn ownership across OFF/ON and generation changes, and reports capacity or tracking loss truthfully. Public text and retained logs expose no credentials or private report payloads; any persistence invariant change is classified before implementation.",
+    "Focused regression witnesses exercise missing binding and missing grant with Base ON/control OFF, all three recognized command families, OFF/ON and runtime/generation races, unmatched completion, deduplication and bounded tracking loss, plus the existing credited positive path. The exact-input required full gate and independent review pair pass before landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "PI-7",
+    "host-recording",
+    "post-import"
+  ],
+  "assigned_to": "Termal::Opus2 (session-8111)",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a18a53-c626-7740-9c09-ec8cbcc3efec"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

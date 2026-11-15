@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c50b-73c2-84c1-939548b48723",
+  "external_ref": "tm-gbok",
+  "title": "Report a missing 'engram work core held' in readiness before the first mediated admission",
+  "outcome": "From tm-winf round-8 review (Claude, Note). Since tm-winf step 3 every Engram bind reads 'engram work core held'; against an older Engram build every mediated session's bind fails (control cards instead of a binding), with the error 'install a newer Engram' (ENGRAM_WORK_CORE_HELD_MISSING_DIAGNOSTIC). The requirement is documented in docs/features/engram-host-adapter.md. Consider having the project readiness / doctor probe run the subcommand and report the missing capability before the first admission, so the break is seen at enable time rather than on the first turn.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

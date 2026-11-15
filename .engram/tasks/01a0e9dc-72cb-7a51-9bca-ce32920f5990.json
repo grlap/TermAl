@@ -1,0 +1,27 @@
+{
+  "id": "01a0e9dc-72cb-7a51-9bca-ce32920f5990",
+  "external_ref": null,
+  "title": "Shell following trusts the line's exit status rather than the cd's (`cd /abs || true`, `cd /abs; cmd` re-follow at /abs after a failed cd)",
+  "outcome": "engram_settle_shell_move anchors a pending move (the line's single leading literal cd) when the whole command succeeds. With `cd /abs || true`, or `cd /abs; cmd` where cmd succeeds, a failed cd still ends in a successful line. TermAl then presumes the shell at /abs, though it stayed where it was. Later commands can be credited or bounded in the wrong place, and overlap may be under-marked. This predates PI-26a, and the old code behaved the same.",
+  "acceptance": [
+    "TermAl follows a leading cd only when its success is implied by the line's success (the cd is the line's only command, or is joined to the rest by `&&` all the way), and loses the shell between both places otherwise; a test covers `cd /abs || true` and `cd /abs; true`"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

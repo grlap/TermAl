@@ -1,0 +1,29 @@
+{
+  "id": "01a0f57d-90dc-7c83-98c9-39d4f950ad04",
+  "external_ref": null,
+  "title": "Another Codex session's read-only command (git status) in a worktree with a carried gate refuses the gate's credit: no read-only classification for Codex commands",
+  "outcome": "Found by the independent evaluation of w-a450af06e8bd (Codex evaluator delegation-16f984ed-81fd-455c-b2ab-b12c571003e2, evaluation 5bc7bccd9ef84c4f810696e190d65ce9, criterion 1: fail).\n\nengram_session_command_reads_only (src/engram_turn_checks.rs:685) treats only Claude sessions' commands as possibly read-only: `record.session.agent == Agent::Claude && engram_command_reads_only(...)`. engram_command_reads_only uses claude_bash_command_is_read_only, a Bash-syntax classifier.\n\nA Codex session's command, for example `git status --short` run through Codex's exec tool, is therefore always a possible write. When another Codex session runs it in a worktree with a carried gate, the gate's credit is refused. The test another_claude_sessions_read_only_command_in_the_worktree_leaves_the_gate_credited explicitly expects this refusal for a Codex `git status`.\n\nCodex on Windows runs commands through PowerShell, so classifying them needs a fail-closed PowerShell read-only checker that unwraps Codex's shell invocation. w-61ca4952467c (\"Implement a fail-closed PowerShell read-only reviewer command checker\") is the likely prerequisite.",
+  "acceptance": [
+    "A Codex command the classifier cannot prove read-only still refuses the credit and the refusal line names it; a test covers it.",
+    "A provably read-only command (for example git status, git log, a file read) run by another Codex session in a worktree with a carried gate does not refuse the gate's credit, judged by a fail-closed classifier of Codex's command form on Windows; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "read-only-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a17a4a-82fd-7421-978f-d0af0c642bc4",
+  "external_ref": null,
+  "title": "Restore an explicit domain send control in the unavailable-peer directory fixture",
+  "outcome": "Restore an explicit domain send control in the unavailable-peer directory fixture",
+  "acceptance": [
+    "The existing unavailable-unrelated-peer fixture separately proves an exact domain participant target still appends while that peer is unavailable, alongside its existing exact self-host native send and denial/directory/message-count checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-reported",
+    "federation",
+    "follow-up",
+    "mailbox",
+    "regression-candidate",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17986-c6ba-7830-b904-623c0e4ca176",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

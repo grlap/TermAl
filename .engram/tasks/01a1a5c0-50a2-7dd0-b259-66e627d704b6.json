@@ -1,0 +1,29 @@
+{
+  "id": "01a1a5c0-50a2-7dd0-b259-66e627d704b6",
+  "external_ref": null,
+  "title": "Tidy the settled-report retention: a real-turn test step that can't fail, and 'settled' used wider than the code",
+  "outcome": "The real-turn retention test claims only what it shows, and the adapter doc says which reports are bounded in the code's own terms.",
+  "acceptance": [
+    "ordinary_turns_past_the_retention_send_each_report_once_and_keep_only_the_newest no longer has a step that can't fail: either the 'worker run' step goes and the doc comment narrows, or it calls the worker directly and states that it finds no candidate.",
+    "The adapter doc's lead sentence on retention says 'answered definitively' or 'discharged' rather than 'settled', since is_settled also covers a LocalFailure report, which isn't bounded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

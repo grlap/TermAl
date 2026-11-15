@@ -1,0 +1,41 @@
+{
+  "id": "01a1a74f-2eb1-7712-9834-5f8e183e1f97",
+  "external_ref": null,
+  "title": "Execution Observability must not refuse a correct check: tell a real source change from a turn that changed nothing, automatically",
+  "outcome": "During ordinary work, a clean registered check on the current source earns an evaluation, whatever turns come before, around or after it; a real source change after the check is still refused. No empty turns, silence or special manual procedure are needed.",
+  "acceptance": [
+    "The actual source of both window refusals of 2026-11-04 (TermAl unadmitted 5f332fbf on w-c486276cc7a2; Engram position 243 on w-e95c35f8ed70) is established from source and recorded on this item, separating what was read or run from what is inferred, and each cause is removed in the product: no workaround, empty turns, silence, manual ordering or new procedure for agents.",
+    "Regression tests against a real Engram show an accepted evaluation and a completed done for a clean registered check, on criteria bound or not bound to a check kind, when: it is the first close of a named root; the claim is recovered or the root newly named; the host could not place its command; an ordinary mail-woken turn overlaps the previous close; later turns of the holder close before or during the evaluator's run with no change; the turn edited, committed and then checked; the turn checked, failed, fixed and checked again.",
+    "Regression tests against a real Engram show refusal for: a real source change after the check in the same turn, in a later turn, and during the evaluator's run; a cached old result delivered after a real change; a check on a dirty tree or on another commit. A real difference at decision time, a dirty root or another commit, is refused at evaluation and at done, whether or not any turn report arrived; asserted evidence cannot borrow Git provenance from a declared revision's text.",
+    "An edit after the check that is reverted to the checked commit before a decision is accepted, measured or not, and is pinned by a test; the documentation states that equal endpoints show the final input was checked and say nothing about the interval between them.",
+    "One simple end-to-end run of ordinary work passes on Linux and on Windows against a real Engram on a disposable store: claim, name, edit, commit and check in one turn with the holder's turn order as it naturally falls, further ordinary turns, independent evaluation, done, with no manual step beyond those.",
+    "No stored evaluation, verification or seal is rewritten, recomputed, relabelled, invalidated, deleted or re-run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "execution-observability",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered real Engram ordinary-work regression matrix on Linux and Windows, fixed Windows live-selector argv and durable passing provenance, and landed as N24. All six criteria evidenced in linked consolidation; independent evaluation remains non-blocking under current Greg policy. Original failed runs and delivery refusals unchanged, no native credit fabricated. Two deferred Lows remain separate. Root cleanup follows; evidence needed by open joint adapter audit retained under w-c07c note92a63ed8265e49ce85ac14acb7128b37.",
+    "completed_at": "2026-11-05T19:09:01.968234100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

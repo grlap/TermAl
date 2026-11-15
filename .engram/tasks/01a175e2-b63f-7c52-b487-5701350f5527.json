@@ -1,0 +1,30 @@
+{
+  "id": "01a175e2-b63f-7c52-b487-5701350f5527",
+  "external_ref": null,
+  "title": "Federation supervisor logs \"federation authority changed; refresh enrollment and retry\" for a boot-time durability/continuity fence, misleading the operator",
+  "outcome": "When federation peer snapshots are refused because durability is not yet established, continuity is lost, or the local identity is absent, the supervisor log and API error name that actual cause and say it is retried automatically. \"Authority changed; refresh enrollment\" is reserved for a real authority or enrollment change, so an operator is not sent to refresh enrollment after an ordinary restart.",
+  "acceptance": [
+    "Deterministic tests show federation_peer_snapshots and the supervisor log distinguish (a) durability not yet established, (b) continuity lost and (c) missing local identity from a real stale or changed authority, with an operator-actionable message for each that states whether the condition self-clears.",
+    "No change to fencing semantics: every case still refuses, and the supervisor still retries without tearing down a healthy channel (federation_runtime.rs:128-134).",
+    "A review pair has no outstanding Medium or higher, and one complete READY goes to Merger2."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "diagnosability",
+    "federation",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

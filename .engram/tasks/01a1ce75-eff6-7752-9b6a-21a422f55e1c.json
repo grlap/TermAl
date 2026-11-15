@@ -1,0 +1,29 @@
+{
+  "id": "01a1ce75-eff6-7752-9b6a-21a422f55e1c",
+  "external_ref": null,
+  "title": "Recognize Engram's documented Windows test entry (pwsh scripts/test-rust.ps1) as a test route for verification credit",
+  "outcome": "A registered run whose command is a repository's declared or documented test wrapper (first case: Engram's `pwsh -NoProfile -File scripts/test-rust.ps1 …`, its AGENTS.md Windows replacement for scripts/test-rust.sh) earns test verification through a supported route, without relabelling or accepting arbitrary commands.",
+  "acceptance": [
+    "A behavioural test shows a registered run of a repository's declared Windows test wrapper, with its declared result artifact, produces a test verification record, while an undeclared arbitrary command still does not.",
+    "The chosen route is documented in docs/features/declared-test-commands.md, including how Engram declares scripts/test-rust.ps1; no relabelling of unclassified runs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "verification",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Withdrawn by the requester (Engram::Fable, ebe242f7 #7644). Engram's own docs/development.md (lines 1113-1116) document that only a focused `cargo test` is classified as a test and that anything else is `other`, so refusing to classify the pwsh scripts/test-rust.ps1 wrapper is documented behaviour, not a TermAl defect. The fix was Engram's command choice: rerun as a direct cargo test.",
+  "completion": null
+}

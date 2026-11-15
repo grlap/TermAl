@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c51d-7570-b457-0fbe843f0466",
+  "external_ref": "tm-h6uc.2",
+  "title": "Add Workspaces rail section and migrate saved section order",
+  "outcome": "Owner Termal::Grok. Add workspaces to ControlPanelSectionId, section definition/icon in ui/src/panels/ControlPanelSurface.tsx. Standard rail focus/active/tooltip styling; outlined layout icon distinct from Projects/Files. Default order puts Workspaces immediately above Projects. Existing order key termal-control-panel-section-order-v2 currently appends missing sections: fix normalization so a missing Workspaces is inserted immediately before normalized Projects, retaining order of every existing section. If Workspaces already exists, honor its user-chosen position; handle duplicates/unknown entries and repeated normalization idempotently, no storage reset. Workspaces has no launcher WorkspaceTab in v1: createControlPanelSectionLauncherTab returns null for it, internal rail reorder works, no misleading drag-to-open affordance and no new persisted tab kind. Tests default/old reordered order/invalid order/reload/custom move, activation and existing sections unaffected. Observe fixedSection control surfaces remain restricted to their own section.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c51b-7df2-8753-e4ea12b01b75",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-DONE. The rail section shipped in f4ede4b (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

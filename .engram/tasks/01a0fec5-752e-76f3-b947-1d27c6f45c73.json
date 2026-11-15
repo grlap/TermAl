@@ -1,0 +1,29 @@
+{
+  "id": "01a0fec5-752e-76f3-b947-1d27c6f45c73",
+  "external_ref": null,
+  "title": "Use committed pane visibility for transcript certification and repair demand",
+  "outcome": "Ensure transport callbacks use committed visibility rather than refs written by a React render that may be discarded.",
+  "acceptance": [
+    "Use committed pane visibility for transcript certification and repair demand is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "deferred-review",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

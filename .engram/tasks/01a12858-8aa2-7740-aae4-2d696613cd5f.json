@@ -1,0 +1,55 @@
+{
+  "id": "01a12858-8aa2-7740-aae4-2d696613cd5f",
+  "external_ref": null,
+  "title": "execution_observe protocol: unadmitted turns and observed checks",
+  "outcome": "execution_observe protocol: unadmitted turns and observed checks",
+  "acceptance": [
+    "TermAl builds execution_observe requests with an unadmitted_turn occurrence (host_turn_ref; source_change as content_comparison, assumed_missing_baseline or null; observed_checks, at most 16) and a standalone observed_check occurrence (host_turn_ref and one check), per Engram's documented wire (docs/features/behavioral-control-plane.md, execution_observe). An ObservedCheck carries host_check_id, check_kind, observed_result (passed or failed with finished_at; an unfinished check is indeterminate), optional started_at and finished_at, observed_at, optional source_basis and optional host_evidence_ref, with every time inside observed_interval. Building refuses, never truncates, a request with more than 16 nested checks, over 64 KiB, or with a field over its bound. Unit tests serialize each shape and show each refusal.",
+    "Receipt decode for these requests accepts observed_checks naming exactly the request's host_check_ids, each with credit 'uncredited', and the accounting no_source_change for a null source_change or a standalone check. It refuses any other credit, a missing or extra id, and any other accounting than source_change, repeat, no_source_change or the existing historical audit_only reasons. The existing inter_turn_change receipt validation is unchanged and its tests still pass. Unit tests show each acceptance and refusal.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6c9-9c20-7ad3-8066-df1ef323efe9",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed and landed on origin/master at c2660b80ee0a832a23606c60bf34586bfe1c22ab. Full gate test-bdcb40ff passed all five stages on the exact committed tree. Fresh independent acceptance evaluation 854660a1f23d4d8b9c5e617157fe7c95 passed all three criteria.",
+    "completed_at": "2026-10-14T17:11:31.439752200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

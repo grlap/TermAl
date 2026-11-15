@@ -1,0 +1,30 @@
+{
+  "id": "01a1c717-b2f6-7731-9178-a2eeb52da33c",
+  "external_ref": null,
+  "title": "Cover malformed revision metadata combined with owner identity in runtime-observation census",
+  "outcome": "The runtime-observation census rejects malformed source_revision metadata even when source_id has a valid shape, with a behavioral regression that distinguishes this guard from missing-owner rejection.",
+  "acceptance": [
+    "Classifier behavior tests combine source_revision 42 and null with a valid source_id and require Unknown; an empty-string revision plus a valid source_id requires SourceId.",
+    "The tests fail if revision type validation is bypassed while source_id validation remains correct; failure assertions expose only bounded fixed text or fixed enum/counter results.",
+    "Focused relevant validation passes and the review pair has no outstanding Medium-or-higher findings."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "observability",
+    "review-follow-up",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

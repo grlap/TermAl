@@ -1,0 +1,28 @@
+{
+  "id": "01a128b4-9809-7e92-adff-febf458cc062",
+  "external_ref": null,
+  "title": "A read-only Claude child refused a `termal review-freeze-check` Bash line is not pointed to termal_review_freeze_check, its supported route",
+  "outcome": "When a read-only Claude delegation's Bash line invokes the compiled freeze checker (`\"$TERMAL_CLI\" review-freeze-check …`, `termal.exe review-freeze-check …` or similar), the refusal still names the rule it broke: here, a variable can't be checked, and running TermAl's own executable is not a read-only command. It also names the supported route for that delegation, the `termal_review_freeze_check` MCP tool (docs/features/review-freeze-verification.md), with its two inputs. The read-only gate's decision is unchanged and stays fail-closed: no executable, variable or script is admitted. A test covers the refusal text.",
+  "acceptance": [
+    "A read-only Claude child refused a `termal review-freeze-check` Bash line is not pointed to termal_review_freeze_check, its supported route is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "read-only-refusal",
+    "review-freeze"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

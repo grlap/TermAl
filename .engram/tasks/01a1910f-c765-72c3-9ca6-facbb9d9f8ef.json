@@ -1,0 +1,30 @@
+{
+  "id": "01a1910f-c765-72c3-9ca6-facbb9d9f8ef",
+  "external_ref": null,
+  "title": "Make commit-object verification explicit in committed review target instructions",
+  "outcome": "Both review command files name exact commit-object resolution checks for BASE and COMMIT, require the resolved full ids to match their records, and refuse tree-only identities.",
+  "acceptance": [
+    "Committed review instructions explicitly verify BASE and COMMIT as commit objects and compare their resolved full identities with the parent's record, preserving missing/invalid-target refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "committed-input-review",
+    "follow-up",
+    "instructions",
+    "review",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18fb2-aa68-7ae1-833d-2637c793f4c2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

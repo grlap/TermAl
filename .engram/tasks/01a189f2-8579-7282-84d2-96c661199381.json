@@ -1,0 +1,27 @@
+{
+  "id": "01a189f2-8579-7282-84d2-96c661199381",
+  "external_ref": null,
+  "title": "An explicit Refuse of a closing turn_checkpoint holds the session with no recovery path",
+  "outcome": "A session whose closing checkpoint Engram explicitly refuses has a defined path forward (a fallback close, or an operator-visible next action), instead of staying held with the original refused operation in custody and no next action.",
+  "acceptance": [
+    "An explicit Refuse of a closing turn_checkpoint holds the session with no recovery path is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

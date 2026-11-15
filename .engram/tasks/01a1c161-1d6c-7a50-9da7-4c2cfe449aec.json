@@ -1,0 +1,31 @@
+{
+  "id": "01a1c161-1d6c-7a50-9da7-4c2cfe449aec",
+  "external_ref": null,
+  "title": "One-time cargo fmt of the TermAl crate",
+  "outcome": "Master is formatted exactly as cargo fmt produces it, with no other change, landed after combo28.",
+  "acceptance": [
+    "One-time cargo fmt of the TermAl crate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No acceptance evaluation exists (evaluation is off for TermAl); closed self_asserted. Greg's one-time cargo fmt is on master as 0ab3319e (tree 2f6a01c9), fast-forwarded from 4c377a63 and pushed at 20:01:30Z, with the remote verified.\n- Contents: all 436 .rs files exactly as rustfmt writes them, plus a fix to the test_temp_paths delegation-root scan, which had rejected rustfmt's `|| {` closure blocks. That scan is what failed round 1 (6de56520, superseded).\n- Gates on the exact tree: Windows B test-255d487f and DL560 test-e812e019, both PASS and eligible.\n- Review pair: Codex 17082 and Claude 17083, no Medium or higher.\n- Installed on Central (9e9e74d9) and DL560 (a047793b).\n- Test refs deleted.",
+    "completed_at": "2026-11-09T20:25:52.883767900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

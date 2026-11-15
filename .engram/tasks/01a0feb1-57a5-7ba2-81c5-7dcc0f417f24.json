@@ -1,0 +1,29 @@
+{
+  "id": "01a0feb1-57a5-7ba2-81c5-7dcc0f417f24",
+  "external_ref": null,
+  "title": "Test CapturedStderrProcess bounds only the child's exit, not the stderr drain: a grandchild holding the inherited pipe hangs the test forever",
+  "outcome": "Test CapturedStderrProcess bounds only the child's exit, not the stderr drain: a grandchild holding the inherited pipe hangs the test forever",
+  "acceptance": [
+    "CapturedStderrProcess::wait_with_limit (src/tests/phase_sync.rs) bounds the whole teardown, the stderr reader's drain included, by the deadlock guard: when the direct child has exited but a descendant still holds the stderr write handle, the call returns an error naming the phase and 'stderr drain did not reach EOF' within the guard, instead of blocking in reader.join().",
+    "A test that spawns a child which starts a descendant inheriting stderr and then exits, reproducing the hang on the unchanged code (fail-first recorded), passes after the fix, with no process killed by hand and no larger timeout."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "deadlock-guard",
+    "tests",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

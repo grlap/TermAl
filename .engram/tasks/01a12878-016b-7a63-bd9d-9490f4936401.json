@@ -1,0 +1,27 @@
+{
+  "id": "01a12878-016b-7a63-bd9d-9490f4936401",
+  "external_ref": null,
+  "title": "Investigate drift reporting for delegated child sessions and workspaces other than the measured one",
+  "outcome": "Undetermined in the re-audit for w-83754500a736: only one place is measured per grant (engram_turn_observations.rs:601-604), so drift in a delegated child's worktree, or in a second workspace a turn touches, may never reach the store as an inter_turn_change. Establish what is measured and reported for delegated children and for any extra workspace, and file each confirmed gap with its reason.",
+  "acceptance": [
+    "A note records, with file:line citations and a test or a recorded run where behaviour is claimed, what is measured and what reaches the store for (1) a delegated child session's own worktree and (2) a second workspace a turn modifies; each confirmed gap is filed as its own item with its reason, or the note shows there is none."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

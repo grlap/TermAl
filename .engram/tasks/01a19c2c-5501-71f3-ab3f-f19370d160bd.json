@@ -1,0 +1,39 @@
+{
+  "id": "01a19c2c-5501-71f3-ab3f-f19370d160bd",
+  "external_ref": null,
+  "title": "Audit former callers of 17 unused test-helper warning blocks after ordinary EO migration",
+  "outcome": "Audit former callers of 17 unused test-helper warning blocks after ordinary EO migration",
+  "acceptance": [
+    "Apply Fable2 mailbox1889/1891 scope and A/R/C/B labels: audit the remaining14 warning blocks, mark the freeze hook B settled elsewhere and both Human capture warnings settled elsewhere/Sol-d50d. Enumerate every master5dd913d2 caller with file:line and enclosing test/function, current0c00 disposition and ledger provenance; ambiguous R versus C is C.",
+    "Write .evidence/execution-observability-12327/17-helper-caller-audit-0c00cea3.json and mail Fable2 complete counts plus every C with original/current assertions and owning slice.",
+    "Source/native Git object reads only, with only the requested audit artifact written; no source edits, Cargo or commands in the running integrator worktree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed source-only17-helper caller audit: remaining14 blocks12R/2C; freezeB andHuman2 externally settled. Exact JSON and full C assertion texts delivered to Fable1898. No product/coverage-resolution/gate/acceptance certification; routed C owners remain responsible.",
+    "completed_at": "2026-11-02T12:39:44.688236Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

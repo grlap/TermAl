@@ -1,0 +1,26 @@
+{
+  "id": "01a0f50a-971d-7d73-b9d1-05395f1d36f9",
+  "external_ref": null,
+  "title": "Extract delegation workspace observation policy and tests into focused modules",
+  "outcome": "Move observation normalization/bounding helpers from oversized src/delegations.rs and their regression tests from oversized src/tests/delegations.rs into focused modules, preserving behavior.",
+  "acceptance": [
+    "The observation helpers and their tests are extracted without behavioral change, with the full gate green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

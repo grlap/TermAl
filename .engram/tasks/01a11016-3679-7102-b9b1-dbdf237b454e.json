@@ -1,0 +1,36 @@
+{
+  "id": "01a11016-3679-7102-b9b1-dbdf237b454e",
+  "external_ref": null,
+  "title": "Retained-bind deferral does not say why the bind failed: show the Engram refusal code or \"transport/unknown\" in the preview and host log",
+  "outcome": "Retained-bind deferral does not say why the bind failed: show the Engram refusal code or \"transport/unknown\" in the preview and host log",
+  "acceptance": [
+    "When a turn-start Engram bind is deferred to the retained-bind retry, the session preview and a host log line name the failure class: the Engram refusal code when Engram answered with a typed refusal, or transport/unknown when no typed answer arrived. Each later retry attempt that fails records its own class.",
+    "A test drives a typed Engram bind refusal and a transport failure into the deferral path and asserts the preview and log name each class; the existing deferral, retry schedule and eligibility behaviour are unchanged."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

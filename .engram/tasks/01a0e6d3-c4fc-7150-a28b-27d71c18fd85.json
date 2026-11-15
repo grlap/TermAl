@@ -1,0 +1,54 @@
+{
+  "id": "01a0e6d3-c4fc-7150-a28b-27d71c18fd85",
+  "external_ref": "tm-exh1",
+  "title": "Read-only reviewer Bash checker splits on '|' inside quotes, so a read-only git grep with a \\| alternation is denied",
+  "outcome": "Reported by Engram::Opus (mailbox #218; Claude reviewer delegation-145a3e31, session-7664, around 19:08-19:25 UTC). The command git grep -n -A40 \"fn supersede_issued_turn\\|fn expire_unbegun_turn\" 7c1ba5d -- src was denied as not read-only. Cause: claude_bash_command_is_read_only (src/claude.rs ~556) replaces && and || with '|' and splits the whole command on every '|' without regard to quoting. The quoted pattern is cut into segments, and the one with the unbalanced quote fails the tokenizer, which fails closed. The same grep with a single pattern passed; -A40 is not the trigger. Fix direction: split on unquoted separators only, reusing the tokenizer's quote and escape rules. Keep fail-closed for anything the tokenizer cannot parse, since this is a security boundary. Workaround for reviewers: git grep -e PAT1 -e PAT2 instead of an alternation. Related: tm-zg4i (the denial should name the rule that fired).",
+  "acceptance": [
+    "Quoted-separator acceptance in this criterion applies only to the explicitly opted-in trusted Claude Bash permission path and its checker mode. The shared default checker, Kimi and every other or unproven executor remain strict and refuse quoted | or &; policy selection cannot come from command text or caller-controlled tool arguments, and recursive checks retain the selected policy. C1 (split only at real separators). claude_bash_command_is_read_only splits a command into segments only at a '|', '||' or '&&' that is outside every quoted span and not escaped, judged by the same quote and escape rules as claude_bash_segment_tokens. A '|' or '&' inside a single- or double-quoted span stays inside its argument. Each segment is then checked exactly as today: the git/cd retarget guard, the tokenizer, and the per-command read-only rules. Even in the qualified Claude Bash mode, a segment containing a quoted | or & is eligible only when its parsed command form is grep, rg, git grep, or git log with a supported --grep option, and it also passes every existing per-command and whole-command restriction. Other command forms with quoted separators remain refused; no new executable is admitted by this eligibility check.",
+    "C2 (fail closed; no other relaxation). These still refuse: an unterminated quote; a trailing backslash; a lone '&' or a background '&'; an empty segment, such as a leading, trailing or doubled separator; every existing raw-text rejection, unchanged and still applied to the whole command: newline, CR, ';', '>', '<', backtick, '$('; a separator character escaped outside quotes ('\\|' or '\\&'); a command with a quoted '|' or '&' that also contains the sequence `\\\"` anywhere, since bash and PowerShell disagree about where such a quote ends. Nothing outside the separator handling changes. Out of scope: naming the refused construct in the denial (tm-zg4i), `git --version`, and ';' or '>' inside quotes. The r5–r7 refusals for quote/backslash ambiguity, U+2018–U+201F quotes and --% combined with quoted separators remain covered, and this change introduces no new acceptance on a strict caller.",
+    "Quoted-separator acceptance in this criterion applies only to the explicitly opted-in trusted Claude Bash permission path and its checker mode. The shared default checker, Kimi and every other or unproven executor remain strict and refuse quoted | or &; policy selection cannot come from command text or caller-controlled tool arguments, and recursive checks retain the selected policy. C3 (tests, through claude_bash_command_is_read_only and the read-only permission decision). ACCEPTED: `git grep -n \"fn a\\|fn b\" HEAD -- src` (the reported case); `grep -E 'a|b' file`; `rg \"x|y\" src`; `grep 'a|b' f | head -5`; `git diff | grep \"a|b\"`. REFUSED: an unquoted pipe into a writer or an unknown program: `grep \"a|b\" f | tee out`, `cat f | sh`; a quote closed before the pipe: `grep 'a'|rm x`; an or-list into a writer: `grep \"a|b\" f || rm x`; `grep a\\|b f`; `grep \"x\\\"|rm y\"`, and `grep \"a|b\\\"\" f`; an unterminated `grep \"a|b f`; a trailing `grep \"a|b\" f |`. Every existing read-only checker test still passes unchanged. Even in the qualified Claude Bash mode, a segment containing a quoted | or & is eligible only when its parsed command form is grep, rg, git grep, or git log with a supported --grep option, and it also passes every existing per-command and whole-command restriction. Other command forms with quoted separators remain refused; no new executable is admitted by this eligibility check.",
+    "C4 (validation and landing). The full gate passes on the exact tree submitted for landing, the review pair has no outstanding finding of Medium or higher on it, and the item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

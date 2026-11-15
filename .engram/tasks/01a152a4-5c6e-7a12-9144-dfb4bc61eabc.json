@@ -1,0 +1,31 @@
+{
+  "id": "01a152a4-5c6e-7a12-9144-dfb4bc61eabc",
+  "external_ref": null,
+  "title": "Owed source accounting captured before a named-root clear or release must block direct Engram done until it is accounted or explicitly disposed",
+  "outcome": "When an item holds an owed closing source observation (for example an A->B->A excursion whose B change never reached Engram) and its named root is then cleared or released, a direct Engram MCP/CLI done cannot consume the old evaluation while that duty is unresolved. The duty is accounted through an approved path, or explicitly disposed with attribution, before completion. No source change is fabricated, and an unchanged-source clear with no owed duty still allows a normal done.",
+  "acceptance": [
+    "Prospectively, before an explicit clear or release moves the canonical root basis, either eligible source accounting is finished and its canonical receipt confirmed while its basis remains eligible, with transition and completion ordering protected, or an Engram-owned durable unresolved-accounting barrier exists that completion checks transactionally; a TermAl-only hold or client preflight does not count.",
+    "Discriminating proof: evaluated A; captured owed B omitted from the closing report; return to A; clear/release and reload; done called DIRECTLY through Engram MCP/CLI refuses while the canonical duty is unresolved, without a fabricated source change; after accounting or attributed disposal through the approved path the freshness rules hold; an unchanged-source, no-duty clear still allows normal done.",
+    "Already-cleared or legacy duties with missing provenance are never cleared automatically: any disposition is explicit and attributed, and an audit-only receipt is never presented as the accounted receipt that discharges the duty.",
+    "The full gate passes on the exact committed tree in each changed project, with a clean independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "root-clear",
+    "source-accounting"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

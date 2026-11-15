@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c529-72e3-926d-134ea36d6b9f",
+  "external_ref": "tm-htk",
+  "title": "ConversationOverviewRail replacement test is misnamed and leaves useDeferredValue deferral untested",
+  "outcome": "The test replacing the four deleted composer-focus-freeze tests is named 'updates the projection as messages change, without freezing on composer focus' but never creates or focuses a composer textarea. Nothing in it would fail if the composer-focus freeze were reinstated.\n\nDeleting the four useComposerPromptFocused tests is correct (the code is gone), but the risk they guarded — the rail's O(N) rebuild janking composer input — is now the ENTIRE justification for useDeferredValue, and it has zero coverage. Note RTL's rerender is act()-wrapped so deferred work flushes synchronously; assertions of this shape cannot distinguish deferred from non-deferred rendering.\n\nAction: rename the test to what it actually asserts, and add coverage that genuinely pins the deferral behaviour.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. The misnamed test no longer exists on master f7db2c58 (grep).",
+  "completion": null
+}

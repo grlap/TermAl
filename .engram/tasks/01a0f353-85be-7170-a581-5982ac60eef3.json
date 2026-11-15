@@ -1,0 +1,37 @@
+{
+  "id": "01a0f353-85be-7170-a581-5982ac60eef3",
+  "external_ref": null,
+  "title": "A read-only Codex reviewer child has the tracker's MCP server and no host gate, so it can write to the tracker",
+  "outcome": "A read-only Codex delegation child that is not an evaluator can make the tracker's reads that record nothing (the same list the Claude gate uses) and cannot make a tracker call that writes: by a read-only surface the host provides, or by a gate on Codex's tool calls, chosen and recorded with its reason.",
+  "acceptance": [
+    "A read-only Codex reviewer child's tracker reads from the list succeed and every tracker word that writes is refused or absent; a test shows both.",
+    "The choice between a host-provided read-only surface and a gate on Codex's tool calls is recorded on the item with its reason, including what Codex's approval policy `never` makes possible.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "engram-interop",
+    "read-only-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

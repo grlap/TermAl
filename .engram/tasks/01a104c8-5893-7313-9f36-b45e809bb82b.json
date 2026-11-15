@@ -1,0 +1,28 @@
+{
+  "id": "01a104c8-5893-7313-9f36-b45e809bb82b",
+  "external_ref": null,
+  "title": "engram_test_child_temp accepts a child-temp link to another directory inside the Engram home",
+  "outcome": "src/engram_test_child_temp.rs (on master since the earlier fixture-child redirect) accepts an existing `<home>/child-temp` only if its canonical path's parent is the canonical home. A child-temp junction or symlink pointing at ANOTHER directory directly inside the same home therefore passes, and the fixture child's TEMP/TMP/TMPDIR go into that directory. The same flaw in the new terminal helper (src/terminal_test_child_temp.rs) was raised as a Medium by train-32 fix reviewer Codex delegation-f5ddf880-9e3f-47b5-a21f-c3e959945ed6 and fixed there: the helper refuses a link (symlink_metadata is_symlink) and requires canonical == `<root>/child-temp`. This one is pre-existing: master reaches it today on the same path. The existing test a_child_temp_that_links_out_of_its_engram_home_is_refused links only to a target OUTSIDE the home. Fix by the same two checks, with a same-home sibling-link regression test. cfg(test) only; no production change.",
+  "acceptance": [
+    "engram_test_child_temp accepts a child-temp link to another directory inside the Engram home is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-finding",
+    "test-design",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

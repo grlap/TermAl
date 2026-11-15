@@ -1,0 +1,28 @@
+{
+  "id": "01a16756-1531-7190-bec0-3f631b0c8d81",
+  "external_ref": null,
+  "title": "Focused launcher preset ignores the caller's directory; UI-only focused Vitest runs need the root-relative --root ui form; document it in docs/test.md",
+  "outcome": "An agent running a focused UI check through the launcher knows which form works: docs/test.md says that the focused preset runs its command from the repository root, whatever directory the caller is in, and gives the working form for a UI-only Vitest run.",
+  "acceptance": [
+    "docs/test.md states that `node scripts/test-launcher.mjs focused -- COMMAND ...` runs COMMAND from the repository root regardless of the caller's working directory (the focused stage sets no cwd, scripts/test-launcher.mjs around :1587; stageDirectory defaults to the root).",
+    "docs/test.md gives the working form for a UI-only focused Vitest run, `node ui/node_modules/vitest/vitest.mjs run --root ui <file>`, and says that `npx` is not resolvable by the launcher on Windows and that a fresh worktree needs `npm ci` in ui/ first."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

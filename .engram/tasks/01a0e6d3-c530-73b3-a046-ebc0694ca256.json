@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c530-73b3-a046-ebc0694ca256",
+  "external_ref": "tm-ig5d",
+  "title": "Keep internal source-root fields of DelegationAcceptanceEvaluation off the frontend wire",
+  "outcome": "From the Claude /review-code of tm-5gi4 phase 2, round 13, Low.\n\nDelegationAcceptanceEvaluation.sourceRoot (root, commonDirKey, workId, claimId, generation) and sourceClaim (workId, claimId) are serialized to the frontend, and ui/src/types.ts mirrors them. The UI reads none of them. Local-only, so there is no exposure risk, but they widen the wire contract the frontend types must track.\n\nFix direction: keep them in the persisted evaluation record only, via a separate wire projection, or trim what the UI gets to root and workId.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

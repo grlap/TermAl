@@ -1,0 +1,38 @@
+{
+  "id": "01a192f2-512f-7710-b70c-0f8c67cf9fab",
+  "external_ref": null,
+  "title": "Import reconciliation B0: pure exact-scope hold decision over the journal view",
+  "outcome": "One pure function decides, from child A's import-reconciliation journal state and one dispatch candidate's exact scope, whether the candidate is held by import reconciliation, admitted, or unknown. It is a foundation for B's admission and handoff gates, with no production caller and no behaviour change.",
+  "acceptance": [
+    "A new module holds one pure function. It reads child A's journal state and one dispatch candidate's exact scope: store association, project id, original binding and the current host incarnation. It returns one typed disposition: HeldByImportReconciliation, naming every covering fence record in journal key order; Admitted; or Unknown, naming its reason. It takes no lock, does no I/O or persistence, and has no production caller.",
+    "Table-driven tests with deterministic fixtures show: NotActivated gives Admitted. An activated journal with no fence gives Admitted. A covering fence gives Held in every phase, including Reconciled with a terminal decision ref, because only removing the record releases the guard. A covering fence from another host incarnation stays Held. Two covering fences give Held naming both. A sibling in another project, or under another store association, gives Admitted. Under a fence scoped to one owner, a candidate resolved to a different owner with complete coverage gives Admitted, and under an owner-scoped covering fence, an Unknown or Legacy binding, an owner that cannot be resolved, an owner whose coverage is unknown, and a journal whose state cannot be established (child A's typed load refusal) each give Unknown, while a whole-scope covering fence gives HeldByImportReconciliation for any candidate in its scope, including an unbound one.",
+    "No dispatch behaviour changes, on never-activated hosts or anywhere else, and the full gate passes on the exact committed tree. This slice claims none of w-9e40's own acceptance criteria."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a13607-b714-7781-80f7-9e4021dec2c5",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; d43a0f8d; pure test-reachable B0 decision, pair/gate/landing/install noted6fbbb280; closure only, no restart needed for B0.",
+    "completed_at": "2026-11-08T19:22:11.981860500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a0f11b-eae3-7f81-89cb-fd69f3bd9225",
+  "external_ref": null,
+  "title": "Link containment ownership from architecture and document the shared host Command module",
+  "outcome": "Link containment ownership from architecture and document the shared host Command module",
+  "acceptance": [
+    "The architecture source tree lists src/host_command.rs alongside the native windows_launch module.",
+    "docs/architecture.md links back to docs/features/windows-command-containment.md where terminal/bounded-read ownership is described."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "field-report",
+    "process-containment",
+    "terminal",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

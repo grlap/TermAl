@@ -1,0 +1,29 @@
+{
+  "id": "01a1db3d-30c9-7ff3-94a2-aecdd18e0964",
+  "external_ref": null,
+  "title": "Remove zero-cursor and single-batch assumptions from remaining relay boot test callers",
+  "outcome": "The sibling boot-pages fixture and remaining callers that require all home wakes delivered do not mistake an initial zero-row batch returning (0,0) for a complete drain. Preserve production budgets and scheduling, and test durable outcomes with deterministic partial/zero-row controls.",
+  "acceptance": [
+    "Remove zero-cursor and single-batch assumptions from remaining relay boot test callers is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox-relay",
+    "pre-existing",
+    "review-low",
+    "test-reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

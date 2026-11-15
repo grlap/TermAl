@@ -1,0 +1,39 @@
+{
+  "id": "01a1749d-80c0-7942-b03e-e44850d220da",
+  "external_ref": null,
+  "title": "Document seven remote-prompt operator and authenticated policy routes with durability and trust boundaries",
+  "outcome": "The API documentation covers permission listing, consent/grant issuance, revoke/confirm, own-caller references and authenticated prompt-policy; includes limits, version/cursor keys, unknown persistence outcome and deferred enqueue scope.",
+  "acceptance": [
+    "Document seven remote-prompt operator and authenticated policy routes with durability and trust boundaries is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "greg-reported",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "remote-prompt",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1741f-92e2-7ba2-921c-e1b088ba9d33",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

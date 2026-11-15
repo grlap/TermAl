@@ -1,0 +1,28 @@
+{
+  "id": "01a123aa-7db2-77e2-805a-1ae6fd799628",
+  "external_ref": null,
+  "title": "First-brief retirement refusal misdescribes an already-finished delegation, a missing child, and a requester takeover whose turn was never admitted",
+  "outcome": "retire_unacknowledged_acceptance_evaluator (src/acceptance_evaluation_api.rs) words each uncommon branch truthfully:\n- a delegation already terminal when the retirement runs is reported with its actual status, not as \"retired before any turn\";\n- a delegation whose child session is missing is retired, or reported as orphaned, rather than answered with the 409 \"taken over … keeps running\", which leaves a Running record with no child;\n- a requester takeover whose own durability acknowledgement failed, so that no turn was ever admitted, tells the caller to cancel rather than to wait.",
+  "acceptance": [
+    "Each of the three branches returns wording that matches what happened, and none tells the caller to wait on an evaluator that will never run.",
+    "A test per branch, built on the FirstBriefAckWriter fixture in src/tests/acceptance_evaluation_spawn_ack.rs, pins the response."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a16913-75f3-7032-8d22-1e7194aa3c81",
+  "external_ref": null,
+  "title": "Remove misleading unused non-Bash pipe-protection observations in the shell word scanner",
+  "outcome": "The scanner documents the protections actually consumed by qualification and does not imply unused dialect flags establish containment.",
+  "acceptance": [
+    "Remove unused non-Bash containment observation branches or supply meaningful consumers/tests for them, preserving existing word/offset decoder behavior.",
+    "Document that wrappers and Unknown runtime never qualify, while only the known-Bash qualification caller consumes containment flags.",
+    "Focused decoder/recognition controls and independent review cover the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-recognition",
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16827-bfc6-7af3-948f-ba7f38f569aa",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

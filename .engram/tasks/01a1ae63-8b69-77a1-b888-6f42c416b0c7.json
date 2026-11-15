@@ -1,0 +1,42 @@
+{
+  "id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "external_ref": "engram:w-a6c91d6a7f27",
+  "title": "source_id committed-input judgment is implemented four times (TermAl launcher JS, TermAl host Rust, Engram reader Rust, Engram's launcher-copy JS); one contract owner, shared conformance fixtures, and removal of copies that exist only by duplication",
+  "outcome": "The committed-input (source_id) predicate has one written contract with one owner and one shared conformance fixture matrix that every implementation runs. Each remaining implementation has a stated reason to exist, such as a trust boundary. Implementations that exist only because code was copied are removed or replaced by a call to the owner.",
+  "acceptance": [
+    "M1 provides one TermAl host function that invokes the initiating project's explicitly pinned trusted Engram executable and returns the complete strictly parsed source_id object from engram source. The object contains the root commit and tree, submodules with path and actual HEAD (expected pins derive from the root commit), and changes[] from Git status with blob ids produced by the owner using git hash-object --stdin-paths; ignored files are excluded. Exact JSON field names and meanings are agreed with the Engram owner before implementation.",
+    "The host preserves the entire source_id object for whole-object comparison and introduces no local reimplementation of its judgment. M1 carries the stage-1 metadata/bootstrap code into a fresh candidate on current master, but does not switch existing consumers or rewrite historical records.",
+    "At M1's landing, one aggregate budget of at most 8 seconds, or the caller's shorter deadline, and a 1 MiB output limit covered owner execution and parsing. Later explicitly approved source-operation budget changes replace that budget and remain in force; completing this parent does not restore the retired 8-second limit. Overflow, timeout, missing or untrusted executable, wrong root, malformed or incoherent JSON and process failure return unavailable, with no silent partial object or fallback.",
+    "Tests use exact JSON samples and shared fixtures from the Engram owner to cover the agreed new fields, clean and changed input, root/tree identity, actual submodule HEADs, change blob ids, ignored-file exclusion and unavailable/error cases. M1 adds no watcher, hashes no .git directory, derives no full file/index listing and mutates no source or user/global configuration.",
+    "The exact M1 candidate has an independent Codex/Claude review pair with no outstanding Medium-or-higher finding, a passing FULL gate and relevant Windows checks before integration through Opus2. Engram E1 may land and install first; M1 then lands after conformance with the installed E1 executable pinned by its supplied hash. Installed/runtime provenance and any required restart or real-repository follow-up are recorded without claiming consumer cutover.",
+    "After M1, TermAl's remaining consumers switch to that function one at a time: the launcher's before/after check and host focused and carried credit compare the whole source_id object; new host records carry source_id instead of content-v1 (stored content-v1 and git-commit records stay readable as stored); and TermAl's local predicate copies (host Rust and launcher JS) are removed with no fallback. Each switch is its own reviewed and gated candidate.",
+    "After the consumer switches, TermAl's code that creates content-v1 revisions is deleted (today's production producers: src/content_revision.rs, src/content_revision_collisions.rs, src/engram_source_observation_protocol.rs, src/engram_unadmitted_observation.rs, src/engram_registered_closing_baseline.rs, src/ordinary_commit_input.rs and src/acceptance_evaluation.rs, or wherever that code then lives), and TermAl writes no new content-v1 record. Readers of stored content-v1 records remain, and historical records stay readable as stored. This deletion lands last, as its own reviewed and gated candidate, once no consumer uses content-v1.",
+    "No automatic agent-facing TermAl surface (prompt or turn notices, tool output, wake or notification text, transcript messages, compaction material) includes an execution_observe request body or a full source_id. Short summaries and root-path lines are allowed. Checked by the review pair on each candidate that touches observation production or agent notices; where an existing behavioural test already exercises an agent notice, it asserts the notice carries no source_id JSON. No new gate and no text-pin test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Single-owner source_id migration and final content-v1 producer removal are complete. M1 c2fc794f, separately reviewed/gated consumer switches, and final deletion1d63b37a are landed. Fresh independent acceptance28ddf71907db4b33b6d4377cb42c8cc2 passed all8 criteria at clean current73f0/tree20d9362b, revision22;14 optional follow-ups remain separate.",
+    "completed_at": "2026-11-12T15:55:32.309719500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

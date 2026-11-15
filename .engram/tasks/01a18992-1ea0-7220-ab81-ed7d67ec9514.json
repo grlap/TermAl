@@ -1,0 +1,38 @@
+{
+  "id": "01a18992-1ea0-7220-ab81-ed7d67ec9514",
+  "external_ref": null,
+  "title": "Codex integration owner cannot delete path-checked folders in its own project's .logs/.evidence/target/.worktrees: recursive delete refused 'blocked by policy' before execution",
+  "outcome": "Codex integration owner cannot delete path-checked folders in its own project's .logs/.evidence/target/.worktrees: recursive delete refused 'blocked by policy' before execution",
+  "acceptance": [
+    "The original reported refusals are recorded with verbatim tool results and relevant command/runtime policy evidence; the rejecting layer and mechanism are identified, or the missing discriminator is explicitly documented without claiming an unproved cause.",
+    "An authenticated project-bound integration owner has a supported bounded cleanup operation for disposable descendants of its own project's .logs, .evidence, target and .worktrees. It performs an authorized disposable-fixture cleanup and records actual outcome without requiring another agent to execute the deletion. Any registered worktree root or descendant is refused with a typed reason directing the caller to the existing git worktree remove without --force route.",
+    "The operation refuses other-project/outside-root/root-directory/.git/protected-build targets, traversal and link/reparse escapes, registered worktree roots and descendants, and host-known active/frozen/gated paths. Static preflight refusals leave their targets unchanged; concurrent mutation or post-start failure is reported honestly as potentially partial, while deletion never follows a link outside the authorized root. The caller's workRefs and reason are recorded verbatim; retention decisions remain governed by the coordinator's and integration owner's existing cleanup rule, without claiming machine-checked tracker retention in v1. Tests cover allowed cleanup, enforced boundaries and Windows junction/race behavior.",
+    "The operation preserves existing Codex sandbox/approval settings and normal shell-denial behavior; any new delete-authority wording/grant has the repository-required exact-wording concurrence and Greg authorization before it is enabled/landed, with standard review and gate evidence on the final input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a189b2-8937-75d1-89a0-0e6c636795b0",
+      "kind": "manual",
+      "detail": "Parked by Fable1432: unresolved path-authorization proof, authenticated destructive caller transport/operator-only grant provisioning, shared exclusion owner integration, and coordination schema/reader compatibility prerequisites make v1 cost exceed current P2 value. Coordinator path-checked cleanup workaround remains supported. Resume only on coordinator reprioritization with these prerequisites resolved; no implementation authority.",
+      "created_by": {
+        "actor_id": "greg/codex",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-29T22:05:41.551545900Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

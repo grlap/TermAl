@@ -1,0 +1,26 @@
+{
+  "id": "01a0e8cb-f795-70a0-94be-6afb21d3c1f8",
+  "external_ref": null,
+  "title": "Work tab: a \"show closed\" option that also lists completed, cancelled and superseded items",
+  "outcome": "The Work tab offers a \"show closed\" option. With it on, the Engram source lists closed work too (engram work ls --all: completed, cancelled, superseded), with each row's lifecycle shown as it already is (grey for closed); with it off, the view stays as today (open work only). The option is per view, explicit, and a changed setting starts a fresh read like a filter change.",
+  "acceptance": [
+    "Work tab: a \"show closed\" option that also lists completed, cancelled and superseded items is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "work-visualizer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

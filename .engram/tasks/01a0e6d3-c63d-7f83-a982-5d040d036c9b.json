@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c63d-7f83-a982-5d040d036c9b",
+  "external_ref": "tm-m8ew",
+  "title": "Content revision: drop the Git-filter refusal, which only costs filter-configured repositories their basis",
+  "outcome": "Candidate from Opus's review of tm-5gi4 phase 1 (landed as acd7740).\n\ncontent_revision goes through ReviewFreezeGit::new, which refuses a repository that configures Git filters. The code says so itself (src/content_revision.rs:65-67): nothing in a content revision runs a filter, because ls-files runs none and files are read from the worktree. The refusal is kept for uniformity with the freeze, not for safety. A repository with a repo-level filter config, such as Git LFS installed locally, therefore gets no basis for no reason.\n\nFix: let content_revision construct its pinned Git without the filter refusal (the freeze keeps its own), and add a test for a repository with a filter.<name>.clean config that still gets a revision.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "disposal_reason": "Duplicate found in backlog triage w-930e4d333f07 (Architect1 batch 3b; Termal::Fable2). The Git-filter refusal (an LFS repository loses its basis) is covered by w-c07c410dac75, which covers both submodules and Git filters or LFS for the team pilot. This item's notes stay linked as history.",
+  "completion": null
+}

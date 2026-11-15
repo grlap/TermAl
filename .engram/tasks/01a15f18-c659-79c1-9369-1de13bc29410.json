@@ -1,0 +1,44 @@
+{
+  "id": "01a15f18-c659-79c1-9369-1de13bc29410",
+  "external_ref": null,
+  "title": "Skip the postcommit StateInner trim lock when no session tails were persisted",
+  "outcome": "Skip the postcommit StateInner trim lock when no session tails were persisted",
+  "acceptance": [
+    "A successful persistence tick with no persisted session IDs finishes its tail-trim bookkeeping without acquiring StateInner; a deterministic held-lock test proves it returns before the holder is released.",
+    "Nonempty persisted session IDs retain existing tail trimming, active-session and newer-watermark protections, and the writer's watermark, fence acknowledgement, retry and failure-restoration behavior remains unchanged."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "greg-directed",
+    "host-persistence",
+    "lock-contention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a15f18-dd16-71e2-a298-c54e240813a6",
+  "disposal_reason": "Concurrent creation race: coordinator7422 independently created canonical assigned slice w-c54e240813a6 at15:33:47Z with four independently authored criteria, delivered mailbox06f5105c #10 after my optional child/root naming. No source edits/tests under this duplicate. Canonical implementation/acceptance continues on coordinator item; retain already-created clean worktree pending coordinator prep ruling.",
+  "completion": null
+}

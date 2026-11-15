@@ -1,0 +1,28 @@
+{
+  "id": "01a123aa-9378-7493-b89c-470f02762fe0",
+  "external_ref": null,
+  "title": "Test the remaining first-brief retirement branches: WriteFailed/WorkerStopped reasons, an already-finished delegation, a missing child",
+  "outcome": "src/tests/acceptance_evaluation_spawn_ack.rs covers the branches of retire_unacknowledged_acceptance_evaluator that have no test yet:\n- a held first-brief fence failed with Err(WriteFailed(..)) or WorkerStopped, where the reason carries the error's Debug text;\n- a delegation that a cancel, or a read failing it, made terminal inside the acknowledgement window;\n- a child session removed inside that window.\nThe failed-retirement-save branch is already covered by w-c2422f97c77d's own regression.",
+  "acceptance": [
+    "Deterministic tests on the existing FirstBriefAckWriter fixture pin the caller-visible response and the delegation's final status for each listed branch, with no sleep or wall-clock dependence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

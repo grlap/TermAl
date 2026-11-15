@@ -1,0 +1,30 @@
+{
+  "id": "01a14856-da6a-7201-a48d-c3510632a1b3",
+  "external_ref": null,
+  "title": "Announce session metadata changed by observation-retention during a narrow commit",
+  "outcome": "A hidden session retained for an unresolved source-observation duty has any newly visible session metadata announced coherently when a test-run observation uses the narrow persistence commit, without restoring routine full-state broadcasts.",
+  "acceptance": [
+    "A deterministic control drives a hidden duty-bearing session through the actual narrow observation commit and observes whether visibility, preview and dispatch blocking changed.",
+    "A documented and reviewed publication policy makes retention-induced session metadata visible to existing clients while ordinary observation commits still emit zero full-state events.",
+    "The retention control and existing observation publication/persistence controls pass on the exact changed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "publication",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

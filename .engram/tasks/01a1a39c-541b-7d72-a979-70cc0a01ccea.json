@@ -1,0 +1,32 @@
+{
+  "id": "01a1a39c-541b-7d72-a979-70cc0a01ccea",
+  "external_ref": null,
+  "title": "Preserve multiple paths in source identity error diagnostics",
+  "outcome": "Allow the logical capture/verify error to represent both collision paths and existing dirty-path diagnostics.",
+  "acceptance": [
+    "The logical error contract can represent all required path diagnostics without losing either collision path or forcing an ambiguous single-path field."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "architecture",
+    "cross-project",
+    "docs-only",
+    "greg-directed",
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a23f-d694-7041-b135-ccbea5f6c63c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

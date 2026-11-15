@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6a8-7a81-a5ea-cf8a8ecce10a",
+  "external_ref": "tm-q769",
+  "title": "Latest remote routing change breaks new Codex session creation",
+  "outcome": "After commit ec2786c, creating a new Codex session no longer works. Trace the local and remote create-session authority/routing path, add regression coverage for the failing case, restore creation, and validate focused plus relevant quality gates.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in f4193a6 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

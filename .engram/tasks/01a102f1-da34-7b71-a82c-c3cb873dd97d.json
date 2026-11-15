@@ -1,0 +1,46 @@
+{
+  "id": "01a102f1-da34-7b71-a82c-c3cb873dd97d",
+  "external_ref": null,
+  "title": "Budget-clock migration B5: classify and migrate the remaining direct deadline_ms sites",
+  "outcome": "The direct deadline_ms settings sites outside the shared helper, in engram_compaction.rs, evaluator_tool_access.rs and read_only_orientation.rs. Each is first classified: is it a budget fixture at all, or a legitimate settings value? Those that are fixtures are then migrated through the state-owned clock boundary from slice 1. Each migration lists the test's time sources and assertions and adds focused boundary controls, with transitive callers inventoried. A full run validates the batch; it does not classify it. No production change. The decomposition is note 7c38dafc37c5410391ab42881615461a on the parent, with f842da36050949b3ba884f5884c64766. Criteria are to be agreed before this batch starts.",
+  "acceptance": [
+    "Scope at c98d041: the three fixtures that enable Engram by writing EngramProjectSettings directly with deadline_ms: Some(250). They are engram_compaction.rs `fixture` (:7; 8 call sites), evaluator_tool_access.rs `tracker_project` (:16; 5 call sites there, 1 in codex_read_only_tracker.rs, 1 in read_only_refusal_rules.rs) and read_only_orientation.rs `tracker_project` (1 call site). For each test these fixtures reach, a measured diagnostic first establishes whether the test reads the state's Engram budget clock. The method and per-test result are given in a note, and the diagnostic is removed before the freeze. A fixture whose tests read the clock chooses it through the slice-1 boundary before its Engram settings are published and before any target or worker snapshot: select_test_scripted_engram_budget_clock, or declare_test_real_engram_budget_clock with its reason in a comment. A fixture whose tests never read the clock is recorded as such, its tests end with assert_engram_budget_clock_unread where the state is reachable, and its deadline_ms value is classified as a settings value.",
+    "A note lists each converted test's deadline, backoff, elapsed and wait sources and its assertions, and the transitive caller inventory of every changed fixture.",
+    "Each converted test passes on its chosen clock. A budget-expiry assertion either advances the same scripted clock across its causal boundary, with an unadvanced positive control, or declares Real with its reason. Each changed fixture asserts the clock is unread before its settings are published. No expectation is weakened, no timeout grows, and no retry is added.",
+    "No production change. A shared fixture used outside this scope stays unchanged unless the inventory covers every caller.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,41 @@
+{
+  "id": "01a19c45-8e25-7fa0-a0c0-a3ed3fd4d50d",
+  "external_ref": null,
+  "title": "EO acceptance fixtures: reconcile the preserved C1 test-only source return",
+  "outcome": "Source-only diagnosis of the 18 acceptance_evaluation failures on c3ea70b8/tree0c00cea3 versus master5dd913d2; confirmed test fixture defects repaired only in failing files and returned to Sol-03d4.",
+  "acceptance": [
+    "Each acceptance failure cluster has a source-backed root-cause hypothesis with file:line and falsifying evidence, classifying product versus test-port defect while preserving original C1 failure evidence.",
+    "Confirmed test-only defects are fixed in a fresh named root, without weakening assertions or changing production, and exact scoped files and evidence are returned to Sol-03d4; any product defect is reported to Fable2 before editing.",
+    "No Cargo/tests/evaluator run; no ignores, compatibility aliases or production hook changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-tests",
+    "cross-project",
+    "engram-host-adapter",
+    "found-by-gate",
+    "gating-removal-audited",
+    "greg-directed",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only reconciliation completed: all18 original failures classified with source-backed hypotheses/falsifiers; exact six-file fixture return already incorporated at87f49ed0, no new patch or product edits. Independent Claude session17868 evaluation fdbd64e9f8704dde9cff929d1f67df4c attempt1 passed all3 criteria at revision2/cut35 on unchanged clean root3641/2a873f3b. No tests/builds were run or claimed. Original full result and tracker verdicts archived under .evidence/w-a3ed3fd4d50d/evaluation-attempt1. Retain original artifacts, reconciliation report, evaluator archive and own worktree temporarily because open sibling w-e1fc1595d96c consumes the separated product/test provenance; remove once that intake/acceptance is complete, with checked paths.",
+    "completed_at": "2026-11-13T17:38:42.638684400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1cc87-6eae-75d3-a208-ec98043583de",
+  "external_ref": null,
+  "title": "Refresh the prospective focus after a retained opening's original scope is refused",
+  "outcome": "A scope refusal after selecting the original held opening preserves that refusal while allowing a bounded prospective refresh and a useful next-turn remedy.",
+  "acceptance": [
+    "When a focus switch initially keeps the original opening but its original root later fails scope validation, the original turn remains refused and uncredited; the prospective focused association is refreshed only after its existing authority checks, or a bounded notice tells the agent to name or confirm its root.",
+    "A behavioral regression for a remotely ended original root verifies retained refusal, the notice and remedy, and subsequent prospective association behavior without weakening claim/root fences or the closing budget."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "closing-job",
+    "engram-observation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

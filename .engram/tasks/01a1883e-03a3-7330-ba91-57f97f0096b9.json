@@ -1,0 +1,28 @@
+{
+  "id": "01a1883e-03a3-7330-ba91-57f97f0096b9",
+  "external_ref": null,
+  "title": "Document the SSH hostname update route's unknown-peer and shared persistence responses",
+  "outcome": "The HTTP API inventory accurately describes the reachable status responses for the address-only federation hostname update.",
+  "acceptance": [
+    "The /api/federation/peers/{id}/ssh-host API row includes 404 for an unknown peer and accurately states the shared persistence-settling/failure outcomes without changing route behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "federation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

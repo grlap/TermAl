@@ -1,0 +1,30 @@
+{
+  "id": "01a198f2-bc3b-7ac0-81a5-8019a48db252",
+  "external_ref": null,
+  "title": "Make acceptance-evaluation request tests independent of readiness-cache expiry",
+  "outcome": "Acceptance request test fixtures always use their explicitly supplied readiness snapshot, even if delayed beyond the production cache TTL; they never probe the real machine to decide the expected evaluator.",
+  "acceptance": [
+    "The new unsupported-parent request test and the existing provider/default-precedence test use deterministic fixture readiness independent of wall-clock scheduling and real provider installation.",
+    "A discriminating regression simulates an expired readiness timestamp or equivalent delayed read and proves the fixture selection remains deterministic without real-host readiness probes.",
+    "Production readiness expiration, invalidation and refresh behavior remain unchanged; no timeouts, skips, retries or weakened assertions are introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "determinism",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18964-e759-7303-a68a-da97b24042ba",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

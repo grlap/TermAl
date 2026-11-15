@@ -1,0 +1,28 @@
+{
+  "id": "01a1007f-8b53-72c2-b45d-9488978fe0a2",
+  "external_ref": null,
+  "title": "CLAUDE.md and AGENTS.md tell a Claude root session to launch a full gate in Bash background mode, which the host does not credit; the working form is --detach --notify from a mediated turn",
+  "outcome": "CLAUDE.md and AGENTS.md tell a Claude root session to launch a full gate in Bash background mode, which the host does not credit; the working form is --detach --notify from a mediated turn",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md tell a Claude root session to launch a full gate in Bash background mode, which the host does not credit; the working form is --detach --notify from a mediated turn is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "docs",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1a283-a298-7681-8ec9-4949a6b98608",
+  "external_ref": null,
+  "title": "Add reverse documentation links from the shared source identity contract",
+  "outcome": "The shared source identity document links back to the declared-test and host-adapter documentation without altering the frozen contract's substantive wording.",
+  "acceptance": [
+    "The source identity document has working reverse links to docs/features/declared-test-commands.md and docs/features/engram-host-adapter.md, with the substantive source identity contract unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "review-follow-up",
+    "source-id"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

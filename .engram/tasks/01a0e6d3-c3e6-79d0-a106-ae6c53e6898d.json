@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3e6-79d0-a106-ae6c53e6898d",
+  "external_ref": "tm-54i5",
+  "title": "Transcript error messages render Windows paths through Markdown, so backslash-escapes vanish (grzeg\\.termal shows as grzeg.termal)",
+  "outcome": "OBSERVED by Greg 2026-09-11 ~21:15Z: the \"Turn failed: failed to read thread ...\" message displayed the path as C:\\Users\\grzeg.termal\\codex-home\\... although the real file is at C:\\Users\\grzeg\\.termal\\codex-home\\... (coordinator verified both: the literal folder grzeg.termal does not exist; the real file exists and is 0 bytes). The app-server used the correct path; only the display lost the backslash.\nCAUSE (source read, not reproduced in a browser): \"Turn failed\" is pushed as an assistant text message (src/messages.rs:845) and message-cards.tsx renders assistant text through DeferredMarkdownContent/MarkdownContent, where `\\.` is a Markdown escape for a period, so `grzeg\\.termal` renders as `grzeg.termal`. Any `\\.`, `\\_`, `\\*`, `\\[` inside a Windows path in error text is mangled the same way, which sends the operator looking at the wrong folder.\nASK: render host/system error messages (turn failures, delegation failures) as literal text or inside a code span, or escape backslashes before Markdown rendering; regression with a Windows path containing `\\.` and `\\_`.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1bbf3-c806-7143-96cb-dd82a3d7b794",
+  "external_ref": null,
+  "title": "Update stale Commit-only source identity documentation after SourceId record migration",
+  "outcome": "Source identity documentation and comments accurately distinguish the new complete SourceId verification record producer from unchanged commit-only evaluation and naming contracts, with required coordinator concurrence on contract wording.",
+  "acceptance": [
+    "Update stale Commit-only source identity documentation after SourceId record migration is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-project",
+    "docs",
+    "greg-reported",
+    "review-low",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b9c2-867d-7371-88d4-7c5db7d2b5a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

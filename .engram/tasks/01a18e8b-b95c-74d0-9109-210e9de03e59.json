@@ -1,0 +1,27 @@
+{
+  "id": "01a18e8b-b95c-74d0-9109-210e9de03e59",
+  "external_ref": null,
+  "title": "Domain-path exact read relabels any 502/503/504 as \"current status unavailable\", including a central home's own local errors",
+  "outcome": "The domain (federation_mailbox_operation ReadMessage) exact read reports \"current status unavailable\" only when the remote mailbox home could not be reached or gave no usable answer; a local cause on a host that is itself the domain home (store Retryable or writer-admission 503) keeps its own error.",
+  "acceptance": [
+    "Domain-path exact read relabels any 502/503/504 as \"current status unavailable\", including a central home's own local errors is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "agent-ux",
+    "cross-machine"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

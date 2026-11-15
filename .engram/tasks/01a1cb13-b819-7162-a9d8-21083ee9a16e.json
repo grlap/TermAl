@@ -1,0 +1,33 @@
+{
+  "id": "01a1cb13-b819-7162-a9d8-21083ee9a16e",
+  "external_ref": null,
+  "title": "Integrate combo58 on 6338adde: 8e1f be3b6fd8 (w-56cd workspace recovery limits UI slice), direct child of combo57",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit be3b6fd8ad460761fcdd5dec8cfba0436afbc49f (tree d2d7fe00a38eb99f164b4fdf010bfdc27ce3f0c0) is on origin/master, where master was moved to it by a fast-forward from 6338adde1e861563cfebfd788dc82c0c5ac96135.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is d2d7fe00 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the source pair on 7eafeda9 (sessions 17457 and 17458), which be3b6fd8 adopts because its contribution against 6338adde is byte-identical to 7eafeda9's against 5acc932b (raw diff sha256 251aa1b9).",
+    "The release binary built from tree d2d7fe00 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo58 landed: master fast-forwarded 6338adde..be3b6fd8 (8e1f workspace recovery limits UI slice, byte-identical to reviewed 7eafeda9) and pushed at 15:37:25Z, after the DL560 FULL test-06de0186 passed every stage (Rust 7637/0/114, vitest 5095/5095). The test ref is deleted. Installs on Central and DL560 were byte-identical no-ops (UI-only; 3ccf7f77 / 610325a9), with no restart. The DL560 .bak prune is recorded. The independent evaluation (Codex 17497) passed 3/3.",
+    "completed_at": "2026-11-11T15:43:12.155283200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

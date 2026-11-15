@@ -1,0 +1,29 @@
+{
+  "id": "01a17462-b1b6-7e91-aeba-947c67412916",
+  "external_ref": null,
+  "title": "Entrypoint fixture satellite exits before reporting ENTRY_NATIVE; original child cause unmeasured",
+  "outcome": "Determine why the disposable entrypoint satellite exits before its native-startup phase, preserving native child diagnostics and distinguishing product, test/runner and environment/resource causes.",
+  "acceptance": [
+    "Entrypoint fixture satellite exits before reporting ENTRY_NATIVE; original child cause unmeasured is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "federation",
+    "test-runner",
+    "unexplained"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

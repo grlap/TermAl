@@ -1,0 +1,56 @@
+{
+  "id": "01a10193-76ab-7e32-ab34-db79f9d58072",
+  "external_ref": null,
+  "title": "Switch TermAl's acceptance-evaluation reader from the evaluation `hash` label to Engram's new additive evaluation id field",
+  "outcome": "TermAl consumes Engram evaluation record IDs under evaluation, prefers that field when present, and retains only the bounded temporary hash fallback needed during the coordinated producer rollout. Evaluation identity and carried/superseded failure behavior remain unchanged.",
+  "acceptance": [
+    "The actual full-show evaluation reader and normal/minimal/replayed evaluation receipt extraction prefer the evaluation field. The legacy hash field is used only when evaluation is absent. If evaluation is present but null, malformed or invalid for the receiving path, hash does not rescue it; retain the path's safe refusal or omission behavior. When valid fields disagree, evaluation wins. Existing 32/64-character record-ID handling remains intact.",
+    "Rust/wire/UI receipt naming identifies this value as an evaluation ID (evaluation_id/evaluationId), not a content hash. Carried/newer failure IDs and supersedes behavior retain the same identities. Genuine content/source fingerprints and stored historical records are not rewritten. Any necessary deserialization of existing host snapshots is distinguished from the temporary live Engram fallback and its scope documented.",
+    "Focused tests exercise producer-shaped full-show and normal/minimal/replayed receipts with evaluation only, both equal, both different, hash only, neither, and present-invalid evaluation; include carried/newer failure identity and the wire/UI receipt. A read-only check of the landed additive producer's actual output confirms the consumed JSON paths; mocks must not relocate evaluation to a projection the producer does not emit. The maintained full gate passes on the exact reviewed input.",
+    "Rollout documentation and the holder's handoff identify additive producer w-2e2de0461551 and separate fallback-removal follow-up w-c1492f9fc04a. No confirmation authorizing Engram hash removal is sent until this reader has landed AND runs following Greg's host restart; that later confirmation cites landed commit and actual running-host build fingerprint. A landed commit alone is insufficient. No restart is authorized here."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Evaluation-ID reader landed d7671e56 exacttree5aacbf73, remoteverified; fullgate73fbcd00/host0df1b055 PASS, independent Codex+authorizedKimi completepair0Medium+, Low97ac filed, evaluation9039ab08 4/4fresh. Clean locked releasebuild06bd11ca PASS; installedbinary SHA9c139b9f with prior6f501505 backup retained. UnrelatedCLAUDE preserved. No restart or actualrunningproof; hashremoval remainsparked until Gregrestart+runningbuildreceipt.",
+    "completed_at": "2026-10-07T06:18:03.033224900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

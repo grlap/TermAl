@@ -1,0 +1,28 @@
+{
+  "id": "01a1b51a-761e-7b40-8ebf-f462e8f369c7",
+  "external_ref": null,
+  "title": "Watcher ignore policy: classify subdirectory workspaces without inheriting an unrelated parent repository",
+  "outcome": "Decide and implement ignore-policy fallback for a known workspace inside a Git repository while preserving an independent non-Git workspace's visibility.",
+  "acceptance": [
+    "Watcher ignore policy: classify subdirectory workspaces without inheriting an unrelated parent repository is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "followup-proposal",
+    "review-low",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

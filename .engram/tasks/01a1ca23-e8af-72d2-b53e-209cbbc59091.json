@@ -1,0 +1,30 @@
+{
+  "id": "01a1ca23-e8af-72d2-b53e-209cbbc59091",
+  "external_ref": null,
+  "title": "Avoid cloning every terminal delegation before acceptance receipt repair checks",
+  "outcome": "Terminal delegation reads reject nonmatching receipt-repair cases before copying their complete records or histories.",
+  "acceptance": [
+    "The receipt projection repair checks evaluator mode, Failed status, Recorded submission and absence of an in-flight submission using a borrowed delegation before any complete-record clone.",
+    "Recorded receipt recovery still repairs the exact host unconfirmed result while genuine transport failures and ordinary terminal delegations retain their previous public behavior.",
+    "Focused behavioral validation covers the matching recovery and nonmatching cases without a Markdown or implementation-text test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "performance",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

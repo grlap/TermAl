@@ -1,0 +1,48 @@
+{
+  "id": "01a12e87-9641-74f1-8f65-e0351a573356",
+  "external_ref": null,
+  "title": "The scratch fence-cause detail lengthens every source-change fence in worktrees nested under .tmp/ (.tmp/wt-*), and its routed key is case-folded",
+  "outcome": "A routine source-change fence in a worktree nested under another checkout's .tmp/ keeps a short cause, while a .tmp-naming path the scratch exemption was expected to cover but did not still carries the full detail; the routed key is labelled as case-folded (or shown exact) so it does not read as a mismatch with the exact keys.",
+  "acceptance": [
+    "A source change in a worktree nested under .tmp/ (for example <main>/.tmp/wt-x/src/a.rs) fences with the plain cause, and a test shows it.",
+    "A .tmp-naming path the exemption was expected to cover but did not — including when the worktree root resolves to something other than the gate's worktree — still carries the full detail, and a test shows it.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

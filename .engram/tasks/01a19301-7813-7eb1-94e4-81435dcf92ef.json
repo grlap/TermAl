@@ -1,0 +1,31 @@
+{
+  "id": "01a19301-7813-7eb1-94e4-81435dcf92ef",
+  "external_ref": null,
+  "title": "termal_get_session_result accepts a bare delegation UUID and answers a misleading 404 \"review attempt has no confirmed publication\" instead of resolving or refusing the id form",
+  "outcome": "A delegation id given in the bare-UUID form either resolves to the same delegation as its canonical \"delegation-<uuid>\" form, or is refused with a typed error that names the expected id form; it never yields a misleading \"no confirmed publication\" or \"delegation not found\" answer for a delegation that exists and is published.",
+  "acceptance": [
+    "The delegation tools that take a delegationId (at least termal_get_session_result and termal_get_session_status) either normalize a bare UUID to the canonical 'delegation-<uuid>' id or refuse it with a typed error naming the expected form, consistently across the MCP bridge and the HTTP route.",
+    "Tests show: the canonical id reads a published attempt; the bare UUID of the same delegation reads it too (if normalized) or gets the typed id-form refusal (if refused); a genuinely unknown id still gets its own not-found answer; and no path returns 'review attempt has no confirmed publication' for an existing, published attempt.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "delegation-results",
+    "integration",
+    "mcp-tool"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

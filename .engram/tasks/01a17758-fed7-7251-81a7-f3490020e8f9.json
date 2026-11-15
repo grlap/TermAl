@@ -1,0 +1,30 @@
+{
+  "id": "01a17758-fed7-7251-81a7-f3490020e8f9",
+  "external_ref": null,
+  "title": "Document list and wrapped federation snapshot refusal statuses",
+  "outcome": "The federation link feature documentation distinguishes the single-peer snapshot helper's 409/423/409 statuses from the peer-list read's 409 and callers that wrap or replace refusals, without implying all settling text reaches callers as HTTP423.",
+  "acceptance": [
+    "The federation-link documentation states that the peer-list read retains HTTP409 for the shared cause texts and distinguishes direct single-peer helper statuses from wrappers that re-map or replace them, using the actual production callers as evidence.",
+    "The documentation avoids promising that every snapshot caller preserves the helper status or message and changes no production authority, admission, persistence, retry or status behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "diagnosability",
+    "docs",
+    "federation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17644-9706-7260-9a83-dcc0f64ca15d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

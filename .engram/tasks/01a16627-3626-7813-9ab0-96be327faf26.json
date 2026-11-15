@@ -1,0 +1,28 @@
+{
+  "id": "01a16627-3626-7813-9ab0-96be327faf26",
+  "external_ref": null,
+  "title": "Preserve final host proof for a Focused launcher that returns a background locator before completion",
+  "outcome": "A positively associated Focused launcher that returns NotFinished with RUN/STARTED and later reports its own native terminal end retains factual visibility without skipping eligible final host proof or compaction.",
+  "acceptance": [
+    "Preserve final host proof for a Focused launcher that returns a background locator before completion is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

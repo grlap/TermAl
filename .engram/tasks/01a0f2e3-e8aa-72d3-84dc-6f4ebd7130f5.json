@@ -1,0 +1,44 @@
+{
+  "id": "01a0f2e3-e8aa-72d3-84dc-6f4ebd7130f5",
+  "external_ref": null,
+  "title": "Evaluator children receive the project's Engram MCP server, so \"call no other tracker tool\" is only a prompt rule",
+  "outcome": "Found by the design explorer for w-1ec7bb8b9caa (delegation-0734a86c, read at 28e9ed5). Evaluator mode does not exclude the project's Engram MCP server from the child:\n- project lookup follows the parent delegation (src/engram_host_adapter.rs:3059);\n- the MCP configuration has no evaluator exclusion (src/engram_mcp_config.rs:565);\n- Codex also keeps seeded MCP servers (src/delegation_mcp.rs:534).\nSo the brief's \"Call no other tracker tool\" (src/acceptance_evaluation.rs:556-558) is a prompt instruction, not an absence of access. An evaluator could read the tracker beyond its brief, or write to it under its own session: notes, evaluations on other items.\nWanted: an evaluator child's tools are the TermAl evaluator tools only. A tracker call that writes is refused by construction, and any tracker read it needs goes through a host tool scoped to the item it evaluates.\nThis was split out of w-1ec7bb8b9caa, whose brief fix doesn't depend on it.",
+  "acceptance": [
+    "A guessed tracker write from an evaluator child is refused on every path this change controls: for Claude its read-only gate denies the tracker tool and its checked Bash denies an `engram` command; for Codex the child has no tracker server; a test shows each. The Codex shell path is open on Windows until TermAl w-4b1e11b6bfdc lands, and the item's notes say so.",
+    "An evaluation still records end to end with that configuration; the existing acceptance tests pass.",
+    "An evaluator child's tool configuration contains no tracker server for Claude and for Codex: none installed by the host, and for Codex none seeded from the user's configuration; a test asserts it for each runtime, and that a reviewer child and an ordinary session of the same project keep the host's tracker server.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch a640e340, spot-checked by Termal::Fable2): CLOSE-DONE. The host evaluator configuration removes tracker MCP access, landed in 39dd3749 (ancestor of master); src/delegation_mcp.rs:551-556 and src/tests/evaluator_tool_access.rs:128. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a19f03-1eb1-7ca1-8f01-7614f49cdfd9",
+  "external_ref": null,
+  "title": "Plan responsibility-based splits of oversized Rust and UI source/test files",
+  "outcome": "Read-only Phase1 inventory and concrete responsibility/dependency split plan at master87f49ed0, including collision scheduling and estimates, delivered under .evidence/file-split-plan/ to Fable2 before any implementation.",
+  "acceptance": [
+    "Inventory largest Rust production, Rust test and UI production/test files at exact master87f49ed0 with reproducible physical-line counts and responsibility analysis.",
+    "Propose concrete extraction boundaries, destinations, retained owner/API, dependency direction, execution order and rough duration; line count alone is not a justification.",
+    "Identify collisions with named active lanes, defer their files until landing, and deliver .evidence/file-split-plan/ plus coordinator summary; Phase1 changes no source and runs no tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "file-size",
+    "greg-directed",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

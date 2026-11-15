@@ -1,0 +1,43 @@
+{
+  "id": "01a10f7d-1e0b-7f52-b1b1-e0b396a26ad1",
+  "external_ref": null,
+  "title": "Say on the turn when a recognised test command ran through an unrecorded route (Claude's PowerShell tool), instead of staying silent",
+  "outcome": "A Claude session that runs a recognised test or launcher command through a route TermAl does not record gets a host line on that turn naming the route and the recorded form, so it never waits for a credit that cannot come.",
+  "acceptance": [
+    "When a Claude session runs a command TermAl would recognise as a test or launcher run (including a detached full launch) through its PowerShell tool, the host adds a line on that turn stating that the run is not recorded and giving the recorded form (`pushd \"DIR\" && <test>` through the Bash tool).",
+    "A test drives a PowerShell-tool command carrying a recognised launcher line and asserts the host line appears and no check or carried launch is registered; a control drives the same line through the Bash tool and asserts the run is registered with no such line.",
+    "Commands that are not recognised test or launcher runs, run through PowerShell, produce no such line."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "carried-gate",
+    "cross-project",
+    "host-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

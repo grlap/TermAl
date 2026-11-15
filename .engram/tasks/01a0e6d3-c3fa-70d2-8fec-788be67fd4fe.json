@@ -1,0 +1,63 @@
+{
+  "id": "01a0e6d3-c3fa-70d2-8fec-788be67fd4fe",
+  "external_ref": "tm-5qa",
+  "title": "Avoid redundant DOM scans in virtualized page-height recomputation",
+  "outcome": "Residual of the landed cheap-guard fix: every virtualized page measurement, including one at an unchanged height, still recomputes full-content provenance from the DOM, but with a single subtree query for message slots and pending markers instead of one descendant query per slot, and an unchanged result reuses the previous provenance array and measured identity instead of allocating new ones. The provenance it computes is exactly that of the previous per-slot algorithm; same-height hydration, replacement identity and pending-marker semantics are preserved, and no render-policy, layout or scroll behaviour changes.",
+  "acceptance": [
+    "Every page measurement, including one whose height is unchanged, recomputes full-content provenance from the DOM: the existing test 'refreshes full-content provenance even when placeholder activation does not change height' passes unchanged, and a same-height measurement after a slot becomes pending again removes that slot's id; tests cover both directions.",
+    "The provenance scan issues exactly one querySelectorAll on the page node per measurement, matching message slots and pending markers together, and no per-slot querySelector; a test counting these DOM queries over a page of several fully rendered and pending slots proves it.",
+    "The scan returns exactly the ids of the previous per-slot algorithm: slots with data-message-id in document order, excluding a slot with any descendant [data-deferred-content-pending=\"true\"] (including through a nested slot), and unaffected by markers outside every slot, by a marker on the slot element itself, or by a marker with any other value; a test compares the two algorithms over fixtures covering each case.",
+    "A repeated measurement whose provenance and page identity are unchanged reuses the previous fullyRenderedMessageIds array and measured identity object, while a changed provenance or a replaced page identity (messages or trailing gap) stores a new identity carrying the current values; tests assert both reuse and replacement.",
+    "No render-policy, layout or scroll behaviour changes: the source change is confined to ui/src/panels/virtualized-conversation-page-heights.ts, the existing virtualized page-height, measurement and VirtualizedConversationMessageList tests pass, and `npx tsc --noEmit` in ui is clean."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

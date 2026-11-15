@@ -1,0 +1,32 @@
+{
+  "id": "01a14e28-a91c-7672-b08a-7e9c1f5ebcc5",
+  "external_ref": null,
+  "title": "Registration detail-query instrumentation leaves test_run_summaries unused in production",
+  "outcome": "Registration detail-query instrumentation leaves test_run_summaries unused in production",
+  "acceptance": [
+    "The obsolete production wrapper is removed or restricted to its remaining test callers without changing test-run summary selection or API behavior.",
+    "The relevant compilation check succeeds without the unused test_run_summaries warning."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "compiler-warning",
+    "diagnostics",
+    "host-recording",
+    "registration",
+    "rust",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14278-d7bc-7553-bfce-8591ae50da25",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

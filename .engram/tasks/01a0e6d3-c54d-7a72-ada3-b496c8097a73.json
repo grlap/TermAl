@@ -1,0 +1,29 @@
+{
+  "id": "01a0e6d3-c54d-7a72-ada3-b496c8097a73",
+  "external_ref": "tm-ks5l",
+  "title": "Harden Engram control fixture lifecycle test under full-suite load",
+  "outcome": "During the tm-kxku.2 parent Rust gate on 2026-09-03, scripts/test-rust.sh reported tests::engram_host_adapter::real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn as FAILED while the suite ran with four test threads. Immediate focused reproduction passed, and the complete real_process_ family also passed with --test-threads=4. This is classified as a test/resource defect, not a flaky exemption: the test uses a 100 ms intentional hang deadline followed by a 2 s clean-respawn deadline while many process-heavy fixtures run concurrently, and the original failure output was lost in the wrapper stream truncation. Next action: make phase failures preserve exact diagnostic context and prove whether process termination/readiness or respawn exceeded its bounded phase; then harden only the identified wait without weakening production deadlines.",
+  "acceptance": [
+    "Phase failures in the real-process lifecycle fixture retain the transport error kind and message, whether the request was proven unsent, the exact child identity, and retirement/cleanup observations, so startup-budget exhaustion is distinguishable from a sent request timing out.",
+    "The lifecycle fixture keeps its deliberate 100 ms call deadline and spawn, EOF, malformed-output, termination and distinct-process respawn coverage; it checks the original child's completed reap at the existing cleanup/successor admission barrier rather than requiring synchronous reap when the deadline returns. Production transport behavior and deadlines are unchanged.",
+    "The original full-gate failure remains recorded with its exact input and logs. Focused discriminating evidence and validation of the repaired fixture, independent review, and the full gate identify the tested input and any remaining limits; a later pass is not presented as erasing the original failure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

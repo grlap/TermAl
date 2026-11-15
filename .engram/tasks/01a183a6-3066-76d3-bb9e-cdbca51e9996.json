@@ -1,0 +1,37 @@
+{
+  "id": "01a183a6-3066-76d3-bb9e-cdbca51e9996",
+  "external_ref": null,
+  "title": "Repository test fixture double-mocks fs.statfsSync and leaks the mock into the native disk-space smoke test",
+  "outcome": "Repository test fixture double-mocks fs.statfsSync and leaks the mock into the native disk-space smoke test",
+  "acceptance": [
+    "A focused node run of the whole scripts/test-launcher.test.mjs on the IB input tree a966b738, unchanged, reproduces the failure of \"disk space native filesystem smoke reports capacity without imposing a threshold\" at existsSync(entry.measuredPath) (RED).",
+    "With the fix, repository() mocks fs.statfsSync at most once per test context with the unchanged 200 GiB capacity, the native fs.statfsSync is restored after the context resets, and the focused node run of the whole scripts/test-launcher.test.mjs passes, including the smoke test (GREEN).",
+    "The smoke test first asserts that fs.statfsSync is the native function captured at module load, so a future fixture that leaks a statfs mock fails there with a message naming the leak; this is shown by a focused run with only that witness applied to the IB tree, which fails at the witness rather than at existsSync. The smoke test's existing assertions are unchanged."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

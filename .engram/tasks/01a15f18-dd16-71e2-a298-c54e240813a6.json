@@ -1,0 +1,59 @@
+{
+  "id": "01a15f18-dd16-71e2-a298-c54e240813a6",
+  "external_ref": null,
+  "title": "Skip the post-commit StateInner tail-trim lock when no sessions were persisted",
+  "outcome": "A successful metadata-only persistence tick with no persisted session IDs performs no StateInner acquisition for tail trimming, while nonempty trimming, write/fence acknowledgement, watermarks, failure restoration and scheduling remain unchanged. This bounded correction does not claim to explain all historical P1 stalls.",
+  "acceptance": [
+    "The production post-commit tail-trim path returns without acquiring StateInner when persisted_session_ids is empty; a deterministic held-StateInner regression exercises that actual shared path and proves completion before releasing the held state lock, without sleeps or synthetic load.",
+    "For nonempty persisted_session_ids, existing trimming behavior and mutation-stamp/active-session guards remain intact; controls cover eligible versus active or newer-mutated records. Persistence commit/fence acknowledgement, watermarks, tombstone restoration, retries, budgets and deadlines are unchanged.",
+    "The exact input has focused passing regression evidence and the maintained full gate, plus independent read-only Codex and Claude review with no outstanding in-scope Medium-or-higher finding; Kimi substitutes only for unavailable Claude with the observed refusal recorded. Independent acceptance precedes completion.",
+    "Notes distinguish the proven elimination of an unnecessary lock from unresolved nonempty bookkeeping/storage/holder attribution; the P1 parent is not completed or declared root-caused by this correction alone."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "host-persistence",
+    "no-root-cause-claim",
+    "p1-bounded-correction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the bounded empty-ID post-commit StateInner tail-trim lock avoidance. Landed and pushed to origin/master as commit5ef865ac5cabae2d4b6c713569c4804fd57a578e, parentdb2943f8a698b90e655b77b99f613e3b0421d3be, exact reviewed/gated complete treeefed07f8663dd7901d409b0e9b669e57cda01e12. Focused3PASS hostba59d4204f804776ae84b09efe762e25 and full5stagePASS hosteff69c147b4c44489b8d462f80127818; independent Codex+authorized Kimi cleanreview consolidationcb8091b18a504aec937a5cbe3e7d88f0; fresh independentCodex acceptance64c5b5ac4cf048d2ab49a07bcb47a29a passes4/4 criteriarevision2.",
+    "completed_at": "2026-10-21T20:07:01.872358400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

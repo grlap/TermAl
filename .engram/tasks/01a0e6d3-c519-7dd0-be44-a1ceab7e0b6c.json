@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c519-7dd0-be44-a1ceab7e0b6c",
+  "external_ref": "tm-h5cn",
+  "title": "Verify the shared-worker live event stream left staged by session 6276 (one SSE connection per origin)",
+  "outcome": "Six files were staged in the working index by a Codex session (6276) that never posted ownership, never answered four coordinator messages, and left its mailbox on 2026-09-06 05:37Z. They are unverified and unowned: ui/src/shared-live-events.ts (createSharedLiveEventHub: one EventSource for /api/events shared by every tab through a SharedWorker; port lifecycle, event fan-out for state/delta/lagged/workspaceFilesChanged, snapshotRequired for a port joining an already-open stream), ui/src/live-events.worker.ts (onconnect -> hub.connect), ui/src/live-event-source.ts (SharedLiveEventSource: EventTarget facade with readyState/onopen/onerror, pagehide close, plus createLiveEventSource(reconnect)), ui/src/app-live-state-transport.ts (uses createLiveEventSource(sseEpoch > 0) instead of new EventSource and handles snapshotRequired with requestStateResync{allowAuthoritativeRollback, allowUnknownServerInstance, confirmReconnectRecoveryOnAdoption, rearmOnFailure}), ui/src/shared-live-events.test.ts (new), ui/src/backend-connection.test.tsx (extended). Greg's ruling: this is probably real work and goes to review. Task: read it as a reviewer, then verify. Questions that must be answered with evidence: (1) fallback when SharedWorker is unavailable (browsers/private modes) and when the worker script fails to load — the transport must degrade to a per-tab EventSource, never to no stream; (2) reconnect epochs and the sseEpoch>0 reconnect flag: does a reconnecting tab force a shared reconnect for every tab, and is a joining tab's snapshotRequired resync correct under the existing revision/hydration rules; (3) error/close semantics: readyState and onerror parity with EventSource so watchdog/resync logic behaves as before; (4) pagehide with bfcache (persisted) and port cleanup so the worker drops dead ports and closes the upstream EventSource when the last port leaves; (5) vite build of the worker entry (module worker) into ui/dist and the served asset. Gates: tsc, focused and full Vitest (act/Warning 0), scratch vite build, plus a manual two-tab check against the live server (read-only). Outcome: ACCEPT with fixes in the same set (hand back hashes for the verified set) or REJECT with the reasons on this bead; either way the coordinator decides staging with Greg. No bead ids in code.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Shared live events landed in 511cd20 (ancestor of master f7db2c58); ui/src/shared-live-events.ts. Closed by evidence.",
+  "completion": null
+}

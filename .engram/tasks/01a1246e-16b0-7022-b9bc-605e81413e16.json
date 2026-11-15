@@ -1,0 +1,27 @@
+{
+  "id": "01a1246e-16b0-7022-b9bc-605e81413e16",
+  "external_ref": null,
+  "title": "Remove acceptance-evaluation unsettled-submission counters when their attempt ends without an admitted write",
+  "outcome": "An entry in StateInner::acceptance_evaluation_unsettled_submissions (src/state.rs; maintained by acceptance_evaluation_root_refusal_locked in src/engram_source_roots.rs) is removed not only when a write is admitted, but also when its attempt can no longer submit: the limit refusal is issued, the evaluation's delegation is cancelled, retired or finished, or reuse replaces the target with a new attempt key (acceptance_evaluation_reuse.rs:234-236). The bound still holds for attempts that remain able to submit.",
+  "acceptance": [
+    "A regression test shows that replacing, retiring or finally refusing an attempt removes its counter, while an attempt that can still submit keeps its count toward the limit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — Removed unsettled-submission map means replacement/terminal counter leak no longer has a live owner. Source: src/state.rs; src/engram_source_roots.rs. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

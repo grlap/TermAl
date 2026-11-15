@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4e2-79b1-a899-da95e65a2be6",
+  "external_ref": "tm-d9gl.4",
+  "title": "Engram identity slice 4: Phoenix-case acceptance test and the freshness contract in docs",
+  "outcome": "Slice 4: acceptance on the observed case and the contract in docs. Fixture: the Phoenix pilot observation of 2026-09-06 - installed shell reports build 65b2b11cda6e (b5e2712) while the same-connection MCP child reports f234d5b23546 (4a45100) after multiple installs. End-to-end test: a session launched with the older identity, an in-place binary replacement, detection within one status refresh, visibility on all surfaces, refresh deferred during an active turn and applied at the boundary, post-refresh confirmation flipping to fresh only on a matching observed identity. docs/features/engram-host-adapter.md gains the freshness contract: the three identities, what TermAl can and cannot observe (launched-with vs same-connection), the refresh semantics and the no-silent-restart rule; cross-link from docs/features/agent-mailboxes.md where the context nudge line is described. Optional cross-team item to propose to Engram::Fable, not required for acceptance: the Engram MCP child writes a small per-session handshake record (session id, build fingerprint, started_at) under the Engram home at startup so the host can confirm the serving identity without the agent's help.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram",
+    "lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c4e0-7e22-943a-82aa6d83139a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a197eb-bd2a-7d63-8587-0d88bbe23ca5",
+  "external_ref": null,
+  "title": "Keep routine writer opens from reparsing unresolved quarantined transcripts",
+  "outcome": "An H store with a large quarantined local transcript whose defect appears near the end must not repeatedly parse that transcript and log the same exclusion on routine writer connection opens while StateInner or the writer lock is held. Preserve the existing H coverage admission, canonical-row quarantine and typed reconstruction semantics.",
+  "acceptance": [
+    "Routine writer connection setup avoids full typed transcript reconstruction and repeated exclusion diagnostics for unresolved quarantined sessions; startup/load preparation still reconstructs valid missing H metadata and leaves invalid sessions detectably excluded without certifying legacy bytes.",
+    "Regression evidence covers a large late-invalid transcript, repeated routine writer opens, and startup/reload behavior. Canonical rows, H/A reader floors, global storage-error rollback and existing sparse-writer reconstruction remain preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "persistence",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

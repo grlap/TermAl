@@ -1,0 +1,52 @@
+{
+  "id": "01a16799-8828-7f80-a6e4-5c9097cccd3b",
+  "external_ref": null,
+  "title": "Remove the redundant post-ACK StateInner reacquisition from test-run registration",
+  "outcome": "A durably acknowledged test registration returns its exact validated acknowledgement from the same StateInner publication acquisition, without waiting again behind unrelated rescans; pending and disconnected-client outcomes stay truthful.",
+  "acceptance": [
+    "An incident note preserves the existing registration and overlapping rescan phase points, client abort and writer-progress evidence for 19594754, b4990847 and eacff8a8, explicitly separating missing observations, whole-tick age, StateInner waits/holds, durable acknowledgement and response readiness; it makes no unsupported claim that 4–8 seconds was SQLite commit time. Source inspection distinguishes resolve_project’s StateInner-only session/project lookup from the later filesystem/Git phases; the earlier 3.12-second phase is not attributed to a later non-overlapping rescan, and unavailable per-lock wait/hold observations remain unknown.",
+    "After the exact registration fence acknowledges and request.json identity is rechecked, one StateInner publication acquisition validates the original registration identity, marks that exact run registered and constructs its acknowledgement. A second unrelated StateInner acquisition or test-run rescan is not required before returning that acknowledgement. Existing changed-request, changed-owner, durability, pending and supersession checks are preserved; no deadline, writer policy or execution authority is widened.",
+    "Deterministic tests using the existing real background writer and barrier/clock seams cover the post-acknowledgement lock-contention schedule, exact replay and changed-identity refusal. A disconnected or timed-out client may leave a durable registration; this is represented honestly as a registered but unexecuted failed/indeterminate run, never as test success, execution credit or proven non-application. No test stage starts without the launcher's original acknowledged identity.",
+    "Credited focused verification and the final maintained gate pass on the exact input with an independent review pair free of outstanding Medium or higher. The remaining writer-subphase attribution and post-restart/load observation stay open on the parent; this slice alone does not claim to fix every writer stall."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "host-persistence",
+    "state-lock",
+    "test-registration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

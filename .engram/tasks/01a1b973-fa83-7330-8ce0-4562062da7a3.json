@@ -1,0 +1,37 @@
+{
+  "id": "01a1b973-fa83-7330-8ce0-4562062da7a3",
+  "external_ref": null,
+  "title": "Clean freshly named root yields an unadmitted 'assumed_missing_baseline' observation at the naming-turn boundary",
+  "outcome": "It is established whether a clean, freshly named root should produce an unadmitted assumed_missing_baseline observation at the naming-turn boundary. If it should not, the producer is fixed, so a clean named root reports no missing baseline.",
+  "acceptance": [
+    "Record a summary-only reconstruction of the reported naming-boundary observation and the later source_id-era recurrence, distinguishing measured source facts from inferred edits and stating any unavailable producing-turn identity.",
+    "Trace the current ordinary-turn baseline, named-root compatibility and closing-report paths, compare them with the documented contract and existing behavioral tests, and determine whether the reported assumed_missing_baseline result demonstrates a defect or intended uncertainty.",
+    "Record the triage disposition and its limits. If intended behavior is established, close without a source change or redundant test run; if a defect is confirmed, retain the item open with the specific failing behavior and a separately concurred repair plan before implementation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "needs-triage",
+    "observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only triage establishes intended missing-baseline uncertainty on a newly named root; no defect confirmed, source change or test run.",
+    "completed_at": "2026-11-08T07:57:18.514106100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

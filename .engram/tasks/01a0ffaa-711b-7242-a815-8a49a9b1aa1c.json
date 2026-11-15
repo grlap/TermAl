@@ -1,0 +1,29 @@
+{
+  "id": "01a0ffaa-711b-7242-a815-8a49a9b1aa1c",
+  "external_ref": null,
+  "title": "Edit-fence target display leaves some Unicode format and separator characters unescaped (U+061C, U+2028/2029, U+00AD, U+180E, tags)",
+  "outcome": "engram_display_reported_target (src/engram_carried_checks.rs) escapes every Unicode Cf (format) character, every Bidi_Control character and the line/paragraph separators U+2028/U+2029, not only Cc controls and the listed ranges. Today it escapes Cc controls (char::is_control), quotes, U+200B-200F, U+202A-202E, U+2060-2069 and U+FEFF. It misses U+061C ARABIC LETTER MARK, U+2028/U+2029, U+00AD SOFT HYPHEN, U+180E and the U+E0000-E007F tag characters. set_pending_source_root_line folds only CR/LF, so a tool-reported file path containing these reaches the refusal line and the host log intact. That contradicts the helper's doc comment and makes the attribution ambiguous. The fence decision is unaffected (diagnostics only). Also record in the doc comment that backslash is deliberately not escaped (Windows paths), so a literal \"\\n\" in a name displays like an escaped newline.",
+  "acceptance": [
+    "engram_display_reported_target escapes U+061C, U+2028, U+2029, U+00AD, U+180E and U+E0000-E007F, alongside the characters it escapes today, and its doc comment states the set and the backslash trade-off.",
+    "an_edit_refusal_escapes_control_characters_in_its_target (or a sibling test) covers each added character and fails on the code before the fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a148a8-501f-7d91-bb95-7a86bd19716a",
+  "external_ref": null,
+  "title": "Test-run registration refused (HTTP 500) when the persist fence misses its fixed 5 s deadline under build load",
+  "outcome": "A valid focused or full run is not refused because the background persist worker is briefly slow. Registration durability either waits within a budget that tolerates normal gate and build load, or it reports a typed, retryable refusal that names the cause instead of a bare HTTP 500.",
+  "acceptance": [
+    "The cause of the 06:57Z refusal is identified and recorded on this item: persist-worker latency, state size, or another named cause.",
+    "A regression shows that a registration whose persist fence completes after a short delay inside the allowed budget is accepted, and that a fence which truly fails yields a typed, retryable refusal naming registration durability rather than a generic 500.",
+    "The launcher reports that refusal so the operator can tell a host durability refusal apart from a test failure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "persistence",
+    "reliability",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a14071-4dfa-78f1-9168-b37b4125dcb8",
+  "disposal_reason": "Duplicate confirmed by coordinator Fable2 #459. The preserved e67bafae occurrence and careful diagnosis (registration durability boundary, worker latency not proven without lost host stderr) are now recorded on existing parent w-b37b4125dcb8. Continue its existing phase-diagnostics child w-8591ae50da25, then parent fix; no implementation was made for this duplicate.",
+  "completion": null
+}

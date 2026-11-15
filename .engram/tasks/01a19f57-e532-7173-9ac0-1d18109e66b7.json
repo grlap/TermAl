@@ -1,0 +1,29 @@
+{
+  "id": "01a19f57-e532-7173-9ac0-1d18109e66b7",
+  "external_ref": null,
+  "title": "Separate observation RPC retirement from capture cleanup backstop and diagnostics",
+  "outcome": "Observation delivery retirement has explicit bounded custody and a distinct incomplete-RPC outcome, without incorrectly classifying two producer calls as a source-capture cleanup failure.",
+  "acceptance": [
+    "A deterministic in-flight observation delivery test covers both producer calls and proves shutdown classifies pending observation RPC custody separately from source capture cleanup.",
+    "The existing shutdown backstop is preserved without a new timeout knob, sleep or retry, and pending custody is not reported as complete."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "review-followup",
+    "shutdown"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

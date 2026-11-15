@@ -1,0 +1,43 @@
+{
+  "id": "01a19da1-40be-7ed2-a47e-3ab66c26d9e3",
+  "external_ref": null,
+  "title": "Ordinary provider send: reconcile nonblocking opening-root refresh",
+  "outcome": "The opening-root authority refresh no longer delays or blocks a provider send or a queued drain: it runs off the send path or under a short separate budget and never on a runtime reader thread, and execution-observability.md's 'never waits for Engram' promise holds.",
+  "acceptance": [
+    "Ordinary prompt handoff, queued drains, Resume and mailbox delivery perform no synchronous Engram authority/root RPC or wait on runtime reader/callback threads; an unreachable Engram cannot delay their provider enqueue.",
+    "The first ordinary prompt preserves locally acknowledged source-root guidance and exact delivery/notice acknowledgement semantics; unknown or unresolved authority is disclosed conservatively, and a later confirmation cannot relabel the prepared opening or grant evidence to its uncertain start.",
+    "Deterministic regressions prove provider enqueue and shared-reader progress before a parked Engram answer is released, preserve the existing first-prompt and stale-owner/notice/interference assertions, and pass on the exact repaired input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gating-removal-audited",
+    "greg-directed",
+    "review-medium",
+    "w-3fe8-regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [
+    "01a19e2f-50b2-7f23-b9e3-fb1439ff0611"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Removed the synchronous opening-root authority RPC from provider handoff while retaining bounded local S0, exact explicit naming authority, forward-only same-run/fence registration and immutable closing binding. Landed as byte-identical f718 contribution in combo99c eb78d349; existing Windows FULL passed all six stages. Independent post-landing evaluation ce038a428027424cabfb38ebe4b3fbcb passed all three criteria at revision4/cut441 and is fresh. Full authoritative evaluator output and recorded verdicts were consumed in the prior turn. No new checks or reruns; hostless author807/live12 remain evidence without native credit. Separately filed Low w-eaf2968210e1 stays open; evaluator assessed it as pre-existing/nonblocking.",
+    "completed_at": "2026-11-14T03:09:22.137834800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

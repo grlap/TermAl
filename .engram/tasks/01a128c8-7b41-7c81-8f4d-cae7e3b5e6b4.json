@@ -1,0 +1,47 @@
+{
+  "id": "01a128c8-7b41-7c81-8f4d-cae7e3b5e6b4",
+  "external_ref": null,
+  "title": "A line that begins with an absolute cd (cd \"X\" && …) is still placed where its shell started, or anywhere while another cd is pending, so it overlaps checks it cannot write under",
+  "outcome": "A command whose line first changes to an absolute directory (`cd \"X\" && …`, `pushd \"X\" && …`) is placed only in X's worktree, whatever the shell's presumed position or a pending move of another command, so it no longer overlaps a check elsewhere, for the session's own checks and for other sessions'.",
+  "acceptance": [
+    "A command whose line begins with `cd` or `pushd` to an absolute directory followed by `&&` is placed only in that directory's worktree, whether the shell is presumed elsewhere or another command's move is pending; tests cover both shapes from the field case, for the session's own open check.",
+    "A line whose first change is joined by `;` or `||`, a relative target, or a line TermAl cannot follow, keeps its current placement; tests cover each.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

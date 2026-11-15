@@ -1,0 +1,26 @@
+{
+  "id": "01a18b11-ca54-70e2-b6c3-3545cc5a046a",
+  "external_ref": null,
+  "title": "lost_checkpoint test fixture still queues work-binding reads and a stale comment after recovery stopped reading the binding",
+  "outcome": "lost_checkpoint test fixture still queues work-binding reads and a stale comment after recovery stopped reading the binding",
+  "acceptance": [
+    "lost_checkpoint test fixture still queues work-binding reads and a stale comment after recovery stopped reading the binding is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a178c4-4815-75d0-a9dc-09a4e666cd07",
+  "external_ref": null,
+  "title": "Quarantine identifiable delegation rows with non-text payloads without certifying a partial scan",
+  "outcome": "Assess and implement raw-value fingerprinting plus quarantine for a readable delegation ID whose value_json is non-TEXT or invalid UTF-8, while retaining fatal handling of step/iteration failures and preserving every durable row.",
+  "acceptance": [
+    "Quarantine identifiable delegation rows with non-text payloads without certifying a partial scan is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "review-followup",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

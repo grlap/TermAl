@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "external_ref": "tm-uw7j",
+  "title": "Reset running local runtimes when a project Engram MCP eligibility, argv or grant changes",
+  "outcome": "The per-session Engram MCP descriptor is captured only when a Claude/Codex/ACP runtime or thread initializes. Project Engram settings resets (src/session_crud.rs:566) and the deletion path (src/session_crud.rs:1618) shut down only the host-control adapter, so an already-running runtime keeps the old Engram MCP server, config and work-authority grant after disable, project deletion, home/binary change or an explicit grant clear; conversely enabling or rotating the grant never reaches existing runtimes. This defeats authority revocation and leaves configuration stale. Terminate or mark for runtime reset every affected local runtime (including delegation descendants) whenever MCP eligibility/argv changes, with immediate teardown on disable/delete/credential clear, or add a supported dynamic MCP reconfiguration path; cover all runtime families with lifecycle tests. Found by the Codex delegated reviewer (High).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

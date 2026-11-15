@@ -1,0 +1,66 @@
+{
+  "id": "01a10a58-4670-7c31-87c0-e0207258e84d",
+  "external_ref": null,
+  "title": "An Engram admission park shows \"{agent} was stopped; the queue is paused\" and \"Authorization is paused. Resume to retry\", even when nobody stopped the session and the host is retrying automatically",
+  "outcome": "The two activity cards say what holds the queue. A park whose automatic re-admission is scheduled says it is retrying automatically, with the attempt and the next time, and asks for no Resume. A hold that does need Resume or Cancel names its cause. The \"{agent} was stopped\" wording appears only after a real Stop.",
+  "acceptance": [
+    "1 (unbound, fail-first). On unchanged master ae310b9, new Vitest render tests:\n- give the paused-queue card and the retained-prompt card each cause below;\n- assert the cause-specific text;\n- fail on master because both cards show the fixed texts.\nA holder note cites the host's record of that run (a failed record, or, where the host cannot classify a Vitest failure (w-552b18d1dc13), its indeterminate record) together with the preserved native output showing the failing tests, the log path and its sha256.",
+    "2 (test). The paused-queue card (QueuePausedIndicator) states the cause from the session state:\n(a) Automatic retry: preview starts with \"Engram: waiting for admission; retrying automatically\".\n- Heading: waiting for Engram admission, retrying automatically.\n- Body: the attempt number and the next attempt time, shown in local time, plus the prompts-waiting count.\n- It says no action is needed and asks for no Resume.\n- If the attempt or time cannot be parsed, it shows the preview text instead, still without asking for Resume.\n(b) Held by Engram, needing Resume or Cancel: any other preview that starts with \"Engram\".\n- Heading: Engram is holding the queue.\n- Body: the preview text verbatim, which names the cause and the action, plus the count.\n(c) Real Stop: preview \"Turn stopped by user.\". \"{agent} was stopped; the queue is paused\", with today's body.\n(d) Anything else, such as a provider or turn failure or a revoked configuration.\n- Heading: the queue is paused.\n- Body: the preview text as the cause, plus today's \"Send a new prompt or resume the queue to continue.\"\n\"{agent} was stopped\" appears only in (c).",
+    "3 (test). The retained-prompt card, for a retained head that is not interrupted:\n- In (a), it says Engram admission is retrying automatically, with the attempt and next time, and that Cancel drops the retained prompt. It does not ask for Resume.\n- Otherwise it shows the preview text when the preview starts with \"Engram\".\n- Otherwise it shows \"Authorization is held. Resume to retry, or cancel the retained prompt.\" \"Paused\" is no longer used for a hold that nobody paused.\nThe interrupted and source-tracking-recovery texts are unchanged.",
+    "4 (test). Only text changes. When each card appears, its buttons and their actions, roles, aria labels and CSS classes are unchanged.\n- The cause is resolved by one small pure function in a new module under ui/src/panels/, with its own unit tests for (a) to (d), including an unparseable retry preview.\n- Existing tests keep their expectations, except those listed in a provenance note with old and new lines. One is known: the Stop test at AgentSessionPanel.retained-queue.test.tsx:919 asserts \"Codex was stopped…\" with no preview set. Its fixture gains the real Stop preview \"Turn stopped by user.\", which the backend sets on Stop.",
+    "5 (test). `cd ui && npx tsc --noEmit` is clean, and the full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note.",
+    "6 (judged). Scope: Greg's word (notes da33729a and 82ad4fa6) covers only the card text for the paused-queue and retained-prompt states.\n- Changed: ui/src/panels/session-activity-cards.tsx, the retained-card text in ui/src/panels/AgentSessionPanel.tsx, the new module, and tests.\n- Not changed: no backend change, no new API field, no change to what holds or releases the queue, no other UI.\n- None of w-1df557dae3ac's files is touched while it is in flight. Please confirm those two UI files are not in its frozen set; it is a backend item.",
+    "7 (judged). Independent verification: the read-only Codex and Claude review pair has no outstanding in-scope Medium or higher, and the acceptance evaluation is made by an evaluator that never held the item."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The paused-queue card and the retained-prompt card now name what holds the queue, from the session preview the backend writes when it pauses it, resolved by a small pure module (ui/src/panels/queue-pause-cause.ts): an automatic Engram re-admission says it is retrying automatically with the attempt and the next local time and asks for nothing; another Engram hold shows Engram's own preview; \"{agent} was stopped\" appears only after a real Stop; any other cause is shown from the preview under \"The queue is paused\"; the retained card says \"held\", not \"paused\". Text only: card visibility, buttons, roles, aria labels and classes are unchanged. Committed as 84d1f515 (freeze 1, gate test-49e0fba4, pair 1 clean, evaluation 35ea17c2 7/7) and landed by Termal::Opus2 as train 45, merge f7db2c58 on origin/master (train gate test-927e4b07 passed, integration pair clean), with ui/dist deployed and verified live. Follow-ups: w-ee7b6246fb06 (typed pause cause), w-fb6c238b09dc and w-b6f4d5b306f6 (pair-1 Lows), w-48d91aaa9c72 (integration Low).",
+    "completed_at": "2026-10-05T16:58:30.048403400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a17575-d1fa-7131-95e7-83b5a331a1a4",
+  "external_ref": null,
+  "title": "Clarify launch and preflight registration confirmation wording",
+  "outcome": "Clarify launch and preflight registration confirmation wording",
+  "acceptance": [
+    "The documentation explicitly distinguishes launch-time confirmation from preflight confirmation and says the read delivering a Response validates the exact durable registration; it does not imply a pre-Response failed attempt validates identity."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "gate-failure",
+    "review-followup",
+    "test-launcher",
+    "transport"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1755a-8278-7ae3-9849-c51b6b414885",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

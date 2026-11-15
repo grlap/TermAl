@@ -1,0 +1,85 @@
+{
+  "id": "01a0ff1d-b2b0-7a90-b460-e16e7268155a",
+  "external_ref": null,
+  "title": "A source change between two mediated turns is not recorded as its own observation, so the quiet next turn hides it",
+  "outcome": "A source change between two mediated turns is not recorded as its own observation, so the quiet next turn hides it",
+  "acceptance": [
+    "A deterministic test drives two real mediated turns on a named root, with a real content write between them that no watcher sees. The between-turn change is recorded as its own durable observation, with an unknown cause, separately from the quiet second turn; the second turn's own source_changed stays false; and nothing invents a turn mutation. The test fails on unchanged code (fail-first 2a776ce5 on 65e4233 is the baseline) and passes with the fix.",
+    "The observation follows the checked design a35eb89f: after accepted begin and durable admission, the opening capture, then account_if_eligible records the observation receipt and makes it durable locally, then the provider and checks run. The grant stays valid. One shared durable host sighting owner, with no automated display-window baseline. Provider delivery is withheld while the required source observation is unaccounted or its acknowledgement is not durable locally; refusal or uncertainty retains the truthful observation intent and original retry identity as applicable, with an owned recoverable disposition and visible reason, never an orphaned Active turn or a fabricated successful barrier. Recovery controls cover a crash between capture and durable receipt.",
+    "A check that ran before a late observation earns no fresh credit against it.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher.",
+    "An opening with no usable measurement (no opening basis, or Unconfirmed attribution) keeps its admitted provider delivery under an explicit recorded disposition: no source observation, accounted receipt or baseline is manufactured for it, and no later recovery upgrades that opening. The base's independent check-credit rules are unchanged: Unconfirmed authority withholds the affected checks; in the other no-measurement cases a check keeps its own independently established evidence, and no check gains freshness against a later inter-turn observation before that observation's record-time floor. A closing sighting advances the shared baseline only after a measured opening whose required observation was durably accounted or whose comparison was equal; equality never bypasses an outstanding same-scope obligation. A retained observation promotes its sighting only after durable accounting, ordered by the actual measurement time; pending or retired unaccounted facts leave the baseline unchanged, and late older recovery cannot regress a newer compatible baseline. Tests show an unmeasured opening delivers with no invented observation or receipt; its changed close does not advance the baseline; the next opening reports the interval from the last measured sighting; and pending/retired and late older observations preserve baseline ordering.",
+    "A genuine pre-intent conflict retains its immutable measured facts and original grant, connection, routing token and close operation identity in the single shared source-sightings owner, retired for delivery from creation and locally acknowledged durable before a close request. A bounded wait for the predecessor uses only the remaining current-attempt budget and never blocks the worker that must finish the predecessor. Grant settlement and observation accounting are independent durable obligations: explicit Resume processes unaccounted OR unsettled intents, does not repeat a matching durably settled close, and never replays the retired provider continuation or delivers under replacement authority. No fresh admission or automatic abort/re-admission loop occurs while the predecessor or retained observation still needs reconciliation. Tests show a successful early close followed by pending accounting still requires Resume and produces no repeated close or admission loop; an ambiguous close across settings replacement and restart preserves the original connection, routing and key; and persistence uncertainty retains a visible owned hold.",
+    "Capture outcomes distinguish no-evidence delivery, an owned observation gate, retired recovery, supersession and invariant failure. A missing canonical proof beside a Confirmed measured opening is a diagnosed invariant hold, never no-evidence delivery. Supersession cleans only its original admission marker and grant obligation and cannot change a successor; an uncertain close retains original durable recovery responsibility. Tests show confirmed changed openings stay blocked on accounting or local-ACK failure, authority loss cannot erase a captured pending intent, missing proof cannot release a provider, and superseded capture or settings replacement preserves the original obligation without mutating successor ownership.",
+    "A confirmed root rename or clear during an opening retains that opening's immutable workspace and its matching historical canonical proof, captured together before off-lock measurement. A validated account_if_eligible recorded receipt with audit_only/root_basis_moved, acknowledged durably locally, resolves that historical observation without accounting or credit and permits only the still-valid original non-retired admission through the existing final handoff guards. This is the sole root-transition exception to the accounting barrier in criteria 2 and 7. It neither promotes the shared accounting baseline at opening or close nor changes criterion 5's promotion rules. For criterion 6, a terminal validated historical disposition resolves observation recording, while original grant settlement remains an independent obligation and retired delivery stays retired; historical_binding and finished_run cannot authorize provider delivery. Refusal, unknown or mismatched receipts, explicit_audit/no_source_change, and uncertain local persistence do not satisfy this exception. Deterministic tests retain the real rename/clear delivery controls, verify the exact old proof/request and root_basis_moved receipt, no accounting/baseline promotion, a fresh subsequent scope's own observation, and no release after admission supersession or use of the historical exception to upgrade an opening captured with pending or unknown naming authority. The fixture's root_basis_moved receipt matches the shape of Engram's real receipt type, cited by source path at the producer revision used, or is exercised by a pinned live check. Later pending or unknown naming authority alone does not revoke an otherwise valid admitted opening or add a new delivery hold; the existing evidence-withholding rules and final admission-ownership guards remain in force. Tests distinguish pending or unknown attribution at capture from naming uncertainty introduced after a durable root-move receipt and before final handoff.",
+    "Local finalization is an independent durable responsibility after observation resolution and any owed grant settlement. Recorded and settled intents with unfinished receipt acknowledgement, eligible ordered baseline promotion or original-owner cleanup remain recoverable; repeated Resume completes those steps without repeating a remote operation whose matching durable result is present or replaying a retired provider continuation. Full intents and linked refused-policy predecessors are removed only after all their duties are durably complete and no live consumer depends on them. The required owner metadata and relevant session cleanup or handoff projection are confirmed together through content-specific persistence acknowledgement before a separate versioned compaction removes payloads; a metadata-only commit, local finalized flag or queued commit cannot substitute for that proof. Compaction preserves the latest accounted-or-equal baseline and its ordering; audit-only does not promote it. Pending, invariant, unacknowledged, unsettled and unresolved replacement-chain facts are never evicted for a size bound. Normal delivered intents incur no retired-grant close, and eventual compaction does not depend on another turn in the same scope. Deterministic fail-first controls cover lost acknowledgement after Recorded plus settlement, including in-process Resume and restore; a quarantined or failed session cleanup with committed metadata; accounted versus audit-only and newer-baseline ordering; normal delivered finalization; and removal of completed payloads while unresolved or referenced intents and their original retry bytes remain intact."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 8,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 9,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Record source changes between mediated turns as durable unknown-cause observations before provider handoff, with exact retry/recovery ownership, accounting and local persistence barriers, ordered baseline promotion, and coupled finalization/compaction. Exact31 tree18cb52f8 on beb2e688 passed full d2aac68e and pinned live9a0f0d99; review pair10273/10268 has no Medium+, earlier Mediums fixed and re-reviewed. Independent evaluation264d4220 passed9/9 at the same source. Feature-branch commit and integration-owner handoff follow.",
+    "completed_at": "2026-10-03T15:35:21.753776100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "id": "01a129a4-4446-7d13-87ba-d97c0dfe41af",
+  "external_ref": null,
+  "title": "Detach follow for tiny upward scrolls before persisting the viewport",
+  "outcome": "Land the confirmed direction-sensitive fix for tiny upward movement retaining FOLLOW, separately from the unresolved session-dependent delayed jump.",
+  "acceptance": [
+    "An upward scroll input that moves the transcript by 0.5–4 px detaches follow before the scroll write, and the detached position persists across a session switch and across new output arriving while the session is inactive. A focused regression shows each.",
+    "A downward scroll input that arrives at the physical bottom still reattaches follow. A test shows it.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "review-ready",
+    "scroll",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6d3-c4de-7140-8847-940234534ed8",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Independent acceptance evaluation 62a0351110444a5bad611b1f3e232a00 passed all three criteria with zero obligations open on source fingerprint content-v1:66e294afd90f42e3de22a2f49a34ee8f8adccbb2d408a2a8b7bedffe37610b44. Commit 7182f25942323d6bc15f1079ba7ad33cba9d9713 is the exact gated index tree on base 02474e0aa62ebe5ca34f24da8ea2dfec8adaaac2; it is ready for Opus2 to integrate.",
+    "completed_at": "2026-10-11T09:14:49.776213Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

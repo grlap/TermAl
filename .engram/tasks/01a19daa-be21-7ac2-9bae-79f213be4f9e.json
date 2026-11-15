@@ -1,0 +1,33 @@
+{
+  "id": "01a19daa-be21-7ac2-9bae-79f213be4f9e",
+  "external_ref": null,
+  "title": "Global state lock held 250–330 ms by source-observation runtime and test-run code (Greg-observed)",
+  "outcome": "Neither src/engram_source_observation_runtime.rs:115 nor src/test_runs.rs:933 holds the global state lock for more than a few milliseconds. Expensive work (I/O, scans, serialization, persistence) runs off the lock with revalidation, the holds are measured before and after, and behaviour is unchanged.",
+  "acceptance": [
+    "After w-3fe8 lands, implement and validate the tracing change first on a fresh candidate based on that landed master, before restructuring the test-run scanner. The existing bounded test-run phase-trace owner records the actual rescan origin, acquisition wait, complete final-guard hold, separate cut-validation/fallback, old-entry diff/alias, publication, card, terminal-retention and compaction spans, input/work counts and observed persistence dispatch. Marks captured while StateInner is held are appended to the existing trace ring only after that guard is released. Missing, evicted or truncated evidence is explicit, never replaced by zero durations.",
+    "Record a passive baseline from the tracing build before restructuring, naming the running commit/build, server instance, monotonic time range, origin counts and relevant run/session/history populations. Separate measured phase durations and trigger rates from source-derived schedules or hypotheses. Preserve Greg's original two reports and their missing time/session/build provenance. The removed source-observation tick is not restored or patched separately.",
+    "The test-run refresh prepares expensive projection/fallback, old-entry diff and alias restoration, card, terminal-retention and compaction plans outside StateInner using the existing cut/rescan and persistence owners. The final commit validates the exact relevant before-images, memberships, authority/evidence, durability, wait/card and retention inputs, including changes made without revision/stamp updates; stale prepared work is never published or used to discard detail. Revision allocation and enqueue stay under the same StateInner guard and in the existing event order. Row-save/fence, failed-publication retry, immutable proof, synchronous refresh and shutdown durability semantics are preserved.",
+    "A full compaction selection runs only when actual eligibility/population/proof inputs change or an already-requested failed/pending compaction requires completion/retry. Unchanged polls and unrelated global revisions do not request or rebuild a full selection. Existing persistence-fence polling and terminal retention remain live; wait/card/verification/durability/artifact changes still cause a needed selection. Periodic intervals or per-event freshness are not weakened to obtain a shorter hold.",
+    "Deterministic focused regressions cover every moved expensive phase with a lock-not-held assertion and a barrier proving another StateInner client can proceed while preparation is suspended. Existing visit/projection/authority counters show unrelated retained history does not increase final-commit planning work. Forced unstamped before-image drift, membership/durability changes, ordered per-delta publication, failed save/publication and pending compaction completion retain their required outcomes. Tests use no sleeps, enlarged timeouts or elapsed-time pass/fail thresholds.",
+    "The exact final candidate has the required independent review pair and maintained full gate green. Passive post-change evidence uses the same trace schema and records comparable host/configuration and population/workload buckets, at least20 naturally requested rescans per observed bucket. In each bucket the final-guard p95 is at most10ms; maximum, every span above10ms, sample counts and per-origin cumulative held time are also reported without dropping outliers. Any remaining recurring250ms-or-longer final-guard holds in that sample keep the performance item open. Operational measurements are separate from the structural unit-test guarantees and name the actual running build."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

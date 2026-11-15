@@ -1,0 +1,62 @@
+{
+  "id": "01a1a663-90d1-7771-8db5-83d4e75fef4f",
+  "external_ref": null,
+  "title": "Bound Windows commit-input capture cost before enabling the default",
+  "outcome": "Reduce repeated Windows commit-input Git launches without increasing the shared 40-second capture budget or weakening admission and final drift checks. Enable automatic launcher input selection before immutable registration: admitted clean input requests commit verification, other input uses the existing plain run with its actual outcome and a named selection reason. Preserve explicit --input commit strictness and existing plain preconditions and fingerprint guards. The host's independent ORDINARY_COMMIT_INPUT_DEFAULT remains false; host scaling and closing-job limits require a separate decision. This launcher-only rollout uses the independently accepted capture/scaling limits recorded on this item and still requires exact-input reviews, tests and full-gate integration.",
+  "acceptance": [
+    "The Rust and Node commit-input producers reduce repeated Git process launches while preserving the existing end-to-end 40-second shared capture deadline, including launch-lock wait, cancellation, bounded input/output, and fail-closed unavailable-evidence behavior. No test-only budget or timeout increase is introduced.",
+    "Each capture retains root and child eligibility preflight before recursive root status and final checks of root/child commit, tree, index pins, hidden flags, attributes and materialization. Each reused or removed immediate read is mapped to its same-observation replacement and retained final drift check; no cross-capture cache is added.",
+    "Batched configuration, identity and index responses are parsed with explicit framing, cardinality and value validation. Behavioral negative controls cover malformed and multi-valued responses and preserve Git's applicable boolean and last-value semantics, root/child parity, named and typed refusals, filter non-execution, replacement suppression and read-only capture.",
+    "Focused Rust and three-file Node checks pass on the exact new candidate, with DL560 used first, and the original selection passes on Central at eight test threads, once, in a named coordinator slot. Diagnostic observations report actual process counts and per-capture phase totals under that pressure before the proof run; tests add no elapsed-time assertions. Original failed runs remain preserved and later passes are not presented as their diagnosis.",
+    "On the final exact candidate, automatic launcher selection is enabled while the host's ORDINARY_COMMIT_INPUT_DEFAULT remains false. Before immutable run registration, a clean checkout admitted by the committed-input producer selects input=commit; any other checkout, dirty or not admitted, selects the existing plain run, preserving its actual command outcome, naming why in the run's summary and emitting no committed-input verification record. The plain run's own preconditions, including a readable HEAD and root, are unchanged; where they fail, the run stops with its existing error as it does today. Explicit --input commit remains strict and refuses a checkout the producer does not admit. Existing plain-run pre/post fingerprint guards are retained, so edits during a plain run may still fail it; no new drift mechanism is introduced. The required independent review pair has no unresolved in-scope Medium-or-higher finding, and the final exact input passes the standing full-gate/integration requirements. Remaining launcher capture/scaling limits and the evidence supporting this launcher-only rollout are recorded and independently accepted. N11 completion and a paired host-default flip are not prerequisites for this item's landing or completion; a future host-default flip needs a separate decision."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "commit-input-v1",
+    "default-flip-prerequisite",
+    "greg-directed",
+    "performance",
+    "source-revision",
+    "team-pilot",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

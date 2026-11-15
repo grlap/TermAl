@@ -1,0 +1,29 @@
+{
+  "id": "01a1927b-320b-75b1-9763-aeb8ad89b90a",
+  "external_ref": null,
+  "title": "Align the candidate-commits bullet's \"gated again\" with \"frozen, gated and reviewed as its own input\"",
+  "outcome": "Align the candidate-commits bullet's \"gated again\" with \"frozen, gated and reviewed as its own input\"",
+  "acceptance": [
+    "In CLAUDE.md and AGENTS.md the candidate-commits bullet's 'If master has moved, the change is committed afresh as a new candidate whose parent is the current master, and gated again.' says the new candidate is frozen, gated and reviewed again as its own input, matching review-changes.md Step 1",
+    "The change lands under the instruction-change conditions (a), (b) and (c), with a clean review pair and full gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6ec-75e3-8e3a-08bf9eb7d138",
+  "external_ref": "tm-uex8.2",
+  "title": "Require detached launcher readiness before promising mailbox completion",
+  "outcome": "Parent-consolidated dual review 2026-09-22, Codex session-7272 and Claude session-7273; reviewed fingerprint 105d17771f7afa7df75efb3448832b9f7f8303b8fe850f159601b6d5f792e505. Both reviewers found STARTED follows only Node spawn, before notification eligibility or execution admission. Self-send, missing genuine sender, invalid CLI, lock/read/save startup exceptions can leave the coordinator waiting without a wake. Validate notification prerequisites before detach, and require child readiness after exclusive admission and initial state validation. Handle owned startup failures with terminal evidence and best-effort notification when recipient is known. Never overwrite another run owner on EEXIST; unreadable request/recipient must fail visibly before STARTED. Preserve exactly-once execution and notify-only retry. Validate trimmed nonempty non-option-like recipients without forbidding supported session names. Add real detached failure/readiness regressions; OS kill/network failure still cannot guarantee delivery.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c6ea-78d0-ba56-5e0ab65d0a7f",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Launcher readiness comes before STARTED, and post-READY death is covered by `recover` (scripts/test-launcher.mjs:623, :934 on master f7db2c58). Closed by evidence.",
+  "completion": null
+}

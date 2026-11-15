@@ -1,0 +1,37 @@
+{
+  "id": "01a1d135-c3d4-7072-9d47-d8f2e3a93e49",
+  "external_ref": null,
+  "title": "After the 2026-11-12 19:16Z restart: relay boundaries 2010/2011 for session-14548 failed 'session not found', three proxy tails inconsistent, four check credits Unknown",
+  "outcome": "Each anomaly in Greg's 19:16Z startup log is explained from evidence, and none of them loses a message or a credit. Sequence 2 of the native relay messages for session-14548 is either delivered or still durable and retried, and a lasting defect gets a fix. The inconsistent proxy tails and the Unknown check credits have a stated cause, and any real defect is fixed or filed. The original instance is never just repeated.",
+  "acceptance": [
+    "Delivery of the native relay boundary messages 2010/2011 for session-14548 (mailbox-2459dccf-2ce9-4d59-8341-08450acdf458 and mailbox-d00d58a8-b076-4136-a864-6d33b0f21160, sequence 2) is established from the mailbox and relay state: delivered, still durable and pending, or lost. If they are not delivered after the inventory completed, the cause of 'session not found' is established, and a fix lands with a test that first fails on the unmodified host.",
+    "The proxy tail inconsistencies (session-16529 64/63, session-16551 64/62, session-16702 64/63) are explained from the code and state: harmless start-up lag, or a defect. A defect gets a fix with a behavioural test, or its own item.",
+    "The four Unknown check credits in session-13196 are explained from the run records before any check is repeated: still pending settlement, lost by the restart, or something else. If a restart loses a credit, that defect is fixed or filed as its own item."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "post-restart",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

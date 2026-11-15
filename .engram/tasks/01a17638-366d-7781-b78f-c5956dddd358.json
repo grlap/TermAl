@@ -1,0 +1,31 @@
+{
+  "id": "01a17638-366d-7781-b78f-c5956dddd358",
+  "external_ref": null,
+  "title": "Cover remaining scan projection cut proof fences with deterministic mutation witnesses",
+  "outcome": "Regression witnesses distinguish remaining projection-cut input classes at the preparation-to-commit boundary.",
+  "acceptance": [
+    "Table-driven or equivalent deterministic hook cases cover carried-check hazards, registration and compaction proof markers, retained-row/presence/lifecycle changes and project/session-child or index drift.",
+    "Each relevant mutation demonstrates live fallback and verifies its published summary or delta; existing unchanged-input and unrelated-history controls remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-followup",
+    "state-lock",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a175e1-c2a5-7671-8ea2-b5476c291e56",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

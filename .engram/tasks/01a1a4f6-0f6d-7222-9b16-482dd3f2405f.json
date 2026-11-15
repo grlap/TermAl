@@ -1,0 +1,32 @@
+{
+  "id": "01a1a4f6-0f6d-7222-9b16-482dd3f2405f",
+  "external_ref": null,
+  "title": "Audit incremental session and composer publication cost from recorded browser profiles",
+  "outcome": "Decide from isolated measurements whether existing incremental publication does avoidable work, preserving its current owner and correctness before proposing an optimization.",
+  "acceptance": [
+    "The existing operator trace and synthetic profiles are reconciled with named source functions and per-event versus capture-wide self/inclusive timings; overlapping costs and instrumentation are stated explicitly.",
+    "A focused deterministic work-count or allocation diagnostic isolates any avoidable publication work across representative session counts and mutation patterns, without changing UI or authority semantics to improve a benchmark.",
+    "The result records either a measured, separately scoped optimization proposal with expected impact and validation, or evidence that no change is justified; no speculative cache, registry or authority is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "profile-measured",
+    "session-store",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

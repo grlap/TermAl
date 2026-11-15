@@ -1,0 +1,32 @@
+{
+  "id": "01a18adb-5fb0-77c3-8495-5c94e4ca9cbc",
+  "external_ref": null,
+  "title": "Add negative coverage that restricted readiness-deferred drains do not register ordinary activation",
+  "outcome": "Restricted queue-drain origins retain their existing custody when readiness defers them; tests catch accidental conversion into ordinary activation.",
+  "acceptance": [
+    "A focused regression covers applicable allow-blocked, orphaned-workflow and specialised-owner readiness-defer paths, and asserts the existing ordinary activation field is unchanged.",
+    "The positive ordinary-wake registration and existing restriction/owner assertions remain intact; no production behavior or timeout is weakened."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "outage",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a188dd-2eb5-7c30-b8b5-3af0aab58d4c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1bdc9-7a1b-75a3-92e5-7d8744ff6954",
+  "disposal_reason": "Fable2722 obsolete-feature sweep: completed parent w3af0 blocks claim; tracker-advertised independence is used only for removal-provenance disposition, not renewed gated-control implementation.",
+  "completion": null
+}

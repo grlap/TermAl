@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c77e-7f62-b6ba-6462875d03d4",
+  "external_ref": "tm-uw7j.8",
+  "title": "Normalize Engram binary and home strings at settings ingress",
+  "outcome": "Engram home is validated and compared after trimming but persisted and passed to spawn/revoke commands untrimmed. A padded path can compare as the same authority store while selecting a different actual --home, skipping required reset/revocation. Normalize home and binary_path once before persistence and use the same canonical request strings everywhere.",
+  "acceptance": [
+    "Persisted settings, runtime argv, revoke targets, validation, and store identity use the same normalized home/binary strings; padded and blank inputs have explicit behavior; cross-platform regression tests cover padded paths and authority rotation/reset decisions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

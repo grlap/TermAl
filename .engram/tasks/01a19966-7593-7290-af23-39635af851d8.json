@@ -1,0 +1,30 @@
+{
+  "id": "01a19966-7593-7290-af23-39635af851d8",
+  "external_ref": null,
+  "title": "Rust tests that block on a gate, barrier or channel must fail with a diagnosis on panic or deadlock instead of hanging the run",
+  "outcome": "Rust tests that block on a gate, barrier or channel must fail with a diagnosis on panic or deadlock instead of hanging the run",
+  "acceptance": [
+    "An inventory, cited to source, lists Rust tests whose worker threads block on a test-owned gate, barrier or channel that a panic on another thread would not release (for example a gate declared outside thread::scope)",
+    "Each listed test releases its blocked workers when the driving thread panics, so the test fails with its original panic instead of hanging",
+    "Where a wait has no release path on failure, it gains one that fails with a diagnosis; no timeout is inflated, no assertion weakened, and raw low CPU is not used as an automatic kill criterion"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-directed",
+    "test-runner",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

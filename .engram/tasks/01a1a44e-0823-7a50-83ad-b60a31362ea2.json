@@ -1,0 +1,36 @@
+{
+  "id": "01a1a44e-0823-7a50-83ad-b60a31362ea2",
+  "external_ref": null,
+  "title": "Expose citation-refused evaluator submissions to the requester without treating them as recorded evaluations",
+  "outcome": "A requester can inspect the evaluator's complete bounded submitted verdicts and the confirmed citation refusal, independently of the evaluator's final prose, and can distinguish that refused attempt from a recorded evaluation or an unknown write outcome.",
+  "acceptance": [
+    "The diagnosis of evaluator session-16236 records whether the context-only marker survived into its provider-runtime input, identifies the submitted forbidden citation and the host retention/exposure path, and states the limits of the available delivery evidence without assuming that the marker was absent.",
+    "After a confirmed citation refusal, the requester can retrieve a durable, bounded structured view of the submitted criterion positions, verdicts, bases, rationales and citation locators, linked to the evaluator attempt key, judged acceptance/evidence cuts and refusal reason, explicitly marked refused and not recorded; this view survives restart and later attempts, exposes no host-private command or connection arguments, and grants no acceptance credit.",
+    "Regression coverage exercises a context-only citation refusal using Engram's exact refusal contract, checks the requester-visible refused submission and restart/later-attempt retention, and preserves the existing distinction between confirmed refusal, recorded receipt and unknown write outcome. A same-attempt repair is offered only when the tracker supplies typed citable alternatives and permits its bounded retry; otherwise a new judgment requires an explicitly requested fresh host-authored brief and key. No citation is silently removed or relabelled."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Requester-visible confirmed refused evaluator judgments are durably retained as a bounded safe structured view, separate from recorded receipt and unknown write custody; landed with behavioral regression coverage.",
+    "completed_at": "2026-11-10T20:07:02.811763900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

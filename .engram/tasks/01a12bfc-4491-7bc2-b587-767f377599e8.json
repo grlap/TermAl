@@ -1,0 +1,26 @@
+{
+  "id": "01a12bfc-4491-7bc2-b587-767f377599e8",
+  "external_ref": null,
+  "title": "Resume of a Releasable begin-preparation hold skips the same-authority check that boot re-admission applies",
+  "outcome": "The Releasable branch of release_engram_begin_preparation_hold_for_resume (src/engram_begin_preparation_retry.rs) re-admits a held head and its rebind expires the old issued grant. It should require that the retained evaluate's connection and admission settings match the current binding target, as readmit_engram_begin_preparation_holds_on_boot_locked does. Otherwise it should report a deterministic reason and keep the hold, or the exception should be documented with its consequence. Today, after a project's Engram settings change interrupts such a head, Resume re-admits it under the new authority. If the authority store changed, the rebind cannot expire the old store's issued grant. The outcome equals Cancel plus a resend, so the impact is limited. A test covers a settings change followed by Resume.",
+  "acceptance": [
+    "Resume of a Releasable begin-preparation hold skips the same-authority check that boot re-admission applies is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

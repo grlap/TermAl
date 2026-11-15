@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4ea-7a50-ac3c-4f87b3d0a5b1",
+  "external_ref": "tm-dl2x",
+  "title": "Honor workspace deep links on initial load",
+  "outcome": "Opening TermAl with ?workspace=<saved-id> fetches the requested saved layout successfully, but the UI does not adopt that workspace. Trace the cold-start layout/session hydration ordering and ensure the requested server workspace wins without being overwritten by placeholder/default state.",
+  "acceptance": [
+    "A cold load at a saved workspace query URL renders that workspace after state hydration; the requested layout is not overwritten by initial/default persistence; regression coverage exercises the query-selected server layout; UI typecheck/tests/build pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

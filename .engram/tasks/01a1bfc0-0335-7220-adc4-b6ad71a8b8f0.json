@@ -1,0 +1,33 @@
+{
+  "id": "01a1bfc0-0335-7220-adc4-b6ad71a8b8f0",
+  "external_ref": null,
+  "title": "Make the second relay wake admission assertion identify its sequence",
+  "outcome": "The boot recovery test's pre-outage assertion distinguishes the second message's admitted wake from the first message's retained continuation.",
+  "acceptance": [
+    "Before clearing the process queue in the existing production-shape boot test, a structured assertion requires the queued mailbox source to identify the second message sequence.",
+    "The original boot retry, message preservation and receipt ACK assertions remain; relevant focused tests and required review/gate evidence are recorded without phrase pins, sleeps or timeout changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "regression",
+    "remote-mailbox",
+    "review-followup",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a187f2-acc8-7242-8ab8-39b36c866297",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

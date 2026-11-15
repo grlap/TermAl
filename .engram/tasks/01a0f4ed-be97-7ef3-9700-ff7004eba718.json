@@ -1,0 +1,26 @@
+{
+  "id": "01a0f4ed-be97-7ef3-9700-ff7004eba718",
+  "external_ref": null,
+  "title": "Scope delegation workspace observations to the current follow-up attempt",
+  "outcome": "Read-only observation snapshots scan the child transcript across earlier turns. A reused child can report prior-attempt watcher paths under the label 'during the run'. Preserve writing-child behavior while defining an attempt boundary or clarifying the presentation.",
+  "acceptance": [
+    "Repeated child follow-ups distinguish workspace observations from prior attempts, with regression coverage for plain and structured results."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,73 @@
+{
+  "id": "01a1319c-2508-7262-8fbc-255bd34c5620",
+  "external_ref": null,
+  "title": "S2 P1 foundation: host-persisted test-run transition record, joint transition-and-prompt release prerequisite, and owner acknowledgement, inactive in production until launch provenance and the host route land",
+  "outcome": "A host-persisted, restart-safe transition record and settlement path for declared test-run transitions exists. Deterministic tests prove it through a test-only verified-provenance input, while production stays inactive: without host-observed launch provenance and positive host-route authority, no owner resume is created and the transition shows a visible blocker. A transition's resume prompt is released only on an exact transition-and-prompt durability conjunction, on every release path including boot. The exact owner can acknowledge a delivered transition through an authenticated boundary, and the UI distinguishes delivered-awaiting-acknowledgement from acknowledged. Launch observation, the route discriminator, mail suppression and production activation stay open in w-6efe's package (iii) and its final integration. No polling, watchdog, timer or new telemetry.",
+  "acceptance": [
+    "Each project/store and validated run incarnation gets one host-persisted transition record. It holds:\n- the frozen declaration: canonical owner, action and item;\n- the declaration and result digests, as integrity fields only;\n- the delivery state and the acknowledgement state;\n- the correlated run wait and queued prompt.\nRegistration persists the record together with its pending run wait in one commit. Terminal settlement persists the queued prompt and consumes the wait in one commit. The record is kept after the wait is consumed.\nA rescan creates nothing new after consumption, after a restart, or after the run directory disappears and reappears. A changed declaration or result digest blocks that same record. A run's first terminal result is not a conflict. Tests show each case.",
+    "In production, a declared transition creates no owner resume prompt unless it has host-observed launch provenance and positive, immutable host-route authority. Without them it shows a visible Blocked disposition (unverified provenance, or unsupported route) that a rescan does not undo.\n- request.json owner metadata never grants authority on its own.\n- S1 and legacy runs keep their mailbox route and get no host wake.\n- Provenance and route authority can be supplied only through a test-only input that is unavailable outside cfg(test).\nTests show the production blocker, the legacy route unchanged, and the test-only input absent from non-test builds.",
+    "A transition's resume prompt is promoted or sent only when all of these hold:\n- the transition record (incarnation/version, owner, prompt id and content, hold nonce) has its exact durability proof;\n- the queued prompt has its exact durability proof;\n- the transition is still current.\nIt is never released after a failed commit. Every release path enforces this:\n- the generic queue-durability acknowledgement;\n- its Changed re-request;\n- the rejected-prompt requeue;\n- boot load before orphan recovery, which needs a validated durable transition, queue and wait-consumption snapshot, or else keeps the prompt held with an actionable reason.\nTests attempt each path with the transition proof missing and show zero promotions, then exactly one promotion once both proofs exist. They also show that a stale acknowledgement after Stop or Cancel releases nothing, and that a replacement prompt cannot inherit an old acknowledgement. Ordinary prompts behave as before.",
+    "Deterministic barrier tests use the test-only verified provenance and route input. They show exactly one logical sign-off and one resume prompt in each of these cases:\n- the host is down before terminal indexing;\n- a restart before the registration commit;\n- a restart after registration;\n- a restart after the terminal enqueue but before dispatch;\n- the ambiguous send/receipt boundary, reconciled through the w-9b3a delivery receipt and never re-sent.\nAn owner that is stopped, paused, archived, deleted or unverified is never woken or substituted. Its transition shows an explicit Blocked or Cancelled disposition that a rescan does not undo. No polling, watchdog or timer is added.",
+    "The exact owner acknowledges a delivered transition through an authenticated boundary that derives the caller's session identity, never trusting an owner id supplied in a body or path.\n- A duplicate acknowledgement is idempotent.\n- A wrong or stale owner, or a wrong or stale transition identity, is rejected.\n- Delivery and acknowledgement are distinct persisted states. An acknowledgement neither records provider acceptance nor clears a delivery conflict.\n- The UI shows a delivered transition as awaiting the owner until it is acknowledged, and as acknowledged afterwards.\nRust and UI tests cover both states and the rejections.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "greg-direction",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a129c6-e080-7840-b9e2-6efe708d7c6d",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a12cb4-ec29-7fb0-bcf0-9b3a30fde03e"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

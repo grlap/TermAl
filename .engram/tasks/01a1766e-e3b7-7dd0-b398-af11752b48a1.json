@@ -1,0 +1,31 @@
+{
+  "id": "01a1766e-e3b7-7dd0-b398-af11752b48a1",
+  "external_ref": null,
+  "title": "Prepare gated-control release observation using existing host-API sampler, OFF dry run, and document-only enable/rollback",
+  "outcome": "Prepare criterion3 instrumentation safely while gating stays OFF; reuse Sol-1cee's sampler, run about10-minute host-API-only dry run, and record exact project enable/readback/rollback bodies without executing them.",
+  "acceptance": [
+    "The existing Sol-1cee host-API-only sampler is reused; any justified extensions and correlation limits are recorded against criterion3(a)-(d), including original admission windows, supported dispositions, prompt progress and provider handoffs by exact project record/source.",
+    "An approximately10-minute dry run samples /api/state at least once a minute with gating OFF, records sampling/correlation/report artifacts and no-grant-traffic observations or explicit unavailable evidence; it is labelled dry run and does not claim the enabled30-minute release condition.",
+    "A document-only enable/readback/rollback runbook records exact PATCH bodies for project-6, project-1 and the exact Engram project record; no enable/PATCH/profile/config or live-store action is executed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "control-plane",
+    "cross-project",
+    "gated-control",
+    "greg-directive"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16637-ea9c-7001-907d-0d2e12f303a8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "superseded by EO 87f49ed0 removing gated control; decided by Termal::Fable2. Source: mailbox1330, message mailbox-message-2c078ba9-6d9c-4713-8042-e85f302ec7e3, 2026-11-08T19:18:53.353491600Z. Historical artifacts/failures retained; no new execution/acceptance claim.",
+  "completion": null
+}

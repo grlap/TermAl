@@ -1,0 +1,29 @@
+{
+  "id": "01a109a9-45db-7e13-9d80-173a6576b9c5",
+  "external_ref": null,
+  "title": "Design an explicitly authorized coordinator route for continuation stall alerts",
+  "outcome": "Design pending, separate from the owning-session v1 continuation alerts. Define an explicit authorized host coordinator designation and routing lifecycle, including project scope, replacement, unavailability and dispatch revalidation. Role memories, display names and a borrowed root sender are not routing authority. This configuration/authority decision requires Greg's input, to be relayed by TermAl's coordinator when relevant; no implementation or authority widening is authorized by this intake.",
+  "acceptance": [
+    "Acceptance criteria are pending Greg's routing-authority input, joint design and coordinator concurrence; this placeholder does not authorize evaluation or completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "design-pending"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10998-76aa-7a03-b188-07dca1a93d8f"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

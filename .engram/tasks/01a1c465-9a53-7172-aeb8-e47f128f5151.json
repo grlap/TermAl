@@ -1,0 +1,27 @@
+{
+  "id": "01a1c465-9a53-7172-aeb8-e47f128f5151",
+  "external_ref": null,
+  "title": "Keep severity None tallies from becoming phantom delegation findings",
+  "outcome": "A clean ordinary delegation that writes **High — None.**, **Critical — none**, or existing compact High - None. tallies remains clean in parsed findings and the parent wake, while real findings keep their severity and content.",
+  "acceptance": [
+    "Behavioral parser and parent-result/wake clean controls for severity None tallies produce no phantom findings, with positive real-finding controls preserving actual findings."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation-results",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

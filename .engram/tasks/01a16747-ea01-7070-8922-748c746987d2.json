@@ -1,0 +1,64 @@
+{
+  "id": "01a16747-ea01-7070-8922-748c746987d2",
+  "external_ref": null,
+  "title": "Bash file writes into a protected gate root: per-operation provisional interference from tool_use through the permission decision, so a host-denied unexecuted sed -i does not cost gate credit",
+  "outcome": "Follow-up to w-47e49c222faf. Its slice C2 covers only the four file tools, because a Bash tool_use fences at command start (engram_turn_checks.rs:1617, then engram_carried_checks.rs:382 and :1485) BEFORE can_use_tool. Design, from Architect2 (mailbox 3d06f738 #920), is per-operation provisional interference, never clearing the general gate fence:\n- Correlate tool_use, the permission request and decision, and execution or result by session, runtime/turn and tool-use/request identity, with exact command and target provenance.\n- Only a positively identified host-mediated request awaiting permission may be provisional.\n- A definitive host Deny before any execution removes ONLY that operation's provisional contribution.\n- Allow, or observed execution, promotes it to the existing interference path.\n- A missing callback, preapproved execution, orphan or restart, ambiguous correlation, or an error after possible execution stays unresolved and fenced. Never infer \"no write\" from is_error.\n- Pending operations block a new gate's admission or final positive settlement until resolved, so an earlier Allow cannot escape protection by arriving before the gate.\n- Concurrent independent writer or watcher causes are untouched.\nTests: deny and allow; no callback; delayed, reordered and duplicate replies; cancellation and restart; two simultaneous causes; and the already-authorized-before-gate race.",
+  "acceptance": [
+    "C1 (correlation). TermAl reads the tool_use_id of a Claude can_use_tool request and keeps it, with the request id, on the request's control origin and on a queued approval. A request is correlated with an operation only when its tool_use_id equals the id of a Bash tool_use already seen from the same runtime and turn, its tool_name is Bash, and its input command equals that tool_use's command line; the operation then binds that request id and keeps the command line and the places its start resolved. A request without a tool_use_id, with an unmatched id, a different command, tool or turn, one arriving before its tool_use, or a second request id for an operation already bound is uncorrelated and gives no provisional state. A pre-permission observation can hold credit unresolved (C2) but never by itself establishes that a request is awaiting permission; a reused id with a different request id or command can never remove an entry.",
+    "C2 (provisional contribution, scope). A root, foreground Claude Bash tool_use that would fence a carried full gate (the holder's own or another session's) records that contribution on the gate as a per-operation entry keyed by runtime and tool_use id, with its cause, instead of setting the gate's fence. While any such entry or a correlated denial-result hold is unresolved, the gate cannot be credited. It stays carried only while no independent existing refusal applies and its original TTL has not expired. Expiry never releases a pending operation into credit. Existing watcher, writer, source, claim, generation and other terminal refusals retain their normal precedence. Fences from every other cause are recorded exactly as today and are never cleared or hidden by an entry. Out of this slice, and fenced as today: background and subagent Bash (their outstanding-work hazards), overlap marks on non-carried turn checks, Codex commands, and any Bash the CLI runs without a callback.",
+    "C3 (resolution). - Deny pending result: when the host sends a definitive Deny for the bound request of a correlated operation, before any execution evidence for it, only that operation's contribution may transition to a denial-result hold. The operation identity and hold remain through both settlement and admission checks. Sending Deny alone does not release either check. A failed or unknown response-send outcome is unresolved, not proof of denial delivery. - Removal: the denial-result hold is removed only after the same operation's expected denial result is received: a tool_result for that tool_use_id with is_error true whose content is the denial message the host sent, with no conflicting evidence. That result alone is retired as an abandoned command, not a finished one. Removing this hold never clears a separate fence or another operation's entry. - Contradictory evidence: any other execution evidence for the operation (a result without is_error or with other content, a background start or task notification) turns it into the gate's ordinary first-wins fence, even after the Deny. - Promotion: everything else turns the entries into that fence: an Allow the host sends (automatic or delayed), a tool_result with no host Deny before it whatever is_error says, an uncorrelated, duplicate or conflicting reply, a request cleared by cancel, runtime exit, Stop or reset, and a host restart. \"No write\" is never inferred from is_error alone. Pending entries and denial-result holds, their resolution version, and independent fences are rechecked under the final settlement/admission state fence. An off-lock settlement snapshot taken before a new entry, conflict or resolution cannot publish stale credit. Cancellation, runtime exit, Stop, reset, restart or the existing TTL ending with a denial result still missing cannot make that operation credit-safe. Retain operation correlation for the relevant gate lifetime so later conflicting evidence observed before final settlement follows the ordinary fence path; never resurrect a gate already refused or consumed.",
+    "C4 (admission). While an operation's entry is unresolved in a worktree, a new full gate launched there is not carried, through the existing running-command and writer-in-Approval rules; an operation allowed before a gate's launch and executed after it fences that gate.",
+    "C5 (tests), through the production frame path: deny then its denial result: credited, the result retired as abandoned; deny then a contradictory result (is_error false or different content): refused; allow then result: refused; no callback then result: refused; delayed user Reject: credited, delayed Accept: refused; request before its tool_use, an unmatched id, a matching id with a different command, and a second request id for a bound operation: refused; duplicate replies: no double effect; cancel, and runtime exit, with the request pending: refused; an independent writer's fence beside a denied operation: refused with that writer's cause; two parallel identical commands, one denied and one allowed: refused by the allowed one; allowed before launch, executed after: refused; a launch while an operation is pending: not carried; checkpoint/terminal gate result between sending Deny and its matching denial result: no credit; after the matching denial result and otherwise unchanged eligibility, normal credit remains possible; missing denial result through cancellation, runtime exit, Stop, reset, restart or TTL expiry: no credit; contradictory result, background start or task notification after Deny and before final settlement: refused, including when an off-lock settlement snapshot was already taken; an independent refusal while another operation is unresolved takes effect normally; pending operations cannot hide it.",
+    "C6 (validation and landing). The full gate passes on the exact tree submitted for landing, the review pair has no outstanding finding of Medium or higher on it, and the item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

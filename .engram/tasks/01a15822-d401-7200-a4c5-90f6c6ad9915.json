@@ -1,0 +1,29 @@
+{
+  "id": "01a15822-d401-7200-a4c5-90f6c6ad9915",
+  "external_ref": null,
+  "title": "Cover bounded-read admission and failed-wait production wiring",
+  "outcome": "Ensure regressions detect bypassing production group-admission retention or failed-wait phase guards and retained Unknown propagation.",
+  "acceptance": [
+    "A deterministic regression exercises the conversion, positive-group validation and retention wiring used by production, and fails when admission errors bypass unresolved-owner retention.",
+    "A deterministic adapter-level failed-wait regression verifies retained Unknown and rejection of subsequent nonzero signal/probe, with a successful-wait control, and fails if the adapter bypasses phase tracking."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "bounded-reads",
+    "review-follow-up",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

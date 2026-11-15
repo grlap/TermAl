@@ -1,0 +1,39 @@
+{
+  "id": "01a19c45-a6ee-7471-b35b-eaf03ba39be1",
+  "external_ref": null,
+  "title": "Diagnose C1 ordinary host and containment failures on frozen 0c00cea3",
+  "outcome": "Diagnose C1 ordinary host and containment failures on frozen 0c00cea3",
+  "acceptance": [
+    "Classify each assigned C1 ordinary host/containment failure against tree 0c00cea3 and master 5dd913d2 with exact source/log evidence and any shared reset/busy cause; report product defects to Fable2 before repair.",
+    "Repair only confirmed test defects in assigned failing test files, in a fresh named root after the naming turn, preserving original guarantees; return scoped immutable patch and provenance to Sol-03d4. No Cargo."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gate-failure",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed source-only diagnosis13 and ten approved test ports, frozen TREE0a35249be9592955c7d0e30e6e69365c16020a91, exact4 testpaths, +87/-97. Full master discriminator and scoped patch delivered to Sol-03d4; Fable2579 independently audited and accepted for C2. Three product witnesses preserved unchanged for assigned owners. No Cargo or test/compile/gate/landing claim.",
+    "completed_at": "2026-11-02T13:10:59.242411900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

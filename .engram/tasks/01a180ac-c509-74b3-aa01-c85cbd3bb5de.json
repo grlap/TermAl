@@ -1,0 +1,32 @@
+{
+  "id": "01a180ac-c509-74b3-aa01-c85cbd3bb5de",
+  "external_ref": null,
+  "title": "Classify public federation response routes under their known telemetry producer",
+  "outcome": "Classify public federation response routes under their known telemetry producer",
+  "acceptance": [
+    "The existing fixed producer classifier recognizes the actual public federation route family while keeping genuinely unknown routes classified as Other, without altering response delivery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "deferred",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18073-bc4d-7e21-8d46-a81c8a3f5351",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

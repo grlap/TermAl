@@ -1,0 +1,27 @@
+{
+  "id": "01a1097b-02d2-7f53-847f-eb14f9124ee7",
+  "external_ref": null,
+  "title": "Engram host-adapter brief still says a focused launcher run never shows passing tests",
+  "outcome": "docs/features/engram-host-adapter.md (~line 1634, the passing-evidence paragraph) says 'A focused launcher run never shows it, since its verdict does not say how many tests the wrapped command ran.' After the focused-credit change, a focused run shows passing tests when its own results.json backs the pass (passed > 0, failed == 0) and the summary's first verdict names that run. Reword it to the new rule and cross-link docs/test.md#which-stages-count-as-tests, per the feature-brief cross-link convention.",
+  "acceptance": [
+    "Engram host-adapter brief still says a focused launcher run never shows passing tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

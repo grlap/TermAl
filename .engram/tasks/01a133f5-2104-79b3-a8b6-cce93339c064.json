@@ -1,0 +1,31 @@
+{
+  "id": "01a133f5-2104-79b3-a8b6-cce93339c064",
+  "external_ref": null,
+  "title": "Document retained Codex test hazards across other writable sessions",
+  "outcome": "Overlap lookup and command-start comments describe both in-turn writers and a still-running retained Codex test of another writable session. EngramRunningCodexTest's limitation states that a lost end under a still-current runtime blocks later checks by other writable sessions in its captured worktree until a reported end or runtime exit/clear/replacement. Document the current conservative contract without adding a release mechanism.",
+  "acceptance": [
+    "Lookup and command-start comments no longer describe other writers solely as sessions in a turn.",
+    "The retained-test lifetime/limitation comment explicitly describes cross-session overlap, runtime/root ownership, and existing release conditions without promising process termination or a new release."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "codex",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1315c-966b-7c33-be9b-1bf3d434a624",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

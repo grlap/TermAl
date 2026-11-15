@@ -1,0 +1,33 @@
+{
+  "id": "01a1668d-d7e1-7df0-9d9b-4bd9cb910b9b",
+  "external_ref": null,
+  "title": "Cover and document explicit verification during retained federation requalification",
+  "outcome": "Operator verification behavior while reconnect recovery is pending is explicit and tested, including restoration of prior Active or Draining state.",
+  "acceptance": [
+    "A deterministic explicit-verify test with pending retained qualification confirms the intended membership result for prior Verified, Active and Draining without granting new initial activation.",
+    "Satellite onboarding documentation describes that behavior; any reachable retained-authority mismatch remains fail-closed and is covered or shown unreachable by current mutators."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a14db6-ffdd-7b52-89bb-da487f3e0f0d",
+  "external_ref": null,
+  "title": "A completed focused launcher run stays registrationState=discovered / trackingDurability=unconfirmed, so its result is never credited to the held item",
+  "outcome": "A completed focused launcher run stays registrationState=discovered / trackingDurability=unconfirmed, so its result is never credited to the held item",
+  "acceptance": [
+    "A focused launcher run that completes and delivers its terminal result to the caller is represented in /api/test-runs with a confirmed registration and tracking state bound to the caller's held work and source fingerprint, or the host reports a specific, typed reason why it is not.",
+    "A regression test reproduces a completed focused run whose host record remains discovered/unconfirmed and shows the corrected state or the typed reason.",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "registration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a16719-2d7f-73c1-ae57-35da520b784d",
+  "external_ref": null,
+  "title": "Verify which error a delete-pending Git metadata entry yields on Windows, so the identity walk's vanished-entry skip covers it",
+  "outcome": "identity_gone (src/review_identity.rs) treats NotFound and Windows ERROR_DELETE_PENDING (303) as a vanished entry in the Git metadata walk. A file deleted while another handle holds it open may instead surface from symlink_metadata or read_dir as ERROR_ACCESS_DENIED (5). If so, the walk still fails such an entry as input_unavailable, and docs/features/review-identity.md overstates what is handled. A held-open-handle test on Windows should establish the real code; then either identity_gone covers it (restricted to the delete-pending case, not every access denial) or the doc names only the codes actually handled.",
+  "acceptance": [
+    "A Windows test holds a handle open on a Git metadata entry, deletes it, and records which error symlink_metadata and read_dir yield. The identity walk skips that delete-pending entry without treating genuine access denials as vanished, or the doc is narrowed to the handled codes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "reliability",
+    "review-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

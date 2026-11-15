@@ -1,0 +1,31 @@
+{
+  "id": "01a1665f-e7db-7a02-a745-e393dc438c0a",
+  "external_ref": null,
+  "title": "Preserve reconnect backoff across an immediate first-health success",
+  "outcome": "A flapping peer cannot reset reconnect backoff merely by passing the immediate first health; subsequent health waits at least one probe interval before resetting.",
+  "acceptance": [
+    "A deterministic production-monitor regression models repeated short-lived healthy connections and proves backoff grows despite the immediate first probe.",
+    "A stable connection still resets backoff after the intended minimum uptime, and stop/control-stream completion remains bounded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

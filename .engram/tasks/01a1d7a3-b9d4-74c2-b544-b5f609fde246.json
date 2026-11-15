@@ -1,0 +1,28 @@
+{
+  "id": "01a1d7a3-b9d4-74c2-b544-b5f609fde246",
+  "external_ref": null,
+  "title": "Cover persistence-failure rollback of empty-queue Resume unpause",
+  "outcome": "A meaningful failure-injection witness proves empty-queue Resume restores its prior pause and mutation stamp and publishes nothing when persistence fails.",
+  "acceptance": [
+    "A deterministic persistence-failure test drives the empty-queue Resume unpause path, asserts the prior blocked/queue_paused state and mutation stamp are restored, and asserts no successful state publication or durable unpause occurs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

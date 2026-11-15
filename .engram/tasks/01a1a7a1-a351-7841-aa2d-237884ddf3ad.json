@@ -1,0 +1,25 @@
+{
+  "id": "01a1a7a1-a351-7841-aa2d-237884ddf3ad",
+  "external_ref": null,
+  "title": "The report before a registered check discards the session's control child on a timed-out send, and its locks skip lock diagnostics",
+  "outcome": "A report that runs out of its short share doesn't interrupt unrelated work on the session's control child, and a stall on the report's state-lock acquisitions shows as a lock observation.",
+  "acceptance": [
+    "What a send or read timing out in the report does to the session's control child and any request in flight on it is established, and either changed or stated as accepted, with a test of the behaviour kept.",
+    "The report's scope and settle lock acquisitions appear in registration's lock diagnostics, not only as time in the report_source_change phase."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

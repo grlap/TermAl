@@ -1,0 +1,30 @@
+{
+  "id": "01a17986-c6ba-7830-b904-623c0e4ca176",
+  "external_ref": null,
+  "title": "Sending to a LOCAL session by its host-qualified address creates a new mailbox and does not wake (durableButNotWoken)",
+  "outcome": "A send to a local session by its host-qualified address (the central host's own host id) resolves to the same local session and the same existing pair mailbox, and wakes it exactly like a plain local session-id send.",
+  "acceptance": [
+    "The cause is identified in source: why a self-host-qualified address is treated as a different participant or mailbox and why the wake is not delivered.",
+    "A minimal fix reusing the existing address resolution makes self-host-qualified sends resolve to the same local session and existing pair mailbox and wake normally, with one deterministic test and a clean review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-reported",
+    "federation",
+    "mailbox",
+    "regression-candidate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

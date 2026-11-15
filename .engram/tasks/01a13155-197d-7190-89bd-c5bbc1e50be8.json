@@ -1,0 +1,28 @@
+{
+  "id": "01a13155-197d-7190-89bd-c5bbc1e50be8",
+  "external_ref": null,
+  "title": "Receipted delivery: an unpromoted receipted prompt removed from the queue loses its receipt silently instead of settling Rejected",
+  "outcome": "Receipted delivery: an unpromoted receipted prompt removed from the queue loses its receipt silently instead of settling Rejected",
+  "acceptance": [
+    "A receipted prompt that leaves the queue before its hand-off began (Stop, Cancel, source clear) ends with a terminal Rejected receipt that the settled-limit prune ages out, or the wire contract documents the removal semantics explicitly",
+    "A test removes an unpromoted receipted prompt by each removal path and asserts the chosen terminal behaviour"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

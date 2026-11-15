@@ -1,0 +1,29 @@
+{
+  "id": "01a15456-e7ce-7952-a687-22a52a20f1c2",
+  "external_ref": null,
+  "title": "Named-roots view item-lifecycle reads: stop on client abandonment, keep the batch within the shared permit's bound, and test the route's limiter wiring",
+  "outcome": "Named-roots view item-lifecycle reads: stop on client abandonment, keep the batch within the shared permit's bound, and test the route's limiter wiring",
+  "acceptance": [
+    "GET /api/engram/named-roots stops launching item-lifecycle reads once its client has gone (the WorkReadAbandonGuard / work_read_not_abandoned pattern of the other Work-read routes); the remaining rows show an unknown reason",
+    "The item-lifecycle batch holds a shared WORK_READ_PERMITS permit no longer than the bound other Work views size their admission wait to (ENGRAM_WORK_BINDING_COMMAND_TIMEOUT), or the difference is documented with its reason",
+    "A route-level test drives list_engram_named_roots with a private WorkReadLimiter: with no permits every row shows 'unknown (tracker reads busy)', and with one permit the permit is free again after the response and itemLifecycle is serialized on the wire"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "named-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

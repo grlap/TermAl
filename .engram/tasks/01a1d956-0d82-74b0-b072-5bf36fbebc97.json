@@ -1,0 +1,24 @@
+{
+  "id": "01a1d956-0d82-74b0-b072-5bf36fbebc97",
+  "external_ref": null,
+  "title": "Dismissing a history row that is a running delegation's queued follow-up skips successor reassignment",
+  "outcome": "When cancel_queued_prompt removes a delivery-history row that is a running delegation's queued_followup_prompt_id, it still reassigns the follow-up to a queued User/Human successor and calls prioritize_user_queued_prompts. With no successor, it settles the delegation with an honest reason, such as \"follow-up dismissed; its delivery outcome is unknown\", instead of leaving it Running with a dangling follow-up id. It still never claims \"canceled before it started\". Covered by a test. Low from the Claude reviewer (delegation-9bf35347) of the historical-queue-row fix, round 2. That change skipped reconcile_removed_followup_prompt_locked entirely for history rows (session_lifecycle.rs:368) to avoid the false \"not sent\" claim. The case is rare and currently untested.",
+  "acceptance": [
+    "Dismissing a history row that is a running delegation's queued follow-up skips successor reassignment is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

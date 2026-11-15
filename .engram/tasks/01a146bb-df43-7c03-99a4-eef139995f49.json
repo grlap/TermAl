@@ -1,0 +1,28 @@
+{
+  "id": "01a146bb-df43-7c03-99a4-eef139995f49",
+  "external_ref": null,
+  "title": "Clear uncredited command notices when carried checks end",
+  "outcome": "Remove a command's uncredited notice marker when a carried check's reported end settles, matching the running and withheld key lifecycle.",
+  "acceptance": [
+    "A carried check's reported end removes its key from uncredited_command_notice_keys alongside running_command_keys and withheld_command_keys, with a regression test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-removal",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2d2-0c6c-7590-93e9-78f1b409aeca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

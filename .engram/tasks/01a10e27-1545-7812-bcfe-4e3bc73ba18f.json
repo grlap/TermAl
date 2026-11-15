@@ -1,0 +1,28 @@
+{
+  "id": "01a10e27-1545-7812-bcfe-4e3bc73ba18f",
+  "external_ref": null,
+  "title": "Cover Orchestrator parked-head removal when dedicated cleanup Stop fails",
+  "outcome": "Cover Orchestrator parked-head removal when dedicated cleanup Stop fails",
+  "acceptance": [
+    "Cover Orchestrator parked-head removal when dedicated cleanup Stop fails is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "process-cleanup",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

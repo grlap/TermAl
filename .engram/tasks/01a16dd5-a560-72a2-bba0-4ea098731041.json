@@ -1,0 +1,62 @@
+{
+  "id": "01a16dd5-a560-72a2-bba0-4ea098731041",
+  "external_ref": null,
+  "title": "Bound Engram control-process teardown so shutdown_session cannot hold a project reset fence indefinitely",
+  "outcome": "An Engram control-process teardown can't hold a project reset fence beyond a fixed bound. terminate() waits up to a deadline and hands the rest to a reaper.",
+  "acceptance": [
+    "C1. Engram control-process retirement through shutdown_session and EngramControlProcess::Drop spends at most one shared two-second foreground teardown budget per retired process. Expiry releases the calling reset path without joining an unfinished kill or wait, and repeated or concurrent retirement does not start duplicate cleanup or add another foreground budget for the same process.",
+    "C2. A single cleanup owner retains the exact SharedChild and EngramProcessTree handles until termination and reaping are observed. Returning at the foreground deadline never reports cleanup as complete; kill or wait failures remain observable. Releasing a deliberately delayed cleanup in tests leads to confirmed child exit/reaping without losing process-tree ownership or targeting a replacement process.",
+    "C3. A fail-first deterministic regression uses a real disposable control child held alive by a controlled termination/exit seam: the pre-fix path cannot release shutdown/reset while cleanup is held, whereas the fixed path releases it at the foreground bound and the reaper later completes after release. Positive controls cover ordinary immediate cleanup, repeated/concurrent retirement, and descendant termination; timing assertions use phase synchronization or a controlled deadline rather than machine-speed thresholds.",
+    "C4. The change stays within Engram control transport teardown and its focused regression/diagnostic support, preserves registry removal and request/idle/startup cleanup behavior and existing RPC/application refusal semantics, and does not alter general runtime shutdown, durable authority, project-reset admission semantics, live configuration or the host process.",
+    "C5. Focused compile and relevant transport/reset regression checks pass on the exact frozen input, followed by an independent read-only Codex and Claude review pair with no outstanding in-scope Medium-or-higher finding. The integration owner performs any final integration/full gate; this task does not claim to identify the historical 06:50–08:53 wait without contemporaneous phase evidence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "dispatch",
+    "engram-control"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

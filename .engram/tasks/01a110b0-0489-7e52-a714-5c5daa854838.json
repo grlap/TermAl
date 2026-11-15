@@ -1,0 +1,30 @@
+{
+  "id": "01a110b0-0489-7e52-a714-5c5daa854838",
+  "external_ref": null,
+  "title": "Inter-turn source observation reports the interval end as the opening sighting even when the host already knew the revision earlier from another scope",
+  "outcome": "An inter-turn change observation's interval reflects the earliest moment the host knew the workspace held the sighted revision, across all scopes on that root, so an evaluation cut taken after that moment is not read as preceding the change.",
+  "acceptance": [
+    "The two councils (TermAl and Engram coordinators, with Engram's deferred barrier item) agree in notes on the exact semantics: whether the host narrows `through` to the earliest cross-scope sighting of the revision, and how Engram's barrier consumes it.",
+    "If the host narrows it: an inter-turn observation for scope S whose sighted revision was already reported by another scope's checkpoint or sighting on the same root at time T carries an interval ending no later than T; a test reproduces the two-claims-on-one-root shape (claims at generations 563 and 564 on one worktree, changes credited to one scope, the next turn opening on the other).",
+    "Docs state the per-scope baseline and the interval semantics for the Engram consumer."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "design",
+    "source-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

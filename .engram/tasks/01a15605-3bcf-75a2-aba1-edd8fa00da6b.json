@@ -1,0 +1,28 @@
+{
+  "id": "01a15605-3bcf-75a2-aba1-edd8fa00da6b",
+  "external_ref": null,
+  "title": "A batch landing's full gate on the exact landed tree is not credited to a constituent item's test-bound acceptance criteria",
+  "outcome": "When several items land together as one batch (one combined tree, one full gate on that exact tree), each constituent item's owner can have its test-bound acceptance criteria judged on the batch gate's host-recorded check, through a supported, attributed evidence association that proves the constituent's source is unchanged inside the landed tree. Owners no longer need fabricated duplicate checks or waivers. Today, the evaluator sees only checks recorded at the owner's own (older or different) source revisions, so criteria judge insufficient even though the exact landed tree passed its gate.",
+  "acceptance": [
+    "A batch landing's full gate on the exact landed tree is not credited to a constituent item's test-bound acceptance criteria is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3d7-7820-8989-66e5537bef1d",
+  "external_ref": "tm-4cwe",
+  "title": "Distinguish Chrome tabs: dynamic document.title with workspace label (+ optional state prefix/favicon)",
+  "outcome": "Chrome tab title is the static <title>TermAl</title> from index.html, so multiple TermAl tabs are indistinguishable (narrow tabs truncate to ~5 chars).\n\nProposal:\n1. Dynamic document.title = \"{workspace label} - TermAl\" (distinctive part FIRST because Chrome truncates from the right).\n2. Workspace label cascade: (a) new editable `name` field on the workspace layout (persists via existing /api/workspaces PUT; edit control in the workspace switcher), (b) fallback: dominant project among session tabs, (c) fallback: active session name.\n3. Optional attention prefix: a marker when any session is asking for approval, unread count — lets the user pick the right tab without clicking.\n4. Optional per-workspace favicon (colored dot derived from workspace id via canvas data URI) — distinguishes tabs even at zero text width.\n\nImplementation: small App-level effect updating document.title on workspace/session state changes; favicon swap optional second step. Requested by Greg 2026-08-21 (screenshot: five identical \"TermA...\" tabs).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Dynamic title shipped (ui/src/App.workspace-layout.test.tsx:1004); the favicon part was optional.",
+  "completion": null
+}

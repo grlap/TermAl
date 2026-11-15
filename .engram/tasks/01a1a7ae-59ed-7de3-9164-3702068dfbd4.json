@@ -1,0 +1,30 @@
+{
+  "id": "01a1a7ae-59ed-7de3-9164-3702068dfbd4",
+  "external_ref": null,
+  "title": "Bound delayed closing measurement so a predecessor retry cannot move a later turn's edit into its successor's report",
+  "outcome": "Determine and prevent incorrect turn attribution when an immediate predecessor's delayed delivery postpones its successor's closing source measurement.",
+  "acceptance": [
+    "A deterministic three-turn worker test gates predecessor A's delivery while B closes unchanged, then starts and edits C before releasing A, and records B and C's actual closing measurements and reports without assuming the outcome.",
+    "The resulting behavior preserves the real change and exact source timestamps and ownership; a change made by C is not asserted to be B's change, with no fabricated baseline or receipt, weakened post-check protection, new manual ordering, or blocked ordinary provider turn.",
+    "The chosen correction or explicit supported limit is documented and reviewed, with focused positive and real-change negative evidence on the exact candidate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "review-followup",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1a74f-2eb1-7712-9834-5f8e183e1f97",
+  "disposal_reason": "Greg's 'tak' to simple EO rule, relayed by Fable2 mailbox2366, explicitly retires this withdrawn predecessor-wait follow-up along with dffaa. Provenance note97f227e83b3a41e8bcab17bb51f9acf6. Keep raw/review/characterization evidence for open p0; superseding does not assert telemetry fixed or acceptance passed.",
+  "completion": null
+}

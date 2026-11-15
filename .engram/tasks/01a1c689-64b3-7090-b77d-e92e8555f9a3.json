@@ -1,0 +1,28 @@
+{
+  "id": "01a1c689-64b3-7090-b77d-e92e8555f9a3",
+  "external_ref": null,
+  "title": "Build the test-run registration confirmation projection from a typed borrowed Serialize struct",
+  "outcome": "The registration view's field names come from one serde definition tied to TestRunSummary, so renaming a summary field cannot silently drift the projection.",
+  "acceptance": [
+    "src/test_run_registration_query.rs builds the registration confirmation projection with a borrowed #[derive(Serialize)] struct (serde rename_all camelCase or shared field attributes) instead of a hand-written json! object, keeping the same 11 identity fields plus source and the same encoded output; the existing bounded-view behavioural test that compares every key with the full detail still passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "registration",
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

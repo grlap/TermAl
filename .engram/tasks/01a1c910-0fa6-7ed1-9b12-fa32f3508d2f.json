@@ -1,0 +1,33 @@
+{
+  "id": "01a1c910-0fa6-7ed1-9b12-fa32f3508d2f",
+  "external_ref": null,
+  "title": "Integrate combo50 on 3e178a6d: edfd c6516440 (w-4ac6 terminal closing-job journal custody), direct child of combo49",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit c651644038747fe2ea606e986ae51d1428d0df5d (tree e1c61889b09bfd868d25abac0fe3fdc73473455d) is on origin/master, where master was moved to it by a fast-forward from 3e178a6d2d2faa3086bfe68638013837fc37013d.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is e1c61889 passed every stage, with equal source ids before and after and an eligible clean input, and the review pairs recorded no finding of Medium or higher: the whole-3 pair on 3970a735 (Codex 17337, Claude 17338) and the scoped confirmation pair on c6516440 (Codex 17345, Claude 17346).",
+    "The release binary built from tree e1c61889 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo50 integrated. c6516440 (tree e1c61889) is on origin/master by fast-forward from 3e178a6d (07:44:04Z). The DL560 FULL on the exact tree (test-687110a1) passed every stage, and the whole-3 and scoped confirmation pairs had no Medium+ finding. Installed on DL560 (07:59:02Z) and on Central (08:29:36Z, under Fable2's one-off 17 GiB floor), with the previous binaries kept aside and no host restarted by the install. Greg's post-reboot cargo run then rebuilt Central from c6516440, so combo50 has been live since 08:59Z. Independent evaluation delegation-3d5d074f recorded 3/3 pass at 09:14:05Z.",
+    "completed_at": "2026-11-11T09:19:43.449043Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

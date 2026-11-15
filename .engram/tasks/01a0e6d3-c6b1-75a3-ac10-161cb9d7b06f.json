@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6b1-75a3-ac10-161cb9d7b06f",
+  "external_ref": "tm-r5ze",
+  "title": "Fence remote project POST responses against authority drift",
+  "outcome": "Both remote project creation and lazy ensure_remote_project_binding release application state while POST /api/projects is in flight, then persist the response without proving that the project/remote routing authority is still the one that issued the request. Concurrent remote removal or endpoint replacement can attach an old server project id to a missing/new endpoint, and lazy binding can overwrite a concurrent project rebind. Revalidate the captured project identity and routing config under the final state lock, reject stale responses without mutation, and add deterministic removal, endpoint-replacement, and rebind coverage for both paths.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Remote POST is fenced in ec2786c (ancestor of master f7db2c58); BINDING_CHANGED_DURING_CREATE in src/remote_*.rs. Closed by evidence.",
+  "completion": null
+}

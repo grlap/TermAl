@@ -1,0 +1,27 @@
+{
+  "id": "01a0f95a-5a09-7552-b6d7-a67ba7c1c684",
+  "external_ref": null,
+  "title": "A wait over a cancel-only or self-retrying held delegation cannot wait for its result: each new wait wakes at once on the unchanged hold",
+  "outcome": "A parent can register a wait that skips a hold generation it was already told about and wakes on a newer hold, a release or the result",
+  "acceptance": [
+    "A wait over a cancel-only or self-retrying held delegation cannot wait for its result: each new wait wakes at once on the unchanged hold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "waits"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

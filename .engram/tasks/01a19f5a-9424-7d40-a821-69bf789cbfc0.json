@@ -1,0 +1,31 @@
+{
+  "id": "01a19f5a-9424-7d40-a821-69bf789cbfc0",
+  "external_ref": null,
+  "title": "Agent/session API to send a Markdown file as a document to the current Telegram conversation",
+  "outcome": "An agent or session can send a real Markdown file to the operator's linked Telegram chat as a document through a documented TermAl API or tool. It names the file, which must lie inside the session's workdir or repository, and optionally a caption. It gets a typed success response carrying the Telegram message id, or a typed error: no Telegram link configured, not connected, file outside the allowed roots, too large or not Markdown, or a Telegram API error. Size and type limits are enforced. Bot tokens are never logged or returned. Nothing is sent without an explicit call. Tests cover the success and each refusal path with a fake Telegram client, and the docs show how to use it.",
+  "acceptance": [
+    "A session can send a Markdown file from its workdir or local project root to the linked Telegram chat through one documented API call (POST /api/sessions/{id}/telegram/documents, optional plain caption); success returns the Telegram message id, file name and size.",
+    "Admission refuses `..` components, judges containment and type on the canonical path after following symlinks, accepts only regular non-empty UTF-8 .md files within the size cap, and returns typed { error, code } refusals; the bot token is never returned, logged or placed in argv, and upload errors pass through token redaction.",
+    "Focused tests with a fake sender cover success and every refusal class, the exact-input review pair is clean, and the FULL gate is green.",
+    "On Greg's request, a real send delivers the named .md file to his Telegram chat."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "api",
+    "greg-directed",
+    "telegram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

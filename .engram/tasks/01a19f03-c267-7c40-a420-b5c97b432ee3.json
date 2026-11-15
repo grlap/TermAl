@@ -1,0 +1,28 @@
+{
+  "id": "01a19f03-c267-7c40-a420-b5c97b432ee3",
+  "external_ref": null,
+  "title": "Receipt ACK on a remote native relay mailbox fails with 404 'native mailbox association not found' after a successful read",
+  "outcome": "After termal_read_mailbox successfully returns a page and receipt for a remote native relay mailbox, termal_acknowledge_mailbox with that exact mailbox id and unchanged receipt succeeds. Read and ACK resolve the same native mailbox association, with no 404.",
+  "acceptance": [
+    "Receipt ACK on a remote native relay mailbox fails with 404 'native mailbox association not found' after a successful read is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Reporter copy error; no product defect established. Original reporter withdrew byte-identical retry claim and confirms malformed400/missing-association404 used hand-copied wrong IDs; no raw failing exact-input artifact exists. Current exact discovery/read/ACK succeed. Fable2 #1604 authorizes this disposition. No ownership relaxation or speculative recovery patch.",
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1acc3-46b9-7471-a85a-efef9ac2cb4f",
+  "external_ref": null,
+  "title": "Correct the whole-suite live paragraph after diagnostic capture and source-input changes",
+  "outcome": "The named-live documentation accurately describes the whole suite, including uncaptured diagnostics and the Engram launcher's source inputs, without a contradictory unchanged-behavior claim.",
+  "acceptance": [
+    "docs/test.md describes the no-name mode as running the root_recovery_live suite with the documented pin verification, --nocapture and applicable Engram launcher source inputs, without saying it runs exactly as before.",
+    "Existing reciprocal links and documented foreground/registration semantics remain intact; the change requires source/document inspection rather than new behavior tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "review-follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

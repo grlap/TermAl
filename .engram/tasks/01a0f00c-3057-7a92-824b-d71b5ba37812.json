@@ -1,0 +1,31 @@
+{
+  "id": "01a0f00c-3057-7a92-824b-d71b5ba37812",
+  "external_ref": null,
+  "title": "A maintained, tested audit script for the final-diff audit of authority text (/review-changes Step 7)",
+  "outcome": "An auditing coordinator runs one maintained script that lists the changed passages of authority text in a frozen change and finds each in the recorded concurrences, so two auditors reach the same result on the same input.",
+  "acceptance": [
+    "/review-changes Step 7 names the script.",
+    "A script under scripts/ takes a worktree and a file of recorded concurrence sentences, derives the changed passages of authority text from the word-level diff (added, altered and removed), normalises whitespace and strips Markdown list and quote markers at line starts, and reports for each passage whether a recorded concurrence contains it, a removed passage only where the concurrence names it as removed.",
+    "It prints the worktree's input fingerprint beside its result, computed the way the test launcher computes it.",
+    "Tests cover an added, an altered, a removed and a whitespace-only change, a passage inside a bulleted list and one inside a block quote."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "review-cadence",
+    "scripts"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

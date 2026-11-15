@@ -1,0 +1,55 @@
+{
+  "id": "01a0e6d3-c3c0-7561-acd6-8376b03f2259",
+  "external_ref": "tm-2g52",
+  "title": "test launcher can report PASS for a stale test binary built from another checkout",
+  "outcome": "Seen 2026-09-27 by Termal::Opus in tm-5gi4 phase 2. A full gate that misfired onto the main checkout (test-30bd4d38) built master into the worktree's shared CARGO_TARGET_DIR (.tmp/wt-85im/target). The next gate, correctly rooted in the worktree (test-a914fc46), compiled nothing: cargo's mtime fingerprint found the earlier build newer than every worktree source, so cargo check and cargo test ran master's binary (2896 tests instead of 2949, none of the new ones). The run still reported PASS with before == after, because the launcher fingerprints the source tree, not what was built from it. Fix direction: in scripts/test-launcher.mjs, either refuse, or clean-then-run, when CARGO_TARGET_DIR last held a build of another root (for example a marker file under the target dir recording the root it was built for). Or record and check evidence that the tested binary was compiled from the run's root. The reported test count against the previous run for the same root is another cheap signal. Workaround: cargo clean -p termal on the shared target dir after building another checkout into it; never share one CARGO_TARGET_DIR between checkouts without it.",
+  "acceptance": [
+    "C1. Full/live runs and directly recognized focused Cargo runs cannot reuse a Cargo output/intermediate cache owned by a different execution root. They select and durably report the canonical root, effective target/build directories and original caller selections under the independently concurred root-isolation policy; source fingerprint equality or test counts alone never establish build provenance.",
+    "C2. Unknown populated caches, foreign/malformed ownership and output-directory escape or unsupported overriding Cargo arguments fail closed before any test/build stage. The launcher never cleans, adopts or mutates a caller's shared production target directory; a matching owned cache remains reusable for the same root.",
+    "C3. Existing registration, process ownership, terminal-result truth, source-before/after validation, disk-space floors/location checks and caller diagnostic/backtrace environment behavior are preserved. Node-only focused runs do not acquire a Cargo requirement or Cargo cache side effects. A run with no caller-selected Cargo output or build directory keeps using its execution root's own existing target directory, with no forced cold rebuild, relocation or duplicate per-root cache; only a caller-selected directory outside the execution root is subject to the ownership and refusal policy.",
+    "C4. Isolated Node fixtures exercise two different checkouts offered the same external target, contaminated/unknown and owned cache cases, relevant environment case/config/argument precedence, retained requested/effective diagnostics, refusal-before-stage and same-root reuse. The launcher's own relevant Node tests pass through the launcher from the named source root; no shared production cache is cleaned.",
+    "C5. The final exact input has an independent Codex/Claude read-only pair with no outstanding in-scope Medium-or-higher finding and passes the standard full gate for integration after B16."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

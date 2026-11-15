@@ -1,0 +1,35 @@
+{
+  "id": "01a1765a-f052-71c3-befa-4604304eec31",
+  "external_ref": null,
+  "title": "Avoid no-op mutable scans dirtying unchanged persistence metadata collections",
+  "outcome": "Conservative mutation tracking remains correct, while revalidation passes that change no rows do not unnecessarily select large metadata collections for cloning and encoding.",
+  "acceptance": [
+    "Measure or deterministically demonstrate which no-op mutable scans select unchanged metadata collections, distinguishing encoded footprint from clone time.",
+    "Replace confirmed no-op dirtying with shared prescans and targeted mutable access using the existing tracking owner, preserving validation semantics and deadlines.",
+    "Focused regression checks and an independent review pair cover the changed mutation paths; no live speedup is asserted without measurement."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "greg-reported",
+    "host-persistence",
+    "performance",
+    "persistence",
+    "review-low",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a175fd-713c-7720-b1da-6c2daf95c56f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

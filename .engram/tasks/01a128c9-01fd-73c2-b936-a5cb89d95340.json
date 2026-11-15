@@ -1,0 +1,29 @@
+{
+  "id": "01a128c9-01fd-73c2-b936-a5cb89d95340",
+  "external_ref": null,
+  "title": "Design a reversible observe-only (pass-through) Engram control mode: ordinary turns are not withheld by control admission (Greg 2026-10-11)",
+  "outcome": "A concrete, reversible design, delivered to Engram::Advisor for Greg's decision, for running the Engram control plane in an observe-only/pass-through mode. Ordinary coding turns are never withheld by control admission (no evaluate/begin/checkpoint wait on the turn's critical path), while diagnostics and verification evidence are retained (observations, checks, source revisions and so on, recorded asynchronously or best-effort). The design: (1) lists every place the host blocks a turn on control today (admission, begin, checkpoint, bind, recovery holds), with file:line; (2) identifies the narrow cases, if any, that genuinely need hard blocking, each with its justification; (3) defines the feature/config boundary for switching modes (per session, per project or host-wide), its default, and how to switch back; (4) states what evidence and guarantees are lost or weakened in observe-only mode, and what Engram's acceptance/verification still gets; (5) gives the migration and validation scope: tests, a live proof, a restart, and Engram-side changes if any. No global runtime configuration is changed by this item. The P1 transient repairs continue only as safety until the decision.",
+  "acceptance": [
+    "Design a reversible observe-only (pass-through) Engram control mode: ordinary turns are not withheld by control admission (Greg 2026-10-11) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "control-plane",
+    "cross-project",
+    "design",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

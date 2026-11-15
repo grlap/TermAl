@@ -1,0 +1,29 @@
+{
+  "id": "01a1dd2a-99c0-7542-9b8f-a82b03dfc5e0",
+  "external_ref": null,
+  "title": "Investigate unexpected source-sighting validator panic in the ordinary-reporting worker",
+  "outcome": "Identify and correct or explicitly disposition the unexpected background-worker source identity rejection without weakening the SourceId contract; aggregate test success alone does not resolve it.",
+  "acceptance": [
+    "The original unexpected panic is preserved with its exact run, input, timestamp, thread, location and full journal/backtrace, and the investigation identifies the owning fixture/path and falsifiable cause or records an independently concurred bounded unresolved disposition.",
+    "Any confirmed product or fixture defect is corrected with a discriminating behavior check, preserving strict SourceId validation; the original panic is explicitly accounted for independently of later aggregate passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "execution-observability",
+    "test-investigation",
+    "unexpected-panic"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

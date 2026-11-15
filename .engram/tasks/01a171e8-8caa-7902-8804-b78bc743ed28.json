@@ -1,0 +1,29 @@
+{
+  "id": "01a171e8-8caa-7902-8804-b78bc743ed28",
+  "external_ref": null,
+  "title": "Relay boot reconciliation can rearm a boundary already handed off in the same process",
+  "outcome": "Prevent boot paging from resetting a successful live-process relay handoff while preserving restart unread recovery.",
+  "acceptance": [
+    "A boot/live interleaving control proves a boundary handed off earlier in this process is not reset by a later boot page.",
+    "Receiver restart after handoff-before-ACK still recovers unread mail, while ACK, Cancel and live duplicate controls remain valid."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-host",
+    "greg-reported",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1711f-eab5-7671-a7e1-559787f77f80",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

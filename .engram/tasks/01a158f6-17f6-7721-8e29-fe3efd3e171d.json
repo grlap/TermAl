@@ -1,0 +1,28 @@
+{
+  "id": "01a158f6-17f6-7721-8e29-fe3efd3e171d",
+  "external_ref": null,
+  "title": "Record the patched Mermaid minimum in the UI manifest",
+  "outcome": "Raise the Mermaid manifest minimum to the chosen patched release floor in a separate reviewed and gated dependency change; preserve a coherent lockfile. The current ^11.14.0 range permits older compatible versions while the reviewed lock pins11.16.1. Default npm update normally seeks newer compatible versions: this is documentation of the minimum in dependency metadata, not a deterministic downgrade bug.",
+  "acceptance": [
+    "Record the patched Mermaid minimum in the UI manifest is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "dependencies",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

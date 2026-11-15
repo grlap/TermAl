@@ -1,0 +1,37 @@
+{
+  "id": "01a1ceb4-6694-7803-b20d-87ceafc41a63",
+  "external_ref": null,
+  "title": "Measure coordination custody admission cost on large mailbox stores",
+  "outcome": "Measure coordination custody admission cost on large mailbox stores",
+  "acceptance": [
+    "A reproducible disposable-store measurement records custody admission work and elapsed cost for large mailbox bodies with sparse typed custody rows.",
+    "The measurement supports a documented disposition, or a scoped optimization with behavioral corruption-refusal coverage and unchanged reader-floor semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "mailbox",
+    "multi-machine",
+    "performance",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

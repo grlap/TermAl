@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c678-7561-ac5d-6d1a3d458a65",
+  "external_ref": "tm-nrmy",
+  "title": "Test launcher: a focused cargo run that executes zero tests reports PASS",
+  "outcome": "Found 2026-09-25 (run test-9ec0ce39 in worktree TermAl-wt-ncc6-backend). A focused 'test-rust.sh --bin termal -- tests::test_runs::' run printed PASS with 'test result: ok. 0 passed; 2723 filtered out'. The filter matched nothing because cargo ran another worktree's binary: CARGO_TARGET_DIR pointed at TermAl-wt-engram-ready/target, and cargo judged freshness from that worktree's dep-info ('Finished in 2.96s', no 'Compiling termal'), so it never rebuilt the snapshot's sources. The evidence was invalid but reported as a pass. Fix direction: for focused cargo test stages, parse libtest's 'test result:' totals and fail (or at least warn loudly) when zero tests executed; document in docs/test.md that sharing CARGO_TARGET_DIR across worktrees can run a binary built from the other worktree's sources. Related: the launcher's fingerprint protects the source tree, not which binary cargo runs.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

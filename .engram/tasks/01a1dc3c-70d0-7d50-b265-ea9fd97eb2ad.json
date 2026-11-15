@@ -1,0 +1,33 @@
+{
+  "id": "01a1dc3c-70d0-7d50-b265-ea9fd97eb2ad",
+  "external_ref": null,
+  "title": "Document Kimi permission questions on the shared user-input route",
+  "outcome": "Architecture and Kimi integration documentation accurately describe the shared question card, opaque option IDs, submission and dismissal semantics.",
+  "acceptance": [
+    "docs/architecture.md describes Kimi use of the user-input endpoint/message shape, optional question-option id versus label, and Skip mapping to a reject option or cancelled.",
+    "docs/features/kimi-cli-integration.md describes named answer buttons and malformed-choice dismissal consistently with the implementation, without claiming new elicitation/free-form capabilities or a fresh installed-version capture."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acp",
+    "approvals",
+    "docs",
+    "greg-reported",
+    "kimi",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dbb6-58b9-7cf1-9bc0-65b096fb3238",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

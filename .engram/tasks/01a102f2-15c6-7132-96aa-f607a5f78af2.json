@@ -1,0 +1,54 @@
+{
+  "id": "01a102f2-15c6-7132-96aa-f607a5f78af2",
+  "external_ref": null,
+  "title": "Budget-clock B4a: root_fixture (src/tests/engram_root_dispatch.rs) selects the scripted clock, with an audit of its root_dispatch callers, so the 1 s real bind backoff no longer races queued admission under load",
+  "outcome": "root_fixture chooses the scripted budget clock through the slice-1 boundary before Engram is enabled. Every test that calls root_fixture is audited for its deadline, backoff, elapsed and wait sources: it either advances the scripted clock across its causal boundary, with a positive control, or declares Real with a reason. held_child_initial_and_followup_authorization_survive_polling_then_resume then passes even with an injected delay longer than 1 s between the child's eager bind and its admission, and its about-24 s unloaded runtime is explained or reduced. No production change, no weakened expectation.",
+  "acceptance": [
+    "A controlled delayed-admission diagnostic, without machine load, first fails the unchanged held_child_initial_and_followup_authorization_survive_polling_then_resume at src/tests/engram_post_receipt.rs:1501 with \"bind, followup=false\" (Active, expected Idle). It does so by holding the child's queued admission more than 1 s of real time after its eager bind's lost reply. The original failed gate run test-3786f725-1837-4bc0-92e8-8a29ce552b28 is retained.",
+    "root_fixture selects the state's scripted budget clock through the slice-1 boundary (select_test_scripted_engram_budget_clock) before Engram is enabled and before any target or worker snapshot. A note lists every root_fixture caller with its deadline, backoff, elapsed and wait sources and its assertions. Each caller either advances that same clock across its causal boundary, with a positive control that shows the unexpired side, or declares Real with a stated reason.",
+    "A retained test-only stall of more than 1 s of real time, between the child's eager bind and its queued admission, leaves held_child_… passing on the scripted clock: the child stays Idle and its prompt stays queued. The test's existing assertions are unchanged.",
+    "A note explains held_child_…'s roughly 24 s unloaded runtime from measured sources. Any real-time wait that isn't the subject of its test is removed or moved onto the scripted clock.",
+    "Production code changes only by a cfg(test) seam, if one is needed. No production timeout, default, backoff or expiry changes. No retry is added, no expectation is weakened, and no test timeout grows.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "root_fixture runs on the state's scripted Engram budget clock, chosen before Engram is enabled. Every root_fixture caller is audited (126 tests): tests that cross the bind backoff advance that same clock, with a pending-side positive control, through elapse_bind_backoff and arm_bind_backoff; one control declares Real. A cfg(test) admission stall witnesses that a late-scheduled child stays held. Landed as master 1b2d8a0.",
+    "completed_at": "2026-10-03T22:22:10.194047200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

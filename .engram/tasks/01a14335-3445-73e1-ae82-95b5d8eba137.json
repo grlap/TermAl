@@ -1,0 +1,28 @@
+{
+  "id": "01a14335-3445-73e1-ae82-95b5d8eba137",
+  "external_ref": null,
+  "title": "A provider content-safety refusal (\"flagged for possible cybersecurity risk\") fails a turn with no typed cause or recovery path",
+  "outcome": "A provider content-safety refusal (\"flagged for possible cybersecurity risk\") fails a turn with no typed cause or recovery path",
+  "acceptance": [
+    "A provider content-safety refusal (\"flagged for possible cybersecurity risk\") fails a turn with no typed cause or recovery path is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "host-reliability",
+    "provider-refusal"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

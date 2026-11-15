@@ -1,0 +1,35 @@
+{
+  "id": "01a155a0-1017-7860-bd34-dffa6ca1a3a0",
+  "external_ref": null,
+  "title": "P-mac S2 verification: native O1 checklist and M4 receiver/queue evidence on macOS",
+  "outcome": "Verification-only S2 per Architect1 M6 note21ad10a4 and Fable concurrence e01295066a4b485187340e3524fc1671 / mailbox196. Audit O1 macOS assumptions; run native Mac fake-link two-process O1 checklist and local platform probe on landed input (origin/master directly allowed per concurrence practical note), then M4 increment2 receiver/queue tests after S1 lands. Unlanded input requires an Opus2-issued merge-ready test ref. Classify any actual failures into concrete children or exact Greg-owned acts; no speculative product changes, no install/restart/SSH edits and no full P-mac or M6 lifecycle claim.",
+  "acceptance": [
+    "Record O1's macOS path, shell, process-supervisor and binary-profile source audit with concrete locations and native facts, including rustc availability under the intended TermAl launch PATH; classify unresolved operational conditions without changing live configuration.",
+    "From an Opus2-issued merge-ready test ref, record exact-input standard-launcher focused Mac runs of the O1 checklist against a loopback central/satellite pair with a fake link, and, after M4 increment2 lands, its receiver/queue regressions. Preserve commit/tree, before/after input identity, command, toolchain, native result, duration and artifact references; remote observations do not become local verification without recognized import.",
+    "File any confirmed failure as a concrete child with owner/fix or record the exact Greg-owned operational act; when these verification cases pass, close only this S2 slice, without claiming the full P-mac lifecycle or M6 matrix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-eca0-70a0-b9a7-c1af4362f3ef",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

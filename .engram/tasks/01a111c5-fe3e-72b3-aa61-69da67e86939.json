@@ -1,0 +1,39 @@
+{
+  "id": "01a111c5-fe3e-72b3-aa61-69da67e86939",
+  "external_ref": null,
+  "title": "G — PURE RETIREMENT IMAGE PLANNER",
+  "outcome": "G — PURE RETIREMENT IMAGE PLANNER",
+  "acceptance": [
+    "G — PURE RETIREMENT IMAGE PLANNER, cap +550. Depends on A/C and the captured representations in E. Produce a non-runnable quarantine/retirement image for every inventoried metadata/session/delegation/runtime authority category, retaining original arguments, prompts/history, source facts, receipts and unresolved reasons. Unknown potentially affected data refuses the plan. No live caller, persistence or producer operation in the planner. Acceptance subset: I5 category-by-category positive/negative controls and preserved content; I4 isolation of unaffected stores; I7 dormant reachability. If the actual category handling cannot fit, split session/queue retirement and metadata/delegation/evidence retirement into separate pure planners; neither partial plan may be treated as a complete transaction manifest."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-backup",
+    "engram-host",
+    "identity-stage-g"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0fa84-7f43-7782-b76d-47338f8245e3",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a111c5-fca2-7d71-a3b2-d3e6910a9679",
+    "01a111c5-fd68-75b3-872f-28bbf0c41e19",
+    "01a111c5-fdcc-7640-97d9-69d5bf0d779f"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

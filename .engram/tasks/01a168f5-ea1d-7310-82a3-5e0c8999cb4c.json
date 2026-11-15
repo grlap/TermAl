@@ -1,0 +1,28 @@
+{
+  "id": "01a168f5-ea1d-7310-82a3-5e0c8999cb4c",
+  "external_ref": null,
+  "title": "Move the reviewer input-admission logic out of delegations.rs",
+  "outcome": "The launch admission, follow-up re-admission and re-arm admission selection for read-only reviewers live in delegation_review_input.rs behind small helpers called from delegations.rs, which shrinks rather than grows; behaviour unchanged.",
+  "acceptance": [
+    "delegations.rs calls helpers from delegation_review_input.rs for launch admission, follow-up re-admission and re-arm admission installation; the move is a pure code move with the review-input test suite unchanged and green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "delegations",
+    "refactor",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

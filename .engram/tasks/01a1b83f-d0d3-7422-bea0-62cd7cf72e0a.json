@@ -1,0 +1,30 @@
+{
+  "id": "01a1b83f-d0d3-7422-bea0-62cd7cf72e0a",
+  "external_ref": null,
+  "title": "Cover federation facade peer boundaries, source reasons and argument rejection with fixtures",
+  "outcome": "Fixture-only checks discriminate peer-count boundaries and preserve status-reason and argument-rejection behavior without network or process tests.",
+  "acceptance": [
+    "Demonstrate a valid256-peer positive control and a257-peer rejection attributed to the peer-count limit.",
+    "Test empty-schema argument rejection without I/O and status200 with sourceLimit, invalidResponse and responseUnavailable passing unchanged to a null utilization roster.",
+    "Keep tests behavioral and fixture-only; no source/Markdown/instruction-file assertions or new network/process/sleep tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "agent-api",
+    "federation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

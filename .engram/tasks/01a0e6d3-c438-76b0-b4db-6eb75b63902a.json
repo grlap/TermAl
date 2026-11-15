@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c438-76b0-b4db-6eb75b63902a",
+  "external_ref": "tm-9ucp",
+  "title": "Skip Engram command-event worktree resolution when no project has Engram control enabled",
+  "outcome": "Round-15 review (Claude, tm-winf steps 2+3). note_engram_command_started/_finished/_described and note_engram_workspace_edit resolve worktrees on the file system (engram_worktree_root, engram_command_worktrees, engram_resolve_shell_move: canonicalize plus .git ancestor walks) on the runtime event-reader thread for every command start, finish and diff of every session, even when no project has Engram control enabled and no check can exist. Network paths are skipped, but mapped drives, NFS mounts and slow volumes are not detected, so command-event streaming can stall. Fix direction: check cheaply under the state lock whether any project has Engram control enabled (checks exist only there) and skip the resolution and running_command_worktrees bookkeeping otherwise; note the edge where a project is enabled while a command runs.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

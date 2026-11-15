@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c42b-7c70-96a1-51df03b9957d",
+  "external_ref": "tm-8qba",
+  "title": "Bound retention of mailbox_read_pages issuance records",
+  "outcome": "The mailbox read-receipt change adds table mailbox_read_pages, and nothing ever removes its rows.\n\nCONFIRMED FROM SOURCE during the acceptance review of the read-receipt work:\n- No DELETE of mailbox_read_pages exists anywhere in src.\n- The only removal path is the foreign-key cascade from mailbox_participants, but participants are soft-left by setting left_at rather than deleted, so that cascade effectively never fires in normal operation.\n- Each distinct (after_sequence, through_sequence) read adds a row: agent reads at the moving cursor, explicit replays, and the UI mailbox panel initial, refresh and load-older reads. Growth is proportional to read traffic, not to message count.\n\nNOT VERIFIED: the reviewer claim that UI polling reads can return 503 under writer contention. What is confirmed is narrower: read_range takes the writer lock before it knows whether the page is empty. The insert itself is already skipped for empty pages.\n\nDIRECTION, to be decided rather than assumed: prune pages whose through_sequence is at or below the participant processed_through during acknowledgement. The open question is compatibility, because replayed receipts at or below the cursor are currently no-ops that still resolve, and existing tests replay them. Decide whether such receipts must keep resolving after pruning before choosing the pruning rule. Separately, consider not taking the writer lock at all for a read that turns out empty.\n\nFound by the acceptance review pair for the read-receipt change; kept separate because it outlives that item.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

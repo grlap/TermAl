@@ -1,0 +1,34 @@
+{
+  "id": "01a16519-1276-7c53-8bf5-a108efba750a",
+  "external_ref": null,
+  "title": "Ordinary root prompts remain available when optional Engram control fails before Begin",
+  "outcome": "Ordinary root prompts remain available when optional Engram control fails before Begin",
+  "acceptance": [
+    "A fresh root User or Mailbox prompt reaches the provider exactly once after a certified pre-Begin availability failure, with an explicit degraded sent-without-grant card and no automatic admission retry.",
+    "Explicit Refuse and Defer, delegated sessions, uncertain Begin, changed authority and local persistence faults retain existing safeguards; ungranted turns produce no Engram checkpoint or host check credit.",
+    "Focused failure-mode regression tests and full gate pass; independent reviews find no unresolved in-scope Medium or higher.",
+    "The batch's live and post-restart criteria are preserved verbatim in linked item w-7a9b4163c18a, \"v3 admission recovery: post-restart live verification\"; this item's evidence links to that item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 5f7d7ac9; focused, independent pair, FULL09650293 and install recorded; closure only. Linked live obligation stays in w-7a9b4163c18a.",
+    "completed_at": "2026-11-08T19:21:34.870395600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c536-7420-8989-c88d35a193ba",
+  "external_ref": "tm-j2lm",
+  "title": "Reduce full state snapshot cost and frequency for very large session collections",
+  "outcome": "DEV profiling observed full SSE state frames for 2,313 sessions taking 65-154ms on the main thread (JSON.parse 27-97ms, adoption 33-50ms). This is not a CPU-triggered refresh; it is backend-pushed state. Investigate which mutations still publish full snapshots instead of deltas and whether the wire projection/parser can avoid repeated large JSON work without weakening recovery semantics.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

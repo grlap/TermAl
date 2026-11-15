@@ -1,0 +1,35 @@
+{
+  "id": "01a11793-e43d-73a3-97a6-355f289a7784",
+  "external_ref": null,
+  "title": "Observe one genuine Build verification on the restarted TermAl host",
+  "outcome": "Perform exactly one bounded foreground cargo build on the landed Build recorder source under a separate live claim and named source root; inspect the subsequent checkpoint's typed Build record separately from restart health and binary-equivalence evidence. No implementation edits, repeated full gate/review/implementation acceptance evaluation, install, restart, live-store manipulation, or cleanup bypass.",
+  "acceptance": [
+    "A single genuine foreground cargo build on the restarted host produces a host-recorded Build verification at its claim's closing checkpoint, with command outcome, source revision and environment retained; report any missing or refused credit without retrying."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "build"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "engram-interop",
+    "host-recording",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

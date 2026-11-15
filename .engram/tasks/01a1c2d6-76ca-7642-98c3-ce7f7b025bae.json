@@ -1,0 +1,31 @@
+{
+  "id": "01a1c2d6-76ca-7642-98c3-ce7f7b025bae",
+  "external_ref": null,
+  "title": "Integrate combo32 on 9075802d: content-v1 removal (C6), formatter as full-gate Lint (w-645c)",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo32 on 9075802d: content-v1 removal (C6), formatter as full-gate Lint (w-645c) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo33 1d63b37a landed on master as a fast-forward from 9075802d: content-v1 producers removed, formatter admitted as a full-gate Lint stage. Gated by Windows B FULL test-b298fdf8 on tree 8fcb18bd (eligible, fingerprints equal, six stages passed). Pushed at 01:59:27Z; test ref deleted. Installed on Central (93279cd0) and DL560 (4c481223). No acceptance evaluation exists; self-asserted under TermAl's evaluation-off policy. The live Lint witness for w-645c remains a separate follow-up.",
+    "completed_at": "2026-11-10T02:10:51.105930800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

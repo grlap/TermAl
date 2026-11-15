@@ -1,0 +1,39 @@
+{
+  "id": "01a19f0b-12f1-7cc2-b8fc-252999666e5d",
+  "external_ref": null,
+  "title": "UI interaction latency: tab switch and keystrokes take 210–300 ms (DevTools INP); measure the real cause and fix",
+  "outcome": "Identify and reduce the dominant reproduced client-side work behind tab-switch and keystroke delays using an isolated UI harness before product changes. Measure render/commit work and incoming state/snapshot application during interactions, preserve before/after numbers and regression coverage, and state the limits of what these measurements establish about Greg's live DevTools INP.",
+  "acceptance": [
+    "Before product changes, an isolated UI test harness records tab-switch and keystroke render/commit work, including the work of applying incoming state updates or snapshots during the interaction, identifies the dominant reproduced cause, and preserves the measured baseline and the limits of its relation to Greg's DevTools INP.",
+    "The implementation reduces that measured work through existing UI owners without changing interaction behavior, with before/after numbers and meaningful regression coverage.",
+    "TypeScript and relevant UI tests pass on the clean candidate, with no claim that harness timing proves a live-host INP budget.",
+    "A DOM-count regression test: rendered row count bounded by viewport plus overscan, independent of session count.",
+    "The same profiled production 4x typing run before and after, showing the keyup HitTest delay gone."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Measured and reduced large-session-list DOM/HitTest work through the existing row-window owner; landed unchanged reviewed fix in cd79424e with exact-input FULL PASS. Controlled 4x production typing: DOM142218→841, HitTestmax192.523→0.984ms. Bounded-DOM and logical keyboard/action regressions pass. Greg refreshed :4173 and reported „jest wyraznie lepiej bardzo dziekuje” via Asistant/Fable2269; this is qualitative, not a measured live INP. Optional narrow-layout/session-pane follow-ups remain open.",
+    "completed_at": "2026-11-03T16:27:39.628228200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

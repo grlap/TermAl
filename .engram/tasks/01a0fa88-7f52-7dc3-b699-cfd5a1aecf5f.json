@@ -1,0 +1,55 @@
+{
+  "id": "01a0fa88-7f52-7dc3-b699-cfd5a1aecf5f",
+  "external_ref": null,
+  "title": "termal mailbox read --json fails with 'missing field body' whenever the page holds the reader's own send",
+  "outcome": "termal mailbox read --json fails with 'missing field body' whenever the page holds the reader's own send",
+  "acceptance": [
+    "`termal mailbox read` succeeds, in --json and text forms, on a page that holds the reader's own send. The own message keeps `bodyOmitted: true` without a body, and the text form says the body is omitted and how to read it. A CLI test covers both forms and fails before the fix.",
+    "A read page whose message carries both `body` and `bodyOmitted`, or a non-true `bodyOmitted`, is still rejected as unusable; a test covers it.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cli",
+    "mailboxes"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "`termal mailbox read` accepts pages that hold the reader's own sends.\n- Validation accepts `bodyOmitted: true` without a body. It still rejects a contradictory omission: a body together with `bodyOmitted`, or a value other than true.\n- The text form prints a hint that names `mailbox read-message`.\n- The --json output is unchanged.\n\nCommitted as 9cc948c, landed on master by Opus2 as a fast-forward from 3e921cf, pushed, and verified at origin/master 9cc948c.\n\nEvidence:\n- Gate test-97474ced passed, verification 126fcb97 at content-v1:40855edf….\n- Review pair clean: Codex delegation-717a91fa found nothing; Claude delegation-366552fd raised one Low, filed as w-4547a93f0e39.\n- The independent evaluation, delegation-c47baffc (Codex), passed all 3 criteria.\n\nThe install is pending Opus2's window outside a gate.",
+    "completed_at": "2026-10-02T05:08:51.604079600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

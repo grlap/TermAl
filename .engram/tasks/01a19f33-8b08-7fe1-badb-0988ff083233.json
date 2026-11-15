@@ -1,0 +1,28 @@
+{
+  "id": "01a19f33-8b08-7fe1-badb-0988ff083233",
+  "external_ref": null,
+  "title": "A review delegation follow-up can't retarget a new source root: its workdir stays on the original root and the read-only policy refuses cd to the new one",
+  "outcome": "A follow-up to a read-only review delegation can name a new review root, for example a sibling worktree holding a re-frozen candidate. The reviewer then works with that root as its workspace, under the same read-only policy, with no new write rights, or the follow-up is refused at once with a typed reason telling the caller to start a new review delegation. A Claude reviewer can verify HEAD, the index and the status of the root it is asked to review.",
+  "acceptance": [
+    "A review delegation follow-up can't retarget a new source root: its workdir stays on the original root and the read-only policy refuses cd to the new one is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "readonly-policy",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

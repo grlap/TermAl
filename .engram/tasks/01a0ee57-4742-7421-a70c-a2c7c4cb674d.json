@@ -1,0 +1,28 @@
+{
+  "id": "01a0ee57-4742-7421-a70c-a2c7c4cb674d",
+  "external_ref": null,
+  "title": "A project's own check script is never recognised as a test: let a project declare its check commands",
+  "outcome": "A check that a project names as one of its tests is recorded by the host as verification evidence when it runs in the measured root, although it is not one of the runners TermAl knows by name.",
+  "acceptance": [
+    "A project's own check script is never recognised as a test: let a project declare its check commands is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

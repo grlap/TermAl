@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c528-7673-91dd-f8671be94d3a",
+  "external_ref": "tm-hrfc",
+  "title": "History reveal after bottom-origin scroll can show a false new-response popup",
+  "outcome": "When the user begins scrolling from the live bottom, virtualized history residency can prepend older messages. SessionPaneView.scroll currently treats the resulting broad conversation-signature change as unseen tail content after detachment, so a New response/New activity popup can appear even though no new tail content arrived. Separate tail/pending-prompt advancement from resident-prefix changes: scrolling/history reveal alone must not arm the indicator, while a genuine assistant tail update or queued prompt arriving after detachment still must.",
+  "acceptance": [
+    "A bottom-origin scroll followed only by older-history residency changes leaves the new-response indicator hidden; actual assistant tail growth while detached still shows New response; actual queued-prompt growth while detached still shows New activity; focused scroll tests, TypeScript, Vitest, and production UI build pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

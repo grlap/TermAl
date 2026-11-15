@@ -1,0 +1,28 @@
+{
+  "id": "01a110b1-9f74-7f63-aee5-f8c5aee4068c",
+  "external_ref": null,
+  "title": "Read-only shell check's sed script vetting fails open on writes behind addresses: negation, ranges, custom delimiters, address modifiers, unterminated addresses (pre-existing)",
+  "outcome": "Read-only shell check's sed script vetting fails open on writes behind addresses: negation, ranges, custom delimiters, address modifiers, unterminated addresses (pre-existing)",
+  "acceptance": [
+    "Read-only shell check's sed script vetting fails open on writes behind addresses: negation, ranges, custom delimiters, address modifiers, unterminated addresses (pre-existing) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "claude",
+    "read-only-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0fe7c-a484-79b0-b2dc-9c2f094930a3",
+  "external_ref": null,
+  "title": "Notify an item's participants when a note lands on it",
+  "outcome": "When a note is recorded on an Engram item, the sessions involved in that item (its holder, the project coordinator, and sessions that have noted on it) are told by a mailbox notification carrying the note's id, so a decision is recorded and announced in one act and the item is the one ordered thread everyone reads.",
+  "acceptance": [
+    "Notify an item's participants when a note lands on it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "coordination",
+    "engram-interop",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

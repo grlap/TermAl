@@ -1,0 +1,28 @@
+{
+  "id": "01a0f546-88b8-7ab3-944f-eed878409585",
+  "external_ref": null,
+  "title": "Host event stream: an admission whose recorder never resolves it must not pin every later cut",
+  "outcome": "Before a step makes the cut of the host event stream required (docs/features/host-architecture.md, section 10, step 10b), an admission whose recorder died or panicked between its two phases is resolved explicitly as abandoned, so that later cuts are not Incomplete for the life of the process.",
+  "acceptance": [
+    "A recorder that admits an observation and then unwinds before the execution owner records its transition leaves the admission resolved as abandoned (a drop guard or an explicit abandon resolution), proven by a test in which a cut through a later position is Complete after the unwind",
+    "The log's set of unresolved admissions is shown bounded in that case, or the brief states the bound and why it holds"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "host-event-stream"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

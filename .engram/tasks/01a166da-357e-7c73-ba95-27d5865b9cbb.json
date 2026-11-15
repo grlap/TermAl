@@ -1,0 +1,37 @@
+{
+  "id": "01a166da-357e-7c73-ba95-27d5865b9cbb",
+  "external_ref": null,
+  "title": "Keep Resume delivery conflicts tied to the admitted prompt after successor replacement",
+  "outcome": "A Resume delivery that holds one admitted prompt never reports a successor's durability hold as that prompt's failure after Cancel or replacement; exact owner and Scheduled/Superseded behavior stay intact.",
+  "acceptance": [
+    "The post-delivery Resume refusal checks only the admitted prompt identity, or an equivalent current-owner fence, before using a durability refusal; a successor's save state cannot become its conflict text.",
+    "Deterministic owner-bound and ordinary Resume tests cover Cancel or successor replacement between delivery and the final check, preserving the successor and causing no extra provider handoff.",
+    "Credited focused tests pass on the final source, and the independent review pair has no outstanding Medium or higher findings."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "queue-resume",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

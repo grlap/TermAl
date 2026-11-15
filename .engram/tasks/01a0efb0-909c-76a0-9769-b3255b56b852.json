@@ -1,0 +1,40 @@
+{
+  "id": "01a0efb0-909c-76a0-9769-b3255b56b852",
+  "external_ref": null,
+  "title": "Host credits a launcher full gate only by TermAl's stage names, so another project's gate (Engram: nine stages, five of kind test) is never credited",
+  "outcome": "A full gate run with a project's own copy of the test launcher is credited as a passed test check when its test stages passed, whatever the stages are called, in the foreground and as a carried background or detached run.",
+  "acceptance": [
+    "A full gate whose record lists Engram's nine stages (fmt, check, clippy, rust, freeze, mcp, control, parity, docs) with their kinds, all passed, is credited as a passed test check; a test shows it for a foreground run and for a carried run.",
+    "TermAl's own five-stage gate is credited as before; a test shows it.",
+    "The Engram project's coordinator has concurred, in a recorded message, on the rule that decides which stages count as tests.",
+    "The host decides whether a launcher stage is a test stage from the kind the run's record gives the stage, or from a rule agreed with the Engram project and written in docs/test.md, not from the two names rust-tests and vitest alone; a run whose record marks no stage as a test is not credited.",
+    "docs/features/engram-host-adapter.md and docs/test.md describe the rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "multi-project",
+    "test-launcher",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The host now decides a launcher full gate's test stages by the run's request record: stages of kind `test`, or, in a record with no kinds (TermAl's own launcher), `rust-tests` and `vitest`. This applies in the foreground (record found from the summary's `results:` line) and for carried runs, so Engram's nine-stage gate is credited. The rule was agreed with Engram::Fable (TermAl mailbox 28ccc255 #25) and is documented in docs/test.md and the adapter doc. Landed as 2869ea2 with gate test-59adda6c PASS and a clean Codex+Claude pair. The review's Low is filed as w-a17fb2799709. Independent evaluation b48681fae4b949a490a0c27bbccc7f35 passed all five criteria. Installed at target/release/termal.exe (sha256 9bcb5ec1…db01); it takes effect after Greg's restart.",
+    "completed_at": "2026-10-01T12:12:39.973669500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

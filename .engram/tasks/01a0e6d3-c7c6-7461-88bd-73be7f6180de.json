@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7c6-7461-88bd-73be7f6180de",
+  "external_ref": "tm-wmcn",
+  "title": "Test the production bounded forced rescan of run-wait registration",
+  "outcome": "From the changeset-3 dual review (Claude /review-code, test gap). AppState::rescan_test_runs_bounded (src/test_run_waits.rs) is cfg(not(test)): it spawns a thread running refresh_test_runs and waits at most TEST_RUN_WAIT_FORCED_RESCAN_BOUND (1 s). Tests inject the rescan through create_test_run_wait_with, so neither the bound nor the fall-through (the rescan finishing in the background) is ever exercised. Make the spawn and the bound injectable, then test that a slow rescan returns control within the bound and still commits later, and that a burst of registrations queues on the rescan lock (docs: forced-rescan bound).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

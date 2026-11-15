@@ -1,0 +1,27 @@
+{
+  "id": "01a0f1d6-eca5-7fe1-af1a-e6131ff11a62",
+  "external_ref": null,
+  "title": "Carried-gate .tmp/ exemption: follow-ups from review of w-7e5446a60ac7 (per-repo ignore check, credited-despite-scratch test, launch-time fence test, instruction mention, watcher cost)",
+  "outcome": "Carried-gate .tmp/ exemption: follow-ups from review of w-7e5446a60ac7 (per-repo ignore check, credited-despite-scratch test, launch-time fence test, instruction mention, watcher cost)",
+  "acceptance": [
+    "Carried-gate .tmp/ exemption: follow-ups from review of w-7e5446a60ac7 (per-repo ignore check, credited-despite-scratch test, launch-time fence test, instruction mention, watcher cost) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

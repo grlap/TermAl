@@ -1,0 +1,29 @@
+{
+  "id": "01a0f16e-2416-7471-b52a-6ba327debdde",
+  "external_ref": null,
+  "title": "A refused checkpoint report loses the turn's check evidence silently: tell the holder which checks were dropped, and keep the receipt's stored record ids",
+  "outcome": "When Engram refuses a turn report, TermAl falls back in three stages: the full report, then its own observation, then empty. The grant can then close without the turn's checks.\nToday the holder sees only a degraded card with an error code and a log line. Nothing tells them which checks lost their evidence, so they may believe a test was recorded when it was not.\nAlso, the checkpoint receipt returns the ids of the records Engram stored, and TermAl discards them (src/engram_host_adapter.rs:796-801). So the host can't compare what it sent with what was stored.\nWanted: after a fallback, the host tells the holder, in the session and on the item's checkpoint where possible, exactly which checks were not recorded. It keeps the receipt's stored ids and compares them with the report it sent. \"Checkpointed\" is never presented as \"tests recorded\".\nSource: Engram::Fable's contract answers to Termal::Architect1 (mailbox acbb2383 #4), relayed in 2a27fd51 #12.",
+  "acceptance": [
+    "The host keeps the checkpoint receipt's stored record ids and reports any mismatch with what it sent; a test covers a partial store.",
+    "When a report falls back, the session shows which checks' evidence was not recorded, naming each command; a test covers each fallback stage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "engram-interop",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,33 @@
+{
+  "id": "01a1d359-9f04-7972-9561-b347753024b2",
+  "external_ref": null,
+  "title": "Remove orphaned test-run refresh wrappers introduced by phase tracing",
+  "outcome": "Production builds have no new dead-code warnings from the phase-tracing entry-point change; retained wrappers have an actual caller or are restricted to tests.",
+  "acceptance": [
+    "Remove orphaned test-run refresh wrappers introduced by phase tracing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-concurrence-needed",
+    "acceptance-needed",
+    "greg-reported",
+    "performance",
+    "review-low",
+    "state-lock",
+    "test-run-tracing",
+    "tracing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d30d-722f-7e31-ab8d-4bd81a716e52",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

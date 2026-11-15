@@ -1,0 +1,36 @@
+{
+  "id": "01a1ae32-acd7-7b53-9a31-d6e1d61ec87f",
+  "external_ref": null,
+  "title": "Ensure Windows launcher owner-stop reaches the MSYS and Cargo test tree",
+  "outcome": "Stopping an owned Windows launcher run also stops its owned MSYS/Cargo/test descendants, while preserving interrupted evidence and leaving the host and other owners' processes untouched.",
+  "acceptance": [
+    "A Windows regression demonstrates the observed ancestry escape through Git Bash/MSYS and proves that the supported owner-stop path terminates all processes belonging to the selected run.",
+    "Stopping a selected run preserves its original artifacts and records interruption without rerunning tests or granting a passed verification record.",
+    "The owner-stop path verifies process/run ownership and does not stop the TermAl host or another run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "owner-stop",
+    "p1",
+    "resource-stop",
+    "source-revision",
+    "team-pilot",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

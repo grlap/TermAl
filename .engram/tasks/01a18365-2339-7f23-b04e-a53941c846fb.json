@@ -1,0 +1,28 @@
+{
+  "id": "01a18365-2339-7f23-b04e-a53941c846fb",
+  "external_ref": null,
+  "title": "Launcher panic-journal summary misses aborts in the engram-live stage and focused scripts/test-rust.sh runs (not recognised as going through cargo)",
+  "outcome": "An abort of the Rust test binary is summarized with its journal records whatever stage or wrapper ran cargo.",
+  "acceptance": [
+    "Launcher panic-journal summary misses aborts in the engram-live stage and focused scripts/test-rust.sh runs (not recognised as going through cargo) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "gate-load",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1b514-f0c8-7f50-b8f2-e3ba5135b3ae",
+  "external_ref": null,
+  "title": "docs/test.md still describes the pre-cutover source_id state and the 8 s registration budget",
+  "outcome": "docs/test.md still describes the pre-cutover source_id state and the 8 s registration budget",
+  "acceptance": [
+    "docs/test.md still describes the pre-cutover source_id state and the 8 s registration budget is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "eo-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

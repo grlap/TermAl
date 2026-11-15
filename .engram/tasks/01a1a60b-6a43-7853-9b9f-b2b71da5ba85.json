@@ -1,0 +1,31 @@
+{
+  "id": "01a1a60b-6a43-7853-9b9f-b2b71da5ba85",
+  "external_ref": null,
+  "title": "Apply a shared committed-input status-entry bound and avoid large Node push spreads",
+  "outcome": "Root and child status parsing uses an explicit shared aggregate budget consistent with the contract, and Node accumulation reports a named limit refusal rather than an argument-count RangeError.",
+  "acceptance": [
+    "Apply a shared committed-input status-entry bound and avoid large Node push spreads is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-finding",
+    "source-identity",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,39 @@
+{
+  "id": "01a1749d-7ff1-7cc3-aa8c-7dbb08b51097",
+  "external_ref": null,
+  "title": "Keep deferred remote-prompt integration helpers warning-clean after the lead fold",
+  "outcome": "The integrated production remote-prompt path builds without new dead-code warnings; deferred helpers are either wired to their real owner or narrowly annotated using repository conventions.",
+  "acceptance": [
+    "Keep deferred remote-prompt integration helpers warning-clean after the lead fold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "greg-reported",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "remote-prompt",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1741f-92e2-7ba2-921c-e1b088ba9d33",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

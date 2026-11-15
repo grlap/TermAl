@@ -1,0 +1,29 @@
+{
+  "id": "01a1c7e2-98bf-7110-a6ac-227669abfee8",
+  "external_ref": null,
+  "title": "Match category no-credit fixtures to the launcher's recorded Vitest argv",
+  "outcome": "The category-credit regression test represents actual terminal Vitest argv, and comments accurately state whether category scope or stage rules enforce no credit.",
+  "acceptance": [
+    "A behavioral category record test includes the launcher-owned vitest-json reporter and --outputFile.json suffix and proves the intended unclassified no-credit outcome.",
+    "The no-credit guard and comments accurately cover actual category argv and any client-stage-list fallback they claim to exclude, with no test reading source or Markdown text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-launcher",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

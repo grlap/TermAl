@@ -1,0 +1,28 @@
+{
+  "id": "01a100d2-1937-7423-ab83-5c9f2a14f167",
+  "external_ref": null,
+  "title": "rustfmt drift on master 59b2fd4: `cargo fmt -- --check` fails in 19 test files",
+  "outcome": "`cargo fmt -- --check` on master 59b2fd4 reports formatting differences in 19 files, all under src/tests/:\nacceptance_evaluation.rs, agent_commands.rs, delegation_followup_admission.rs, delegation_wait.rs, engram_bind_backoff_retry.rs, engram_first_extraction.rs, engram_lost_shell_overlap.rs, home_fixture.rs, http_routes.rs, kimi.rs, kimi_approvals.rs, kimi_read_only.rs, mod.rs, opencode_approvals.rs, phase_sync.rs, review_freeze.rs, test_run_cards.rs, test_run_waits.rs, test_runs.rs.\nThe gate does not run a formatting check, so the drift accumulates unseen. Fix: a pure formatting commit of those files with `cargo fmt`, with no other changes, gated like any change. Optionally, decide whether the gate should run `cargo fmt -- --check`.",
+  "acceptance": [
+    "`cargo fmt -- --check` passes on the landed tree.",
+    "The fix commit changes formatting only; its diff ignoring whitespace (`git diff -w`) contains no code change beyond line wrapping."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "formatting",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0feaa-67fa-7bc3-80e0-a490c271ed2e",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate rustfmt-drift item, covered by w-a490c271ed2e. The survivor's holder must also cover this item's three extra file names, listed in note b80d766c.",
+  "completion": null
+}

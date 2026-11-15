@@ -1,0 +1,35 @@
+{
+  "id": "01a1c7d2-4cfd-7140-b0a5-c3ddf8f15354",
+  "external_ref": null,
+  "title": "Integrate combo44 on 6265bb97: c593 bcf66e4d (w-f3b7 carry of dcb9887c)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit bcf66e4d34ce886fa00819664f72e9ff1b9c81a2 (tree 89a3895fc1cf7430676c6c62b9178c607f35e795) is on origin/master, where master was moved to it by a fast-forward from 6265bb97cba9dfa9cc20555944d48a3077577af8, and its raw no-renames diff against that parent is byte-identical to the reviewed c593 dcb9887c's diff against 5be407c3.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 89a3895f passed every stage, with equal source ids before and after and an eligible clean input, and the adopted review pair of dcb9887c (one Codex, one Claude) recorded no finding of Medium or higher.",
+    "The release binary built from tree 89a3895f was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install may since have replaced it, in which case this binary is kept aside there."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Combo44 is LANDED: c593's bcf66e4d, a byte-identical carry of dcb9887c, was fast-forwarded onto master from 6265bb97 and pushed at 00:20:36Z. Its gate was the DL560 FULL test-6376f83a, which passed every stage. It was installed on Central (ebd6c551) and on DL560 (f56476e4); later landings have since replaced those binaries, which are kept aside there. The independent evaluation passed 3/3 (delegation-7f01454f, Codex session-17334).",
+    "completed_at": "2026-11-11T04:09:41.484711200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

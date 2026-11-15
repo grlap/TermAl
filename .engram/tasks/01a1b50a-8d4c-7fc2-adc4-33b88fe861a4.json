@@ -1,0 +1,27 @@
+{
+  "id": "01a1b50a-8d4c-7fc2-adc4-33b88fe861a4",
+  "external_ref": null,
+  "title": "Native results use input/post_run source_id keys that the run-detail and wait readers don't read",
+  "outcome": "Native results use input/post_run source_id keys that the run-detail and wait readers don't read",
+  "acceptance": [
+    "Native results use input/post_run source_id keys that the run-detail and wait readers don't read is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "diagnostics",
+    "eo-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

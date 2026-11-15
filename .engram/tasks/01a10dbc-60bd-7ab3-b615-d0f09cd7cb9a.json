@@ -1,0 +1,28 @@
+{
+  "id": "01a10dbc-60bd-7ab3-b615-d0f09cd7cb9a",
+  "external_ref": null,
+  "title": "Exercise admission retry ticks and drain release while dedicated cleanup is held",
+  "outcome": "Use a due retry through the production tick/drain paths under current and predecessor cleanup holds to verify no external admission request and preserved cleanup preview, with a confirmed-cleanup positive control.",
+  "acceptance": [
+    "Exercise admission retry ticks and drain release while dedicated cleanup is held is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "engram-retry"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

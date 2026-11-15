@@ -1,0 +1,41 @@
+{
+  "id": "01a19d06-5c55-7572-b1e3-1608ce7eed47",
+  "external_ref": null,
+  "title": "Diagnose four new federation failures in C2 diagnostic c9d619a1",
+  "outcome": "Read-only cause assessment of three isolated platform probe failures and one stream-EOF liveness failure, with environment/product/baseline evidence.",
+  "acceptance": [
+    "Inspect exact c9d619a1 failure logs and timing; compare federation changes92a→50226370 and prior/master sources without rerunning.",
+    "Trace probe and EOF test owners, shared process resources and any surrounding spawn-heavy failures; distinguish proven facts from hypotheses and unresolved causes.",
+    "Return evidence-based read-only diagnosis to Fable2 within30min; no edits/tests/retry or fabricated environmental closure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "engram-host-adapter",
+    "federation",
+    "gated-control",
+    "greg-directed",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only diagnosis accepted Fable1966 within30min: two probe failures predate run, no direct changed federation path, post-prepare probe error unresolved because detail discarded; explicit hypotheses and discriminating diagnostics returned. EOF fixture drops socket but asserts gracefulEOF; actualConnectionReset distinction preserved, independent bugfiled. No edits/tests/retry or invented environmental closure. Further sourcework separately assigned existing2448 and independent80b3.",
+    "completed_at": "2026-11-02T16:21:49.303113100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

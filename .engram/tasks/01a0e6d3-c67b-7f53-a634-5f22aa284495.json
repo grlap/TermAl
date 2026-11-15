@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c67b-7f53-a634-5f22aa284495",
+  "external_ref": "tm-o1li",
+  "title": "Add TermAl-managed AutoApprove for Codex",
+  "outcome": "Codex approvalPolicy=never is a native app-server policy that suppresses prompts and lets sandbox-denied operations fail; it is not equivalent to Claude's TermAl-managed AutoApprove. Add a distinct auto-approve Codex mode so TermAl requests native on-request approvals and answers eligible approval requests automatically. This also fixes orchestrator autoApprove=true currently mapping Codex to Never.",
+  "acceptance": [
+    "The auto-approve value round-trips through persistence, API, remote snapshots, settings UI, slash palette, and docs while Never remains distinct and remains the default. Codex receives native on-request for auto-approve at thread start/resume and turn start. During a turn whose active policy is AutoApprove, TermAl immediately accepts commandExecution, fileChange, and permissions approval requests once/turn using existing response shapes, without creating approval cards or pending entries. User input, MCP elicitation, and generic app requests remain interactive. Active read-only delegation children always receive exact decline-shaped responses for all three approval kinds, including Windows reviewers using danger-full-access. A mid-turn settings change does not alter the active turn policy. Orchestrator template autoApprove=true maps Codex to AutoApprove; delegation children remain initially forced to Never. Focused and full Rust/UI gates pass, followed by independent Fable verification."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

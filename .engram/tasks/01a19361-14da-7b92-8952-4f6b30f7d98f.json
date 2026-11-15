@@ -1,0 +1,30 @@
+{
+  "id": "01a19361-14da-7b92-8952-4f6b30f7d98f",
+  "external_ref": "engram:w-9a1707c9f487",
+  "title": "Define the missing producer authorization source for import-reconciliation successor access",
+  "outcome": "Resolve the joint contract's missing source and verifier for an admitted bookkeeping successor's access to exact predecessor control-session operations. The design names the producer-owned authorization, its scope and durable custody/fence requirements, and the implementation dependencies. Until that contract exists and is implemented, successor historical access and retirement remain Pending; the original-session route does not count as completion of this capability.",
+  "acceptance": [
+    "Record the exact authorization source, minting and verifying owners, and supported acquisition path for successor access, binding the predecessor and successor associations to the original control-session/operation scope and required durable custody/fence. Distinguish an existing implemented source from a proposed dependency; a nonempty ObjectId or structural owner chain is not sufficient.",
+    "Record producer and host concurrence on the concrete contract and its implementation boundaries, including refusal/Pending behavior for missing authorization, ambiguous scope or unavailable predecessor custody. Any new durable kind or authority widening follows the existing project authority rules rather than being inferred from this item.",
+    "Link the resulting implementation dependencies and deterministic scope/race test requirements. Preserve the Pending fallback until those dependencies are supported, and state explicitly that original-session reconnect/current-route success alone does not satisfy successor access."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "import-reconciliation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

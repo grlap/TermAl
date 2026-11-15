@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c67f-71b1-9531-de4bf4fc05e9",
+  "external_ref": "tm-ob6g",
+  "title": "Let a single-quoted dollar in a test filter keep Engram evidence",
+  "outcome": "From tm-winf round-11 review (Claude, Note). engram_check_worktree's leads_out rejects any argument containing \\$ or % after unquoting, including single-quoted literals bash and PowerShell pass on as written (go test -run '^TestFoo\\$', pytest -k 'a\\$'). Anchored filters are common, so such runs never yield evidence. Conservative (no false credit) and documented. Option: track quote context per word in engram_shell_word_spans_as and treat \\$ inside single quotes as literal for Bash/PowerShell dialects (not %: cmd expands it inside quotes).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

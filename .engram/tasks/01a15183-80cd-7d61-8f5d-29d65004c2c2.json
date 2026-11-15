@@ -1,0 +1,27 @@
+{
+  "id": "01a15183-80cd-7d61-8f5d-29d65004c2c2",
+  "external_ref": null,
+  "title": "A batch gate's member fences can be confirmed at a later checkpoint than the gate's launch",
+  "outcome": "A batch gate's members carry the fences their claims had when the gate launched, even when the launching checkpoint did not read held claims (the launcher's STARTED end came after that checkpoint's first phase, or its plan was Cached or Nothing), so a member whose claim moved after the launch is caught by the 'claim moved since the gate's launch' precheck.",
+  "acceptance": [
+    "A batch gate's member fences can be confirmed at a later checkpoint than the gate's launch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a13343-8dbe-75a1-b35a-540531f46f53",
+  "disposal_reason": "Fixed inside w-540531f46f53 slice (ii) after the Codex /review-code round 5 (delegation-291b0c49) raised it to a Medium. A batch gate now reads the session's held claims at its launch, off the lock in note_engram_command_finished_with_capture, and only for a launcher full gate that has members. Each member carries the fence its claim had then, never replaced later; the checkpoint-time confirmation was removed. A launch whose read fails binds no member, and the holder is told. Tests: a member recovered before the launch carries the launch fence, a move after the launch is not adopted, and an unread launch binds nothing and says so.",
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1767a-0ba9-7e63-8173-a423b36be63c",
+  "external_ref": null,
+  "title": "Scope Base-only naming SessionBind retries to one attempt and recover invalid tokens",
+  "outcome": "Base-only naming does not reuse a superseded SessionBind reply across distinct binding attempts, and can safely recover a definitively invalid routing token without enabling turn admission.",
+  "acceptance": [
+    "A deterministic regression using the stateful SessionBind model distinguishes same-attempt lost-reply replay from a subsequent bind attempt after token rotation/local token loss with unchanged claim association; report separately whether the live engine contract is verified.",
+    "Any attempt identity and invalid-token recovery preserve exact store/claim/run/fence/runtime/owner checks and unknown-outcome replay; no grant, turn admission, host-credit or acceptance prerequisite is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-control",
+    "greg-reported",
+    "host-recording",
+    "review-low",
+    "source-root",
+    "source-root-naming"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1708c-a60a-7781-b45a-c7b546116c5a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete. Its subject, SessionBind, is no longer in production code: 87f49ed0 removed turn-gated control and SessionBind. Verified by Opus3's read-only sweep at master 57a762c8 (TermAl mailbox 03723eab #5238); cancelled by coordinator Termal::Fable2, 2026-11-13.",
+  "completion": null
+}

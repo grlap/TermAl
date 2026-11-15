@@ -1,0 +1,29 @@
+{
+  "id": "01a110fc-ff5a-7f31-bf30-dc5abaee429a",
+  "external_ref": null,
+  "title": "Delegation API mailbox read occasionally times out after 30s before a response (host under full-gate load); a retry succeeds",
+  "outcome": "A mailbox read either completes within the bridge timeout under expected host load, or the cause of the stall is identified and fixed; a timed-out read never leaves ambiguous state.",
+  "acceptance": [
+    "The delegation mailbox read handler logs per-stage timings (router receipt to handler start, blocking-task start, store connection-mutex wait, SQLite work, response serialization, response write until the body is fully sent) in one line whenever a request exceeds 2 seconds, without omitting any stage, and the loopback bridge client sets a connect timeout, so the next occurrence names whether the stall was connect, queueing, lock wait, store work or response write; a test drives a slow stage and a slow response write and asserts the logged stages.",
+    "Acquiring the store connection mutex on the mailbox read path is bounded and maps to the existing typed Retryable response, the loopback client does not reuse an idle pooled connection past a short idle timeout, and the docs state that a timed-out mailbox read is safe to repeat (reads never move the cursor; issuance is idempotent per page); tests cover the bounded wait and the Retryable mapping."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation-api",
+    "load",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

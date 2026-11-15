@@ -1,0 +1,37 @@
+{
+  "id": "01a1d829-4287-74e3-9690-8e291dcbe597",
+  "external_ref": null,
+  "title": "Response Board: allow cards to be moved and dropped at negative positions",
+  "outcome": "A Response Board card can be dragged or dropped above or left of the board origin (negative x/y), so the reader can make room for a new card by moving existing cards left or up instead of moving everything else right or down.",
+  "acceptance": [
+    "Dragging a placed card left or up past the board origin keeps moving it to negative x/y (bounded only by the backend's existing coordinate range), and the position persists after reload.",
+    "Dropping a transcript message or a staged card left of or above the origin places it at the negative position under the pointer.",
+    "A behavioural UI test covers a drag to a negative position and a drop at a negative position; tsc is clean and the Response Board suites pass.",
+    "Greg confirms in the live UI that cards can be moved to negative positions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "response-board"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Response Board cards can be moved and dropped at negative positions (left of and above the origin), bounded only by the backend's ±1,000,000 coordinate range. Landed in master 491dd015 (fast-forward from eb78d349) after FULL test-590a0d31 PASS and Opus2's GO; confirmed live by Greg. Independent post-landing evaluation (Codex, delegation-59910aae) passed all 4 criteria.",
+    "completed_at": "2026-11-14T06:27:30.573242900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

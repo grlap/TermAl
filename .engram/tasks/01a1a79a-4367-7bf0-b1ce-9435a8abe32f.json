@@ -1,0 +1,31 @@
+{
+  "id": "01a1a79a-4367-7bf0-b1ce-9435a8abe32f",
+  "external_ref": null,
+  "title": "Add kept-name regression controls for in-turn unconfirmed openings and publication failures",
+  "outcome": "Tests directly protect immutable opening provenance and acknowledgement ordering in the kept-name refresh branch.",
+  "acceptance": [
+    "A kept re-name during a running turn that opened Unconfirmed preserves that opening and reports OpeningCapturedUnconfirmed without false verification credit.",
+    "A deterministic kept re-name with a failed fresh read, learn or publish preserves the prior tuple and cannot make the next capture falsely confirmed; assertions exercise the kept branch."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "host-recording",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a74e-64f3-7530-870f-dd7f6eb456d5",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

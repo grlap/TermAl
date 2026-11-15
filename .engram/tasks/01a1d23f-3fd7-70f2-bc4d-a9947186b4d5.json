@@ -1,0 +1,43 @@
+{
+  "id": "01a1d23f-3fd7-70f2-bc4d-a9947186b4d5",
+  "external_ref": null,
+  "title": "Work view list stops short of the pane, clipping its last row and expanded details above unused space",
+  "outcome": "The Work list fills the pane's available height, so its last row and any expanded item's details can always be seen in full or scrolled to inside the Work view.",
+  "acceptance": [
+    "In the tree, label-group, table and urgent views, the Work list fills the pane's available height with no unused space below it, its last row can be scrolled fully into view, and an expanded item's details near the bottom are visible in full or reachable by scrolling inside the Work view.",
+    "A UI regression test checks observable behaviour of the fix (for example that the expanded details are brought into view or that the list scrolls to them), not CSS text or implementation details; tsc and vitest are green and the change has a clean review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "ui",
+    "work-panel"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Work list fills the available pane and preserves reachable rows/details in short panes; focus-preserving loaded-detail reveal covered by behavioral tests. Landed4d5ac4b4 with adopted clean R2 pair, integrationFULLgreen and exact-source closureVitest129/0/nativeTest90726b71. Independent evaluation7236467217b348a3a143847d34fd1fa6 passed both criteria at revision3/cut156 with fresh source; optional anchor-timingLow remains separately tracked w-79eb730068a9.",
+    "completed_at": "2026-11-13T03:56:07.517463300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-54b17896e8ad",
+  "external_ref": "tm-m6r1.1",
+  "title": "Work notes: accept advancing observation times on valid continuations",
+  "outcome": "Round-1 Codex Medium, WorkItemDetails.tsx:31: older-note merging requires readCut.observedAt equality, but upstream recomputes observation time on successful continuation. Valid later pages clear all detail content as Notes window changed. Static source confirmation at the feature-doc revision d0182e7; installed build reported as 80d7f9d3af12 is not a local Git object, so confirm its exact contract using build-tagged receipts before finalizing. Preserve opaque cursors and true project-position/count/boundary validation; do not merely remove all generation checks.",
+  "acceptance": [
+    "Regression with stable projectPosition and advancing observedAt merges older notes; truly invalid cursors or changed source generation still clear the window; preserve initial detail and holder."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

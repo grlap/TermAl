@@ -1,0 +1,51 @@
+{
+  "id": "01a1216b-df1d-7343-834d-c53817fab911",
+  "external_ref": null,
+  "title": "A Codex foreground focused Node run leaves no host trace at all: no execution start or end observation, no verification record (not even Unknown), no refusal notice",
+  "outcome": "Every foreground launcher run a session makes in its named root ends with exactly one host outcome on the bound item: a verification record (PASS, FAIL or Unknown with a named guard), or a refusal or non-recognition notice naming why. A run never leaves no trace.",
+  "acceptance": [
+    "The holder's note identifies, from host state or logs with source locators, why run test-632de02f produced no observation, record or notice (for example: the Codex exec completion was never observed, the command form was not recognized and the non-recognition notice was not sent, or the record was dropped).",
+    "A regression test drives that cause and shows the host then emits exactly one outcome (a record or a named refusal or notice) for the run.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-recognition",
+    "codex",
+    "coordination-cost",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented the foreground launcher outcome handling and regression coverage. The independent acceptance evaluation 120dd0653abc4eccb6118eb24ca49d53 passed all three criteria at the landed source revision; the full five-stage gate passed on the exact tree.",
+    "completed_at": "2026-10-16T23:03:29.507065900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

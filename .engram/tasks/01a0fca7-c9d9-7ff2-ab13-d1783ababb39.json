@@ -1,0 +1,26 @@
+{
+  "id": "01a0fca7-c9d9-7ff2-ab13-d1783ababb39",
+  "external_ref": null,
+  "title": "Claude orphaned outstanding work: explicit recovery of evidence eligibility, and the knowledge gap across a host restart",
+  "outcome": "A session whose Claude work was left outstanding with no verified completion (a subagent or background command whose runtime was stopped or replaced, an abandoned call, or work past the per-session bound) has a truthful, explicit path back to evidence eligibility, and the host says what it no longer knows after a restart, instead of losing test credit in that workspace for good.",
+  "acceptance": [
+    "Claude orphaned outstanding work: explicit recovery of evidence eligibility, and the knowledge gap across a host restart is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

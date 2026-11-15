@@ -1,0 +1,29 @@
+{
+  "id": "01a1720a-507d-7612-ae41-94270949de01",
+  "external_ref": null,
+  "title": "Native relay Wake RPC waits for provider startup after durable queue admission",
+  "outcome": "Separate the durable metadata Wake response from local provider startup while retaining exact-head authority and idempotent admission.",
+  "acceptance": [
+    "A Wake response can confirm durable metadata/queue admission without waiting for provider startup and never claims runtime acceptance from that response.",
+    "A deterministic delayed-provider control preserves exact-owner draining, Stop/cancellation/authority checks, duplicate suppression and fair progress for unrelated targets."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-host",
+    "greg-reported",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1711f-eab5-7671-a7e1-559787f77f80",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

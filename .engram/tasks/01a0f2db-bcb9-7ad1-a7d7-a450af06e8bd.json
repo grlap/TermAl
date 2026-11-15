@@ -1,0 +1,43 @@
+{
+  "id": "01a0f2db-bcb9-7ad1-a7d7-a450af06e8bd",
+  "external_ref": null,
+  "title": "A carried full gate loses its credit when another session merely runs a read command in its worktree",
+  "outcome": "Another session's read-only Claude command in a worktree with a carried gate no longer refuses the gate's credit. Such a command is classified the same way the holder's own Claude commands are. Writes by other sessions there still refuse the credit, and the refusal line names the observed write instead of \"a turn\". Scope: Claude sessions only. A read-only command by a Codex or other non-Claude session still refuses the credit until TermAl can classify that command form; that continuation is w-39d4f950ad04.\n\nOriginal report (live on the host built from d58ec4d, 2026-09-30): Termal::Codex's containment closure gate test-c7ee639e-b426-4c9f-8fb7-e9b72ffe87a7, launched detached at 15:04:23Z in .tmp/wt-containment, was refused with \"a write the host observed reached its worktree before it settled: session Termal::Architect1 (session-8982) was in a turn or ran a command there\". Architect1 was only reading in that worktree. The line called it a write, but the cause it named was a turn or command, with no write shown. The fix direction was to fence on evidence of a write (a reported edit, a watcher-seen change to a non-ignored path, or a command not provably read-only), to apply to other sessions the read-only classification the holder's own Claude commands get, and to make the refusal line say what was observed.",
+  "acceptance": [
+    "A read-only command (for example git status, git log, a file read) run by another Claude session in a worktree with a carried gate does not refuse the gate's credit, by the same read-only classification the holder's own Claude commands get; a test covers it.",
+    "A write by another session in that worktree during the run still refuses the credit, and the refusal line names the observed write rather than a turn; a test covers it.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed at 27bf0b6. Independent evaluation cb9beb3ada594133a81101e86bb2bb8b (delegation-6d9a5c65, Codex) passed all 3 criteria at source root .tmp/wt-tmpfence, revision content-v1:fc2ca148, superseding the carried failure 5bc7bccd.",
+    "completed_at": "2026-10-02T00:30:25.256420900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

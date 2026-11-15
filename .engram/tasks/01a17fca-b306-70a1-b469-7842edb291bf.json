@@ -1,0 +1,30 @@
+{
+  "id": "01a17fca-b306-70a1-b469-7842edb291bf",
+  "external_ref": null,
+  "title": "Remote mailbox read on an existing relay locator returned 503 then 409 'federation link changed' with no reconnect action",
+  "outcome": "The cause of the 503 'native mailbox relay transport/response unavailable' followed by 409 'federation link changed; reconnect and reconcile the original operation' on Windows B's immediate termal_read_mailbox (about 23:53–23:54Z on 2026-10-27, after its bundle sends were accepted) is diagnosed, and either fixed or documented with the recovery path an agent should follow.",
+  "acceptance": [
+    "The trigger for the federation link change observed at about 23:53Z on 2026-10-27 between the central host and Windows B is identified from host evidence (logs or federation state), or the evidence that rules each candidate out is recorded",
+    "If the link change was not caused by an operator or restart action, a product fix lands so that an established relay link does not change under an ordinary read, or the condition is bounded and covered by a test",
+    "The agent-facing recovery for a 409 'federation link changed' on a read is documented: whether a plain re-read is safe and what reconcile means for a read-only operation"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "remote-incident"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

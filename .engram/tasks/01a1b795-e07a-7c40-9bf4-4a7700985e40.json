@@ -1,0 +1,29 @@
+{
+  "id": "01a1b795-e07a-7c40-9bf4-4a7700985e40",
+  "external_ref": null,
+  "title": "Windows B FULL: retained_runs::a_retired_runs_root_is_disposed_of_and_never_planned_for_a_read failed once (passes elsewhere)",
+  "outcome": "Windows B FULL: retained_runs::a_retired_runs_root_is_disposed_of_and_never_planned_for_a_read failed once (passes elsewhere)",
+  "acceptance": [
+    "The failure is diagnosed from the original panic and the source: test race or assumption, environment, or product. It is recorded on this item with evidence, not inferred.",
+    "If it is a test defect, the test is fixed so it observes the intended behaviour deterministically (no retries, no larger timeouts, no quarantine); if it is a product defect, that is fixed instead, with a behavioural regression.",
+    "The fixed test passes on Windows and Linux in the normal gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1b796-83a5-7141-98f5-463cabf5d2a9",
+  "disposal_reason": "Duplicate filed in parallel. Opus2's w-463cabf5d2a9 covers the same Windows B FULL failure (test-9a60d621) with the decoded cause: the fixture's `git worktree add` failed with \"fatal: '$GIT_DIR' too big\" because the rerun's temp root label `fd48f207-env2` was one character longer than earlier runs, pushing the nested path from 229 to 230 characters. That is a test-location/path-length issue, not the product or the change. Greg's quote („Mysle ze testy maja bledy. Logujemy bug dla testu i chrck in”) and the FAILED (not pass) record stay on this item and on w-e072.",
+  "completion": null
+}

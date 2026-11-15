@@ -1,0 +1,30 @@
+{
+  "id": "01a18383-2c85-78c1-9ef4-d6ec849490e9",
+  "external_ref": null,
+  "title": "Design a safe retention policy for compacted test-run history (test_run_compacted is never pruned)",
+  "outcome": "Design a safe retention policy for compacted test-run history (test_run_compacted is never pruned)",
+  "acceptance": [
+    "An inventory names every consumer and reference of test_run_compacted rows (projection, restart-risk, receipt/settlement, lifecycle revalidation, recovery and evaluation evidence), their proof/receipt/recovery obligations, retention pins and whether a pruned row could be reconstructed.",
+    "A proposed eligibility rule defines when a compacted row may be removed without weakening any obligation, coordinated with the existing session-retention mechanism without assuming archived-session eligibility implies test-evidence eligibility.",
+    "A non-destructive dry run on representative retained history reports the rows and bytes the rule would remove and why the rest stay; no deletion, count cap or behaviour change is made by this item, and its findings are reviewed before any implementation item is filed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "design",
+    "host-persistence",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

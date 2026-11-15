@@ -1,0 +1,28 @@
+{
+  "id": "01a1c3e8-15f9-7602-8271-5492c95da2cd",
+  "external_ref": null,
+  "title": "Keep unquoted Git blame peels out of path argument positions",
+  "outcome": "The unquoted Git peel exception applies only where blame's syntax unambiguously places the operand in a revision role.",
+  "acceptance": [
+    "Production control-request classification refuses an unquoted peel in blame's single-path and legacy path/revision forms, while preserving ordinary read-only blame and quoted literal arguments.",
+    "If blame keeps unquoted revision peels, an explicit revision/path separator is required and covered by behavior tests; no shell expansion or execution/write authority is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "read-only-gate",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

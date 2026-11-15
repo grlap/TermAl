@@ -1,0 +1,27 @@
+{
+  "id": "01a11df8-8aac-7ac1-af2a-63ac945b518e",
+  "external_ref": null,
+  "title": "Causal diagnostics copy local error chains (anyhow {:#}, PersistFenceError Debug) into causalFailure.message",
+  "outcome": "Causal diagnostics copy local error chains (anyhow {:#}, PersistFenceError Debug) into causalFailure.message",
+  "acceptance": [
+    "Local preparation and durability failures reach the persisted and rendered causalFailure.message only as constant categories (for example 'local persistence failed; durability unknown'), with the full chain kept only in host logs; a sentinel test with a corrupt stored row and a failing write shows no serde Display text or DB path in the stored record or on the wire."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-diagnostics",
+    "low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

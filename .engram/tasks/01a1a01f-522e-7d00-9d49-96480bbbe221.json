@@ -1,0 +1,37 @@
+{
+  "id": "01a1a01f-522e-7d00-9d49-96480bbbe221",
+  "external_ref": null,
+  "title": "A check is closed as Unknown at turn end while its registered launcher run is still running, which invites a duplicate run",
+  "outcome": "While a registered launcher run is still alive (process present, results.json running, fresh heartbeat), the host reports its check as running, or as pending with the run id. It is never closed as a terminal Unknown that a session can read as finished.",
+  "acceptance": [
+    "The path that closed check 0dfa0914… as 'Unknown/no credit' at the ordinary turn end, while launcher run test-dba590bc was registered but not indexed and still running, is identified in code.",
+    "The fix keeps a live registered run non-terminal in the check's status and in the text agents see, naming the run id, until the run's own terminal result is indexed. A regression test asserts this for a registered-but-not-indexed live run.",
+    "The wording agents see distinguishes 'still running, run X' from 'outcome unknown', so it never invites a rerun of a live job. The review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed registered-launcher turn-end distinction: an exactly correlated live run stays pending with its run id, and agents are told not to duplicate it; unverifiable cases retain honest Unknown with conditional registered-run advice. Native running/carry custody and verification authority remain separate. Real recorder regression coverage, original independent whole-input reviews and complete carry confirmation pair recorded; exact landed-tree focused and full gates passed on Windows B and DL560. Four optional Low follow-ups remain separate.",
+    "completed_at": "2026-11-04T05:52:57.222914700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

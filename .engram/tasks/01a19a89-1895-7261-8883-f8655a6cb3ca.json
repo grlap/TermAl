@@ -1,0 +1,31 @@
+{
+  "id": "01a19a89-1895-7261-8883-f8655a6cb3ca",
+  "external_ref": null,
+  "title": "Pin admission regression pause ownership independently of the product predicate",
+  "outcome": "The lost-bind and lost-evaluate OFF regression has independent absolute pause-ownership expectations, so a classification regression cannot make both implementation and expected result change together.",
+  "acceptance": [
+    "For both session_bind and turn_evaluate cases, human_prompt_ui_resume_preserves_retained_gated_admission_recovery independently asserts the expected pre-OFF paused and control-owned values before its relative transition assertion.",
+    "The exact head, frozen request, ledger, interruption, no-provider/no-control-RPC and ON exact recovery checks remain; diagnostics are deliberately retained or removed with rationale.",
+    "Focused verification covers both lost-operation branches and an independent review confirms the new assertions do not derive their expectation from control_pause_is_owned."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1981d-73dd-7db2-bef1-ba8d28acb0fd",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete assertion refinement for deleted gated admission test and predicate: native rg over current src finds no human_prompt_ui_resume_preserves_retained_gated_admission_recovery or control_pause_is_owned. Current product no longer has ON admission/lost-bind/evaluate transition being pinned. Cancel as inapplicable under Fable2694/Greg direction, not as tested/fixed; original4133967c review evidence retained and no replacement phrase/implementation-mirroring test added.",
+  "completion": null
+}

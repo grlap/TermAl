@@ -1,0 +1,31 @@
+{
+  "id": "01a1b4c9-58fd-7131-87a6-9374bc43a560",
+  "external_ref": null,
+  "title": "Retain the session Host filter when a panel or tab remounts",
+  "outcome": "The Host choice survives pane/tab moves and remounts alongside project/status/search.",
+  "acceptance": [
+    "A standalone Sessions tab retains its Host choice when moved to another pane or remounted.",
+    "Docked Host selection survives remount consistently with other filters; tabs retain independent selections."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "review-low",
+    "session-panel",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b4ac-b691-77a3-9373-2050f215638d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4ec-7f11-9553-2736da5f4bcb",
+  "external_ref": "tm-dmi0",
+  "title": "Engram bootstrap can be silently dropped if Codex honours config.developer_instructions over the top-level field",
+  "outcome": "Claude review session-6531, Low at src/codex_engram_bootstrap.rs:51.\n\nWhen the base is taken from params.config.developer_instructions (lines 31-36),\nthe composed value is written ONLY to the top-level developerInstructions key.\nTHE UN-APPENDED COPY IS LEFT IN params.config.\n\nTermAl's assumption that the top-level field outranks the config layer is pinned\nonly by TermAl's OWN test\n(engram_bootstrap_composition_matches_override_precedence_and_null_inheritance),\nnot by any observed Codex behaviour. If Codex's precedence is the reverse, the\nthread starts successfully and THE BOOTSTRAP IS SILENTLY DROPPED - a failure\nwith no error and no signal, which is the hardest kind to notice.\n\nLatent today because the production mcp_config never sets developer_instructions.\n\nFIX DIRECTION: overwrite or remove the config.developer_instructions copy so\nboth layers carry the same composed text regardless of which one Codex honours.\nThat removes the dependency on an assumption nobody has measured.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

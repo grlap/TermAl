@@ -1,0 +1,28 @@
+{
+  "id": "01a1c178-27e9-78f3-b4f8-e0c86a558982",
+  "external_ref": null,
+  "title": "termal_review_identity refuses a malformed request with a bare invalid_request that names no field",
+  "outcome": "A refused termal_review_identity request says which field or combination was wrong, so the caller can correct it without reading source.",
+  "acceptance": [
+    "Each invalid_request refusal from termal_review_identity names the offending field or forbidden combination, such as platformProfile on capture, in its returned reason.",
+    "Valid requests and the existing refusal codes are unchanged, shown by a behaviour test per refusal case."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "review-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

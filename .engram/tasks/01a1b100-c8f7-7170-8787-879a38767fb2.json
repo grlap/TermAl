@@ -1,0 +1,31 @@
+{
+  "id": "01a1b100-c8f7-7170-8787-879a38767fb2",
+  "external_ref": null,
+  "title": "The isolated rev-5 source reader (no system Git config) can judge a clean Windows checkout dirty when the checkout used system core.autocrlf=true and the repository has no full .gitattributes eol policy",
+  "outcome": "On Windows, a worktree checked out under the machine's line-ending configuration is measured clean at its commit by the source reader whenever its content is unchanged, regardless of whether the reader isolates system/global Git config; any remaining mismatch is reported as a named line-ending cause rather than a generic dirty tree.",
+  "acceptance": [
+    "On Windows with system core.autocrlf=true and a repository without a complete eol policy, an unchanged worktree checked out under that system config (including files whose stat cache is stale or racy) is measured clean at its commit by the committed-input reader, and a genuinely changed file is still not clean.",
+    "If the reader cannot reconcile the checkout's line-ending conversion with its isolated config, it refuses with a named line-ending cause, not a generic not-clean result; the chosen behaviour is applied identically in Engram's `engram source` command and documented.",
+    "Tests cover: autocrlf=true checkout clean (fresh and stale-stat), a real content change, and a repository with a full .gitattributes eol policy (unchanged behaviour)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "source-revision",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

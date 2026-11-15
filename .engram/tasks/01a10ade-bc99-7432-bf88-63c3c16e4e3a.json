@@ -1,0 +1,27 @@
+{
+  "id": "01a10ade-bc99-7432-bf88-63c3c16e4e3a",
+  "external_ref": null,
+  "title": "Allow Stop of a live dedicated runtime when predecessor cleanup retry fails",
+  "outcome": "Stop can terminate the current dedicated runtime without first requiring a failed predecessor to confirm cleanup; any unresolved predecessor remains visible and retains its exact retry owner.",
+  "acceptance": [
+    "Allow Stop of a live dedicated runtime when predecessor cleanup retry fails is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "agent-workflow",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

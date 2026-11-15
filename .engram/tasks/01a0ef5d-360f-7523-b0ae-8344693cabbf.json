@@ -1,0 +1,32 @@
+{
+  "id": "01a0ef5d-360f-7523-b0ae-8344693cabbf",
+  "external_ref": null,
+  "title": "Mirror the coordinator's final-diff audit for authority-text landings into TermAl's instruction files, citing Engram 778e596",
+  "outcome": "TermAl's CLAUDE.md, AGENTS.md and .claude/commands/review-changes.md carry the final-diff audit as condition (c) of the authority-text rule, in the wording both coordinators concurred on, so a landing of authority text cannot contain a passage nobody agreed to word for word.",
+  "acceptance": [
+    "A test in the agent-command tests pins the new review-changes.md paragraph, and the test that compares CLAUDE.md with AGENTS.md, where one exists, still passes.",
+    "Every sentence added or changed in CLAUDE.md, AGENTS.md and .claude/commands/review-changes.md is quoted whole in a recorded message, and both coordinators' concurrence on that exact wording is recorded on this item before the landing; the item's notes map each changed passage to its message.",
+    "Greg was sent the exact wording and its consequence before the landing, and the item records when and where; no objection from him is recorded.",
+    "The final frozen diff was audited against the recorded sentences by the other project's coordinator, since TermAl's coordinator wrote the change, and by script (whitespace-normalised exact strings and a word-level diff); the audit's result is recorded on the item before the landing.",
+    "The full five-stage gate passes on the exact reviewed tree, and the review pair has no outstanding finding that blocks under the rule in force when the pair ran; each unfixed Low is filed as its own item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "instructions",
+    "review-cadence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

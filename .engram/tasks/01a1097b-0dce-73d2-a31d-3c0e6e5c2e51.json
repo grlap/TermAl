@@ -1,0 +1,27 @@
+{
+  "id": "01a1097b-0dce-73d2-a31d-3c0e6e5c2e51",
+  "external_ref": null,
+  "title": "Reserved `focused` stage name is applied in the foreground path only; docs/test.md states it for carried gates too",
+  "outcome": "docs/test.md (~line 420) says the stage name `focused` is reserved, so a full gate's stage of that name is never a test stage, under a rule stated for foreground and carried gates alike. Only the foreground path (engram_launcher_output_test_stages) drops the name. The carried path (engram_read_carried_run, src/engram_carried_checks.rs:904) still calls engram_launcher_test_stages unfiltered, so a carried kinded full gate whose only test stage is named `focused` would be credited. No real gate uses the name; it is not a weakening. Either apply the filter inside engram_launcher_test_stages (both paths, with a carried test) or narrow the sentence to the foreground.",
+  "acceptance": [
+    "Reserved `focused` stage name is applied in the foreground path only; docs/test.md states it for carried gates too is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

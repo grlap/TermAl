@@ -1,0 +1,31 @@
+{
+  "id": "01a1a00b-7f65-74c2-a2a3-881c69c0ccdb",
+  "external_ref": null,
+  "title": "Finished gate checks of a session are reported as running across a Central restart",
+  "outcome": "After a host restart, a gate or test run that had already ended is reported with its recorded terminal result, never as running. Nothing invites or starts a duplicate run of finished work.",
+  "acceptance": [
+    "The code path that reported Opus2's (session-8111) old gate checks as running during the 2026-11-03 06:08Z restart is identified, with the affected run ids and their recorded terminal results.",
+    "Whether anything automatically re-runs, re-registers or re-requests verification for such runs is established. Any such path is fixed so that a finished run is never repeated.",
+    "A regression test restarts the host over a store holding a finished run and asserts that it is reported terminal with its original result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "greg-reported",
+    "post-restart",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

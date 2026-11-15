@@ -1,0 +1,32 @@
+{
+  "id": "01a1c326-0fb5-7b61-bf83-aa8bbd08ef07",
+  "external_ref": null,
+  "title": "Prove that subprocess unwind fixture child modes actually execute",
+  "outcome": "Exit-only subprocess regression checks cannot pass when their child selector or mode environment skips the intended fixture body.",
+  "acceptance": [
+    "The native phase gate unwind parent test observes an execution witness for each cancel, worker, driver and both child mode; a missing mode or an unmatched exact selector cannot pass as exercised coverage.",
+    "Existing CapturedStderrProcess callers with the same exit-only pattern, starting with federation_shutdown_unwind.rs, are assessed and tightened where the child body could silently be skipped.",
+    "Checks exercise observable child execution without Markdown phrase tests, real timeout-expiry waits, weakened assertions or inflated limits."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "review-low",
+    "subprocess",
+    "test-runner",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19966-7593-7290-af23-39635af851d8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

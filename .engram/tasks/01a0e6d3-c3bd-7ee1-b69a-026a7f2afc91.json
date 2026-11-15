@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3bd-7ee1-b69a-026a7f2afc91",
+  "external_ref": "tm-214j",
+  "title": "Surface an acceptance evaluator's 'worktree changed while it was evaluated' refusal in the parent's fan-in",
+  "outcome": "Follow-up from review pair 2 on tm-5gi4 phase 1 (Claude Low, 2026-09-27). When the first submission finds the evaluated worktree at a different content revision than at the request, TermAl refuses it with 409 and tells the evaluator to finish and report. The refusal is not persisted on the evaluation target, so the parent's fan-in line says only 'nothing was recorded; the tracker has no verdict from this evaluator', and the parent learns that it must request a new evaluation only from the evaluator's prose. Unrelated activity in a shared worktree triggers it easily: another session's edits, an editor, or a bd write to the tracked .beads export. Wanted: record a structured refusal, 'source moved: requested X, found Y', on the target, and show it in the fan-in and status packets.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1380f-725d-75d0-b47d-def0ff62dc8f",
+  "external_ref": null,
+  "title": "The new-session dialog cannot set a workdir inside the selected project, so a session for a .worktrees task checkout needs the API",
+  "outcome": "A person creating a root session in the UI can choose a working directory inside the selected project (for example .worktrees\\<task>), so a second parallel task gets its own session in its own in-project checkout without a supervisor calling POST /api/sessions by hand.",
+  "acceptance": [
+    "The new-session dialog cannot set a workdir inside the selected project, so a session for a .worktrees task checkout needs the API is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "pilot",
+    "ui",
+    "worktrees"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

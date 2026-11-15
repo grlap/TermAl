@@ -1,0 +1,50 @@
+{
+  "id": "01a11bdb-7fc5-78e0-855c-974b05f17ec2",
+  "external_ref": null,
+  "title": "Declared route: support `!=` test filters (the shared placement check reads `!` as a cmd variable)",
+  "outcome": "A declared test command whose quoted filter uses `!=` (for example `dotnet test --filter 'TestCategory!=Slow' …`) reads, binds and is judged like any other declared command, while built-in placement keeps its behaviour byte for byte.",
+  "acceptance": [
+    "A declared command with a quoted `!=` filter binds to its entry and a passing TRX run records PASS end to end, with a control that fails before the change.",
+    "Built-in recognition and placement (engram_check_worktree_in's variable check for `$`, `%` and `!`) are unchanged for every non-declared command, shown by the existing tests passing unchanged.",
+    "docs/features/declared-test-commands.md no longer says `!=` filters are not declarable."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "declared-tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10cfc-06d2-7f81-82e0-8e72f7e16778"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

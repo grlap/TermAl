@@ -1,0 +1,30 @@
+{
+  "id": "01a14ad7-6318-73a2-ba1a-b217486da92c",
+  "external_ref": null,
+  "title": "Pin each exclusion of the mailbox-only bind-retry predicate",
+  "outcome": "Meaningful negative controls keep each mailbox-only admission-recovery exclusion fail-closed, including actual mailbox-source delegation work.",
+  "acceptance": [
+    "A table-driven fixture starts with an otherwise eligible Mailbox-source head and varies each independent exclusion (attachments or expanded text, delegation associations, recovered admission, grants/evaluate, source-observation, durability and cleanup holds), asserting no automatic bind retry and retained work.",
+    "Mailbox-source delegation followup is covered directly; User-source early rejection is not used as evidence for the delegation exclusions.",
+    "Credited focused tests pass and the independent review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

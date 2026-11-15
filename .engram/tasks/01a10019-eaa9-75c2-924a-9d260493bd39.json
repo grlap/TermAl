@@ -1,0 +1,29 @@
+{
+  "id": "01a10019-eaa9-75c2-924a-9d260493bd39",
+  "external_ref": null,
+  "title": "Doctor descendant-deadline tests assert the teardown mechanism but not the temp-root removal it protects",
+  "outcome": "check_doctor_descendant_deadline (src/tests/engram_host_adapter.rs) observes its TestTempRoot's removal and asserts it succeeded, using root.observe_cleanup() and an Ok receipt, as src/tests/test_temp_paths.rs already does. A regression of the teardown ordering then fails this test by name. Today it is caught only by scripts/test-temp-root.mjs's end-of-run residual check, which fails the whole green run without naming the race. The test asserts the mechanism (the launching process is in the awaited set) but not the outcome.",
+  "acceptance": [
+    "Both doctor descendant-deadline tests assert that their temp root was removed (an Ok cleanup receipt) after the fixture tree exited.",
+    "A deliberately unawaited fixture process makes the test itself fail, naming the root that could not be removed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "temp-root-leak",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

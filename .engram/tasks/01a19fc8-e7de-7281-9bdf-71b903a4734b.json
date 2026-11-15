@@ -1,0 +1,29 @@
+{
+  "id": "01a19fc8-e7de-7281-9bdf-71b903a4734b",
+  "external_ref": null,
+  "title": "A native error in the Windows capture-job observe_member permanently loses a witness and keeps the job and root forever",
+  "outcome": "When observe_member fails after a NEW_PROCESS message has been consumed, the lost witness is recorded explicitly, so the retained drainer can report it and stop waiting forever, while custody still fails safe.",
+  "acceptance": [
+    "a lost witness after a consumed NEW_PROCESS message is recorded and reported",
+    "a regression injecting an OpenProcess or IsProcessInJob failure shows the drainer does not wait forever on a witness that can never arrive, and never releases the root early"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capture-lifetime",
+    "review-low",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

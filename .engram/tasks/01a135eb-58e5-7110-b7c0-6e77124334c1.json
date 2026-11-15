@@ -1,0 +1,29 @@
+{
+  "id": "01a135eb-58e5-7110-b7c0-6e77124334c1",
+  "external_ref": null,
+  "title": "Wire a production producer of receipted prompts: the prompt-delivery receipt module is dormant outside tests",
+  "outcome": "Wire a production producer of receipted prompts: the prompt-delivery receipt module is dormant outside tests",
+  "acceptance": [
+    "At least one production path that dispatches host-originated prompts (for example orchestrator or mailbox wakes) enqueues them through queue_receipted_orchestrator_prompt_on_record, so prompt_deliveries is populated outside tests and the cfg_attr(not(test), allow(dead_code)) on the receipt impl can be removed.",
+    "Requeue of a rejected receipt (requeue_rejected_prompt_delivery) has a production caller or is explicitly documented as operator-only, and PROMPT_DELIVERY_WRITE_AHEAD_BUDGET is used outside tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "delivery",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

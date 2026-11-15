@@ -1,0 +1,28 @@
+{
+  "id": "01a1859b-7326-7153-874d-15e81a9c82fa",
+  "external_ref": null,
+  "title": "Apply the shared \"Commit messages\" section and test-ref message wording to TermAl's CLAUDE.md and AGENTS.md",
+  "outcome": "TermAl's instruction files carry the shared Engram/TermAl \"Commit messages\" section, and the remote-test-ref bullet says its message follows that section, so landings no longer put fingerprint-only messages on master.",
+  "acceptance": [
+    "Apply the shared \"Commit messages\" section and test-ref message wording to TermAl's CLAUDE.md and AGENTS.md is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "git",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

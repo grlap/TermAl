@@ -1,0 +1,29 @@
+{
+  "id": "01a1caa1-ab3f-73b3-acb8-184d1c27edea",
+  "external_ref": null,
+  "title": "A newer passed run with only unclassified stages (e.g. cargo fmt --check) refuses evaluation over an earlier eligible acknowledged test run on the same commit",
+  "outcome": "A newer passed run with only unclassified stages (e.g. cargo fmt --check) refuses evaluation over an earlier eligible acknowledged test run on the same commit",
+  "acceptance": [
+    "When the newest terminal committed-input run of a claim at the judged commit passed, but has only stages TermAl cannot record as test or build (so it can never produce a verification record), committed-input admission skips it. Admission is then decided by the next older applicable run at the same commit, exactly as if the skipped run did not exist. A behavioural test registers a passed, acknowledged cargo test run and then a passed fmt-only run on the same clean commit, and shows the evaluation is admitted on the test run.",
+    "A newer run that failed, or whose state is unknown, keeps today's refusal; a coherent unfinished newer run and a run on another commit keep today's handling (skipped, and never themselves able to admit). The newest-terminal-result rule settled in w-e66983e3d919 is otherwise unchanged. Behavioural tests show that a failed fmt-only run and an unknown-state fmt-only run both still refuse, and that an unfinished or other-commit run cannot by itself supply admission.",
+    "A run with only unclassified stages that is the only candidate still refuses with verification_record_unclassified_stages and its remedy text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

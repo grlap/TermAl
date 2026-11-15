@@ -1,0 +1,37 @@
+{
+  "id": "01a1db4d-fc5e-78d0-818b-05e69f0e0ff0",
+  "external_ref": null,
+  "title": "Keep pre-write remote verification read failures pending instead of final refusal",
+  "outcome": "Only a refusal from the remote_verification_record write itself can terminate an admission; work-session reads and capability/revalidation failures retain unsent pending recovery.",
+  "acceptance": [
+    "Behavioral evidence distinguishes an invalid_request from work_session_read (pending, no record write) from invalid_request or control_operation_idempotency_conflict returned by the actual record write (final refusal)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "remote-verification",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d3bf-d356-70b1-985a-c82b845900a5",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

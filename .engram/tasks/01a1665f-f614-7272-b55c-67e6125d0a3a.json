@@ -1,0 +1,32 @@
+{
+  "id": "01a1665f-f614-7272-b55c-67e6125d0a3a",
+  "external_ref": null,
+  "title": "Type automatic qualification refusal reasons and cover reverse classification exhaustively",
+  "outcome": "Material and availability classifications use a compiler-checked shared type rather than reason-string agreement across verification and requalification modules.",
+  "acceptance": [
+    "Material identity/protocol/schema/platform and authenticated authority refusals remain fatal; availability/settling failures remain retryable through typed classification.",
+    "Tests cover successful reverse payload mismatches, authenticated reverse refusals and availability responses, and report serialization retains explicit readable reasons."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

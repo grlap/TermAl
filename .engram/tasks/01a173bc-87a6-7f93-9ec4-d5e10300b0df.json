@@ -1,0 +1,39 @@
+{
+  "id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "external_ref": null,
+  "title": "Remote sessions require a per-session explicit domain join (fresh session, manual binding) after a host is added; mailbox participation must be automatic for qualified peers",
+  "outcome": "Remote sessions require a per-session explicit domain join (fresh session, manual binding) after a host is added; mailbox participation must be automatic for qualified peers",
+  "acceptance": [
+    "After a host is added and qualified (enrolled and verified on the current link), its native sessions and the central host's native sessions can use the central mailbox domain (directory, send, read, ACK) without any additional per-session authorization, explicit join call or fresh-session requirement",
+    "Unqualified, unverified, revoked or stale-link peers stay refused, with an explicit error; host qualification checks, creation-identity, placement-generation and authority-epoch fences, and receipt semantics are preserved",
+    "Existing sessions that already have standalone mailbox history become usable without losing or moving their local mail; the docs (central-control-plane.md, participation section) state the new rule",
+    "Focused tests cover automatic participation for a qualified peer, refusal for an unqualified or stale peer, and a pre-existing session with local mail history; a review pair has no outstanding Medium or higher; one complete READY goes to Merger2"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 6365481c; R9 automatic participation, focused/pairs/FULL9239386b, push/install7efbefe2; acceptance accounting only. Do not add manual joins or restaff old implementation.",
+    "completed_at": "2026-11-08T19:21:42.576818500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

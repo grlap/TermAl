@@ -1,0 +1,33 @@
+{
+  "id": "01a19f3d-371b-7c42-9f9f-920c5fe3b0d3",
+  "external_ref": null,
+  "title": "Remove obsolete test-only verification-bind workflow helpers and tests",
+  "outcome": "Only the obsolete cfg(test) verification-bind workflow implementation and matching tests are removed; live launch history, retained shapes and historical acceptance evidence remain intact.",
+  "acceptance": [
+    "Remove obsolete cfg(test)-only bind decision, idempotency-key, request, outcome/classifier and notice helpers and only their matching retired-workflow tests from src/engram_verification_bind.rs and src/tests/engram_verification_bind.rs; retain live engram_bind_targets_at_launch behavior/tests and retained data/request/receipt shapes, historical readers and acceptance/evaluation paths.",
+    "Full source/caller and test-oracle audit proves each removal belongs solely to the retired workflow and no preserved production/history/acceptance path is altered. On the exact clean candidate run the authorized compile-only, focused relevant Engram/acceptance checks and native WSL Linux checks under a coordinated slot, then obtain the independent Codex/Claude read-only pair with no outstanding Medium or higher findings.",
+    "Hand exact base/commit/tree, preserved original failures if any, check and review evidence to integration for the coordinated green-FULL queue; no landing is asserted without that gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "greg-directed",
+    "legacy-cleanup",
+    "legacy-scan",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a19ef2-54b4-7661-a602-1fd8f197b596",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d257-7cf4-7240-a545-693034085dc9",
+  "disposal_reason": "CoordinatorFable3102/message81712139-b521-4510-89ad-2cde4a43d9d1 concurs this duplicate'swhole removal scope alreadylanded8e4fd2f90f18647b1b00c900640696d1407a9e2c via6930/combo85. Fullauditab059fcbf84b4e8b89520c0b7e717e9d: bothtargetfilesbyteidenticalcurrentmastercca3; requestedtestonlysymbols/testsabsent andlivehelper/4shapes/fulltestpreserved. R2pairCodex594155ca/Claude94fed8c5 nofindings, exactTREE8711161b FULL09ac3e93 all6PASS; evidence6930note439b06f2 andintegrationda5notes01556021/6e15044d/ae2f83b9. No newcriteriawaiver,source/check/evaluationcredit, or claim6930rolloutdone. Inheritedroot2651/private471edb1c belongs8e1f/session13106 and stays untouched foritsowner cleanup.",
+  "completion": null
+}

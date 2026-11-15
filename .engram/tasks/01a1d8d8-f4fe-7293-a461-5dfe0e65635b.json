@@ -1,0 +1,41 @@
+{
+  "id": "01a1d8d8-f4fe-7293-a461-5dfe0e65635b",
+  "external_ref": null,
+  "title": "EO closure: update README.md to the Execution Observability actually delivered (per-harness status and limits)",
+  "outcome": "README.md describes Work Tracking & Execution Observability exactly as the final EO build delivers it, including per-harness status and known limits, and announces nothing that was not delivered.",
+  "acceptance": [
+    "README.md describes the delivered Work Tracking & Execution Observability: project-level ON/OFF, non-blocking host observation of turns, source changes and test runs, named source roots, registered verification and test credit, and independent acceptance evaluation, using the terminology of docs/features/engram-host-adapter.md.",
+    "README.md states per-harness support (Codex, Claude, Cursor, Gemini via Antigravity agy, OpenCode, Kimi) exactly as the C6 per-harness evidence on w-3fe8f4472e5d shows it, and states the known limits that evidence and the open items record; a harness or capability without evidence is not described as supported.",
+    "Every capability claim added or kept in README.md is checked against the landed code or a cited evidence note, and that check is listed on this item; no undelivered feature is announced.",
+    "Links from README.md to the feature docs it summarises resolve, and the docs it newly references link back where docs/ conventions require."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "docs",
+    "engram-host-adapter",
+    "eo-closure",
+    "gating-removal-audited",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "README.md now describes the delivered Work Tracking & Execution Observability:\n- project ON/OFF, non-blocking host observation, named source roots, registered verification as the only test credit, and independent acceptance evaluation;\n- per-harness status (Codex, Claude, Cursor, Gemini via Antigravity agy, OpenCode, Kimi) as the C6 evidence shows it, with the known limits.\nEvery claim was checked against code or cited evidence. Links resolve: check-doc-links reports 99 files, 561 links, 0 unresolved, at the landing.\nLanded in combo103 as master 847e6c597056bd43167c996c752b87a93f78451e. The post-landing independent evaluation, delegation-ec8446e4 (session-18039), passed all 4 criteria. The unfixed review Low is filed as w-0717f76b2c16.",
+    "completed_at": "2026-11-14T10:52:43.196635700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

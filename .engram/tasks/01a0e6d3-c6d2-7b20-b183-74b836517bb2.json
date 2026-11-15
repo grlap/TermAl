@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6d2-7b20-b183-74b836517bb2",
+  "external_ref": "tm-sf8e",
+  "title": "termal_spawn_session response echoes the composed child prompt four times",
+  "outcome": "Reported by Engram::Opus (mailbox-78a30e41 seq 32, 2026-09-24 05:42 UTC) and seen on Termal::Opus's own reviewer spawns the same day. A termal_spawn_session call returns childSession.liveActivity.prompt, childSession.messages[0].text, childSession.promptHistory[0] and delegation.prompt (the task part), so the full composed child prompt, including TermAl's injected reviewer protocol, reaches the calling coordinator's context four times. With a ~4.5 KB brief that is ~20 KB per spawn and ~40 KB per /review-changes round, which the coordinator never needs: it keeps only the delegation id and the child session id for the fan-in wait. Callers cannot opt out. Fix direction: return ids, status, agent, model, write policy and a short preview by default, with the full session projection only on request (or behind a detail flag), keeping the durable prompt in the session record where termal_get_session_status / the child transcript already expose it. Coordinate with tm-p619, which currently has uncommitted edits in src/delegation_mcp.rs.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a re-check, spot-checked by Termal::Fable2): CLOSE-DONE. 499c5af (ancestor of master f7db2c58) adds src/delegation_mcp_projection.rs plus tests compacting the spawn response.",
+  "completion": null
+}

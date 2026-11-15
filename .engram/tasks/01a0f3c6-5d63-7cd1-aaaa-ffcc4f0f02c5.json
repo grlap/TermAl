@@ -1,0 +1,35 @@
+{
+  "id": "01a0f3c6-5d63-7cd1-aaaa-ffcc4f0f02c5",
+  "external_ref": null,
+  "title": "The read-only command list omits `cut`, so a progress read such as `tail FILE | cut -c1-150` refuses a carried gate's credit",
+  "outcome": "A line built only from pure readers, `cut` among them, is judged read-only by the Claude Bash read-only policy, so it neither refuses a carried gate's credit nor is denied to a read-only reviewer.",
+  "acceptance": [
+    "The full gate passed on the exact landed input.",
+    "`cut` with its reading flags (`-c`, `-f`, `-d`, `-b`, `-s`, `--complement`) is accepted by claude_bash_tokens_are_read_only; a test covers `tail -2 FILE | cut -c1-150` as read-only and `cut` with an output redirection as not."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "check-credit",
+    "read-only-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

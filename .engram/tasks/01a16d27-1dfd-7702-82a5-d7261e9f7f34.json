@@ -1,0 +1,29 @@
+{
+  "id": "01a16d27-1dfd-7702-82a5-d7261e9f7f34",
+  "external_ref": null,
+  "title": "Exclude ambiguous or conflicted carried runs from compaction restart-credit hazard",
+  "outcome": "Exclude ambiguous or conflicted carried runs from compaction restart-credit hazard",
+  "acceptance": [
+    "Both restart-evidence summary paths exclude ambiguous and terminal-conflicted carried matches from the exact pending-credit claim while retaining other independently justified restart hazards.",
+    "Regression coverage checks the compaction summary path for eligible, ambiguous and conflicted matched carries and passes with required source review."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

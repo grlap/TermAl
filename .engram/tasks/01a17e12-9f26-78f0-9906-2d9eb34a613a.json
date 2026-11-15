@@ -1,0 +1,31 @@
+{
+  "id": "01a17e12-9f26-78f0-9906-2d9eb34a613a",
+  "external_ref": null,
+  "title": "macOS watcher display-path aliases can hide a change inside a canonical named source root",
+  "outcome": "A watcher event inside a named source root remains attributed to that root when macOS presents /var and /private/var spellings, including another session's scope and a missing closing basis.",
+  "acceptance": [
+    "Before source execution, record Greg's authorization lifting the applicable 2026-10-24 product STOP for this change.",
+    "Preserve the existing cross-session named-root watcher regression, with canonical named-root identity and realistic watcher scopes/events, and prove alias-equivalent events count exactly once while outside-root events do not count; do not skip or weaken the regression.",
+    "Use consistent path representations at the existing watcher attribution and closing-observation boundaries without adding filesystem I/O under StateInner, changing identity authority or broadly relaxing path fences; obtain the standard review and exact-input checks before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-stop",
+    "macos",
+    "path-alias",
+    "source-attribution"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c540-7002-a829-4a07c2595d4a",
+  "external_ref": "tm-jxcu",
+  "title": "sharedWorktree delegation write policy is not implemented (501), although the spawn tool schema advertises it",
+  "outcome": "Reported by Engram::Opus (mailbox #237, 2026-09-25): spawning Kimi as explorer with writePolicy { kind: sharedWorktree, ownedPaths: [target/kimi-review-scratch] } returned 501 'sharedWorktree delegation write policy is not implemented yet'. The termal_spawn_session schema lists sharedWorktree as a writePolicy option, so callers discover the gap only at spawn time. For agents that cannot run readOnly (tm-fy7m) a shared worktree with owned scratch paths would let them read the frozen input in place. Wanted: implement sharedWorktree with ownedPaths enforcement, or remove it from the advertised schema until it exists and say so in the tool description.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

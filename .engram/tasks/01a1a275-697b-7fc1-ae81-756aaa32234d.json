@@ -1,0 +1,30 @@
+{
+  "id": "01a1a275-697b-7fc1-ae81-756aaa32234d",
+  "external_ref": null,
+  "title": "Guard the captured TRX manifest against fixture and verdict drift",
+  "outcome": "The committed capture manifest remains consistent with its fixtures, and original-report hash retention is described accurately.",
+  "acceptance": [
+    "A focused guard cross-checks all nine manifest entries against committed fixture outcomes, all counters, expected verdicts and canonical sanitized hashes; raw original hashes are explicitly described as provenance whose reports follow project evidence-retention policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "dotnet",
+    "greg-directed",
+    "review-low",
+    "team-pilot",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a111ee-c262-71e1-a59e-59d270b393d3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

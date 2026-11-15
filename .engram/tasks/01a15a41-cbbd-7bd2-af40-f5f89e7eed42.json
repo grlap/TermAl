@@ -1,0 +1,50 @@
+{
+  "id": "01a15a41-cbbd-7bd2-af40-f5f89e7eed42",
+  "external_ref": null,
+  "title": "A remote proxy session's turn (unresolved remote workdir) withholds test credit in every central worktree",
+  "outcome": "While a federated remote session is in a turn, the central host's credit decision for checks in central worktrees does not treat that session's proxy as a possible writer of every central worktree. Its turn executes on the other host, and its workdir is the other host's path. Credit for an unrelated central check is withheld only by sessions that can actually write that worktree, and the overlap line says why.",
+  "acceptance": [
+    "The holder's note names the code path (engram_turn_checks.rs engram_writer_match, :1328-1337, and engram_unresolved_writers) by which a remote proxy session in a turn (record.remote_id set, workdir on the other host) counts as a writer in every central worktree. It correlates the 2026-10-20 occurrence: Sol-8e1f's focused run test-877f0c17 (16:54:14-16:56:44Z) was refused credit because session-13931 'Termal::O1-Mac remote proxy of macbookpro has UNRESOLVED workdir'. It also states, from the source, whether any path lets a remote proxy's turn write a central worktree.",
+    "A fail-first test: a central check in a central worktree, overlapping a turn of a remote proxy whose workdir is a remote path, is refused credit today.",
+    "With the fix, that check is credited when no LOCAL writer overlaps, while a local session in a turn with an unresolved LOCAL worktree still withholds credit. A remote proxy keeps counting where it can write central worktrees: in the worktree its workdir resolves to on this host, and, when its workdir resolves to none, in every worktree unless its live SSH connection is proven, from the connection's actual established endpoint, to be a single direct connection to a non-local address. Tests cover each case. Unsupported configurations: a different host writing central worktrees through a network share mounted under another path, an SSH remote whose non-local destination is routed (NAT, port forward or hairpin) back to this machine's own sshd, and a WSL2, virtual machine or container guest of this machine reached at its own address.",
+    "The full five-stage gate passes on the exact final input that lands (tree 763d899a368f71c6ff91219ce81317113143fa26 on parent 972bc08c, or its byte-exact carry onto the integration base), and an independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "credit",
+    "federation",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

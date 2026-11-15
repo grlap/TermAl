@@ -1,0 +1,28 @@
+{
+  "id": "01a10a31-ca06-73b2-b03b-784917e64a74",
+  "external_ref": null,
+  "title": "Pin the real `show --note … --after` continuation receipt envelope (top-level work_ref, locator, assessment) in the obligation-assessment fixture or the live suite",
+  "outcome": "Pin the real `show --note … --after` continuation receipt envelope (top-level work_ref, locator, assessment) in the obligation-assessment fixture or the live suite",
+  "acceptance": [
+    "Pin the real `show --note … --after` continuation receipt envelope (top-level work_ref, locator, assessment) in the obligation-assessment fixture or the live suite is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

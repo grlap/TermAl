@@ -1,0 +1,39 @@
+{
+  "id": "01a191da-b3a3-7a23-936b-212221c53e2c",
+  "external_ref": null,
+  "title": "Deferred design: sender-owned advisory binding for control-OFF verification delivery, with a store-identity witness (needs Engram w-952b4211be2d)",
+  "outcome": "A DEFERRED design and producer dependency, not a shipped defect. w-decd61d62831 removed its never-landed advisory-bind subsystem (T2 fix, option (i): Fable2 df007e37 #1439; Architect2 notes 6accfe7d and 836101aa), so no shipped code creates advisory intents and no naming wedge exists in any deployed build.\n\nIf control-OFF verification delivery ever needs a sender-owned Base binding, which would fully lift the reload limit tracked in w-ee4f85deaf54, the binding must follow the recorded rulings: 9a3b5fa0, b2e55014, 66205b0a, 2f19c4c8, 3684ad1a, 7b412544, 19c6197b, fbfd55f7, 937271c4 and 2fdd6f6b. It must retain a same-child store-identity origin witness before the first dispatch, match it against the successor, and retire only as SUPERSEDED / OUTCOME UNKNOWN after the connection fence. It must never replay onto a successor or fall back to config, launch arguments or readiness, and it must keep naming live.\n\nThe required producer witness is Engram w-952b4211be2d, which is awaiting Greg's narrow unsafe-exception decision. The removed implementation is preserved at .evidence\\w-212221c53e2c-advisory-bind-design\\ (see this item's notes). Acceptance W1 to W5 apply to a future reintroduction. History is retained in the notes.",
+  "acceptance": [
+    "W1. Witness. TermAl accepts store identity only from a supported witness, produced by the same serving control child under a producer contract the Engram coordinator has shipped. The witness yields that child's actual opened canonical store and its project and native session. Configuration, launch arguments, readiness probes, a separate process, a successor-only answer, equal strings alone, and an answer of control_connection_identity_unavailable or control_connection_superseded never count.",
+    "W2. Origin and successor. Before an advisory intent's first dispatch, the Base owner retains the witnessed store, project and native session of the original serving child, bound to that intent's custody, connection and incarnation. A successor's witness must match that retained origin. The existing readiness canonical formatter is used only to represent the witnessed paths; the identities themselves come from the witnesses. Project and session must be exactly equal. An intent stored without an origin witness stays an explicit gap, and nothing upgrades it after the fact.",
+    "W3. Retirement. When a matched replacement incarnation has completed its connection resume, and every old future, retry dispatch and adoption for the intent has been fenced, the owner durably retires the intent as SUPERSEDED / OUTCOME UNKNOWN. This removes only that intent's exclusion. The retirement survives reload, and the old bind is never replayed or migrated onto the successor. Before any new bind or naming, the actual session and grant state is reconciled through normal Base recovery. Ordinary naming eligibility, begun-grant checkpoints and other retained obligations still apply.",
+    "W4. Liveness. For a residual true-Unknown intent, a session whose only exclusion was that intent can name a root again after W3. A mismatch, an unavailable or malformed answer, or a stale or raced completion leaves an explicit gap for that session alone and blocks no other session. The separate case of a sole correlated authoritative no-write refusal keeps its existing retirement as refused.",
+    "W5. Evidence. Focused tests run against the real producer wire, not only self-consistent mocks. They cover: a matched successor that retires, reconciles and then names; a mismatched store, project or session that stays a gap; identity-unavailable and superseded answers that stay a gap; a legacy intent with no origin witness that stays a gap; an old bind committed before the fence and read back, and a delayed old bind refused after the fence; a stale or raced completion that is discarded; no replay onto the successor; reload that keeps the retirement; a begun grant that is preserved. The full gate passes on the landing input, and the review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a191e0-4c9f-7881-9309-b2c23d857e38",
+      "kind": "manual",
+      "detail": "Blocked on the existing Engram P0 w-952b4211be2d, \"Prove which store file SQLite actually holds, so a recovered Engram control child can be matched to TermAl's pinned store\", coordinated by Engram::Fable. That item is itself blocked on Greg's narrow unsafe-exception decision (Advisor #2452). It is the supported witness W1 refers to. Until it ships, this residual stays a required, inactive gap. Sources: Architect2 note 45fc5fe8 and Fable2 df007e37 #1422.",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-31T12:12:38.416899900Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

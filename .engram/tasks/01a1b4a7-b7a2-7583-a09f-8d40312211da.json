@@ -1,0 +1,28 @@
+{
+  "id": "01a1b4a7-b7a2-7583-a09f-8d40312211da",
+  "external_ref": null,
+  "title": "DL560 native relay boot boundary defers queued deliveries with 409 'requires an enrolled authenticated peer with relay support' after a host restart",
+  "outcome": "After a TermAl host restart on DL560, deliveries that were pending at the native relay boot boundary and deferred with 409 'native mailbox relay requires an enrolled authenticated peer with relay support' are either delivered automatically once the peer authenticates, or the gap is fixed. The recovery path is recorded, with evidence from the host log.",
+  "acceptance": [
+    "DL560 native relay boot boundary defers queued deliveries with 409 'requires an enrolled authenticated peer with relay support' after a host restart is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

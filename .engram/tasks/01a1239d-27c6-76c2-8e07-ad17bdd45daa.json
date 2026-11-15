@@ -1,0 +1,50 @@
+{
+  "id": "01a1239d-27c6-76c2-8e07-ad17bdd45daa",
+  "external_ref": null,
+  "title": "Admission guard before Begin reserves Begin's share of the shared budget (F3)",
+  "outcome": "A slow named-root authority fence before Begin can no longer leave Begin with no time: the guard's deadline keeps Begin's share of the shared admission budget, and a guard that still runs out yields a definite NotStarted hold naming the guard. Lands after 1b, because it touches src/engram_host_adapter.rs.",
+  "acceptance": [
+    "The named-root guard before Begin (src/engram_host_adapter.rs, guard_engram_root_read_until before TurnBegin) uses a deadline that reserves Begin's share of the shared admission budget, so a slow authority fence cannot leave Begin with no time. A fail-first test with a gated persist writer and a scripted clock (no load) shows the guard exhausting the budget on unchanged code; after the fix, Begin is still transmitted, or a definite NotStarted hold names the guard.",
+    "The full gate passes on the exact committed tree.",
+    "The full gate's cargo-check stage on the exact committed tree prints no warnings; in particular, cargo check on the bin target reports no 'never used' warning for persist_delta_via_cache or persist_delta_with_fences."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "host-persistence",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "F3: the named-root guard right before TurnBegin now uses begin_guard_deadline = the admission deadline minus Begin's share, which is min(ENGRAM_BEGIN_MIN_CALL_TIMEOUT_MS, budget/2) per coordinator ruling #218. A stalled authority fence fails the guard (Begin unsent, the \"named-root guard before Begin\" hold) while Begin's share is left, instead of spending the whole budget. The folded Low (superseded w-b8d28ccb6195): the untimed persist wrappers are cfg(test), so cargo check is warning-free.\nEvidence:\n- Fail-first: RED test-a229f6de (0 s left of 60 s / 15 s), then GREEN test-b99e5ae3 (exactly 10 s / 7.5 s left).\n- Review pair round 1 clean (Codex 32e5943b, Claude b541ac25).\n- Full gate test-8c08ade5 (record 274d052e) passed on exactly the committed tree, with no cargo-check warnings.\n- Evaluation d2f0b245, 3/3.\nOpus2 landed it as a fast-forward d28f28ba -> c6d6b04e on origin/master, confirmed in mailbox a2b548b7 #6 and by my ls-remote. The install is pending Fable2's restart call.\nFollow-ups: w-d699624ac61a, w-c4d93c109c9c, w-54f5abc386d6.",
+    "completed_at": "2026-10-10T03:17:26.905844400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

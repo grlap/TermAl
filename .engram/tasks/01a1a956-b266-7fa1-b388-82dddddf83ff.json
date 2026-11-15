@@ -1,0 +1,32 @@
+{
+  "id": "01a1a956-b266-7fa1-b388-82dddddf83ff",
+  "external_ref": null,
+  "title": "Investigate a rescan republishing a compacted test run and losing its retained registration",
+  "outcome": "Determine with a deterministic interleaving whether a rescan started before compaction installation can republish the run or overwrite retained registration metadata, and preserve installed evidence across any confirmed race using existing owners.",
+  "acceptance": [
+    "A deterministic rescan/compaction interleaving proves or refutes the reported stale-index publication and registration-loss trace, distinguishing source hypothesis from reproduced behavior.",
+    "If confirmed, retained original registration remains discoverable after compaction/rescan and a newer failed run cannot disappear from early selection; otherwise record the exact guard that rules out the trace. Any repair has focused regression and required review/gate evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "compaction",
+    "execution-observability",
+    "greg-directed",
+    "review-note",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

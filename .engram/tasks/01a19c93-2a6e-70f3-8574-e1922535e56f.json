@@ -1,0 +1,30 @@
+{
+  "id": "01a19c93-2a6e-70f3-8574-e1922535e56f",
+  "external_ref": null,
+  "title": "Persist self-exec test child sweeps the shared user-temp product root instead of a repository-local test root",
+  "outcome": "The persist test's self-executed child process uses the same repository-local temporary test root as its parent, so its startup sweep never touches the shared user-temp product root and cannot fail on entries other processes hold.",
+  "acceptance": [
+    "The persist self-exec child (CASE_ENV branch) establishes the repository-local test temp scope before TestTempRoot::create, so its startup sweep runs only inside that scope.",
+    "All existing persist cases and assertions stay unchanged.",
+    "The root cause is recorded: the parent's thread-local temp scope does not cross the self-exec boundary, so the child defaulted to the user-temp product root."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "nondeterminism",
+    "pre-existing",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

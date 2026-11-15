@@ -1,0 +1,35 @@
+{
+  "id": "01a1be7f-e822-7df3-8636-e23b6817b4e1",
+  "external_ref": null,
+  "title": "Remove the Session filter from the Test Runs view",
+  "outcome": "The Test Runs view no longer has the Session / All sessions control; other filters, sessions and test results are unchanged.",
+  "acceptance": [
+    "The Session control is gone from the Test Runs view, along with any code that only served it; the View, Project and State filters still work, and no session or test result data is removed. A behaviour test covers this.",
+    "Review pair with no Medium or higher, and the normal UI checks and gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed removal of Test Runs Session picker/options; retained View/Project/State and data; session-linked scope is named with Show all runs, docs and scoped legacy/overview/pane tests.",
+    "completed_at": "2026-11-09T07:43:42.903207900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

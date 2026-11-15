@@ -1,0 +1,66 @@
+{
+  "id": "01a10a37-db9f-7093-9bad-96649f729cfc",
+  "external_ref": "engram:w-d7959a4e8a42",
+  "title": "Read Engram's v2 summary assessment view in the evaluator brief (tolerate both shapes); reader-first for Engram w-d7959a4e8a42",
+  "outcome": "Engram w-d7959a4e8a42 changes the default `show REF --note RECORD` assessment to a summary view: {view:\"summary\", record_position, cut_position, check_kind, total, counts[{status, reason, count}], must_show_total/earlier/remaining, must_show[ROW], continuation?, history}. The summary has no rows, shown, earlier or omitted. The full listing moves to a 'history' view behind v2 cursors ({view:\"history\"} plus the old shape), and v1 cursors are refused.\nTermAl's w-6616fbef4689 reader (not yet landed) reads the OLD shape strictly, so it would report every summary as malformed_page: fail-closed, but degraded.\nThis item makes the reader accept BOTH shapes. Old shape: as w-6616 lands it. Summary shape: render from counts and must_show directly (must_show = every row not left out as already_closed), follow 'continuation' for further must_show pages, and keep 'history' as the full-history command. The no-hide, no-displacement and incomplete rules of w-6616 apply unchanged.\nEngram does not land w-d7959 until this item is landed and LIVE on the host. Tests use a real captured summary page and a history page.",
+  "acceptance": [
+    "1 (unbound, fail-first). On a base that is master with w-6616fbef4689 landed, a test feeds TermAl's assessment reader real pages captured from Engram's frozen w-d7959a4e8a42 build: a summary page, a further must_show page if the capture has one, and a history page, with their sha256s cited. It expects one summary rendered from `counts` and the `must_show` rows in full. It fails on the base because the reader reports the summary page as malformed_page. A holder note cites the host-recorded failing run, its log path and sha256.",
+    "2 (test). For a summary-view assessment (`view: \"summary\"`), TermAl renders the same compact summary as w-6616:\n- total, record_position and cut_position;\n- a count per (status, reason) from `counts`;\n- every `must_show` row in full, with the same fields as w-6616 criterion 2.\nIt reads further must_show pages through `continuation` (`show --note … --after`) until the rows read equal must_show_total.\nThe summary path is defined by membership: a row is listed in full exactly when Engram puts it in must_show; any other row appears only in its count. Engram's rule for must_show, as Engram::Opus stated it in TermAl mailbox 587a65fb #153: \"a row is in must_show exactly when its assessment is matches or mismatch, or its obligation's recorded end is open. That is 'every row a reader must act on'. Every other left_out row, whatever its reason, appears only in counts.\"\nThis differs from w-6616's old-shape rule (criterion 2, revision 4: every row is listed except a row recorded as satisfied_by_another_record that is not a mismatch) in two ways:\n- A matches row recorded as satisfied_by_another_record is listed here, and only counted on the old-shape path.\n- A left_out row whose recorded end is neither open nor satisfied_by_another_record (for example waived or displaced) is only counted here, and listed on the old-shape path.\nJustification: on the summary path every row whose recorded end is open, and every matches or mismatch row, is listed, so no open or mismatch row is hidden on either path. The feature doc states the rule and the difference.",
+    "3 (test). Both shapes are read:\n- The old shape is read exactly as w-6616 lands it; w-6616's fixtures and tests pass unchanged.\n- A page with `view: \"history\"` is read as the old shape.\n- One record's read never mixes shapes.\n- The read stops as malformed_page, an incomplete read under w-6616's rules, on any of: a change of shape mid-read; an unknown `view`; a missing or ill-typed summary field (total, record_position, cut_position and must_show_total/earlier/remaining must be non-negative integers; counts and must_show must be arrays; each count entry needs a status and a non-negative count, and a reason that is a plain string when present); counts that do not sum to total; more must_show rows than must_show_total.",
+    "4 (test). w-6616's no-hide, no-displacement and incomplete rules apply unchanged to the summary path:\n- No listed row is ever cut.\n- An incomplete read states the must_show rows read out of must_show_total, plus the total, the reason, and the resume point at the same cut.\n- The summary names Engram's `history` command as the full history at the cut, in place of the old shape's first-page continuation.\n- Summaries never displace protected content, with the same notice-only exception.",
+    "5 (test). The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note.",
+    "6 (judged). Scope:\n- TermAl only: the assessment reader and renderer, their tests, and the \"Obligation assessments in the brief\" section of docs/features/engram-host-adapter.md, which describes both shapes and the rule difference.\n- No w-6616 test expectation changes, except those listed in a provenance note with their old and new lines.\n- No Engram change.",
+    "7 (judged). Independent verification: the read-only Codex and Claude review pair has no outstanding in-scope Medium or higher, and the acceptance evaluation is made by an evaluator that never held the item."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "reader-first"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The evaluator brief's obligation-assessment reader reads both Engram's v2 Summary view and the Rows shape. Landed as train 47: master = origin/master = f476060e90b608bef82c7b28110c6afea6f496ee, a merge of f7db2c58 and 72f2e607, tree bfffabb5. The train gate test-74ddabeb passed on exactly that tree, and the integration pair was clean (Codex delegation-8edd3f67, Claude delegation-181f7ce2). Installed target/release/termal.exe sha256 e151c0f95749b0c39434fb107eb00726eb1caf379dfbc3650357b5eab5a948dc, built from f476060e; the backup is termal.exe.7ab0724e.bak (Opus2, mailbox f852105e #125). Running sessions need the new build for Engram's w-d7959; the restart is at the coordinators' moment. Verified: ls-remote origin master = f476060e, with parents f7db2c58 and 72f2e607 and tree bfffabb5.",
+    "completed_at": "2026-10-05T22:01:03.608699800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

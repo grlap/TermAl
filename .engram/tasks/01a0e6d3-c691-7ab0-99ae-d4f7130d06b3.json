@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c691-7ab0-99ae-d4f7130d06b3",
+  "external_ref": "tm-p8t9",
+  "title": "Investigate intermittent backend hang and Vite 502 on /api/state after recent changes",
+  "outcome": "User reports TermAl process hung and browser :4173/api/state returned 502 after recent changes. At 2026-09-07 01:57Z the same local Vite endpoint returned 200 in 24.6 ms (1.97 MB summary); at 01:58Z direct :8787/api/health returned 200 in 0.8 ms, direct state 200 in 11.4 ms, proxy state 200 in 8.7 ms. termal.exe PID 52824 started 2026-09-06 16:44:01 PDT under cargo run --release PID 51224; serverInstanceId 4aaa3d53-9c66-455a-aa5b-6f49d8521654. No restart or database access performed. Need establish exact incident time, action preceding hang, and whether user restarted or it recovered; capture backend/proxy errors and lock-holder diagnostics during recurrence before assigning a root cause. Current HEAD 5eec13e, dirty shared worktree contains unrelated test and scroll changes.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DUP. The hang investigation became the shared-SSE fix tracked as w-a88874257e88, which landed in 511cd20 and is closed.",
+  "completion": null
+}

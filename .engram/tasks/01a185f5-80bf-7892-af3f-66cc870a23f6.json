@@ -1,0 +1,27 @@
+{
+  "id": "01a185f5-80bf-7892-af3f-66cc870a23f6",
+  "external_ref": null,
+  "title": "Extract Cargo output selection policy from the shared test launcher",
+  "outcome": "Keep the launcher orchestration readable by moving the coherent Cargo output selection/argument/path policy into a small module when coordinated scope permits, preserving the current root-local/warm-cache policy and all existing launcher contracts. This follow-up grants no new registry, namespace, cleanup or provenance authority.",
+  "acceptance": [
+    "The coherent Cargo output policy has a documented module boundary and the launcher retains only orchestration, without changing behavior or dependency ownership.",
+    "Relevant launcher tests and required independent review pass on the extracted input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3c0-7561-acd6-8376b03f2259",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a18617-8de1-79e3-b1cb-c205c0fecb44",
+  "external_ref": null,
+  "title": "Audit host-dispatched Engram writes for lost-reply handling: keep original identity, tell unsent from dispatched-without-reply, disclose and read back before any retry",
+  "outcome": "Audit host-dispatched Engram writes for lost-reply handling: keep original identity, tell unsent from dispatched-without-reply, disclose and read back before any retry",
+  "acceptance": [
+    "An inventory lists every TermAl host path that dispatches an Engram write (control operations over the adapter, and any host-issued CLI or MCP write), with file and function, and for each states how a lost or invalid reply is handled today.",
+    "For every write path in the inventory, the original dispatch identity and arguments (session, idempotency key, intent) are retained before send, and a lost reply is classified as either proven-unsent or dispatched-without-valid-reply; timeout or cancel alone is never treated as rollback.",
+    "A dispatched-without-valid-reply outcome is disclosed explicitly as unresolved to the caller or user. No mutation is retried automatically except as an identical replay through a path the code supports, with the exact retained originating session, idempotency key and intent, never with a newly built identity or time; an append-style operation is never repeated merely because its reply was lost. Any other retry of a mutation is preceded by a readback through Engram's supported contract, and a restored completed gate is read back with `show REF --notes --gates` before any repeat.",
+    "Each path changed by this work has a test that loses the reply after dispatch and shows the classification, the disclosure and the readback-before-retry, or identical replay, behaviour; paths already conforming are named with the existing test that shows it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

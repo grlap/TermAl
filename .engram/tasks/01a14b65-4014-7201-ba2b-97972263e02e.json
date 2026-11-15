@@ -1,0 +1,30 @@
+{
+  "id": "01a14b65-4014-7201-ba2b-97972263e02e",
+  "external_ref": null,
+  "title": "Require the later check's own refusal cause in the compound-terminal regression",
+  "outcome": "The compound terminal regression asserts SECOND's own was-still-running cause rather than a generic overlap phrase from either command.",
+  "acceptance": [
+    "The assertion ties SECOND's fingerprint to its own was-still-running refusal explanation, retaining the existing no-SECOND-evidence assertion.",
+    "The regression still fails if the simple-command early-terminal guard is removed.",
+    "The exact changed input has required green checks and independent review."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a18555-051d-7f11-bdf5-5bae470f59f0",
+  "external_ref": null,
+  "title": "Read-only sed checker: pin label termination at '#' with allowed and refused test cases",
+  "outcome": "src/tests/read_only_sed.rs pins how a label is ended, both when another command follows and when a '#' comment follows: `b x#…`, `:x#…`, `t x#…`, with both allowed and refused cases. The comments name the sed behaviour the checker relies on: GNU ends a label at '#', and BSD folds the rest of the line into the label.",
+  "acceptance": [
+    "Read-only sed checker: pin label termination at '#' with allowed and refused test cases is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "read-only-checker",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

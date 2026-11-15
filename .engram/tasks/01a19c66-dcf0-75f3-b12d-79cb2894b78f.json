@@ -1,0 +1,40 @@
+{
+  "id": "01a19c66-dcf0-75f3-b12d-79cb2894b78f",
+  "external_ref": null,
+  "title": "EO ordinary turn observations: reconcile the C1 failure classification",
+  "outcome": "Every one of the 45 turn_observations failures in C1 test-684d7866 is clustered by first panic and classified against source and master, with no source edits or execution.",
+  "acceptance": [
+    "All 45 assigned failures are accounted for by first panic/assertion clusters with exact existing evidence file and line references.",
+    "Each cluster is classified K against a specific already-fixed C2 regression, T against a master-to-C1 test-port discriminator, or P with both source sides and an immediate STOP report.",
+    "A compact cluster/count/class/evidence table is returned to Fable2 within the source-only scope; no source edits, Cargo, tests or commands in peer roots."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "diagnosis",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-directed",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "All 45 C1 turn_observations failures (test-684d7866) are clustered by first panic and classified read-only against C1 (0c00cea3) and master. Totals: 5 K (3 outcome via #755/#756, 2 intent via the settles_intent fix), 12 P with STOP (8 naming #757, 3 supersede and 1 overlap 033d04c3), 28 T (including cluster 10, a boot-recovery test-expectation error that master's port reads correctly). No P? remains. The table is in note 79a5db04, with notes f685fb19 and cbe6efec; Fable2 received it (#5277, #5287). No source edits, Cargo, tests or peer-root commands. The independent evaluation (attempt 2) passed all three criteria.",
+    "completed_at": "2026-11-13T16:24:37.156467400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

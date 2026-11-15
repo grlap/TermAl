@@ -1,0 +1,29 @@
+{
+  "id": "01a1d04a-b0b9-7752-b047-e025100c9179",
+  "external_ref": null,
+  "title": "Evaluation preflight accepts a spawn whose registered check is on a since-rebound named root, and Engram refuses the submission only after the evaluator has finished",
+  "outcome": "termal_evaluate_acceptance refuses at spawn, with the same reason Engram would give at submission, when the claim's registered check belongs to a named-root generation that is no longer current, so no evaluator runs and no evaluation slot or turn is spent on a judgment that cannot be recorded.",
+  "acceptance": [
+    "A test shows that when an item's newest registered check was recorded under named-root generation N, and the claim's root has since been renamed to generation N+1 at the same path and commit, termal_evaluate_acceptance refuses before spawning an evaluator, naming the stale root generation and the need for a new check in the current root.",
+    "A test shows that when the newest registered check is on the current named-root generation, the spawn proceeds as today."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d04a-ef4e-7751-a435-36d0e270de9d",
+  "disposal_reason": "Duplicate: Fable2 filed the same TermAl defect concurrently as w-36d0e270de9d (P1). This item's evidence note (12325 mailbox a2a71e38 #765, the verbatim 409, the archived output path) applies there.",
+  "completion": null
+}

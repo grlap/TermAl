@@ -1,0 +1,29 @@
+{
+  "id": "01a14698-5b79-7d61-97c7-d7347147faf0",
+  "external_ref": null,
+  "title": "Consume Engram's control request budget contract: send request_budget_ms, refuse before transmission when the host budget is exhausted, and handle control_request_expired",
+  "outcome": "Consume Engram's control request budget contract: send request_budget_ms, refuse before transmission when the host budget is exhausted, and handle control_request_expired",
+  "acceptance": [
+    "Consume Engram's control request budget contract: send request_budget_ms, refuse before transmission when the host budget is exhausted, and handle control_request_expired is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "control-plane",
+    "cross-project",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

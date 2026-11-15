@@ -1,0 +1,32 @@
+{
+  "id": "01a1c478-9ebb-79b0-8f18-6195c9a51cf4",
+  "external_ref": null,
+  "title": "Show a recorded evaluator receipt in the public result after a transport failure",
+  "outcome": "When a recorded evaluator submission is followed by a genuine child transport failure, the public result leads with the receipt-derived outcome and retains the transport diagnostic without presenting child prose as the evaluation verdict.",
+  "acceptance": [
+    "A recorded evaluator submission followed by Error without a latest result packet exposes the recorded receipt outcome in the public DelegationResult, with the transport failure retained as diagnostic metadata or a note.",
+    "The same receipt-first behavior holds when an Active or Stopping child has no runtime and no result packet; genuine transport failures without a recorded submission remain distinguishable.",
+    "Behavioral tests cover these cases without replacing or rewriting the stored receipt, open write, evaluation, or verification records."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "codex",
+    "cross-project",
+    "field-report",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

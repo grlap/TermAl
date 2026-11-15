@@ -1,0 +1,30 @@
+{
+  "id": "01a1c149-9514-7260-9f9c-91d1c8063bf4",
+  "external_ref": null,
+  "title": "Runner bundle transfers use 44,000-character mailbox parts; about 240 KiB parts would cut message count",
+  "outcome": "An author candidate reaches a native runner and its run can start within about a minute of sending, with integrity checked, and without widening who may push test refs.",
+  "acceptance": [
+    "Where the time goes in one real transfer today is measured: bundle size, part count and size, turns on each side, refusals and waits.",
+    "With the chosen fix, a real candidate of typical size reaches a native runner and its run starts within about a minute of sending, with the bundle's hash checked on arrival.",
+    "No new authority: test refs stay the integration owner's and the Merger's, merge-ready only. Any TermAl change has a review pair with no Medium or higher and the normal gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "federation",
+    "procedure-cost"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

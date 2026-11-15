@@ -1,0 +1,31 @@
+{
+  "id": "01a18dd8-ef85-7f50-b38e-118b720aa2dc",
+  "external_ref": null,
+  "title": "Kimi read-only reviewer's Engram MCP read calls (next --peek, memories, show) are declined while Codex and Claude reviewers in the same round succeed",
+  "outcome": "Kimi read-only reviewer's Engram MCP read calls (next --peek, memories, show) are declined while Codex and Claude reviewers in the same round succeed",
+  "acceptance": [
+    "A cause note identifies why the Kimi reviewer child's Engram read calls were declined (tool exposure, read-only policy mapping, runtime permission prompt handling, or binding) with file:line and evidence from supported surfaces only",
+    "A read-only Kimi reviewer can perform the same read-only Engram calls (next with peek, memories, show) that Codex and Claude read-only reviewers can, or, if Kimi deliberately has no Engram route, the spawn result and reviewer brief say so explicitly; a deterministic test covers the chosen behaviour",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "kimi",
+    "mcp-tool",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

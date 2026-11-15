@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-eca1-7ff0-ac19-84a3624a42ea",
+  "external_ref": null,
+  "title": "Document certificate invalidation for attached replacing history navigation",
+  "outcome": "Document certificate invalidation for attached replacing history navigation",
+  "acceptance": [
+    "Document certificate invalidation for attached replacing history navigation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

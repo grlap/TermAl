@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6da-a858-7730-9442-613eff6fcb90",
+  "external_ref": null,
+  "title": "Trust the followed shell for check credit, with detection of Claude's cwd reset (option A of tm-y9b2)",
+  "outcome": "Trust the followed shell for check credit, with detection of Claude's cwd reset (option A of tm-y9b2)",
+  "acceptance": [
+    "Trust the followed shell for check credit, with detection of Claude's cwd reset (option A of tm-y9b2) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-1",
+    "host-recording",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

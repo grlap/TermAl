@@ -1,0 +1,29 @@
+{
+  "id": "01a1658b-81d5-7590-a3b1-6c70b99dbfa1",
+  "external_ref": null,
+  "title": "Confirm every caller of resume_local_session_queue handles the new 409 for retained, interrupted and cold-begun heads (delegation resume, capacity retry, UI Resume)",
+  "outcome": "Confirm every caller of resume_local_session_queue handles the new 409 for retained, interrupted and cold-begun heads (delegation resume, capacity retry, UI Resume)",
+  "acceptance": [
+    "Each caller of resume_local_session_queue other than the public POST queue/resume handler (delegation resume, capacity-retry resume, the UI Resume action and any other) is listed with file:line and its handling of a 409 Conflict for a retained, interrupted or cold-begun head is stated: handled as a reported outcome, or changed so it is.",
+    "At least one such caller has a test that drives the 409 path and asserts the caller's handling."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "follow-up",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

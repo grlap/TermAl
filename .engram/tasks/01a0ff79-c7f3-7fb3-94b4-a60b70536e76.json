@@ -1,0 +1,57 @@
+{
+  "id": "01a0ff79-c7f3-7fb3-94b4-a60b70536e76",
+  "external_ref": null,
+  "title": "Name the tool-reported target of the first fencing edit in the \"this session reported a file edit\" credit refusal",
+  "outcome": "When a reported file-edit observation first fences a carried gate, the refusal identifies the structured target available on that observation, so the agent can identify the reported edit that cost credit. The target is diagnostic only. Fence eligibility and existing first-cause behavior are unchanged. This delivers diagnostics only. It does not exempt outside-worktree edits from fencing or restore credit lost to those edits; that limitation stays tracked on w-aa25f77a6d2b.",
+  "acceptance": [
+    "A deterministic test first fails on the unmodified host because the refusal for a carried gate first fenced by a reported edit with a structured target does not identify that target.",
+    "The edit observation carries the structured target already available to its recorder: Claude create/update result filePath with the existing input fallback, or the path of the Codex file-change record being emitted. The edit-fence refusal labels it as a tool-reported target, bounds the rendered text and escapes control characters; missing targets retain the existing generic wording. The displayed target is not passed through canonical-path or worktree-root resolution helpers. Tests cover a named target, a relative target displayed without placement inference, long/control-character targets, no target, and multiple edit observations preserving the first fence rather than claiming a complete operation-wide file list.",
+    "The fencing contract and first-cause behavior are unchanged: every emitted reported-edit observation still fences every unsettled carried check of the session that is not already fenced, including when its target is outside the worktree. Existing fences are not replaced. Command-start, other-session writer and host-write fences, active-turn check marks, and provenance and attribution are unchanged; their existing tests pass.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "When a reported file edit first fences a carried gate, the \"this session reported a file edit\" refusal now names the edit's tool-reported target: escaped, bounded, never resolved. Fence eligibility and first-cause behaviour are unchanged. Landed as dea3df47dce645b37849d353a14b6b6688ad7743 in train-19 merge b24d91c34eeebb6238aa4eb5952ad559082854fc. Evaluation 39f1ef0537204042b895dbe22825b63e passed 4/4.",
+    "completed_at": "2026-10-03T04:51:44.028281700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

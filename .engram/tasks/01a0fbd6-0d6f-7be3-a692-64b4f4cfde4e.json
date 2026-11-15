@@ -1,0 +1,27 @@
+{
+  "id": "01a0fbd6-0d6f-7be3-a692-64b4f4cfde4e",
+  "external_ref": null,
+  "title": "Spawned sessions carry environment keys that differ only in case, so PowerShell cannot list Env:ENGRAM* or Env:TERMAL*",
+  "outcome": "A session TermAl spawns on Windows has no two environment variables whose names differ only in case, so PowerShell's environment provider can list them.",
+  "acceptance": [
+    "Spawned sessions carry environment keys that differ only in case, so PowerShell cannot list Env:ENGRAM* or Env:TERMAL* is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "environment"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

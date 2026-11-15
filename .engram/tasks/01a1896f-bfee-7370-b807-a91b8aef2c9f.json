@@ -1,0 +1,28 @@
+{
+  "id": "01a1896f-bfee-7370-b807-a91b8aef2c9f",
+  "external_ref": null,
+  "title": "Near-miss notice does not read past env, time, nice or timeout wrappers before a test",
+  "outcome": "A recognised test launched behind `env NAME=value`, `time`, `nice` or `timeout N` either gets a check or gets the typed uncredited near-miss line. It is never silent.",
+  "acceptance": [
+    "Near-miss notice does not read past env, time, nice or timeout wrappers before a test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

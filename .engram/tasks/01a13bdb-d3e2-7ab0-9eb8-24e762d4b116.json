@@ -1,0 +1,43 @@
+{
+  "id": "01a13bdb-d3e2-7ab0-9eb8-24e762d4b116",
+  "external_ref": null,
+  "title": "Move the active test-run count from the global header chip to a badge on the left-rail test icon",
+  "outcome": "The global header no longer shows the persistent yellow \"Tests: N running · restart impact …\" chip. Instead, the left-rail flask/test icon carries a compact badge with the active-run count N, keeps an accessible label/tooltip, and shows no badge when no run is active. Per-run status and restart-impact detail stay in the test view/panel.",
+  "acceptance": [
+    "The global header no longer renders the persistent top-level \"Tests: N running · restart impact …\" chip.",
+    "With N > 0 active test runs, the left-rail flask/test icon shows a compact badge with N, and its accessible name/tooltip states the active-run count.",
+    "With zero active test runs, the icon shows no badge or warning styling.",
+    "The test view/panel still shows per-run status and restart-impact detail, unchanged.",
+    "UI tests cover the badge for N = 0, N = 1 and N > 1, and the absence of the header chip; tsc and the full gate are green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "coordination-cost",
+    "host-recording",
+    "restart-safety",
+    "test-launcher",
+    "test-run-visibility",
+    "ui",
+    "user-authorized"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed on master by the integration owner, Termal::Opus2.\n\nCommit 1495e8d3acb07ed4869cd63bd9de5f57a6c66bf8 (tree c57ac8b1) was pushed to origin/master as a fast-forward from ebdfdbab, and ls-remote confirmed it at 00:38:29Z.\n\nPre-push checks:\n- 9 UI/docs files, +210 −82, 0 CR; no authority or scripts paths.\n- Full gate test-3c651675: PASS 5/5 (host record 98ae0c4f). Its new-format staged hash b62f02cd was reproduced from a scratch index of the commit.\n- Review: scoped confirmation pair cd64ea13 / bef12380 on the exact staged freeze dc8695f5. No Medium or higher; Lows filed as w-8d07accf7d01 and w-a4e8ffca8f23.\n- Evaluation 91d4980f: 5/5, independent, not stale.\n\nUI-only, so no binary rebuild. Any ui/dist rebuild is on the coordinator's word, from landed content.",
+    "completed_at": "2026-10-15T00:38:37.266921500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

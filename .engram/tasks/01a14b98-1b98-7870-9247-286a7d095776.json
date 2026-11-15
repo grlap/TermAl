@@ -1,0 +1,32 @@
+{
+  "id": "01a14b98-1b98-7870-9247-286a7d095776",
+  "external_ref": null,
+  "title": "Cross-host Engram sync: TermAl host integration with a separate Engram synchronization mechanism between hosts",
+  "outcome": "Each host keeps its own local Engram store (no shared SQLite, no network-drive store), and a separate Engram synchronization mechanism carries tracker state between hosts with defined boundary and conflict semantics. TermAl's host integration (claims, named roots, verification credit, evaluations) states exactly what crosses, what stays host-local, and how conflicts and divergence are detected and resolved. No code is written before the joint design is accepted and broken into small slices.",
+  "acceptance": [
+    "A joint design by Termal::Architect1 and Termal::Architect2, coordinated with Engram's architects for the Engram-owned store side, is recorded on this epic, covering the sync boundary (what crosses: items, notes, gates, claims?; what never crosses: live stores, credentials, host-local credit), conflict and divergence semantics, ordering and idempotency, authority over completion, and how TermAl host integration attributes cross-host evidence; the coordinator and Greg have it before any implementation.",
+    "The design is broken into small, independently landable child slices (TermAl side here, Engram side cross-linked to Engram items) with their own test-bound criteria; this epic completes when its required children complete."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "greg-directed",
+    "multi-machine"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a14b98-032e-7f70-922a-93105e5592c0"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

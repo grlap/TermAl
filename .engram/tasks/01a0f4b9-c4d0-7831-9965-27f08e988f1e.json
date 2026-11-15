@@ -1,0 +1,45 @@
+{
+  "id": "01a0f4b9-c4d0-7831-9965-27f08e988f1e",
+  "external_ref": null,
+  "title": "After 27bf0b6 a read-only Codex child is offered the tracker's MCP tools but every call is refused, so Codex reviewers abort their startup recovery",
+  "outcome": "A read-only Codex child either is not offered the tracker's MCP server at all, or its calls are served under the read-only gate; it never sees tools that refuse every call with an approval error, and a Codex /review-code child completes its review.",
+  "acceptance": [
+    "A read-only Codex delegation on Windows, run live on the landed build, completes Engram next with peek and memories without an approval refusal; its commands and results are recorded in a note.",
+    "A test pins the configuration that lets a read-only Codex child call Engram's read words and not its write words.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The same live child is still refused a file write, and an Engram write word (for example note) is refused or unavailable to it; recorded in the same note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "delegation",
+    "mcp",
+    "regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

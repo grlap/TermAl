@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-55e7128dcd18",
+  "external_ref": "tm-m6r1.27",
+  "title": "Beads Work availability: do not classify an empty status as ready",
+  "outcome": "Claude session-7004 Low, consolidated parent review 2026-09-15 and confirmed in source: src/work_visualizer_beads.rs beads_availability matches open together with the empty string. An empty status without unsatisfied blockers therefore becomes ready, contrary to the fail-closed unknown-status contract. Map empty status to unknown or disclose the row as malformed; do not infer readiness. Cover list and detail normalization, with and without blockers. No implementation in this review. Dedup: empty status search, beads_availability description search, and all Work children inspected.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03; no \"beads\" remains in src/work_*.rs on master.",
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a17661-6c54-76d1-b5ad-b604f9f9d62b",
+  "external_ref": null,
+  "title": "Assert positive Accepted receipt contents in the checkpoint watermark reload regression",
+  "outcome": "Assert positive Accepted receipt contents in the checkpoint watermark reload regression. Keep the existing authority, ownership, validation and persistence contracts.",
+  "acceptance": [
+    "Assert positive Accepted receipt contents in the checkpoint watermark reload regression is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "containment-followup",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a11e8a-6f12-7dd2-8db5-77cab466349b",
+  "external_ref": null,
+  "title": "Prove end to end that a second termal server process refuses a held data directory, and that new_server keeps its lock in the process-wide static",
+  "outcome": "A test runs the termal binary in server mode twice against one temporary data directory and shows the second process exits with the refusal before it binds or changes the store. Another test shows AppState::new_server keeps the lock in the process-wide holder.",
+  "acceptance": [
+    "Prove end to end that a second termal server process refuses a held data directory, and that new_server keeps its lock in the process-wide static is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "host-boot",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1c1a5-03df-7cc0-9499-f90cb5292535",
+  "external_ref": null,
+  "title": "Update current gate descriptions from five stages to six after the fmt stage lands",
+  "outcome": "Current gate descriptions agree with the maintained six-stage launcher while dated historical results retain their original counts.",
+  "acceptance": [
+    "README.md and current feature documentation describe six stages with cargo fmt --check first; historical dated five-stage run reports remain unchanged.",
+    "Current AGENTS.md and CLAUDE.md gate descriptions agree with the six-stage launcher without changing commit, push, tracker or approval authority.",
+    "No Markdown phrase-pinning tests are added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "formatting",
+    "launcher",
+    "procedure",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1c175-8d31-76b2-931d-645c42b2ccec",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c2de-d03a-7b52-9078-6cbc329d348f",
+  "disposal_reason": "Duplicate of the same five-stage documentation drift, now implemented and completed in w-6cbc329d348f (seal5d1a4bb95d6346e68d5cb1a1d4aa2ace) on origin/master a6978c03b68467d5123724c8097f0a1a7e19d76b. Current count-free/six-stage descriptions, history preservation and no Markdown tests satisfy the same scope; no second implementation is needed. Original review provenance88e713c1ddc6482aa4c0581a760a1788 and aa8f4bce653a4e88806344f8327ba5f8 remains here. Fable2907 explicitly concurred shared provenance. Replacement's linked evidence covers exact8paths, clean17182/17183 pair, authority(a)(b)(c), equal-treeDL560FULLbedc8b43 and independently verified landing. No acceptance evaluation exists; this is duplicate reconciliation, not another independently tested contribution.",
+  "completion": null
+}

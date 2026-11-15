@@ -1,0 +1,30 @@
+{
+  "id": "01a1ad11-c755-7061-8921-cf039ab7b131",
+  "external_ref": null,
+  "title": "Central TermAl host aborted at 18:29:30Z on a failed 1 MiB allocation (0xc0000409)",
+  "outcome": "The cause of the host's out-of-memory abort is established, separating system-wide memory exhaustion from growth of the host's own memory, and whatever in the product or in our operating rules let it happen is fixed so the host doesn't abort under the same load.",
+  "acceptance": [
+    "Whether the system commit limit was exhausted, or the host's own memory grew, at 18:29:30Z is established from retained evidence (launcher run records, process starts, host logs, Windows events), separating facts from inference; the Telegram 'session not found' line is treated as unrelated unless evidence links it.",
+    "If the host's memory grows without bound (for example from importing run history, w-d57f7ec79343's class), that is fixed in the product with a test. If concurrent Cargo jobs on Central exhausted memory, the placement rule and its enforcement are corrected, and the host degrades without aborting where it reasonably can.",
+    "The host's baseline memory after boot (about 4 GB private at 18:55Z, steady over 40 s) is explained or reduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Cancelled as a stale resource-incident umbrella under Fable2#1338 and Greg's recorded authority to cancel work that no longer makes sense, NOT as fixed, tested or acceptance-complete. Retained incident notes fda30327b62747998cba241fc08b3995/f50b926bcd31479ca84305a9a490f72a classify the Nov5 abort as system-wide commit exhaustion: the host and two unrelated rustc processes failed allocation together during Engram's FULL load. One capped Central Cargo job and free-commit census/stop floors are now in the active Opus2 placement workflow (including this session's GO418), replacing the original concurrent/default-parallelism incident response. There is no newly established unbounded TermAl leak to code against here. The historical host's exact pre-abort private bytes, the roughly4GB boot baseline and persistent~16GB paged pool remain unexplained; ADU-handle hypothesis was explicitly not supported by8c075305d4c0472281e87e445fc85ad1. Telegram session-not-found remains unlinked. Cancellation does not assert the host can survive allocation failure, that every memory contributor is known, that no recurrence can occur, or that the old acceptance criteria passed. A new observed host-growth defect or a separately scoped baseline/pool investigation can be assessed on actual current measurements; none is fabricated by this disposal. No live probe, allocation experiment, source edit or test was performed.",
+  "completion": null
+}

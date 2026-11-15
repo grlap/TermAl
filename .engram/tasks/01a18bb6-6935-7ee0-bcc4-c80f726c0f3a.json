@@ -1,0 +1,35 @@
+{
+  "id": "01a18bb6-6935-7ee0-bcc4-c80f726c0f3a",
+  "external_ref": null,
+  "title": "Verify Windows utilization interface filtering and prevent duplicate binding counters",
+  "outcome": "The Windows active-interface projection has documented native semantics and avoids misleading duplicate filter-layer counters where the API exposes them.",
+  "acceptance": [
+    "Verify GetIfTable2 filter-layer, loopback and virtual-interface semantics against primary platform definitions before choosing a filter.",
+    "Implement or document the intended per-interface projection and add a deterministic counter fixture for the selected behavior.",
+    "Preserve valid active interfaces, explicit collection limits and the existing read-only projection; validate and independently review the final change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-directed",
+    "host-utilization",
+    "network",
+    "observability",
+    "review-low",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18ac3-0c9b-7e60-9738-24c75af616ab",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

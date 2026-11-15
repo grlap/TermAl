@@ -1,0 +1,28 @@
+{
+  "id": "01a1ac77-3dff-7f22-aa81-e90c61a3970b",
+  "external_ref": null,
+  "title": "A mailbox read returns 404 \"mailbox not found for this session\" once, while the listing shows the mailbox, and an identical retry succeeds",
+  "outcome": "A participant's read of a mailbox it belongs to either succeeds or returns a typed, explained refusal; it doesn't fail with a 404 that an identical retry then contradicts.",
+  "acceptance": [
+    "The cause of the transient 404 is established from source and recorded, saying what was read or run and what is inferred.",
+    "A participant's read of a listed mailbox doesn't return 'mailbox not found for this session' while membership holds; a test covers the discriminating condition found.",
+    "If the condition is transient by nature, for example during host startup after a restart, the refusal is typed and names it, rather than a bare 404."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

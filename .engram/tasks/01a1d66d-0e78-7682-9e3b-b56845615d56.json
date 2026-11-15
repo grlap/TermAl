@@ -1,0 +1,33 @@
+{
+  "id": "01a1d66d-0e78-7682-9e3b-b56845615d56",
+  "external_ref": null,
+  "title": "Retry benign stale captures in shared local-tail hydration",
+  "outcome": "Body-dependent user actions tolerate a bounded number of benign hydration capture races before returning the existing typed retry conflict.",
+  "acceptance": [
+    "A deterministic regression races the first cold-tail capture with an unrelated same-session mutation, then verifies a stable subsequent capture allows the requested body-dependent action without a spurious 409.",
+    "Repeated stale captures exhaust a bounded retry policy and preserve LocalSessionTailChanged; corruption and operational failures remain correctly classified, and transcript durability and Stop behavior remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "lazy-transcript-tails",
+    "performance",
+    "post-restart",
+    "review-follow-up",
+    "startup",
+    "usability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

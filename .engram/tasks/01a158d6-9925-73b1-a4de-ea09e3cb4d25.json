@@ -1,0 +1,29 @@
+{
+  "id": "01a158d6-9925-73b1-a4de-ea09e3cb4d25",
+  "external_ref": null,
+  "title": "Validate and harden conditional runtime KaTeX and embedded DOMPurify dependency paths",
+  "outcome": "Perform mode-specific validation of the recorded runtime math/sanitizer paths and implement only justified minimal dependency hardening in a separate reviewed, gated change. Preserve explicit trust and sanitizer configuration, verify embedded copies rather than treating npm audit zero as runtime proof, and record any excluded modes concretely.",
+  "acceptance": [
+    "Validate and harden conditional runtime KaTeX and embedded DOMPurify dependency paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "conditional-reachability",
+    "dependencies",
+    "security",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

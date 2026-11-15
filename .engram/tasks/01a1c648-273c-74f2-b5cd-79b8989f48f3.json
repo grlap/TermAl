@@ -1,0 +1,28 @@
+{
+  "id": "01a1c648-273c-74f2-b5cd-79b8989f48f3",
+  "external_ref": null,
+  "title": "Document the requester-visible refused evaluator submission contract",
+  "outcome": "The host-adapter feature brief describes attemptHistory.refusedSubmissions, its bounds, refusal/unavailable states, privacy and separation from recorded evaluations.",
+  "acceptance": [
+    "Documentation beside the persisted citation-retry/refusal section describes refused/unavailable state, recorded=false, maximum six entries, retention across fresh attempt keys, no acceptance credit or receipt, and old refusals shown unavailable without private argv/source backfill; validate with the existing documentation lint, without text-pinning tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "documentation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

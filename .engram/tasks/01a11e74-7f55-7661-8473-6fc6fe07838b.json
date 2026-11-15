@@ -1,0 +1,27 @@
+{
+  "id": "01a11e74-7f55-7661-8473-6fc6fe07838b",
+  "external_ref": null,
+  "title": "Decide one rule for whether an Engram admission Stop drops later queued workflow continuations",
+  "outcome": "From the round-3 review of w-f917452faa71 (Claude delegation-8250851e, Low, src/session_stop_idle_wait.rs). With no pending wait, the Engram admission/retry Stop keeps later Orchestrator continuations queued behind the latch, so they run on an explicit Resume. With any pending delegation or test-run wait, the same Stop now also drops them (it keeps the Engram-held head). The running-Stop path always drops them. Decide one rule: always drop non-held Orchestrator continuations on an admission Stop, or never. Then test the no-wait case explicitly.",
+  "acceptance": [
+    "Decide one rule for whether an Engram admission Stop drops later queued workflow continuations is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

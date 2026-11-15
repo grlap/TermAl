@@ -1,0 +1,36 @@
+{
+  "id": "01a0e6d3-c3ba-7d33-86a6-0ad23cd0145d",
+  "external_ref": "tm-1nk5",
+  "title": "Completed Markdown reverts to raw text and shows as still streaming when the next prompt is sent",
+  "outcome": "Reported by Greg directly to Termal::Scroll and relayed in mailbox #401 at 02:11Z on 2026-09-11; the coordinator has not reproduced it.\n\nSYMPTOM, as relayed: after a response has finished and its Markdown table has rendered, sending the next prompt switches that previous response back to raw text, and the UI shows \"Response still streaming\".\n\nINITIAL READING by Scroll, not yet verified: streamingAssistantTextMessageIdForSession (ui/src/SessionPaneView.render-callbacks.tsx, defined at line 43, used by SessionPaneView.tsx) marks the last resident assistant text message of an active session as streaming, without evidence that this message is the one currently streaming. It does not account for a completed response followed by a pending next turn. Scroll reports that the live bundle BZtJSHwW contains the same helper. Scroll rejects a plain pendingPrompts.length check because a queued prompt can coexist with a genuinely live stream, and is looking for per-message evidence of the current stream.\n\nOWNER: Termal::Scroll (session-5651), dispatched directly by Greg. The UI fix is being made in the main checkout. No tests, build, deploy or commit are planned yet.\n\nCOORDINATION: at 02:11:44Z the tree contained only the staged mailbox receipt package (18 backend and docs paths, no ui paths; index diff bc687e85). The two must not share the index until Greg decides on that commit.\n\nRELATED but distinct: tm-kei8 (tail hydration burst while streaming) and tm-wze0 (latest-turn tail signature work during streaming).",
+  "acceptance": [
+    "After the client observes an assistant text response complete, sending the next prompt with that same unchanged response still resident preserves its rendered Markdown and does not show Response still streaming, including card remounts, through full, incremental and upsert store publication.",
+    "Genuine streaming remains classified as streaming with a queued next prompt, with changed text on the same message ID, and with a new message ID containing identical text; historical resident windows and another session's completion evidence cannot misclassify the current tail.",
+    "The existing focused session-streaming-text regression suite passes on the named current source root, and the result records the already-active first-snapshot ambiguity separately rather than claiming it solved."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

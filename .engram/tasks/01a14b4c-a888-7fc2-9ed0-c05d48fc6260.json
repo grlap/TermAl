@@ -1,0 +1,24 @@
+{
+  "id": "01a14b4c-a888-7fc2-9ed0-c05d48fc6260",
+  "external_ref": null,
+  "title": "Keep automatic abort-retry presentation stable during the fresh admission",
+  "outcome": "An exactly owned automatic abort retry does not briefly appear operator-paused during its in-flight admission; presentation remains separate from dispatch authority.",
+  "acceptance": [
+    "Keep automatic abort-retry presentation stable during the fresh admission is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

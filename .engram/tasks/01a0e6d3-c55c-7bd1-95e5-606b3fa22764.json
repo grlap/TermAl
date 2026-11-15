@@ -1,0 +1,43 @@
+{
+  "id": "01a0e6d3-c55c-7bd1-95e5-606b3fa22764",
+  "external_ref": "tm-ljgz",
+  "title": "Delegation result changedFiles blames a read-only child for edits other sessions made in the shared worktree",
+  "outcome": "Reported by Engram::Opus (mailbox #206). Delegation delegation-d399162d (read-only Codex evaluator session-7647) listed docs/features/turn-gate-assessment.md and three .tmp.117252.* editor temporaries as its changedFiles. Those were the parent's (session-7284) edits made while the child ran. child_changed_files (src/delegations.rs) collects Message::FileChanges, which the workspace watcher records for every file changed in the workdir during the child's turn, so it cannot tell who wrote a file. Fix direction: a read-only child reports no changedFiles, and watcher observations appear in a separate field clearly labelled 'changes observed in the workspace during the run', which isn't attributed to anyone.",
+  "acceptance": [
+    "For a read-only delegation, watcher-only file changes never populate changedFiles. The result exposes those paths separately as observedWorkspaceChanges, explicitly meaning changes observed in the workspace during the run with no author attribution; concurrent changes in the same checkout and nested worktrees are covered.",
+    "Regression tests demonstrate the current false attribution before the fix and pass afterward, covering read-only and writing policies, legacy result compatibility, and the user-visible result paths. The full five-stage gate passes on the reviewed input, and the Codex/Claude review pair has no outstanding Medium-or-higher finding.",
+    "The compact result API, delegation completion/fan-in text, and UI result formatting preserve that distinction. Persisted older read-only results remain readable without presenting their watcher-derived changedFiles as child-authored edits. Workspace observations alone are not treated as proof of a read-only violation; actual review-freeze checks remain intact.",
+    "Writing delegations retain their existing changedFiles behavior in this change; any different attribution policy for writing children is separate work."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered read-only watcher observations separately from child-authored changedFiles, including pending-buffer capture, bounded storage/fan-in, legacy projections and UI. Author commit b366f9ef204e193ac794320773bfb938324466fd landed in integration commit acea4c74bf8cdd50d278b906cc43371af7255ce0 on origin/master. Source worktree remains clean. Independent acceptance 17d2d5981fb14142a540078d0df74cf0 is fresh, 4/4 pass; integration owner landing evidence is note1f24fde4069f4495be8673277ddd0d06 (test-b90c0ff7 PASS and Codex/Claude pair no Medium+). Installed binary and rebuilt UI reported there; no host restart performed by this session.",
+    "completed_at": "2026-10-01T02:43:27.006830800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

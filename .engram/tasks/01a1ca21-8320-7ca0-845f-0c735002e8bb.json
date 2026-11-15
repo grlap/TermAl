@@ -1,0 +1,28 @@
+{
+  "id": "01a1ca21-8320-7ca0-845f-0c735002e8bb",
+  "external_ref": null,
+  "title": "Distinguish an earlier retired write from the current evaluator's terminal unavailable result",
+  "outcome": "A reused evaluator's terminal unavailable summary describes its own refusal or lack of a verdict, while preserving a separate notice that an earlier locally retired write has an unknown outcome.",
+  "acceptance": [
+    "When only a previous attempt has a locally retired write, a current attempt ending without a recorded verdict or with a confirmed refusal reports that current status and separately retains the earlier unknown-outcome notice.",
+    "Current Pending, Unconfirmed and locally retired writes retain their own uncertainty wording, and behavioral tests cover both current and previous-attempt cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

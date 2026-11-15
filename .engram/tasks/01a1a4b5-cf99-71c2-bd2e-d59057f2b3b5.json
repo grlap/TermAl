@@ -1,0 +1,41 @@
+{
+  "id": "01a1a4b5-cf99-71c2-bd2e-d59057f2b3b5",
+  "external_ref": null,
+  "title": "Check DL560's NUMA effect on many-thread runs, and try mimalloc as TermAl's global allocator",
+  "outcome": "We know from measurements on one host whether NUMA and the allocator contribute to the stalls DL560 shows at high thread counts, and TermAl has a mimalloc change prepared with its effect, platform support and correctness stated, so Greg can decide on landing from numbers rather than from an assumption.",
+  "acceptance": [
+    "DL560's NUMA topology is recorded, and a same-commit, same-filter comparison on DL560 alone separates NUMA placement from thread count without code changes: at least default threads, matched threads unbound, and one node bound with its local memory, each with test time, over-60 s count, failures and cross-node allocation figures",
+    "A candidate makes mimalloc the global allocator for the TermAl binary, with Cargo.lock and license policy satisfied, and builds on Linux, Windows and Mac with the toolchains those hosts already have; nothing is installed on any host to make it build",
+    "The same comparison and a representative long-running or product-shaped workload run with and without mimalloc on one host, reporting throughput or time, resident memory and any failures; the results say plainly if there is no benefit, and no cause is claimed that the numbers don't show",
+    "Correctness: the candidate passes a review pair and the full gate on the exact input, with memory growth over a long run and the release build path from the master checkout addressed; landing follows the standing rule only if the measurements support it, and Greg gets the numbers and the recommendation either way"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a1a53e-fe9d-7830-ad45-323f1fbd85cf",
+      "kind": "manual",
+      "detail": "Parked by Greg's explicit stop at 2026-11-04 06:23Z (Fable2 mailbox2716; memory greg-stop-timing-comparisons-2026-11-04 r1). No further mimalloc/NUMA timing/RSS runs, replica, review, gate or landing is authorized. Existing results and candidate2c4499b1 are retained, comparison is inconclusive and focused performance FAIL remains. Greg decides whether to pursue the allocator without proven benefit. Original acceptance remains unmet/unchanged; not completed. Final recorded results and scoped target-release requests: note91abae7875ba4aa4a6cb81b6f0a556fb.",
+      "created_by": {
+        "actor_id": "greg/codex",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-11-04T06:28:51.451683100Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

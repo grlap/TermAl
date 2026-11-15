@@ -1,0 +1,45 @@
+{
+  "id": "01a12475-f1fd-79f0-8fe5-4a73ea28ed55",
+  "external_ref": null,
+  "title": "Cover the remaining Resume reporter cancellation families",
+  "outcome": "Regression tests prove that cancellation on session delete, dedicated runtime reset, Engram delivery rejection, revocation and token-mismatch release settles the exact feedback row once without provider delivery.",
+  "acceptance": [
+    "Each listed cancellation family has a regression proving that the original feedback row reaches a terminal or Unknown disposition exactly once without provider delivery; existing detach, Stop, boot, buffering and persistence-failure coverage is preserved.",
+    "The added cancellation tests and maintained full gate pass on the resulting input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "reliability",
+    "resume",
+    "retained-prompt",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12188-9cc9-7b60-9301-b21c5132848c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

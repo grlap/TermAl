@@ -1,0 +1,33 @@
+{
+  "id": "01a1ca81-d1d4-7241-80fe-4d053a208468",
+  "external_ref": null,
+  "title": "Integrate combo55 on 5acc932b: c593 28687c03 (w-71e9 evaluator replay), direct child of combo54",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 28687c03cd6581f95d938ee8774b2b120aa9141a (tree 9ea5b013796cd80d45abcce47220da0657a99692) is on origin/master, where master was moved to it by a fast-forward from 5acc932b4d94dbf7c98a5d3f56e01b34848816fe.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 9ea5b013 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the whole-13 pair on c92e1019 recorded on w-71e95318ea03, and the scoped merge pair on 28687c03 itself (Codex 17412 delegation 2f8d515c, Claude 17413 delegation b99e0224) with no findings, which covers the 3-way carry's shared paths.",
+    "The release binary built from tree 9ea5b013 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo55 landed: master fast-forwarded 5acc932b -> 28687c03cd6581f95d938ee8774b2b120aa9141a (tree 9ea5b013) and pushed at 13:01:35Z. It was gated by DL560 FULL test-f4aa1664 (all stages passed; rust 7630/0/113, vitest 5093/5093; equal source ids) on test ref ded8ea9a, which is now deleted. The review pairs are the whole-13 pair on c92e1019 plus the scoped merge pair 17412/17413 (no findings). Installed on Central (9874d02c; backup termal-before-28687c03-476c3cfa.exe) and DL560 (18f27c6b; backup termal.f147e29d.bak), with no restart. Independent evaluation by Codex 17456 (delegation 2d7dddbb) passed 3/3.",
+    "completed_at": "2026-11-11T13:09:27.427258500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

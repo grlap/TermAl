@@ -1,0 +1,36 @@
+{
+  "id": "01a1d6a0-95e7-7202-953b-48d79a4083d4",
+  "external_ref": null,
+  "title": "Engram settings change skips the post-fence queue drain when MCP cleanup is degraded or pending, stranding prompts queued during the fence",
+  "outcome": "After a project's connection fence is released, every session's queue is drained (best effort) whatever the cleanup outcome, so no automatic prompt queued during the fence is stranded.",
+  "acceptance": [
+    "update_project_engram_settings_checked (src/session_crud.rs) always runs the per-session post-fence drain, collecting errors, before returning any cleanup error or pending-cleanup conflict, and one session's drain or delivery error no longer abandons the later sessions (or the fence release itself wakes the affected sessions' drains).",
+    "A regression test: Engram is disabled while one session's revocation is pending; another idle session that received a mailbox wake or delegation result during the fence starts its queued prompt without an unrelated user send or Resume."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-settings",
+    "queue",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed best-effort post-fence queue draining before cleanup errors or pending-Stop conflicts; all later sessions are attempted even if preparation or delivery fails. Added real mailbox delivery regressions. Fresh independent evaluation 92c86dd71c1c417db95a3a3ac9668224 passed both criteria on clean landed eb78d349.",
+    "completed_at": "2026-11-14T03:21:33.397121300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

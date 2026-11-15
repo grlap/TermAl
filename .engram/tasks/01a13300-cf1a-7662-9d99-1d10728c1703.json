@@ -1,0 +1,28 @@
+{
+  "id": "01a13300-cf1a-7662-9d99-1d10728c1703",
+  "external_ref": null,
+  "title": "No supported way to cancel a running detached launcher full gate: taskkill /T ends the launcher but its contained descendants refuse with 'The operation attempted is not supported'",
+  "outcome": "An agent that must stop a detached full gate (for example after an accepted review finding) has a supported cancel route, through the launcher or the host. The route ends the run's whole process tree, including members contained in TermAl's job, settles the run as cancelled, and reports which processes ended, without anyone using taskkill against processes they cannot see the ownership of.",
+  "acceptance": [
+    "No supported way to cancel a running detached launcher full gate: taskkill /T ends the launcher but its contained descendants refuse with 'The operation attempted is not supported' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "process-containment",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

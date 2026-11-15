@@ -1,0 +1,29 @@
+{
+  "id": "01a1a014-b09b-7d23-bc22-4c7ce140fdb8",
+  "external_ref": null,
+  "title": "Record the local install_security error class and HTTP status when a federation attestation ends with localInstallFailed",
+  "outcome": "When Central's local install of an authenticated peer context fails, the attestation observation keeps a fixed error class and HTTP status for that attempt, with no raw error message. A run of localInstallFailed attempts, like DL560's attempts 1–7 after restart #3, can then be classified after the fact.",
+  "acceptance": [
+    "The install_security failure branch records a fixed local install error class and the HTTP status, for example 423, 500 or 409, in the existing attestation observation. The accepted-heartbeat fields are null, the existing owner fences are respected, and no raw error.message is recorded.",
+    "A regression test drives each failure class through that branch and asserts the recorded class and status, and the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "diagnostics",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

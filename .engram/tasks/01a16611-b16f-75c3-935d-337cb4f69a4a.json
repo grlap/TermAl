@@ -1,0 +1,27 @@
+{
+  "id": "01a16611-b16f-75c3-935d-337cb4f69a4a",
+  "external_ref": null,
+  "title": "Cargo target-sibling watcher refusals do not name the change's modification and arrival times",
+  "outcome": "A gate refusal caused by a Cargo temporary target sibling (a pending candidate judged at settlement, a reported-end carry's sibling, or candidate overflow) names the sibling change's modification time and when its notification reached the host, as other watcher refusals do. The holder can then tell a late report from a write during the run.",
+  "acceptance": [
+    "Cargo target-sibling watcher refusals do not name the change's modification and arrival times is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

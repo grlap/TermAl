@@ -1,0 +1,41 @@
+{
+  "id": "01a18367-4118-77e2-97cb-041ac1b8dbbd",
+  "external_ref": null,
+  "title": "Show orphaned Engram control debt after its session is removed",
+  "outcome": "When a session that holds unresolved Engram control debt (an Unknown or owed original operation) is killed or removed, the debt stays visible in the UI, independent of the deleted session row, across a reload, with only reachable actions.",
+  "acceptance": [
+    "The UI consumes the backend's canonical control-recovery summary (engramControlRecovery) through the existing state updates and a discoverable project/settings recovery surface. No second ledger, rebuilt card, new endpoint, or new cleanup or settlement protocol is added.",
+    "After a qualifying kill or removal of a session holding unresolved control debt, the debt stays visible independent of the removed session row and card. It survives reload, reconnect and live refresh, and shows the original session reference, the unresolved operation, a truthful reason and the reachable next steps. Private payloads, tokens and store paths stay private.",
+    "Only reachable actions are offered: no dead Inspect, Resume or Stop for an absent row, no clear-debt button, and no claim that toggling control settles an Unknown. Only a canonical confirmed settlement updates or removes the indication.",
+    "The witnesses are a qualifying removal with the exact durable debt and evidence; an actual UI/state consumer render without the owner row; persistence, reload and live refresh; dead-target actions absent; canonical-settlement-only removal; and no unauthorized send, with healthy sessions progressing. Backend-only or count-only assertions do not count."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "b16",
+    "control-plane",
+    "engram-control",
+    "engram-host-adapter",
+    "gated-control",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete gated-control path deleted by87f49ed0 and absent on649d77d5; The removed engramControlRecovery public projection and ui/src/engram-control-recovery.tsx/App.engram-control-recovery.test.tsx no longer have a product surface. Current passive-original tests explicitly assert engramControlRecovery is absent from public settings; preserving private original data does not revive the deleted debt UI. Historical Rust3/UI11 and missing native credit remain historical, not newly satisfied. Fable2#1347 and sweep5954218a provenance recorded. Withdrawn as obsolete, not fixed/tested or newly credited.",
+  "completion": null
+}

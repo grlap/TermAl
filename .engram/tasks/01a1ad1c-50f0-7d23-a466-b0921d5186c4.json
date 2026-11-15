@@ -1,0 +1,32 @@
+{
+  "id": "01a1ad1c-50f0-7d23-a466-b0921d5186c4",
+  "external_ref": null,
+  "title": "Cover verification refusal filter negatives and exact command and summary boundaries",
+  "outcome": "Regression tests discriminate malformed refusal details, the exact rejected command boundary, and informational summary fallback behavior.",
+  "acceptance": [
+    "Test details with control characters, more than4096 bytes, non-string values, another error code and absent/null details leave the original message without an added details suffix.",
+    "Test8193 UTF-8 bytes are refused without send or rewriting alongside the existing8192-byte acceptance witness.",
+    "Test summary malformed JSON, non-string refusal detail and the documented control filtering behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "execution-observability",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

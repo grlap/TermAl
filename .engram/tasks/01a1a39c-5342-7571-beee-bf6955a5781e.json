@@ -1,0 +1,32 @@
+{
+  "id": "01a1a39c-5342-7571-beee-bf6955a5781e",
+  "external_ref": null,
+  "title": "Document local Git normalization and mode limits in source identity",
+  "outcome": "State the accepted effects of repository-local core.autocrlf, core.eol and core.fileMode on committed-input cleanliness.",
+  "acceptance": [
+    "The contract consistently describes accepted local line-ending and mode judgment limits and does not promise byte or mode fidelity beyond the adopted Git judgment."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "architecture",
+    "cross-project",
+    "docs-only",
+    "greg-directed",
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a23f-d694-7041-b135-ccbea5f6c63c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a0eed6-a5a0-7bd3-ba49-1d369c45c233",
+  "external_ref": null,
+  "title": "Client drops a transcript delta at or below its adopted revision although the adopted snapshot carries no message bodies",
+  "outcome": "A transcript message or its streamed text is never lost in the running client because a state snapshot of a later revision was adopted first: either the client keeps such a delta, or adopting a summary snapshot whose messageCount or sessionMutationStamp is ahead of the resident transcript of a visible session always fetches the missing tail.",
+  "acceptance": [
+    "The client's behaviour for a delta at or below its adopted revision is written down next to decideDeltaRevisionAction, including why a metadata-only snapshot does not by itself cover a transcript delta.",
+    "The production UI (ui/dist) is rebuilt from the landed tree in the master checkout by the integration owner, whose authority for that step is recorded on this item, and the build's hash is noted.",
+    "When a summary state snapshot of revision R is adopted and a textDelta or messageCreated of revision below R for a visible session arrives afterwards, the rendered transcript ends up containing that message's final text without a page reload; a UI test replays that order and fails without the fix.",
+    "cd ui && npx tsc --noEmit is clean and npx vitest run is green on the exact reviewed tree, and the full five-stage gate passes on it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "conversation-view",
+    "sse",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

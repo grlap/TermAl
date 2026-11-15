@@ -1,0 +1,29 @@
+{
+  "id": "01a1939d-4484-7811-9ff8-3e5f1e420259",
+  "external_ref": null,
+  "title": "A review child's slash-command arguments lose everything before a literal \" -- \" in the scope text",
+  "outcome": "Scope text passed to a /review-code child arrives intact even when it contains \" -- \" (as git diff path lists do), so a review round is not wasted on a lost file list.",
+  "acceptance": [
+    "The cause is located and named: which layer (the spawn API, argument tokenizing, or the command template) drops the text before \" -- \".",
+    "A test passes a scope containing \" -- \" through the same path a /review-changes round uses, and shows the child receives the complete text, both for a Codex child and for a Claude child.",
+    "Existing argument handling without \" -- \" is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "review-pair",
+    "slash-commands"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

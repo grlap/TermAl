@@ -1,0 +1,31 @@
+{
+  "id": "01a0f1e0-3b20-7d31-8a06-6c42efa495b8",
+  "external_ref": null,
+  "title": "Establish and preserve the Windows terminal Stop and timeout exit-code contract",
+  "outcome": "Establish and preserve the Windows terminal Stop and timeout exit-code contract",
+  "acceptance": [
+    "A recorded discriminating Windows check establishes Stop/timeout root exit status under the original and native cleanup paths.",
+    "The chosen terminal exit-code contract is preserved or explicitly concurred and documented, with a regression through production Stop/timeout cleanup."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "review-follow-up",
+    "terminal",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

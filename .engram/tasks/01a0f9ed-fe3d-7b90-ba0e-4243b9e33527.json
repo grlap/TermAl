@@ -1,0 +1,27 @@
+{
+  "id": "01a0f9ed-fe3d-7b90-ba0e-4243b9e33527",
+  "external_ref": null,
+  "title": "Restore cargo fmt cleanliness in the existing test-module formatting debt",
+  "outcome": "Apply a formatting-only correction to the 16 unchanged test modules reported by cargo fmt -- --check on master base 057c3895; do not add a launcher stage or alter product behavior.",
+  "acceptance": [
+    "cargo fmt -- --check reports no differences in the 16 attributed test modules, and their changes are formatting only."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "formatting"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0feaa-67fa-7bc3-80e0-a490c271ed2e",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate rustfmt-drift item, covered by w-a490c271ed2e.",
+  "completion": null
+}

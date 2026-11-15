@@ -1,0 +1,39 @@
+{
+  "id": "01a188dd-2eb5-7c30-b8b5-3af0aab58d4c",
+  "external_ref": null,
+  "title": "Enabling turn-gated control on the Engram project holds its reset fence for 20+ minutes and blocks every Engram-project session; tier-only rollback is refused 409",
+  "outcome": "A project settings change (enable or disable turn-gated control) reaches its applied or typed-refused outcome in bounded time regardless of how many sessions the project has, and removes its reset-specific hold on root sessions' queued prompts within that bound; eligible heads are then served by the existing capped scheduler under a documented fair policy, while sessions with unresolved authority, checkpoint or cleanup obligations or explicit pauses keep their existing holds. The supported tier-only rollback is always accepted or reports a typed, actionable reason, and an operator can see the reset's current phase without reading host stderr.",
+  "acceptance": [
+    "A cause note identifies, with file:line on build 92572b94, every reset phase whose cost scales with the project's session count (including target construction under StateInner and per-session fresh binds). A deterministic reproduction at a comparable session count (at least 3,850 sessions, synthetic clock and controlled transport) measures each such phase's scaled work before and after the fix, and states which phases could account for the incident's ~20-minute pre-bind and ~16-minute bind windows. Because the incident's host stderr was not retained, the exact historical phase is recorded as UNKNOWN rather than inferred, and the note shows that the new read-only phase projection makes a recurrence diagnosable without host stderr.",
+    "Deterministic tests with thousands of sessions show that the reset reaches its defined applied or typed-refused outcome and removes the reset-specific queue hold within the stated reset bound. Every otherwise eligible queued root head is registered with the existing capped scheduler by release; a root late in the initial order receives service under the documented fair scheduling policy. Tests separately establish the service bound for a fixed admitted backlog with bounded attempts, and show that retained authority/checkpoint/cleanup obligations and explicit pauses continue to hold the affected heads.",
+    "The tier-only rollback during an in-flight reset is either accepted (it supersedes or queues behind the reset with a bounded wait) or refused with a typed reason naming the phase and expected completion; covered by a test.",
+    "The current reset phase and elapsed fence time are visible through a supported read-only API projection, not only host stderr; covered by a test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "outage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 3a504107; exact-tree FULL02644563, Greg's direct landing word, later installed chain; old no-sighting evaluation hold only, gating now removed.",
+    "completed_at": "2026-11-08T19:22:11.029016200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "01a0e6d3-c669-71b2-b96a-1ec7bb8b9caa",
+  "external_ref": "tm-nrao.28",
+  "title": "Acceptance evaluator cannot read a cited note beyond 600 characters",
+  "outcome": "Reported by Engram::Opus (mailbox #206, 25 Sep). Delegation delegation-d399162d on w-f0ca1bb7ef80: criterion 2's only evidence was one 4,224-byte note (locator 08fa9353...), and the evaluator recorded insufficient_evidence because the brief cut the note. build_acceptance_evaluator_prompt shows each evidence entry flattened to one line and cut to MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS = 600, and the brief says 'Call no other tracker tool', so the evaluator cannot run 'show REF --note LOCATOR'. Preferred fix: allow a read-only 'engram work show REF --note LOCATOR' for locators the brief cites, and say so in the brief. Alternative: raise the per-entry cap within the 64 KiB prompt budget. Workaround meanwhile: cite a note of 600 characters or less that gives a workspace file path and its sha256.",
+  "acceptance": [
+    "The evaluator's brief never silently cuts a holder's evidence note: it carries notes in full within the brief's byte budget, newest first; a test covers a 4 KB note whose proof lies past its first 600 characters and is judged readable in the brief.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "Where the budget, the entry cap or the tracker's own window forces a cut or an omission, the brief marks that note as clipped or not shown, with its locator and the shown and total sizes where known, and the evaluation request's response tells the requester which notes were clipped or left out; tests cover the marker and the response."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6d3-c668-7032-a387-eb4b41f2d431",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Independent evaluation ee986812e911405a9e76e6740e826540 passed all3 criteria at current named snapshot21779da/source52949e5. Current credited acceptance_195passed validates whole4096-byte late-proof and clip/omission/response handling. Evaluator independently inspected historical exact reviewed-tree five-stage gate and digest for already-landed5d3e9cd. Evidence-only closeout: no source changes, new commit or install.",
+    "completed_at": "2026-10-03T04:11:28.707119800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

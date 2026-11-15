@@ -1,0 +1,27 @@
+{
+  "id": "01a0fe83-8e3a-7b02-b65c-773c661fc473",
+  "external_ref": null,
+  "title": "Keep sequenced session reads from advancing the global event revision",
+  "outcome": "Keep sequenced session reads from advancing the global event revision",
+  "acceptance": [
+    "Keep sequenced session reads from advancing the global event revision is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "conversation-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,51 @@
+{
+  "id": "01a14278-d7bc-7553-bfce-8591ae50da25",
+  "external_ref": null,
+  "title": "Report test-run registration failures by phase without changing durability semantics",
+  "outcome": "Independently land Phase2a registration diagnostics: preserve existing 5s/8s deadlines and ACK/admission/settlement behavior while making POST/GET HTTP, abort, transport and host writer-fence failures actionable. Dedicated durable registration writes and exact no-start settlement remain parent Phase2b.",
+  "acceptance": [
+    "Host registration failures log and report the phase, a concrete category, the total elapsed time, and the available writer progress, in bounded JSON. The 5 s and 8 s budgets are unchanged, and there is no ACK, admission or settlement behaviour change.",
+    "Deterministic Rust fence and real-HTTP launcher controls distinguish a POST abort, a POST HTTP error (including the host's reason), and a POST transport failure, and the same three for the GET. They prove that no test stage starts on a failure, and they preserve the exact durable-ACK positive path and idempotency.",
+    "The full five-stage gate passes on the exact landed input, and the independent review pair is clean."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "host-recording",
+    "registration",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14071-4dfa-78f1-9168-b37b4125dcb8",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed phase-specific registration diagnostics without changing 5s/8s budgets, durable ACK, admission or settlement. Exact tree be47eed0ccc191c060e59dc6fe2b07d755beb0fc passed all5gate stages and qualified Codex/Claude review; independent evaluation a49072c6a42e49819d396a707b49e428 passed3/3 at exact judged source. Opus2 confirmed fast-forward push and remote master e71db1c8 in mailbox-1a98a0b5 #2; pushed_at records that confirmation timestamp, not a separately observed Git transport timestamp.",
+    "completed_at": "2026-10-18T08:44:34.854490600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

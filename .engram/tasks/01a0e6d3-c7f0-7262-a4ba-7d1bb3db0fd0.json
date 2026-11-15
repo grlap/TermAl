@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7f0-7262-a4ba-7d1bb3db0fd0",
+  "external_ref": "tm-y9b2",
+  "title": "A withheld test check, or a report refused with its evidence, leaves no reason anywhere but the host's stderr",
+  "outcome": "Reported by Engram::Opus (2026-09-27, mailbox #331-#332) for session-7284.\nTwo turns ran host-observed tests, and each left a turn observation in Engram but no verification evidence of any kind:\n- Turn one, about 20:46:30-20:50:00Z: run 01a0e391, cargo test --lib -q, 1090 passed in 116 s.\n- Turn two, 20:50:05-20:51:42Z: run 01a0e397 (grant 01a0e4a1), cargo test --lib -q <one test>, 1 passed.\nBoth were in the Claude Bash tool, foreground, with cwd the main Engram checkout (workdir \\?\\C:\\github\\Personal\\Engram). The checkpoint cards show grant / sent_on_grant with nothing about checks.\n\nTwo TermAl mechanisms give exactly this result, and both are only eprintln'd to the host's stderr:\n(1) engram_resolve_turn_checks (src/engram_turn_checks.rs ~370) withholds a check whose start and end snapshots differ, meaning the source moved while it ran. Other writable sessions working in the same main checkout during the run would cause it.\n(2) engram_turn_report's fallback: when Engram refuses a report that carries evidence (a redacted summary, a bounds or basis mismatch), TermAl sends the report without checks.\nNeither reason reaches the session, the checkpoint card, or Engram. The live host has no log file (~/.termal holds none), so after the fact the cause cannot be recovered from here. The agent is left guessing and may rerun tests blindly.\nFix direction: record the withheld or fallback reason where it can be read. Options: on the checkpoint card, for example 'check withheld: source changed during the run' or 'evidence refused by Engram: <code>'; in the turn report as an indeterminate observation, if Engram's contract allows one; or both. Also consider a durable host log.\nRelated: tm-5gi4 phase 2, where a claim's named source root measures checks in the item's own worktree, avoiding case (1) from other sessions' writes to the main checkout.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d9-0ee9-7970-9657-3e6804fa2785",
+  "disposal_reason": "Superseded by w-3e6804fa2785 (PI-7): 99d262e landed the one-call form and the host lines for a recognised test that gets no check (hypothesis 4; evidence in note 93fe68ccf39a4b9ca03ca7716a0996a8); the outcome's two remaining paths — a check withheld at resolution because its snapshots differ, and a report refused with its evidence — are the silent no-credit paths that w-3e6804fa2785 delivers, together with w-9ebadc01e428 (overlap marking) and w-32d02e1dd7f6 (place outside the worktree).",
+  "completion": null
+}

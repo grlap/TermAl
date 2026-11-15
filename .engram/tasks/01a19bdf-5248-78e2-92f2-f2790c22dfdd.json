@@ -1,0 +1,38 @@
+{
+  "id": "01a19bdf-5248-78e2-92f2-f2790c22dfdd",
+  "external_ref": null,
+  "title": "w-3fe8 warning cleanup SET A: core production files (gating residue deletion, test-only isolation)",
+  "outcome": "w-3fe8 warning cleanup SET A: core production files (gating residue deletion, test-only isolation)",
+  "acceptance": [
+    "A source-only patch on baseline 728c0cc9 for exactly the SET A files in the integrator's #1902 (state.rs, engram_budget.rs, engram_connection_reset.rs, engram_host_adapter.rs, engram_causal_failure.rs, engram_turn_observations.rs, engram_source_observation_protocol.rs, engram_turn_checks.rs, engram_carried_checks.rs, engram_watcher_order.rs, engram_verification_bind.rs, engram_reported_ends.rs, engram_host.rs, engram_one_call.rs, acceptance_evidence_selection.rs, plus only the completed_at initializer in src/tests/engram_turn_checks.rs) is returned to Sol-03d4",
+    "Class A gating residue is physically deleted; class B test-only chains are put under cfg(test) consistently; there are no blanket allow attributes, no fake reads, and no restored executor; all new known-root, Runtime, placeholder and old-EO authority guards from the custody fix are preserved",
+    "Cross-set data-field dependencies are reported explicitly before the combined compile; no cargo"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 warning setA; a6ba5630 discloses root correction restoring live no-stage field after bad cfg. Cite corrected integrated source, not original uncompiled return as PASS.",
+    "completed_at": "2026-11-08T19:22:46.726358900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

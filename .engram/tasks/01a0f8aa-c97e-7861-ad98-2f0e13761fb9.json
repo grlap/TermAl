@@ -1,0 +1,35 @@
+{
+  "id": "01a0f8aa-c97e-7861-ad98-2f0e13761fb9",
+  "external_ref": null,
+  "title": "Preserve eligibility refusals when the initial evidence basis is legitimately absent",
+  "outcome": "Preserve eligibility refusals when the initial evidence basis is legitimately absent",
+  "acceptance": [
+    "An acceptance request with supported initial show receipts lacking acceptance or evidence basis refuses with the documented eligibility conflict rather than a tracker-failure 502, with request-path coverage for no active run, no criteria and non-evaluated policy."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "repeated-problem"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f464-f38b-7f82-a402-e57a7f7e8da0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

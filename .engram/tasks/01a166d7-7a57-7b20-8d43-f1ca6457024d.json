@@ -1,0 +1,32 @@
+{
+  "id": "01a166d7-7a57-7b20-8d43-f1ca6457024d",
+  "external_ref": null,
+  "title": "Remove foreign-handle dependence from the Windows delete-transition test fixture",
+  "outcome": "The native state-path deletion-transition fixture distinguishes an owned-handle release from possible foreign filesystem handles, without weakening product guard assertions, adding blind retries or inflating timeouts.",
+  "acceptance": [
+    "Remove foreign-handle dependence from the Windows delete-transition test fixture is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "gate-failure",
+    "pre-existing",
+    "review-followup",
+    "test-runner",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16534-0d24-7881-8ebe-11f5eab5c235",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a17e09-46f7-7832-b4a9-f1893ed78084",
+  "external_ref": null,
+  "title": "Attribute 18 Mac Rust gate failures on 86c882dc and propose the minimal repair",
+  "outcome": "Individually classify all 18 failures from the Mac full gate on 86c882dc, compare with the earlier 7d5116e3 Mac gate, and send Fable2 an evidence-based minimal fixture-only fix proposal before edits. Preserve the original gate and separate confirmed causes, hypotheses and unavailable evidence.",
+  "acceptance": [
+    "Every one of the 18 Rust failures on Mac full gate test-1146909c is mapped to its exact test, source assertion, observed values and a supported cause classification or explicit unresolved question; earlier 7d5116e3 Mac evidence establishes whether each failure predates the fixture change, or the unavailable comparison is stated.",
+    "The coordinator receives the per-failure classification, provenance and minimal fix proposal before any source edit, with Windows/Linux implications and preserved assertions. No product change, test weakening, Mac-only skip, test rerun or quality gate is performed as part of this read-only diagnosis."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "diagnosis",
+    "gate-failure",
+    "macos",
+    "portability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

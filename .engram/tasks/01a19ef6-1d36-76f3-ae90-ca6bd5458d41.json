@@ -1,0 +1,28 @@
+{
+  "id": "01a19ef6-1d36-76f3-ae90-ca6bd5458d41",
+  "external_ref": null,
+  "title": "Landing gate: add a non-Windows Rust compile check so cfg(unix)-only breakage is caught before landing",
+  "outcome": "A Rust change that breaks cfg(unix) or cfg(not(windows)) code cannot land from Central without a Linux or macOS compile failing first. The landing gate, or a mandatory pre-landing check, runs `cargo check --bin termal --tests` on a non-Windows target.",
+  "acceptance": [
+    "The maintained landing procedure (test launcher or documented pre-landing step) includes a non-Windows `cargo check --bin termal --tests` on the exact input, e.g. through WSL Ubuntu on Central (memory central-wsl-linux-checks) or a remote runner.",
+    "Reintroducing a cfg(unix)-only compile error such as the w-91c2 E0282 makes that check fail."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-platform",
+    "gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1a1ec-10ea-7360-888a-4df8538fb52a",
+  "external_ref": null,
+  "title": "A completed review child's runtime process keeps a handle on its read root, so the worktree directory cannot be removed after review",
+  "outcome": "Once a delegation child (reviewer) has completed and its result is settled, TermAl releases every process handle and working directory it held in the child's read root, so the owner can remove that worktree with ordinary git worktree remove and directory deletion.",
+  "acceptance": [
+    "For the reported case, the process holding the empty root C:/github/Personal/Engram/.worktrees/launcher-posix-stop-204398e-12325 is identified (for example a lingering Codex/Claude/Kimi app-server or shell of children 16068/16069/16083/16084/16085, or another host-owned process) through supported host diagnostics, and the cause is classified.",
+    "A completed delegation's runtime processes are terminated or moved off the child's root when the delegation settles (or the host exposes a supported release action), with a test showing the root can be removed after completion; the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "process-lifecycle",
+    "worktree-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

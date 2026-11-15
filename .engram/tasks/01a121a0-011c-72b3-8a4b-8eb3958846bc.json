@@ -1,0 +1,27 @@
+{
+  "id": "01a121a0-011c-72b3-8a4b-8eb3958846bc",
+  "external_ref": null,
+  "title": "Test the tab hover card's Waiting state and the termal_list_sessions status precedence for Approval, Stopping and Error",
+  "outcome": "buildSessionTooltipRows has unit cases for an idle session with a wait (State: Waiting plus a \"Waiting for\" row) and an active session with a wait (State: Active, row kept). The termal_list_sessions status test covers Approval, Stopping and Error keeping precedence over waiting.",
+  "acceptance": [
+    "Test the tab hover card's Waiting state and the termal_list_sessions status precedence for Approval, Stopping and Error is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "session-status",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

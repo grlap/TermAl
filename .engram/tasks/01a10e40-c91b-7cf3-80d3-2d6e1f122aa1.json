@@ -1,0 +1,28 @@
+{
+  "id": "01a10e40-c91b-7cf3-80d3-2d6e1f122aa1",
+  "external_ref": null,
+  "title": "A test-run completion overwrites a parked session's preview, so the session card no longer says why its queue is paused",
+  "outcome": "A test-run completion overwrites a parked session's preview, so the session card no longer says why its queue is paused",
+  "acceptance": [
+    "While a session's queue is paused (queuePaused true) for a Resume-only reason, a later test-run completion or other preview update does not hide the pause reason: the session card or list keeps showing that the queue is paused and why, until the queue resumes.",
+    "A test drives a parked session followed by a test-run completion and asserts that the pause reason remains visible."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "session-status",
+    "visibility"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

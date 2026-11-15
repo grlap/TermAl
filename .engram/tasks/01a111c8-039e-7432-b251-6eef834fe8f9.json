@@ -1,0 +1,30 @@
+{
+  "id": "01a111c8-039e-7432-b251-6eef834fe8f9",
+  "external_ref": null,
+  "title": "Carried-check watcher fence: exempt the main checkout's Git-ignored .logs/ and .evidence/ like .tmp/, and refresh the stale scratch-directory comment and host-architecture §2.9",
+  "outcome": "A log or evidence write under the main checkout's .logs/ or .evidence/ (Greg's raw-artifact direction, adopted in CLAUDE.md/AGENTS.md by w-5bc0bc7922b4), or the coordinator's removal sweep there, no longer fences a full gate carried in that checkout; the exemption stays exact-case and bound to Git-ignored, untracked directories at the worktree root; the doc comment on ENGRAM_WORKTREE_SCRATCH_DIRECTORY and docs/features/host-architecture.md §2.9 describe the three directories.",
+  "acceptance": [
+    "engram_is_worktree_scratch (src/engram_carried_checks.rs) and the fence path that consults it treat `.logs` and `.evidence` at a worktree's root exactly as `.tmp`: a change under either, or the directory itself, does not fence a carried check of that worktree; a sibling directory of another name still does; comparison stays exact-case.",
+    "A test covers each new directory: a change under WORKTREE/.logs/... and WORKTREE/.evidence/... is exempt, a change under WORKTREE/.logsx/ or a nested worktree's own root is not; run as a focused launcher check in the named worktree.",
+    "The doc comment at the constant no longer says CLAUDE.md and AGENTS.md send logs to `.tmp`; docs/features/host-architecture.md §2.9 names the three exempt directories and the condition (Git-ignored, nothing tracked) they must meet."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "evidence-retention",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

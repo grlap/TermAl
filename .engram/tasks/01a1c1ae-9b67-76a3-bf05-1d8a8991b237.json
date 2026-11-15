@@ -1,0 +1,30 @@
+{
+  "id": "01a1c1ae-9b67-76a3-bf05-1d8a8991b237",
+  "external_ref": null,
+  "title": "Execution observations stop after a run's named root moves, so done refuses unconfirmed_declaration on a clean evaluated commit",
+  "outcome": "After a session's named root moves to a new worktree or commit, the host keeps delivering that run's source observations for the new root, so a clean evaluated commit can be completed.",
+  "acceptance": [
+    "The cause is identified from host records and source: why observations for the run stopped at the old root and nothing was recorded for the new one.",
+    "After a root move within one run, observations for the new root are delivered on later turns, shown by a behaviour test that fails before the fix and passes after.",
+    "Engram child item 778f's case, or an equivalent live case, completes with done on its clean evaluated commit without re-running the evaluation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-5623d2432d68",
+  "external_ref": "tm-m6r1.35",
+  "title": "Work memories: propagate continuation invalidation across HTTP",
+  "outcome": "Consolidated Codex reviewer session-7009 Low at src/work_memories.rs:241. Malformed continuation receipts (duplicate keys within a page, empty page with a next cursor, repeated next_after) return 502, which the UI treats as transient transport failure and retains prior rows/bodies contrary to the documented invalidation contract. Distinguish invalid receipt errors from transient transport errors across HTTP; discard only invalidated source data. Include actual HTTP-shape UI/route regression and preserve partial lists for genuine 429/502 transport failures. Merge non-progress continuation test follow-up here.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

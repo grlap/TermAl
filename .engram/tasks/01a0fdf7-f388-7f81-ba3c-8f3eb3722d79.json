@@ -1,0 +1,29 @@
+{
+  "id": "01a0fdf7-f388-7f81-ba3c-8f3eb3722d79",
+  "external_ref": null,
+  "title": "Eighteen Rust test files on master are not cargo-fmt clean",
+  "outcome": "Eighteen Rust test files on master are not cargo-fmt clean",
+  "acceptance": [
+    "`cargo fmt -- --check` reports no diff for the listed src/tests files on master.",
+    "The fix is a formatting-only commit, with no behaviour change, and the full gate passes on it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "formatting",
+    "low",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0feaa-67fa-7bc3-80e0-a490c271ed2e",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate rustfmt-drift item, covered by w-a490c271ed2e.",
+  "completion": null
+}

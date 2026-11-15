@@ -1,0 +1,29 @@
+{
+  "id": "01a178a7-6f38-7b33-8414-b441bfad6af0",
+  "external_ref": null,
+  "title": "Sending to a session by display name is sometimes refused 'mailbox alias inventory is unavailable' on 0fb7b034",
+  "outcome": "termal_send_to_session with a valid unique local display name resolves reliably, or refuses with an accurate, actionable cause. It never refuses a resolvable unique local name because an alias inventory is transiently unavailable.",
+  "acceptance": [
+    "A note on master identifies, with file and line, where 'mailbox alias inventory is unavailable' is produced, under what condition the inventory is unavailable, and whether the P0 native-addressing change (0fb7b034) introduced or exposed it. It explains why a name send at about 13:41Z succeeded while one at about 14:38Z was refused.",
+    "Fix criteria are proposed separately and concurred by the coordinator; no implementation under Greg's STOP without an exemption."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "addressing",
+    "mailbox",
+    "post-p0"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

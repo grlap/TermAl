@@ -1,0 +1,41 @@
+{
+  "id": "01a19cb6-c18c-7f51-a732-681c043c9121",
+  "external_ref": null,
+  "title": "Represent silent Unknown harness turn endings without an error argument",
+  "outcome": "Fable2348/message3ea8340a-d97a-497a-8cd2-242ddcc04343 assigns separate T source return onTREE92a1830d: shared HarnessTurn::end(Outcome::Unknown) passesNone, preserving six names/Unknown oracle/matrix. No Failed variant; existing ordinary_terminal_callbacks coversSome→Failed. Fresh named root, no Cargo.",
+  "acceptance": [
+    "Claim/name own fresh source root in a separate turn onTREE92a1830d; edit only src/tests/engram_all_harness_ordinary_turns.rs to passNone for intended silent Outcome::Unknown end, preserving all names/oracles/matrix.",
+    "Rationale cites ordinary_terminal_callbacks_report_their_actual_outcome_once Some→Failed and None→Unknown controls; no new Failed variant or product semantics added.",
+    "Return separate immutable tree, before/after blob and scoped patch to Sol-03d4 cc Fable2; no Cargo/compiler/tests/parser/formatter/linter/live/agents/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "test-port"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Separate source-only one-argument Unknown fixture return TREE765b1dff handed to integrator cc Fable; no validation or product semantics claim.",
+    "completed_at": "2026-11-02T14:48:00.501262100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a19df0-3d67-7c81-8908-83d0f1e67826",
+  "external_ref": null,
+  "title": "Switching between session tabs does not restore the transcript position exactly (Greg-reported)",
+  "outcome": "After switching away from a session tab and back, its transcript shows exactly the position it had (same anchored message and offset, or still following the tail if it was), with no visible jump. Greg can check the fix in the UI before it lands.",
+  "acceptance": [
+    "Actual session A->B->A preserves the same resident message and signed viewport offset within 0.5px through cold mount and late measurements, including a deep heavy-card offset.",
+    "FOLLOW stays FOLLOW and genuine wheel/key/FOLLOW/tab navigation cancels obsolete restore.",
+    "Focused UI regressions pass on the exact candidate and Greg can inspect the dedicated 4174 preview before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "transcript-scroll",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

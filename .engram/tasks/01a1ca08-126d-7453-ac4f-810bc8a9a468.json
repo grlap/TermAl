@@ -1,0 +1,33 @@
+{
+  "id": "01a1ca08-126d-7453-ac4f-810bc8a9a468",
+  "external_ref": null,
+  "title": "Integrate combo52 on cfc4516f: 03d4 cff10811 (w-97ace4ae600c closing-job diagnostics), direct child of combo51",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit cff10811ff290762688a776eb35a8f1699ccbbd5 (tree 8f797fb2650bfa4797711625d1dc2e0f1dd07e11) is on origin/master, where master was moved to it by a fast-forward from cfc4516f0cfa32c60193bba399b7adc34fbaa563.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 8f797fb2 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the foundation whole-4 pair on 9e8aaf76 (Codex delegation 4e435dcc, Claude delegation c8bfbb13), whose Claude Medium (UTC-offset symmetry) is fixed, and the scoped confirmation pair on cff10811 (Codex delegation 188a7945, Claude delegation b017d021 attempt 2), which found none.",
+    "The release binary built from tree 8f797fb2 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo52 landed: master fast-forwarded cfc4516f..cff10811 (tree 8f797fb2) and pushed, verified on origin at 10:36:54Z. FULL gate: DL560 test-334011c4 on test ref tree 8f797fb2, all stages passed (Rust 7607/0/113, Vitest 5090/5090), equal source ids. Review: foundation pair Medium fixed, scoped pair clean. Installed on DL560 (bc9d71e5, previous kept as termal.0b9bb345.bak) and Central (d120240c, previous kept as termal-before-cff10811-55d082a5.exe), no restart. Independent evaluation (Codex 17417, delegation 049149df) passed 3/3.",
+    "completed_at": "2026-11-11T10:56:40.210131Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

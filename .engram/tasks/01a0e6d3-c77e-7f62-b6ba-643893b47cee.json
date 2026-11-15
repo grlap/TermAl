@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c77e-7f62-b6ba-643893b47cee",
+  "external_ref": "tm-uw7j.5",
+  "title": "Make Engram fence release ordering callback-safe",
+  "outcome": "After a successful deferred authority rotation, the code clears per-runtime stop fences before releasing the project reset fence. A terminal callback can land in that gap, fail binding/checkpoint access behind the project fence, then complete the turn while leaving its Engram grant open. Release the project fence while runtime callbacks remain fenced, then clear/take and replay deferred callbacks under exact token+generation ownership.",
+  "acceptance": [
+    "Both settings branches release the project reset fence before runtime-stop callback replay; no callback can observe both an absent runtime-stop owner and an owned project fence; a deterministic gated regression covers the post-revoke/pre-project-release interleaving."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

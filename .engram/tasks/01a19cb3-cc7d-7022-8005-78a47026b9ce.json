@@ -1,0 +1,40 @@
+{
+  "id": "01a19cb3-cc7d-7022-8005-78a47026b9ce",
+  "external_ref": null,
+  "title": "Diagnose D1 structural component-seam failure in C2 diagnostic",
+  "outcome": "Identify exact forbidden file/function reference and minimal behavior-preserving component-seam correction.",
+  "acceptance": [
+    "Read5f8 structural panic and complete governing structural test; identify exact failing file/function against92a input and D1/equality deltas.",
+    "Trace existing EngramHost public seam and report minimal compliant behavior-preserving correction without weakening the structural test.",
+    "Return read-only diagnosis toFable within15min, ccSol03d4; no edits/Cargo/compiler/test/retry/credit claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "architecture",
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-diagnosis"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only diagnosis delivered within15min to Fable2 and Sol-03d4: exact structural offender is U1 session_crud direct carried-check helper call, not D1/equality. Proposed thin EngramHost facade preserving behavior and structural test. Fable1947 independently confirms and assigns correction to Opus3; stood down. No edits/build/tests/retry/verification credit.",
+    "completed_at": "2026-11-02T14:43:29.777454300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

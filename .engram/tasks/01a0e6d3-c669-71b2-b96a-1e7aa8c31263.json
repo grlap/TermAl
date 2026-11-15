@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c669-71b2-b96a-1e7aa8c31263",
+  "external_ref": "tm-nrao.23",
+  "title": "Add project acceptance evaluation settings and recorded-result UI",
+  "outcome": "Greg authorized Termal::Codex to implement handed-off UI slice: fast control-policy read, project evaluator defaults without runtime reset, operator-only CAS policy editor with explicit confirmation, and evaluator result cards. Verify real CLI success/refusal shapes on disposable stores before fixtures. Parent owns implementation, tests and dual review.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c668-7032-a387-eb4b41f2d431",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-DONE. The settings UI landed in 8533236 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

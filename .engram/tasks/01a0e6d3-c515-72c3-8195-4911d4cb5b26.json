@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c515-72c3-8195-4911d4cb5b26",
+  "external_ref": "tm-gvsj",
+  "title": "Acceptance tests assume the test temp folder is not inside a Git worktree",
+  "outcome": "Follow-up from the tm-5gi4 phase 1 review pair on input c6140c01 (Claude Low, 2026-09-27; landed as acd7740). It was also on Opus's own list of candidates.\n\nFour assertions rely on 'the fixture's workdir is no Git worktree':\n- the unmeasured notice (src/tests/acceptance_evaluation.rs around line 1725);\n- the joined notice (around line 4717);\n- 'no sourceFingerprint' in the same-session request test;\n- acceptance_submit_declares_nothing_when_the_revision_cannot_be_taken_again.\n\nengram_worktree_root_path climbs to any ancestor that holds .git. If TERMAL_TEST_USER_TEMP or TEMP points inside a repository (which the repo's keep-scratch-under-.tmp rule invites), the capture measures the whole enclosing tree. That is slow, and it flips these assertions: the submit test gets a 409 instead of 'declares nothing'.\n\nFix: build the unmeasured case deterministically, not by where the temp folder is. For example, use a fixture worktree whose index holds a gitlink, or one with an untracked nested repository; both fail closed. No test should depend on the temp root's ancestry.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

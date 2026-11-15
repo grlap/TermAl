@@ -1,0 +1,30 @@
+{
+  "id": "01a18a20-9551-77b2-87e8-f21a0f3c1777",
+  "external_ref": null,
+  "title": "Native test run wait resume prompt reports stage and preflight state totals and a before/after fingerprint comparison",
+  "outcome": "The resume prompt a native test run wait delivers states, per run, totals of stage and preflight states (passed, failed, interrupted, running, unrun, unknown) and whether the before and after fingerprints matched, mismatched or are unknown, so an agent can report a run without reading its summary separately; no per-test schema is added.",
+  "acceptance": [
+    "Each run in a native test-run wait resume prompt reports separate stage and preflight totals for passed, failed, interrupted, running, unrun and unknown, derived from that same run's available results. Missing or unreadable results are stated as unknown rather than invented successful or complete totals; no per-test schema is added.",
+    "Each run's resume section states its recorded before/after input fingerprint comparison as matched when both fingerprints are available and equal, mismatched when both are available and differ, or unknown when either is unavailable. This diagnostic never invents a run verdict or verification credit.",
+    "Deterministic regressions cover mixed stage/preflight states, unavailable results, matched/mismatched/unknown fingerprints, and prompt-size limits. Existing native wait any/all settlement, identity fences, Stop and exactly-once delivery remain unchanged, and the added mandatory fields are included in the existing 48 KiB admission bound and 64 KiB final prompt cap."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "native-wait",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

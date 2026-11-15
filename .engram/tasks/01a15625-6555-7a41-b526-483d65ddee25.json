@@ -1,0 +1,49 @@
+{
+  "id": "01a15625-6555-7a41-b526-483d65ddee25",
+  "external_ref": null,
+  "title": "Cover remaining Binding transport outcome branches with authenticated regressions",
+  "outcome": "Add direct authenticated Binding coverage for replay-counter refusal, handler deadline expiry, sender post-dispatch local 423 and signed status mapping while preserving the original operation key/reservation; do not change production limits or weaken MAC admission.",
+  "acceptance": [
+    "Authenticated tests directly distinguish replay/deadline/post-dispatch uncertainty from proven pre-admission refusals and assert original operation-key/reservation retention.",
+    "Tests exercise the production Binding RPC/MAC path with controlled phases; no unverified response is settled as an authenticated application result."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "low",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "remote-mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a155a8-a901-7301-bd37-350f9926899a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

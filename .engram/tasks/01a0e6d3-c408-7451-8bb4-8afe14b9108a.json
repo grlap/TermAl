@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8afe14b9108a",
+  "external_ref": "tm-7cu.45",
+  "title": "Append across a message gap discards the visible transcript",
+  "outcome": "Greg observes the whole conversation visible, then a new message arrives and all earlier cards disappear. Source: live-updates.ts applyMessageCreatedDeltaToRetainedTranscript replaces a nonempty disjoint resident window with one new tail message and returns applied without requesting repair. Preserve the resident window and its global origin, request existing coalesced targeted tail repair, and retain empty-window initial materialization. Do not alter scroll intent, CSS, or virtualizer to mask data loss. User authorizes implementation directly; no npm tests.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 829d832 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

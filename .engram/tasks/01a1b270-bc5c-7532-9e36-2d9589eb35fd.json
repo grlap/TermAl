@@ -1,0 +1,37 @@
+{
+  "id": "01a1b270-bc5c-7532-9e36-2d9589eb35fd",
+  "external_ref": null,
+  "title": "Windows FULL abort 0xc0000409: federation_m4 round-four test times out and FederationControlGuard::drop panics on a poisoned lock during unwind",
+  "outcome": "Windows FULL abort 0xc0000409: federation_m4 round-four test times out and FederationControlGuard::drop panics on a poisoned lock during unwind",
+  "acceptance": [
+    "The cause of the missed release or receive timeout in federation_m4_round_four_past_writer_receive_commits_once_and_shutdown_joins_before_persist is identified from evidence and fixed, or classified with evidence, with no retry, larger timeout or weakened assertion.",
+    "FederationControlGuard::drop (and any similar guard on this path) cannot panic while already unwinding, so an assertion failure reports as a normal test failure, not an abort; a test covers the poisoned-lock-during-unwind case.",
+    "A Windows FULL that includes the fix passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "test-gate",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed the demonstrated test shutdown scheduling dependency and made exact-owner federation revocation destructors tolerate poisoned locks during unwind without clearing poison or admitting authority. Fresh seven-path Codex/Claude R2 has no Medium+; two Low followups filed. Exact Windows FULL test-d2a6eb02 PASS, clean eligible, stable before/after fingerprint47b74769; original failed gate, controlled RED, focused69PASS, review packets and all25 final-run files preserved with provenance. Landed/pushed7b921438 by Opus2, independently matching local master/origin refs; installation pending owner, no restart claim. All3criteria linked; current temporarily disabled evaluation policy applied, no invented verdict.",
+    "completed_at": "2026-11-06T23:36:25.273241700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a10237-60da-7fe3-aa76-e919fafd72ad",
+  "external_ref": null,
+  "title": "The live retained-bind test reads engram_budget_clock directly, bypassing the clock-boundary slice's single snapshot reader",
+  "outcome": "src/tests/engram_root_recovery_live.rs reads the budget clock through StateInner::engram_budget_clock_snapshot(), honouring the one-reader contract w-8f9988de4cb3's slice 1 documents, so a later fixture clock choice fails at once there too.",
+  "acceptance": [
+    "src/tests/engram_root_recovery_live.rs no longer reads inner.engram_budget_clock directly; it uses engram_budget_clock_snapshot().",
+    "The live suite's retained-bind test still compiles and its behaviour is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

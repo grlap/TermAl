@@ -1,0 +1,30 @@
+{
+  "id": "01a11ed6-acf5-74c1-8368-b7942ad8ae28",
+  "external_ref": null,
+  "title": "A Telegram-originated turn completes but its final answer never reaches Telegram, which shows only \"turn complete\"",
+  "outcome": "Every turn started from a Telegram message ends with the session's final answer delivered to that Telegram conversation, or a visible, actionable delivery-failure notice there. The outbound delivery attempt and its result are recorded and correlated with the session, conversation and turn.",
+  "acceptance": [
+    "Diagnose, with source locators and the host's logs or records for this occurrence, why session-6219's final answer after the Telegram message \"Ok. Co dalej?\" (about 20:58 local, 2026-10-08 = 03:58Z 2026-10-09) wasn't delivered, while Telegram showed \"turn complete\" at 20:57. Say whether the restart at 03:54:38Z (Telegram bridge reconnect) is involved.",
+    "The outbound final-delivery event and its result (sent, failed with reason, or skipped with reason) are persisted and correlated with the session, the Telegram conversation and the turn.",
+    "A completed turn whose final answer wasn't delivered produces a visible Telegram notice with the reason, never a bare \"turn complete\"; a test covers the failure path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delivery",
+    "host-recording",
+    "telegram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

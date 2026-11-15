@@ -1,0 +1,29 @@
+{
+  "id": "01a1d7f9-0b80-7311-b5fd-7fdc470dd2af",
+  "external_ref": null,
+  "title": "Assess adopted-Claude early observation close against terminal projection and Stop fences",
+  "outcome": "An adopted-Claude observation close and terminal lifecycle remain consistent when process cleanup fails or Stop races.",
+  "acceptance": [
+    "A behavioral reproduction determines the expected report and session outcome when the adopted-Claude early close precedes a rejected terminal projection or a Stop race, and the chosen behavior is documented or corrected without granting source credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "execution-observability",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6d8-c66c-7541-b4ce-3186172accdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

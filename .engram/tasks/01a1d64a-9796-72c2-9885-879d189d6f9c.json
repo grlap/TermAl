@@ -1,0 +1,32 @@
+{
+  "id": "01a1d64a-9796-72c2-9885-879d189d6f9c",
+  "external_ref": null,
+  "title": "Edge page demand still fires at the extent ends while the position seek owns an estimate-only viewport",
+  "outcome": "With an estimate for unloaded history above or below the resident window, the previous-page and next-page demands never fire while the viewport centre lies inside that estimate, including within 160 px of the physical ends of the scroll extent. Only the position seek requests history there, so adjacent-page loads no longer race a position request. Without an estimate, behaviour is unchanged.",
+  "acceptance": [
+    "In useInitialActiveTranscriptMessages, the absolute top check (scrollTop <= 160) and the absolute bottom check (within 160 px of the extent end) apply the resident-centre condition whenever the corresponding estimate (historyEstimatePxRef before/after) is non-zero. They keep the legacy behaviour exactly when it is zero.",
+    "Behavioural tests: a wheel landing within 160 px of the physical top with 900 older messages estimated above makes no previous-page request, and the mirror case at the bottom makes no next-page request. The existing 'explicit upward demand' and edge-band tests stay green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "greg-reported",
+    "regression",
+    "scroll",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d626-f425-7c63-9d04-84132b835175",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

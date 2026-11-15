@@ -1,0 +1,28 @@
+{
+  "id": "01a0fe77-698e-7662-bcd0-86aa1599e70c",
+  "external_ref": null,
+  "title": "Test recovery-notice removal when the admitted store or work changes",
+  "outcome": "A production prepare/handoff witness fails if stale recovery status for work A survives a new admission for work B or no naming identity, while B's immutable opening diagnostic remains.",
+  "acceptance": [
+    "Test recovery-notice removal when the admitted store or work changes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

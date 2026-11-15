@@ -1,0 +1,27 @@
+{
+  "id": "01a10cc9-be89-70a2-8024-7d321b036b02",
+  "external_ref": null,
+  "title": "A delegated child whose cleanup failed shows no Stop/retry control in the composer or delegated footer, although the backend accepts a retry Stop on that error state",
+  "outcome": "An operator can retry a failed or ambiguous child cleanup from the UI: the session composer and the delegated-child footer offer the retry when, and only when, the backend reports the cleanup-retry capability for that session.",
+  "acceptance": [
+    "A delegated child whose cleanup failed shows no Stop/retry control in the composer or delegated footer, although the backend accepts a retry Stop on that error state is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "needs-greg-approval",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

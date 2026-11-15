@@ -1,0 +1,50 @@
+{
+  "id": "01a12863-b6a8-76a3-99b6-4cdbaeb1d27b",
+  "external_ref": null,
+  "title": "Launcher self-test \"a failed or hung test keeps its fixture directory\" fails with EPERM removing its own fixture directory under gate load (cwd inside the directory being removed)",
+  "outcome": "The test removes its fixture directory reliably on a pass, without depending on how quickly processes that had their working directory inside it finish tearing down, and without retries, longer timeouts or a weakened assertion.",
+  "acceptance": [
+    "The holder's note classifies the EPERM in run test-b2b5d79c (below) with evidence: which process held the fixture directory (for example the node --test file subprocess or the barrier child, whose cwd was the fixture base), and why the test's existing waits (the runner's close, processGone of the barrier pid) did not cover it. Any rejected hypothesis is recorded with its discriminating evidence.",
+    "The fix removes the cause (for example, spawning the fixture runner and its children with a working directory outside the directory being removed, or waiting on every process that holds it); a test or deterministic reproduction shows the removal succeeds while such a process is still exiting, with no retry loop, timeout increase or assertion relaxation.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "test-defect",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed launcher fixture cleanup and added a deterministic live-child witness. Passed the five-stage full gate and independent acceptance evaluation; committed as 765a9a5a42d11558d05de1cfa782f61882a2b0dc.",
+    "completed_at": "2026-10-11T02:21:57.634853800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

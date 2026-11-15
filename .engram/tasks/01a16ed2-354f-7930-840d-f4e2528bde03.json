@@ -1,0 +1,28 @@
+{
+  "id": "01a16ed2-354f-7930-840d-f4e2528bde03",
+  "external_ref": null,
+  "title": "Engram project-reset release no longer runs the never-woken mailbox reconcile for affected sessions with an empty queue",
+  "outcome": "A project-reset fence release still recovers mailbox wakes the store recorded but never queued, for every session the fence held, without preparing Engram context for sessions with nothing to start.",
+  "acceptance": [
+    "Engram project-reset release no longer runs the never-woken mailbox reconcile for affected sessions with an empty queue is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "dispatch",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

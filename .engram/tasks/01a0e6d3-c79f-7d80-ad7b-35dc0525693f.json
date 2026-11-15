@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c79f-7d80-ad7b-35dc0525693f",
+  "external_ref": "tm-v9r.19",
+  "title": "Recover deterministically from transcript history protocol errors",
+  "outcome": "The history-page request path reports protocolError outcomes as a toast but does not invalidate the resident window or schedule an authoritative bounded resync. The user can remain on stale or incompatible transcript state after a server/client paging contract mismatch.",
+  "acceptance": [
+    "A history protocol error produces one deterministic recovery outcome: invalidate the affected paging authority and perform a bounded tail/state resync, or transition to an explicit retryable error state. Avoid recovery loops and duplicate requests. Add coverage for protocol error during older, newer, start, and tail demands as applicable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

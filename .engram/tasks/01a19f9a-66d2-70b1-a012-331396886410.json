@@ -1,0 +1,32 @@
+{
+  "id": "01a19f9a-66d2-70b1-a012-331396886410",
+  "external_ref": null,
+  "title": "Register the UI-switch CDP regression tests in the maintained Node helper gate",
+  "outcome": "Register the UI-switch CDP regression tests in the maintained Node helper gate",
+  "acceptance": [
+    "scripts/ui-switch-cdp.test.mjs is included in the maintained helperTestFiles stage, or its deliberate focused-only coverage policy is explicitly documented with coordinator concurrence.",
+    "Relevant launcher configuration tests pass without weakening existing helper coverage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "greg-reported",
+    "performance",
+    "review-low",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f45-4449-7d20-86da-ee3a64e5d7d0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

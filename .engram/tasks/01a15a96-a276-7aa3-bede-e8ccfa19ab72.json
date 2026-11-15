@@ -1,0 +1,28 @@
+{
+  "id": "01a15a96-a276-7aa3-bede-e8ccfa19ab72",
+  "external_ref": null,
+  "title": "A remote proxy that writes a central worktree under an alias path is not fenced for focused checks",
+  "outcome": "A remote proxy session that can write a central worktree under a spelling the central host does not read as that worktree is counted as a possible writer there for focused checks too, or such writes are caught by watcher coverage for focused checks. Examples: a WSL /mnt/c/... workdir reached over SSH to the central machine, or a share mounted under another path. Credit is never given to a focused check such a proxy may have written under.",
+  "acceptance": [
+    "A remote proxy that writes a central worktree under an alias path is not fenced for focused checks is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "credit",
+    "federation",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

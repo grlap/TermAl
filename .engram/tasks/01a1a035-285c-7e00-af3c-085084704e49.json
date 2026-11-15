@@ -1,0 +1,30 @@
+{
+  "id": "01a1a035-285c-7e00-af3c-085084704e49",
+  "external_ref": null,
+  "title": "The unconfirmed-root notice for unresolved earlier runs names the retained run, claim and Engram error (recovery_reason)",
+  "outcome": "When a turn's source root is unconfirmed because an earlier run's root authority is unresolved, the notice names which retained run and claim are unresolved and the recorded reason (the Engram error or local failure), bounded and redacted. The cause of each occurrence can then be read from the notice, without opening live state.",
+  "acceptance": [
+    "The WorkRunsUnresolved sentence appends the work's recorded recovery_reason (run id, claim and error class or message), bounded in size and with no secrets.",
+    "A focused test asserts the extended sentence for an unresolved-run history, the existing unconfirmed-reason tests pass, and the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "engram-host-adapter",
+    "execution-observability",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19ef7-c9f6-75a2-a139-426dcbda4467",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

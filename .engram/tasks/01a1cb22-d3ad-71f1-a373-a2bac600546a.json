@@ -1,0 +1,31 @@
+{
+  "id": "01a1cb22-d3ad-71f1-a373-a2bac600546a",
+  "external_ref": null,
+  "title": "Pin Engram acceptance evidence for an observation under a held but unfocused claim",
+  "outcome": "The producer-side acceptance contract for an observation retained under its original held claim after focus moves is explicit and version-bound, separately from TermAl's single-association fixture evidence.",
+  "acceptance": [
+    "Record either a version-bound Engram producer contract that accepts the exact historical claim/run/root cut independently of current focus, or controlled disposable-Engram evidence of that behavior, with the limits of the evidence stated.",
+    "Reconcile the whole-seven review Low against that contract or observation evidence; preserve the distinction between an accepted historical observation and test, acceptance or grant credit, without querying a live store."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "closing-job",
+    "cross-project",
+    "engram-observation",
+    "named-root",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c9f9-a6f9-7c82-8c53-410a50fc32b4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

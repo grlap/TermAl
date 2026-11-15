@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c554-7ff3-8f13-5a5bac2602b4",
+  "external_ref": "tm-ky3h",
+  "title": "Log a missing Engram source basis once per workspace, not twice per turn",
+  "outcome": "Found by the tm-winf step-1 round-3 review (Claude /review-code, Note). engram_execution_source_basis (src/engram_turn_observations.rs) logs 'engram> no source basis for workspace ...' at both the begin-time and the closing capture of every claimed turn whose workdir cannot be fingerprinted. For a workspace that is not a worktree root (a non-Git project, a session rooted in a repository subdirectory, or a repository with configured clean/smudge/process filters, which review_freeze rejects) that is an expected, documented state, so the line repeats twice per turn indefinitely, and each attempt still spawns 'git rev-parse' and the filter check. Fix direction: distinguish 'not a worktree root / unsupported repository' from a genuine capture failure (deadline, Git error, unreadable untracked input); log the former once per session and workdir (or cache the verdict until the workdir changes), and keep logging real failures.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

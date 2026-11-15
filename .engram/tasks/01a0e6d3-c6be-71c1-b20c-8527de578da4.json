@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6be-71c1-b20c-8527de578da4",
+  "external_ref": "tm-rha",
+  "title": "Add structured digest-anchor attachments to mailbox messages",
+  "outcome": "Heavy mailbox coordination repeatedly carries frozen path/digest anchors in prose, forcing recipients to parse and transcribe security/governance inputs by hand. Add an optional immutable structured attachment payload for typed anchor lists (at minimum path plus digest, with room for explicitly typed key/value metadata) alongside the exact body. Preserve it transactionally, include it in authorized exact/range reads, surface it in the read-only UI, and keep idempotency comparisons stable. This must not turn arbitrary attachments into executable instructions.",
+  "acceptance": [
+    "Send/read/restart round trips preserve structured anchors exactly; malformed or oversized attachments are rejected deterministically; idempotent retries compare attachment content; authorization matches message-body access; UI and MCP/API tests demonstrate machine-readable verification without prose parsing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

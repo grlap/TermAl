@@ -1,0 +1,28 @@
+{
+  "id": "01a1b86c-aaef-7281-8d69-92bbc26aa350",
+  "external_ref": null,
+  "title": "Live check after restart: a \"never\" Codex root can use TermAl's mailbox and read-only MCP tools without approval, and spawn stays refused",
+  "outcome": "This item confirms in the running product what w-af604716cb6b establishes from the generated session configuration: a Codex root session with approvalPolicy \"never\" can call TermAl's mailbox and read-only coordination MCP tools without an approval prompt, and TermAl's steering tools stay refused under \"never\". It is a follow-up to w-af604716cb6b, created so that the source-level item can land under the standing rule while the live observation is tracked on its own. If the live check fails, that failure is a new bug in its own right.",
+  "acceptance": [
+    "After a build containing the w-af604716cb6b change is installed and Greg has restarted the host, one local Codex root session created with approvalPolicy \"never\" calls termal_send_to_session and termal_read_mailbox successfully without any approval prompt, and its termal_spawn_session call is refused. The session, build hash, times and exact tool results are recorded.",
+    "The record states the remaining limit honestly. A root that starts on \"never\" does not exercise the policy-crossing detach/resume path. If that path is observed live, it is recorded too, but it is not required. Any failure is filed as its own bug with the observed error."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "live-check",
+    "mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

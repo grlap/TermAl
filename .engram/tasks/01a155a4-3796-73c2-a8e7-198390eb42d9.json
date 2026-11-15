@@ -1,0 +1,29 @@
+{
+  "id": "01a155a4-3796-73c2-a8e7-198390eb42d9",
+  "external_ref": null,
+  "title": "Local mailbox append API should bound sender_name and reject NUL in display metadata",
+  "outcome": "Low from Architect1's ruling on M4 increment 2's r1 repairs (note a5a8f1077e7f491d9b9ca5588eae116e on w-01da81a029e7; TermAl mailbox 2a27fd51 #868), filed by Termal::Fable2. It is in M2 scope, not this increment. The local mailbox append API accepts a topic containing NUL and an unbounded sender_name. M4 increment 2 now normalizes the wake's display copies deterministically, so the remote wake path is safe, but the append API itself should bound sender_name and reject NUL (and other control characters as decided) at the source, with a named refusal, so bad metadata never enters the mailbox store.",
+  "acceptance": [
+    "The local mailbox append API refuses a topic or sender_name containing NUL, and a sender_name above a documented byte bound, with a named validation error and nothing appended; tests cover acceptance at the bound, refusal above it, and refusal of NUL. Existing valid appends are unchanged.",
+    "The full five-stage gate passes on the exact input with an independent Codex plus Claude review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "mailbox",
+    "validation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

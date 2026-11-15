@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3aa-7d53-b1b4-fcfbc0fb70f8",
+  "external_ref": "tm-068m",
+  "title": "update_app_settings applies earlier fields before a later field's validation fails",
+  "outcome": "Pre-existing, surfaced by the Kimi parity review (Codex /review-code, 2026-09-26). session_crud.rs update_app_settings mutates inner.preferences field by field under the lock; set_agent_default_model_if_present (e.g. an invalid Claude default model starting with '-', or an OpenCode model that fails normalize_opencode_model) and the 'cannot remove remote ... still used by project' check return 400 after earlier fields of the same request were already written to memory. The revision/publication are skipped, but the in-memory preferences keep the partial change and later create_session calls inherit it; it is persisted by the next unrelated commit. The Kimi effort instance was fixed in the parity change (validated before the lock). Fix: validate every field before the lock, or build a candidate AppPreferences clone and swap it in only on success; test a mixed valid+invalid request leaves preferences and revision unchanged.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

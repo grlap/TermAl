@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c43f-76d2-b575-d1ec87ce4537",
+  "external_ref": "tm-a9w7",
+  "title": "Surface an idle mailbox counterpart that still owes a reply: sender signal, session/board visibility, action-required class",
+  "outcome": "Relayed by Greg via Engram::Fable (2026-09-05, Engram pair stall 05:40-05:44 UTC). Facts: Engram::Codex (session-5132) finished a review fan-in, sent a hand-off message and ended its turn idle while holding the next implementation step; the coordinator messages sent during that turn were queuedBehindActiveTurn and consumed inside it, so after the turn ended no wake existed; the pair stalled until Greg noticed (\"codex nic nie robi\") and an explicit GO (deliveredToIdleSession) woke the session. From the coordinator seat TermAl gave no signal that the counterpart went idle while owing a next step and no view of idle sessions holding open items. Contributing cause on the Engram side (skill wording that reads as a turn boundary) is being fixed there. Desired, to scope with Greg: (a) a sender-side signal when a mailbox target with an unanswered inbound ends its turn - e.g. a follow-up receipt/notification disposition such as targetWentIdle or a mailbox event to the sender; (b) session list and/or board visibility: status + last mailbox topic + whether the session owes a reply (Greg has asked for a task/state tracker inside TermAl before); (c) a message class \"action-required\" that re-surfaces to the sender when the target turn ends without a reply. Related: tm-pq8 item (2) sender-visible receiver turn state (older wishlist from the .collab era). Acceptance: a coordinator can detect within one turn that its counterpart went idle owing a reply without polling or a human noticing; the board/session list shows the owing state; the action-required class round-trips; forward-only CAS and no-skipping unchanged.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "coordination",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

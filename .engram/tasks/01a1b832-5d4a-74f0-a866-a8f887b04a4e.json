@@ -1,0 +1,37 @@
+{
+  "id": "01a1b832-5d4a-74f0-a866-a8f887b04a4e",
+  "external_ref": null,
+  "title": "Speed up the launcher's fingerprint-tests stage (10–14 min on Windows) by sharing immutable Git/worktree fixtures",
+  "outcome": "Greg asked how to safely shorten gate time. Kimi::Consultant's measurement on Central FULL test-1397710a found the fingerprint-tests stage takes 10–14 min on Windows. By file: test-launcher.test 584.9s, commit-input 187.1s, ui-bootstrap 113.1s, git-path 98.6s, review-freeze-fingerprint 89.0s. The common cost is repeated real repository, worktree, toolchain and process setup, not assertion count. The slowest single tests run 17–20s each: info/exclude, clean commit, LF/CRLF, linked worktree bootstrap, MAX_PATH. The stage gets shorter by sharing immutable fixtures or using lighter process boundaries, with every behavior still checked.",
+  "acceptance": [
+    "Before and after durations of the fingerprint-tests stage and of its five slowest files are recorded from launcher results on the same host. The stage is materially shorter on Windows.",
+    "Every existing assertion and behavior is still checked. Tests share only immutable fixtures (built once, never mutated by a test), or replace a heavy process boundary with a lighter one that exercises the same behavior. There are no deletions of behavioral coverage, no skips, no retries, no timeout changes, and no blanket parallelization that weakens isolation.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input on Windows and one other host."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-time",
+    "greg-directed",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Immutable private Git fixture seed delivered on master/origin in combo16, preserving custom-environment construction and every behavioral witness; observed same-host Windows stage10.466% shorter, with disclosed interference limitation. Fresh combined pair noMedium+, exact final tree FULL PASS on Windows B and DL560.",
+    "completed_at": "2026-11-08T21:37:38.712331900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

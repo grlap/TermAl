@@ -1,0 +1,36 @@
+{
+  "id": "01a0fc35-4dd2-7ae0-9645-724521ef0b7e",
+  "external_ref": null,
+  "title": "adoptSessions queues a tail-read check for every session on each snapshot (O(n^2) lookups, redundant with the visible-repair pass)",
+  "outcome": "adoptSessions queues a tail-read check for every session on each snapshot (O(n^2) lookups, redundant with the visible-repair pass)",
+  "acceptance": [
+    "A deterministic regression on a large resident session collection demonstrates that checking repair demand for invisible sessions performs no resident-session search, while visible demand and a previously invisible session becoming visible preserve existing repair eligibility.",
+    "The narrow change removes the all-session-by-all-session search from the existing repair-demand path without changing visible recovery, retry scheduling, or retained repair state; no new registry, cache, or broader refactor is introduced. Focused existing and new regressions pass on the exact candidate.",
+    "A matched before/after measurement records the same repair-demand scenario and its actual result and limitations; independent review pair has no outstanding Medium-or-higher finding and the exact final full gate passes before landing through the integration owner."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "conversation-view",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the early invisible-session repair-demand guard through integration master2707075c. Deterministic RED demonstrated2,098,176 unnecessary resident-id reads for2048 hidden demands; exact-candidate focused226 tests and independent WHOLE2 pair passed. Matched8327-resident browser scenario reduced largest renderer tasks83–94ms to14–16ms with stated synthetic/sampling limits. WindowsB and DL560 exact-tree FULLs both passed before landing. All3 criteria have explicit evidence links.",
+    "completed_at": "2026-11-04T03:36:44.732566300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

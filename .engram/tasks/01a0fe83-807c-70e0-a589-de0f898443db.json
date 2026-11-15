@@ -1,0 +1,27 @@
+{
+  "id": "01a0fe83-807c-70e0-a589-de0f898443db",
+  "external_ref": null,
+  "title": "Keep stale-global sequenced body placement from rolling back session metadata",
+  "outcome": "Keep stale-global sequenced body placement from rolling back session metadata",
+  "acceptance": [
+    "Keep stale-global sequenced body placement from rolling back session metadata is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "conversation-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

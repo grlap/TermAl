@@ -1,0 +1,29 @@
+{
+  "id": "01a142a3-5b23-7163-ace2-31343fba2d29",
+  "external_ref": null,
+  "title": "Make the omissions fixture's contract-refusal probe fail with its real cause",
+  "outcome": "acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused sizes its criterion by probing for the contract-too-large refusal. If the request path ever refuses the probe for another reason, the test fails with the probe's actual status and message rather than an opaque \"not a contract refusal\" panic.",
+  "acceptance": [
+    "Make the omissions fixture's contract-refusal probe fail with its real cause is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

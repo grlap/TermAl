@@ -1,0 +1,24 @@
+{
+  "id": "01a1be2b-0a00-71f2-969d-db67b43c9c3a",
+  "external_ref": null,
+  "title": "Relay home 5xx history misses a response body that cannot be collected",
+  "outcome": "A relay response-collection failure is either recorded in homeRpcFailures with its own stage or stated as excluded in docs/features/native-mailbox-relay.md. Found by the combo19 Claude review (session-16922) at src/federation_http_authenticate.rs:212: federation_transport_unavailable() returns 503 before the note call at line 215.",
+  "acceptance": [
+    "Relay home 5xx history misses a response body that cannot be collected is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

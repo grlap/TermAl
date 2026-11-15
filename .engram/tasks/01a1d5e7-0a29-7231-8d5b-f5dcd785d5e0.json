@@ -1,0 +1,37 @@
+{
+  "id": "01a1d5e7-0a29-7231-8d5b-f5dcd785d5e0",
+  "external_ref": null,
+  "title": "Named root not re-sighted after a commit in it: no source sighting for ~10 h despite host-delivered turns, so evaluations stay stale at unconfirmed_declaration",
+  "outcome": "After a new commit in a named root, the host's next host-delivered turn of the naming session records a source sighting of that root at its current HEAD and tree, so an independent evaluation that declares that revision is not marked stale with unconfirmed_declaration.",
+  "acceptance": [
+    "Root cause identified with file:line: why no sighting was recorded for root .worktrees\\remote-verification-carry-11859 (generation 3616, binding fe227bcb, session-11859, Engram project) after 07:02:27Z, although HEAD moved from 9b9a2564 to 75af1b27 at about 09:12Z and many host-delivered turns followed.",
+    "A behavioural test reproduces it: a named root whose HEAD moves after naming, followed by a host-delivered turn of the naming session, records a sighting at the new HEAD and tree. The test fails before the fix and passes after.",
+    "The supported recovery, if any is needed for a root already in this state, is documented in docs/ next to the evaluation-sighting text, and needs no new naming generation unless that is the designed path. The change has a clean review pair and passes the full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed landed named-root stale-custody recovery. Fresh independent ClaudeSonnet18002/delegatione171b622 evaluationeab750a8b7d94bcd9c38a8c2f988e4ad recorded08:19:25.801Z rev1/cut353 is3/3judgmentPASS,stale=null; consumed without explicitlinks. Completepacket/ALL2921Bprose/actualverdict/request/config archived beforedone. C1 explicitly accepted identified reproduced mechanism consistent with Merger's incident, NOT proven exclusive historiccause: no Mergertracegeneration diagnostic exists. Pre-fix lifecycle56–57 retains any oldtrace,238–245 refusesmismatchcloseforever; delivered246–266 archives exactfacts/releasescustodyafterterminalfencewithoutinventedreport/measurement. C2 originalREDa27a96a1/runb12011c0=4pass/1expectedfail; GREENa700eb94/run4d6d3d7a=1457/0/0incl5newPASS. C3 docs recoverywithoutnewgeneration, cleanwhole4R1Codex17886+Claude17887zeroM+,Loww-fa98c0fc9474deferred; byte-identicalraw contributionauthora700→landedcca3 independentlyverified. OriginalFULL3f750216 6stagesPASS on exactlandedtree670672216f3cb0b102f35df4c75a4e2630203ee7; Rust7802/0/114+2/0+40/0/1,Node556/0/16skip,Vitest5134/0. Full21originals hash/readbackverified550146BarchiveSHA65b879fd014a689e6c95e30ee7dafdaff67662506c510485484ec89d8b7c15c9; standaloneuntracked,nonnativecreditnotclaimed. Deliveredcca3d3b2e9380cf8772efdde96090385c430f08d ownerlandedNov13 20:55:04Z. No newtests/reruns/evaluatorloop/sourcechanges. LastingREADY7d0394a99238403e96be71743436f234. Nextsafe remove dedicatedauthorroot and releasedcombo97; remove9c32rawoncefinalrelease reconciled; retainf5dcrawreview/RED/GREENthroughopenLowfollowupconcretenote.",
+    "completed_at": "2026-11-14T08:20:18.534195900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

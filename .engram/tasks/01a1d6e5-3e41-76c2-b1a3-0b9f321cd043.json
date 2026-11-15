@@ -1,0 +1,28 @@
+{
+  "id": "01a1d6e5-3e41-76c2-b1a3-0b9f321cd043",
+  "external_ref": null,
+  "title": "Pre-existing dead-field warning: EngramRootReconcileOutcome::Confirmed.fence is never read",
+  "outcome": "cargo check reports no dead-code warning for EngramRootReconcileOutcome::Confirmed's fence field: the field is either read where the confirmation is consumed, or removed.",
+  "acceptance": [
+    "`cargo check --bin termal` reports no `field fence is never read` warning for src/engram_root_authority.rs",
+    "If the field is kept, a behavioural test shows the confirmed fence is used by its consumer; if it is removed, no behaviour changes and the existing root-reconcile tests pass"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cargo-warnings",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

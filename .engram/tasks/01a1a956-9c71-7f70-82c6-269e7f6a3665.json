@@ -1,0 +1,31 @@
+{
+  "id": "01a1a956-9c71-7f70-82c6-269e7f6a3665",
+  "external_ref": null,
+  "title": "Cover Pending-only early acceptance and partially installed compacted registrations",
+  "outcome": "Reader regressions independently prove that Pending-only evidence cannot enter the legacy sighting flow and that only installed retained registrations participate in candidate selection and final admission.",
+  "acceptance": [
+    "Pending-only and Pending plus coherent NotStarted registrations return ScanIncomplete with zero sighting reads; the cases discriminate dropping Pending from observed candidates.",
+    "Partial-compaction cases cover nondurable retention, an indexed run and coexistence with an active registration: the active row decides while available, an uninstalled retained row grants no admission, and final recheck refuses loss of installation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability",
+    "greg-directed",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

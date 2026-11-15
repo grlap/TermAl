@@ -1,0 +1,28 @@
+{
+  "id": "01a17b56-5a93-7b70-917b-04a46be1f3c0",
+  "external_ref": null,
+  "title": "Pin the stateDiff continuity reset on stream open/error and the clear on `lagged` with their own tests",
+  "outcome": "Pin the stateDiff continuity reset on stream open/error and the clear on `lagged` with their own tests",
+  "acceptance": [
+    "Two UI tests each fail if their branch is removed. (1) resetStateDiffContinuity on EventSource open and error: with an alignment pending, an error then an open, then a rejected same-revision unmarked state and an unadmittable stateDiff, expect a second alignment request and a null baseline. (2) The `lagged` handler: from a non-null baseline with an alignment pending, a `lagged` event followed by a stateDiff before the recovery state, expect a second alignment request and a null baseline."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "state-broadcast",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

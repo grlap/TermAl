@@ -1,0 +1,27 @@
+{
+  "id": "01a12bbc-28e2-79f1-a3d4-3e1c46471078",
+  "external_ref": null,
+  "title": "The 240 s admission budget counts outage and Defer waits before a head enters prepared-Begin recovery",
+  "outcome": "Decide whether the 240-second admission budget of a head that later enters prepared-Begin recovery should still count time it spent before then. That time includes Engram Defer abort retries, control_unavailable or circuit admission retries, and refusal holds. Also decide whether the 'exhausted after N attempts' count should include only attempts made during that recovery. Today the window starts at the head's acceptance (by design, under criterion C4 of w-cfcf10b68c9b). A head that spent more than 240 s in an outage and then meets the prepared-Begin fault under load is therefore exhausted at once, and the attempt count includes unrelated retry kinds. The work is either to confirm the current behaviour and document it, or to change the start or the count under criteria that Greg or the coordinator concur on.",
+  "acceptance": [
+    "The 240 s admission budget counts outage and Defer waits before a head enters prepared-Begin recovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a1c3e9-9863-7d63-98ee-6ba5a84335ba",
+  "external_ref": null,
+  "title": "Integrate combo36 on a6978c03: native source admission (w-5c7d), bounded read-only Git inspection (w-64b8)",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo36 on a6978c03: native source admission (w-5c7d), bounded read-only Git inspection (w-64b8) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c3f4-7031-7bf0-9e3f-b19e3456ec63",
+  "disposal_reason": "combo36 ec0dbbad will not land: the review pair returned an in-scope Medium (Codex 17201, reviewer cat-file promisor lazy fetch) against its w-64b8 part. The w-5c7d part lands alone as 8ab420b0 under w-b19e3456ec63; w-64b8 goes back to its author for the fix.",
+  "completion": null
+}

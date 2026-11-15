@@ -1,0 +1,29 @@
+{
+  "id": "01a123aa-addb-7023-92a7-36976e30e86a",
+  "external_ref": null,
+  "title": "A get/list refresh during a new evaluator's first-brief acknowledgement marks it Failed (\"child finished without a result packet\") before its first turn",
+  "outcome": "While a freshly spawned evaluator's first turn is still being admitted (between DelegationCreated and start_delegation_child_turn in create_delegation_with_evaluation_target, src/delegations.rs), a delegation refresh reports it as pending start, as it already does for follow-ups awaiting their first turn. It no longer judges the Idle, runtime-less child as IdleWithoutResult and fails the delegation. A successful request therefore never answers Spawned for a delegation that a concurrent read already failed.",
+  "acceptance": [
+    "A deterministic test holds the first-brief acknowledgement, calls get_delegation (or list_delegations) in that window, and shows the delegation stays Running and pending start. After the acknowledgement succeeds, the first turn starts and the response is Spawned for a Running delegation.",
+    "On unchanged code, the same test shows the delegation turned Failed with \"child finished without a result packet\" and the first-turn start refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "delegations",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

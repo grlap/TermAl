@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-5557bd7bc733",
+  "external_ref": "tm-m6r1.19",
+  "title": "Beads binary resolution: skip non-executable bd candidates on Unix",
+  "outcome": "Review round 27 (Claude Low). validate_beads_binary checks absolute path, regular file, shim extension and shebang, but on Unix never the execute bit; resolve_beads_binary_on_path returns the first bd that passes, so a non-executable file named bd earlier on PATH hides a valid bd later on PATH (a shell lookup would skip it), and the source reports a launch failure instead of reading. Follow-up: on cfg(unix) require metadata.permissions().mode() & 0o111 != 0 in validate_beads_binary (so the PATH search continues to the next candidate and a configured non-executable path is refused), with a cfg(unix) test. Not written on the Windows host: cfg(unix) code cannot be compiled or run here, and unverified code is not evidence. Pair with the Unix symlink-resolution test gap in the sibling task.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03; no \"beads\" remains in src/work_*.rs on master.",
+  "completion": null
+}

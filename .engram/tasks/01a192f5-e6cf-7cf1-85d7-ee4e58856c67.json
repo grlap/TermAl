@@ -1,0 +1,24 @@
+{
+  "id": "01a192f5-e6cf-7cf1-85d7-ee4e58856c67",
+  "external_ref": null,
+  "title": "Two compiler warnings on master 05b442b3 in the termal test build (Windows): a cfg(unix)-only caller leaves a test helper dead, and an unused Result",
+  "outcome": "`cargo test --bin termal` on Windows compiles with no warnings. Both warnings are present on master 05b442b3 and are not in w-decd61d62831's files; they were seen in focused runs test-86615c2c and test-ab7e19e9, 2026-10-31.\n1. src/review_freeze.rs:316: `install_test_review_freeze_before_open` is never used on Windows. Its only caller, in src/tests/test_runs.rs (~359 on master), sits inside a #[cfg(unix)] function. Fix: gate the helper (and its hook) to the same cfg, or give it a Windows caller.\n2. src/tests/engram_root_causal_failure.rs:757: the Result of `fixture.state.finish_turn_ok_if_runtime_matches(&fixture.session, &token)` is unused (must_use). Fix: assert or handle it.\nNote: a Windows-only dead-code warning like (1) can fail a clippy stage that runs with -D warnings. Provenance: reported by Termal::BarA2 on Fable2's instruction (df007e37 #1466).",
+  "acceptance": [
+    "Two compiler warnings on master 05b442b3 in the termal test build (Windows): a cfg(unix)-only caller leaves a test helper dead, and an unused Result is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

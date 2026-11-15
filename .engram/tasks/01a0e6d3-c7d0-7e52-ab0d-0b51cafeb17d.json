@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7d0-7e52-ab0d-0b51cafeb17d",
+  "external_ref": "tm-wwzi",
+  "title": "Establish which Codex compaction event form is authoritative for the transcript notice",
+  "outcome": "Two Codex compaction event forms can both reach the transcript, and only one of them can be deduplicated.\n\n- item/completed with type contextCompaction pushes \"Codex compacted the thread context.\" (src/codex_events.rs:836) and passes an item id into the bounded dedup deque.\n- thread/compacted pushes \"Codex compacted the thread context for this turn.\" (src/codex_events.rs:1273-1278) and reaches mark_context_refresh_needed with None, which by construction cannot be deduplicated.\n\nBoth are dispatched from the same handle_shared_codex_app_server_notification match. If any supported Codex build emits both forms for a single compaction, the transcript shows two near-identical notices for one boundary. The documentation paragraph added in docs/features/engram-host-adapter.md says both forms are handled but does not say which one owns the user-visible message.\n\nNOT ESTABLISHED, and this is the point of the task: whether any supported build actually emits both. Determine that against a real runtime rather than from source, because source shows only that both paths exist.\n\nThen either suppress the losing form message (the refresh request itself is idempotent and can stay on both paths) or record in the doc that the two forms are known to be mutually exclusive across supported versions, with the evidence.\n\nFound by the cache review pair over frozen tree HEAD 272965d.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

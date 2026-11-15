@@ -1,0 +1,27 @@
+{
+  "id": "01a0f140-ad02-7871-817c-fdf78dca0a5e",
+  "external_ref": null,
+  "title": "Helper-script entry guard: fall back to the lexical comparison when realpath throws, share one helper, fix the 8.3 comment",
+  "outcome": "A Low and two Notes from review delegation-b8dc85b3 on the entry-guard fix of w-ae4b52018e7f.\n(1) invokedDirectly in scripts/test-launcher.mjs, scripts/test-temp-root.mjs and scripts/review-freeze-fingerprint.mjs returns false when realpathSync.native throws, which is a silent exit 0. Examples: Windows volumes without final-path support, some RAM disks and bind mounts, or an unreadable parent directory. On such volumes the old lexical guard ran the script. Fix: in the catch, fall back to the lexical comparison, so the new guard is never weaker than the old one.\n(2) Optionally share one invokedDirectly(moduleUrl) helper, since test-launcher already imports test-temp-root.\n(3) The comment in test-launcher.mjs names an 8.3 spelling as a cause. The reviewer reads Node's loader as not expanding short names for the main module, so drop that example unless a test shows otherwise.",
+  "acceptance": [
+    "The entry-guard comment names only the aliases the code actually handles.",
+    "When realpath throws, each helper's entry guard falls back to comparing the lexical resolved paths, and a test that forces the throw shows the script still runs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

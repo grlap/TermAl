@@ -1,0 +1,29 @@
+{
+  "id": "01a169ed-f606-7e51-b405-c25c9ba307ab",
+  "external_ref": null,
+  "title": "Keep full-launch ambiguity when an exit is unknown or the start closes unended",
+  "outcome": "A later mediated gate cannot attribute an earlier still-running full run to itself after an unknown detached exit or an unended authorized launch closes; actual nonzero failures remain distinguished.",
+  "acceptance": [
+    "Deterministic tests reproduce the same-owner/same-root run-association gap for Unknown detached exit and for an authorized full start closed unended.",
+    "Possibly running launches retain a bounded original root/start window; observed nonzero exit policy is distinguished explicitly and matching ordinary carries retain liveness."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "launch-correlation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

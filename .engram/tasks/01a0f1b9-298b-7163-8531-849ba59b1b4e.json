@@ -1,0 +1,31 @@
+{
+  "id": "01a0f1b9-298b-7163-8531-849ba59b1b4e",
+  "external_ref": null,
+  "title": "Terminate a resumed uncontained native root when its supervisor drops on an error",
+  "outcome": "Terminate a resumed uncontained native root when its supervisor drops on an error",
+  "acceptance": [
+    "A forced-unavailable, resumed-root regression retains process identity and establishes root termination before fixture cleanup; normal completed launches and contained lease teardown remain correct.",
+    "An unavailable native launch that is dropped after resume on an error path attempts termination of its retained root handle without claiming descendant containment."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "review-low",
+    "terminal",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

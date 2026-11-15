@@ -1,0 +1,85 @@
+{
+  "id": "01a13343-8dbe-75a1-b35a-540531f46f53",
+  "external_ref": null,
+  "title": "A full gate for a multi-item landing credits only one item, so each item of one commit needs its own 26-minute gate",
+  "outcome": "When one commit lands several items, held together by one session on one named source root with one frozen tree, one credited full gate gives each of those items a host-minted passed `test` verification on its own run, at the same source revision. Each item's test-bound \"full gate passes on the exact committed tree\" criterion can then be evaluated without re-running the identical gate once per item. Today a carried gate settles only for carried.claim_id (src/engram_carried_checks.rs, master bd839153), and Engram cites only evidence on the evaluated item's own run (Engram src/storage/work/acceptance_evaluation/citations.rs:94-101, 199-214), so an N-item commit costs N identical gates.",
+  "acceptance": [
+    "After a carried full gate is credited natively to the launch claim, the host binds that verification, through Engram's verification_bind, to every other live claim the same session holds whose named source root is the same registered worktree (root path and common dir) as the gate's root at launch and at settlement; each bound item gets a passed test verification on its own run at the gate's source revision and workspace, citable by that item's acceptance evaluation.",
+    "Fencing is unchanged and per item: nothing is bound from a gate that was fenced, ambiguous, failed, refused or not natively credited; a target is skipped, with a per-item reason, when its claim is no longer held or its fence/revision changed, its root was renamed, cleared or names another worktree, its newest sighting is not at the gate's revision, or Engram refuses the bind; one target's refusal never blocks another's, and no sighting is fabricated.",
+    "Each (gate, target) is bound at most once: owed binds survive a host restart and replay idempotently without duplication, and the carried record is consumed only after every target is bound, refused, or given up after eight attempts or 30 minutes with its holder told whether it may be bound.",
+    "The host's reads, receipts and test-run views accept Engram's bound records; the turn's notice names each item that received the bound verification and each that did not, with its reason; docs (host-architecture.md Rule 10/§5.4, engram-host-adapter.md) describe the bound path.",
+    "Single-item behaviour is unchanged: a session holding one claim, or a gate whose root no other held claim names, is credited exactly as before, and existing carried-check, citation and fencing tests pass unchanged.",
+    "A pinned disposable Engram live check shows one detached full gate credited on claim A and bound to claim B held by one session on the same root and tree, with B's evaluation citing the bound record on B's own run.",
+    "The maintained full five-stage gate passes on the exact final input, and the independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "greg-directed",
+    "throughput"
+  ],
+  "assigned_to": "Termal::CSharpProof",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Batch full gates landed in 7b8c085f924a9a34b84a2bcfb54edb8de52968bd (origin/master, a fast-forward from 7aff3df0, pushed by Opus2 at 11:06:30Z). After a carried full gate is credited natively on its launch claim, the host binds that passed record through Engram's verification_bind to every other claim the same session holds on the same named worktree. Each member gets a passed test verification on its own run, citable by its evaluation. Owed binds are persisted, decided, confirmed stored, then sent with a stable idempotency key; they are fenced per item, survive restarts, are claimed atomically against admissions and settings resets, and are given up after 8 attempts or 30 minutes with the holder told whether the member may be bound. Acceptance reads bound records. Documented in docs/features/batch-full-gates.md, engram-host-adapter.md, host-architecture.md Rule 10/§5.4, and test.md. Evidence: full gate 4e8ca577 (test-2643cb8f, launcher fingerprint 1646ce58, equal to the landed tree's rebuilt composite), C6 pinned live 64856781 (test-f8cede2b), independent evaluation ee696458 7/7, and clean review pairs. Lows are filed as their own items.",
+    "completed_at": "2026-10-20T11:07:15.671284600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

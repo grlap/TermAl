@@ -1,0 +1,29 @@
+{
+  "id": "01a1acd9-ee58-7033-8f62-bdfc7fd643b8",
+  "external_ref": null,
+  "title": "After the reason-preserving build runs, classify any live verification-record refusal from its retained Engram reason",
+  "outcome": "With w-5f01ad87280f's build running, any refusal of a TermAl verification record by live Engram is classified from the reason TermAl now keeps; a product defect found that way is fixed or filed with an owner.",
+  "acceptance": [
+    "On the running build containing w-5f01ad87280f's change, the first ordinary registered committed-input runs after the restart are checked: either their records are accepted, or each refusal's retained {field, reason} is recorded with its classification.",
+    "If a refusal is a defect in TermAl or Engram, it is fixed or filed with an owner; if it is expected (wrong session, moved claim or root, changed input), that is stated with the evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

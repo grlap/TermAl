@@ -1,0 +1,27 @@
+{
+  "id": "01a1174d-bfc4-7d01-9b03-ced5422a78cb",
+  "external_ref": null,
+  "title": "Align the Build verification evidence field indentation",
+  "outcome": "Fix the cosmetic 12-space indent of check_kind in EngramVerificationEvidenceInput at src/engram_turn_checks.rs:2447 to match its 16-space sibling fields. No behavior change or broad formatting/EOL sweep.",
+  "acceptance": [
+    "The check_kind field matches the surrounding evidence-literal indentation without changing behavior or unrelated source."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

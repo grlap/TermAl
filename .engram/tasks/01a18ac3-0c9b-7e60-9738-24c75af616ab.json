@@ -1,0 +1,37 @@
+{
+  "id": "01a18ac3-0c9b-7e60-9738-24c75af616ab",
+  "external_ref": null,
+  "title": "Federation host-utilization API: Central reads each enrolled host's current CPU, memory, disk and network without manual SSH",
+  "outcome": "Central can read, through the existing authenticated federation link, a current utilization snapshot of every enrolled host (central and satellites): CPU, memory, disk and network. Each metric has a defined unit, the host's measurement time and an explicit state of available, stale, unavailable or unsupported, so an operator or coordinator never mistakes missing or old data for a fresh reading, and needs no manual SSH.",
+  "acceptance": [
+    "A read-only snapshot endpoint on each host, and a Central aggregate that fetches each enrolled peer's snapshot over the existing authenticated federation link (no new transport, credential or pairing), report per host: host identity, OS and architecture, and measured_at (UTC, the host's own clock) together with Central's received_at.",
+    "CPU is reported as logical CPU count and whole-host busy percent over a stated sampling window; on Unix the 1/5/15-minute load averages are also reported; on Windows load average is reported as unsupported rather than invented.",
+    "Memory is reported in bytes as total, in use excluding reclaimable cache, reclaimable cache (standby/file-backed/buff-cache), free, and available; on Windows also commit used and commit limit; values that a platform cannot measure are marked unsupported, never estimated.",
+    "Disk is reported in bytes, total and free, for each configured volume (at minimum the TermAl data volume and each runner checkout volume), with the mount or drive identity.",
+    "Network is reported per active interface as cumulative received and sent bytes with their counter timestamp, plus derived rates in bytes per second over a stated window when two samples exist; otherwise the rate is marked unavailable.",
+    "Each metric carries a state of available, stale (older than a documented threshold), unavailable (with a bounded reason, such as peer disconnected or probe error) or unsupported; a disconnected or unreachable peer appears as unavailable with its last-known snapshot labelled stale, never as zero or absent.",
+    "Collection is bounded and cheap: no shell-outs on the request path, no StateInner lock held while sampling, and a documented maximum response time; sampling never starts, stops or alters a test run or any other process.",
+    "The UI or a documented API shows the aggregate, and a feature brief in docs/features documents the metrics, units, freshness rules and platform differences, cross-linked with central-control-plane.md and native-mailbox-relay.md.",
+    "Tests cover snapshot shape and units, the stale and unavailable states for a disconnected peer, the unsupported markers per platform, and that the endpoint is read-only."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-directed",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

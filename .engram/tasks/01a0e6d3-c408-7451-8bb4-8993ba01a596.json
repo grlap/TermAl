@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8993ba01a596",
+  "external_ref": "tm-7cu.14",
+  "title": "Batch conversation-marker anchor resolution in one SQLite snapshot",
+  "outcome": "Conversation marker anchor resolution opens a separate SQLite connection for each anchor. Marker operations with multiple anchors therefore pay repeated connection and snapshot setup costs and can observe anchors from different database snapshots.",
+  "acceptance": [
+    "Resolve all anchors for one marker operation through one bounded read transaction or equivalent shared snapshot. Add coverage proving multiple anchors use consistent persisted positions and do not require per-anchor database connections."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a0f4ec-528d-7701-8b28-8ce47d7dd0d2",
+  "external_ref": null,
+  "title": "Cover writable and orphaned Codex child tracker configuration",
+  "outcome": "Cover writable and orphaned Codex child tracker configuration",
+  "acceptance": [
+    "A child whose delegation record is absent retains conservative read-only tracker configuration.",
+    "A deterministic config-contract test shows a writable Codex delegation child retains unrestricted Engram configuration without --read-only, enabled_tools or per-tool approval overrides."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation",
+    "mcp",
+    "regression",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f4b9-c4d0-7831-9965-27f08e988f1e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

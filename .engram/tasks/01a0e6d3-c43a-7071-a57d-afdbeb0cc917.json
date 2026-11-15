@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c43a-7071-a57d-afdbeb0cc917",
+  "external_ref": "tm-9xo6",
+  "title": "Kimi delegation children need a write-policy-bounded auto-approval mode; today every tool call waits for a human",
+  "outcome": "Requested by Greg via Engram::Opus (mailbox #239, 2026-09-25): 'kimi needs auto-approval mode'. Kimi child delegation-6efd570a (session-7695, explorer, isolatedWorktree, kimi-code/k3, started 23:01:50 UTC) asked for interactive approval of each tool call, so a delegated review/exploration cannot run unattended; approvals piled up. Spawn record: approvalPolicy null, claudeApprovalMode null (Claude children get read-only-auto-approve, Codex children approvalPolicy never).\n\nCurrent design is deliberately manual: src/kimi.rs:133 configure_kimi_manual_approvals forces Kimi Default mode and refuses to prompt without it ('No approval override is available'); src/acp.rs:576 re-establishes manual approvals across continuation because Kimi can retain Auto/YOLO; src/orchestrators.rs:611 rejects autoApprove for Kimi templates; src/session_crud.rs:3678 'tool approvals remain manual'. So this needs an explicit contract change, not a flag flip.\n\nWanted: keep Kimi in manual (Default) mode and have TermAl answer the child's ACP permission requests itself, bounded by the delegation write policy: auto-approve reads and read-only commands; for isolatedWorktree allow writes inside the child's worktree/owned paths; deny (not ask) anything outside, with the denial reason recorded. Never enable Kimi's own YOLO/Auto mode (unbounded). Root Kimi sessions stay manual unless a separate decision says otherwise. Related: tm-fy7m (Kimi as a read-only reviewer; the same read-only checker would serve both).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1017b-f75c-7db2-93a5-4a029770cd77",
+  "external_ref": null,
+  "title": "Test launcher: the pinned `live` mode runs the whole live suite with no test filter, so one unrelated live failure blocks crediting a single live control",
+  "outcome": "Test launcher: the pinned `live` mode runs the whole live suite with no test filter, so one unrelated live failure blocks crediting a single live control",
+  "acceptance": [
+    "Test launcher: the pinned `live` mode runs the whole live suite with no test filter, so one unrelated live failure blocks crediting a single live control is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "live-suite",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

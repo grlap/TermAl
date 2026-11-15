@@ -1,0 +1,29 @@
+{
+  "id": "01a1533f-4511-7f41-b1c2-5f32a9b5ae41",
+  "external_ref": null,
+  "title": "Align mailbox coverage migration wording with the schema-3 upgrade",
+  "outcome": "The coverage section agrees with the schema-4 bootstrap contract.",
+  "acceptance": [
+    "docs/features/agent-mailboxes.md states that exact schemas 1, 2 and 3 migrate additively to schema 4 and that schema-3 delivery records are preserved.",
+    "The coverage and bootstrap sections agree with docs/features/central-control-plane.md; no runtime or migration behavior changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

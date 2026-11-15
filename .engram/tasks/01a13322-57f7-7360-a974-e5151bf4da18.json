@@ -1,0 +1,28 @@
+{
+  "id": "01a13322-57f7-7360-a974-e5151bf4da18",
+  "external_ref": null,
+  "title": "Running the TermAl binary with no subcommand (as agents probing TERMAL_CLI do) attempts to start a host server; --help and help fail with 'unknown argument'",
+  "outcome": "Invoking TERMAL_CLI (the termal binary) the way an agent would never starts a host server. A bare invocation, or one with --help or help, prints usage listing the supported subcommands and exits non-zero (or zero for help) without touching the data directory. Starting the server requires an explicit, unambiguous form that agent guidance never uses.",
+  "acceptance": [
+    "Running the TermAl binary with no subcommand (as agents probing TERMAL_CLI do) attempts to start a host server; --help and help fail with 'unknown argument' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cli",
+    "cross-project",
+    "safety"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

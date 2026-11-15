@@ -1,0 +1,27 @@
+{
+  "id": "01a16ed2-7d26-7410-9544-8ea5a8af66fc",
+  "external_ref": null,
+  "title": "Project-reset phase timer polish: lost-generation release line, 'finished' wording, test line map growth, eprintln under lock on late authority claim",
+  "outcome": "The reset phase lines say exactly what happened (lost fence generation, time since claim rather than time held), and the timer neither writes under the state lock nor leaves test capture growing.",
+  "acceptance": [
+    "Project-reset phase timer polish: lost-generation release line, 'finished' wording, test line map growth, eprintln under lock on late authority claim is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

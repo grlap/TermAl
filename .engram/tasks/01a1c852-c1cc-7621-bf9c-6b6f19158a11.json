@@ -1,0 +1,29 @@
+{
+  "id": "01a1c852-c1cc-7621-bf9c-6b6f19158a11",
+  "external_ref": null,
+  "title": "Clarify temp-wrapper feedback for non-committed-input focused runs",
+  "outcome": "Feedback or its contract comment accurately describes silence for supported wrappers when no committed-input verification record is produced.",
+  "acceptance": [
+    "The intended notice behavior for staged/plain wrapper runs is documented or bounded with --input commit, without granting ordinary credit.",
+    "Registered committed-input wrappers still avoid a contradictory no-Test-record notice."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "note",
+    "registered-runs",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a1c9fa-d8c1-7071-b782-cb5c92881d8a",
+  "external_ref": null,
+  "title": "Retention incident: Mac 0867-2 RED originals (test-3e236622) released by scheduler before parent intake",
+  "outcome": "The scheduler's release of the Mac 0867-2 worktrees before the parent integrator's intake is recorded with its references, the absence of any surviving original copy is confirmed, and the scheduler rule that prevents a repeat is in force.",
+  "acceptance": [
+    "Retention incident: Mac 0867-2 RED originals (test-3e236622) released by scheduler before parent intake is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

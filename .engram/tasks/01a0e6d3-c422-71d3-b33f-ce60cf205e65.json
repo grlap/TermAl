@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c422-71d3-b33f-ce60cf205e65",
+  "external_ref": "tm-84x",
+  "title": "Return to previously visited tab after closing active tab",
+  "outcome": "Track a most-recently-used tab history per workspace pane. When the active tab is closed, select the most recently visited surviving tab in that pane; retain the existing adjacent-tab fallback when no history entry survives. Add focused tests for visit order, stale history entries, inactive-tab closure, and pane-local isolation.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 9c5409b (ancestor of master).",
+  "completion": null
+}

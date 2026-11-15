@@ -1,0 +1,26 @@
+{
+  "id": "01a108e9-9fca-73f0-9403-b8d040e942d3",
+  "external_ref": null,
+  "title": "Delegation result summary heuristic reads a path:line number after a finding noun ('error at lib.rs:42') as a finding count",
+  "outcome": "Pre-existing and out of scope of w-a7c465026c6c. In src/delegation_result_parser.rs the summary heuristic splits on punctuation, so 'parser.rs:308' becomes 'parser rs 308'. A number preceded by a file-extension token then counts as a finding count near a finding noun. A clean packet whose summary says, for example, 'Note the error at lib.rs:42 is expected' with Findings: None still gains a synthesized 'Unspecified' finding. Fix direction: treat a number preceded by a file-extension token (rs, ts, tsx, md, json, …), or originally joined by ':', as a location, mirroring the path-like prose guard for structured findings.",
+  "acceptance": [
+    "Delegation result summary heuristic reads a path:line number after a finding noun ('error at lib.rs:42') as a finding count is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

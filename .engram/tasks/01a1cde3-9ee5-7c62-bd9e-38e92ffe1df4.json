@@ -1,0 +1,35 @@
+{
+  "id": "01a1cde3-9ee5-7c62-bd9e-38e92ffe1df4",
+  "external_ref": null,
+  "title": "Integrate combo70 on d3a6c0de: c593 1a17cf8a (K3 S2a inactive mailbox test custody shapes, byte-identical carry of 90e87403)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 1a17cf8ae71393542908bca505a529c846e79743 (tree 9e0d708cccc926943eeb121f3a1bfa433ba4762e) is on origin/master, where master was moved to it by a fast-forward from d3a6c0de306228c9615e3b475209215f8af04bf2.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 9e0d708c passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against d3a6c0de is byte-identical (same 14 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 90e87403's contribution against 046951e8, which the original whole-14 pair Codex session 17599 and Claude session 17600 reviewed and whose one shared Medium the scoped repair-confirmation pair Codex session 17605 and Claude session 17609 confirmed repaired with no Medium or higher finding, and the candidate adopts those pairs.",
+    "The release binary built from tree 9e0d708c was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo70 integrated. c593's K3 S2a carry 1a17cf8a (tree 9e0d708c; inactive mailbox test custody shapes, byte-identical to the reviewed 90e87403) is on origin/master by a fast-forward from d3a6c0de, and the DL560 full launcher gate test-39511f5b passed on the exact tree (rust 7697/0, vitest 5102/0). It is installed on DL560 (585f5c87) and Central (8f98bd40), with the previous binaries kept aside. An independent evaluation (Codex session 17625, delegation-e0a05aa5) passed all 3 criteria.",
+    "completed_at": "2026-11-12T05:46:24.355165400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

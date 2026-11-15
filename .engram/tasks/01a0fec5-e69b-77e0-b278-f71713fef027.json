@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-e69b-77e0-b278-f71713fef027",
+  "external_ref": null,
+  "title": "Mark session transport liveness for late and repair body frames",
+  "outcome": "Mark session transport liveness for late and repair body frames",
+  "acceptance": [
+    "Mark session transport liveness for late and repair body frames is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

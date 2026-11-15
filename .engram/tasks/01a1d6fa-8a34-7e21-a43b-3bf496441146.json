@@ -1,0 +1,32 @@
+{
+  "id": "01a1d6fa-8a34-7e21-a43b-3bf496441146",
+  "external_ref": null,
+  "title": "Describe eager boot tails for all persisted test-run card owners accurately",
+  "outcome": "Describe eager boot tails for all persisted test-run card owners accurately",
+  "acceptance": [
+    "The architecture documentation accurately describes that all persisted test-run card owners keep eager tails at boot because terminal metadata is a hint and the first scan trusts the durable transcript."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "greg-reported",
+    "lazy-transcript-tails",
+    "performance",
+    "post-restart",
+    "review-low",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

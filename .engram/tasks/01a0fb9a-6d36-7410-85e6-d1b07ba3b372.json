@@ -1,0 +1,27 @@
+{
+  "id": "01a0fb9a-6d36-7410-85e6-d1b07ba3b372",
+  "external_ref": null,
+  "title": "Read-only Claude Bash refusal re-implements the checker's control flow; a future checker change can make it name the wrong rule",
+  "outcome": "The read-only Bash checker returns a structured denial reason from the same pass that decides. claude_bash_command_is_read_only becomes a thin wrapper over it, and the refusal text in src/claude_read_only_refusal.rs reads that reason instead of re-deriving it.",
+  "acceptance": [
+    "Read-only Claude Bash refusal re-implements the checker's control flow; a future checker change can make it name the wrong rule is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

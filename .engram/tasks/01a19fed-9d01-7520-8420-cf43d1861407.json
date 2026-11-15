@@ -1,0 +1,32 @@
+{
+  "id": "01a19fed-9d01-7520-8420-cf43d1861407",
+  "external_ref": null,
+  "title": "Resolve the narrow-window horizontal layout contract for the measured session list",
+  "outcome": "Resolve the pre-existing <=900px horizontal session-strip rule when the measured row adapter wraps the list, preserving bounded DOM and deliberate responsive navigation behavior.",
+  "acceptance": [
+    "Choose and document the narrow-window session-list layout, with responsive browser coverage of the supported orientation.",
+    "The chosen layout keeps DOM bounded and retains logical keyboard entry, session actions, and reachable final sessions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "responsive-layout",
+    "review-followup",
+    "session-list",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f0b-12f1-7cc2-b8fc-252999666e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

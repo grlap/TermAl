@@ -1,0 +1,43 @@
+{
+  "id": "01a11568-9e85-76c1-aa89-52c7e2d0dfe2",
+  "external_ref": null,
+  "title": "Make top-level TermAl CLI help discoverable without starting a server or session",
+  "outcome": "A caller can discover supported TermAl commands with top-level --help/-h/help instead of receiving a fatal unknown-argument error. Help honestly distinguishes coordination CLI session listing from root-session creation through the existing supported UI/API; it must not imply termal_spawn_session creates roots or introduce a new creation/authority surface. Keep this a small help/dispatch fix, separate from adding a root creation CLI.",
+  "acceptance": [
+    "Top-level --help, -h and help print useful command usage and exit successfully without starting the host, a runtime, a session or making a backend request.",
+    "Usage describes current supported modes and coordination commands, and clearly states that sessions list lists roots while delegation spawn creates children; root creation is directed to the existing UI/API documentation rather than a nonexistent CLI command.",
+    "Existing sessions/mailbox help and commands retain their behavior; focused tests cover top-level help dispatch and no-side-effect behavior."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "agent-workflow",
+    "cli",
+    "discovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a11bde-4906-7182-802f-02f3bce82afe",
+  "disposal_reason": "Duplicate: both items cover the same defect, top-level TermAl CLI --help/-h/help failing with \"unknown argument\" in main.rs Mode::parse. w-02f3bce82afe is claimed and in progress (Termal::Sol-c593, session-13170), so it carries the fix. Its holder adopts this item's three acceptance criteria verbatim, with Termal::Fable2's concurrence recorded on w-02f3bce82afe. Superseded by the TermAl coordinator, 2026-10-31 ~23:42Z.",
+  "completion": null
+}

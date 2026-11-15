@@ -1,0 +1,30 @@
+{
+  "id": "01a0eda6-d96d-7442-b421-881b50cb66d1",
+  "external_ref": null,
+  "title": "Council decision: does Kimi remain a third reviewer in TermAl, optional or required, now that Codex is available again",
+  "outcome": "Council decision: does Kimi remain a third reviewer in TermAl, optional or required, now that Codex is available again",
+  "acceptance": [
+    "Any instruction-text change the decision needs is worded, concurred by both projects' coordinators, sent to Greg, and landed under the existing procedure, or the item records that no text change is needed",
+    "The TermAl council's decision (required / optional / none), its effect on the review and landing rules, and its source are recorded on this item, with each council member's verdict quoted",
+    "The outcome is sent to Engram::Advisor for Greg"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "council",
+    "review-rules"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

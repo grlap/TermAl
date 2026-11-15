@@ -1,0 +1,31 @@
+{
+  "id": "01a14fcd-611c-72a0-80c1-849ea13ed0c2",
+  "external_ref": null,
+  "title": "Named-root release polish: typed audit route, serialized session status, bounded 409 refusal text, no parallel resume of an in-flight release",
+  "outcome": "The release audit and status view are type-safe and compact. The audit route is an enum, not a string. Status rows use the serialized session status, and claim_binding doesn't call an idle tokenless holder \"active\". The full-table 409 refusal is bounded (a summary plus a pointer to GET /api/engram/named-roots) rather than up to 64 full rows in an agent's context. A second identical request does not resume a release that is still in flight.",
+  "acceptance": [
+    "EngramNamedRootReleaseAudit.route is a serde enum (lowercase), and capacity accounting and resume compare enum values",
+    "Status rows show the session status as the API serializes it (camelCase), and claim_binding distinguishes an idle holder without a routing token from an active one",
+    "The capacity refusal text has a stated size bound, with a test at 64 retained roots",
+    "A resume does not run while the original request for that record is still in flight, with a test"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-control",
+    "named-roots",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

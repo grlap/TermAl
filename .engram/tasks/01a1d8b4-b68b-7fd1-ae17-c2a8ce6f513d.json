@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8b4-b68b-7fd1-ae17-c2a8ce6f513d",
+  "external_ref": null,
+  "title": "Acceptance evaluation is blocked forever by a verification record that Engram refused (verification_record_not_acknowledged after verification_record_refused)",
+  "outcome": "When Engram has definitively refused a run's verification record, termal_evaluate_acceptance no longer waits for that record to be acknowledged. The evaluation proceeds with the refusal visible to the evaluator as context, never credited as a pass, the same way a retired-root check is handled by an audited exclusion (w-2ecb0cb4d6e6). A record that is still pending, or whose fate is unknown, keeps the current wait.",
+  "acceptance": [
+    "A behavioural test: an item whose root has one registered run whose verification record Engram refused (verification_record_refused) is admitted for acceptance evaluation instead of returning 409 verification_record_not_acknowledged; the evaluator's brief shows the refused record, its run id and the refusal code, and the run earns no credit",
+    "A behavioural test: a still-pending (unacknowledged, not refused) record keeps blocking as today",
+    "The refusal-handling reuses or aligns with w-2ecb's audited per-request exclusion design rather than adding a parallel mechanism; existing admission tests stay green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

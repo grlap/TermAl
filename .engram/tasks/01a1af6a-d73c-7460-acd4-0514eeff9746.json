@@ -1,0 +1,27 @@
+{
+  "id": "01a1af6a-d73c-7460-acd4-0514eeff9746",
+  "external_ref": null,
+  "title": "Creating a session in a remote project with an explicit workdir is refused ('not a directory') because the path is checked on Central's filesystem",
+  "outcome": "POST /api/sessions for a project whose remoteId is a federation peer accepts an explicit workdir that exists on that peer. It validates the path on the peer, or defers to the remote session proxy, rather than on Central's local filesystem. A refusal names the host it checked.",
+  "acceptance": [
+    "Creating a session in a remote project with an explicit workdir is refused ('not a directory') because the path is checked on Central's filesystem is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "remote-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

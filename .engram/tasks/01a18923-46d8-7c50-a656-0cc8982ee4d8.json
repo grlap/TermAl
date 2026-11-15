@@ -1,0 +1,27 @@
+{
+  "id": "01a18923-46d8-7c50-a656-0cc8982ee4d8",
+  "external_ref": null,
+  "title": "Remove a tracker id from the Engram host adapter brief's doc text",
+  "outcome": "docs/features/engram-host-adapter.md describes the referenced work in words and cites no tracker id in its text, as the repository rule requires (no tracker ids in user-facing text).",
+  "acceptance": [
+    "Remove a tracker id from the Engram host adapter brief's doc text is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

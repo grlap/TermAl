@@ -1,0 +1,66 @@
+{
+  "id": "01a1091a-b1bf-74f0-b62c-6616fbef4689",
+  "external_ref": null,
+  "title": "Verification assessments read dozens of closed obligation records to find the few open ones: give a compact semantic summary by status, with full history optional",
+  "outcome": "A holder or evaluator reading a verification record's obligation assessment gets a complete, compact semantic summary grouped by status, plus every current mismatch in full, with an optional exhaustive history at a stable cut. No unresolved row is ever hidden or truncated out of the summary. TermAl is primary; Engram changes only if the current protocol requires it.",
+  "acceptance": [
+    "1 (unbound, fail-first). On unchanged master d1d92bbb, a test builds an independent evaluator brief whose criterion evidence cites a verification record. The record's assessment is served from fixtures captured from record 95400d92 (7 pages, 49 rows: 47 left out as already closed, 2 matches; fixture sha256s cited), with a second variant identical except that one row on the last page is a mismatch. The test expects a status-grouped summary and the mismatch row in full, and fails on master because the brief carries no assessment. A holder note cites the host-recorded failing run, its log path and sha256.",
+    "2 (test). For every verification record the brief carries whole (requester-selected and original-closure records), TermAl reads the record's complete assessment through `show --note` and its continuations, and renders one compact summary containing the total row count, the record position and the cut position; a count per group of (status, left-out or mismatch reason, recorded); and every row whose recorded state is anything other than satisfied_by_another_record (including mismatch and matches rows, and left_out rows that are still open), in full (rule, criterion, check kind, reason, recorded, trigger position). Rows recorded as satisfied_by_another_record appear only in their group's count, except mismatch rows, which are always listed in full. For the 95400d92 fixture: 49 rows, 47 left out as already closed, and the 2 matching rows in full. The same summary appears for each cited record in the termal_evaluate_acceptance request result.",
+    "3 (test). No open or mismatch row is ever hidden or cut. If an assessment cannot be read whole (page bound, time budget, transport failure, missing continuation, frame bound), or its full rows do not fit the brief budget, the brief and the requester notice say for that record that its assessment is incomplete or not carried, how many rows were read out of the total, and the exact Engram continuation at its stable cut. A partial read is never presented as a complete summary. Shrinking the brief drops whole summaries, each named, before it cuts any row, and summaries never displace a criterion-cited record or note, or a holder fail-first note, that the brief would carry without them. The one exception: when even the line naming a not-carried record cannot be added to the brief without displacing a criterion-cited record or note, or a holder fail-first note, that the brief would carry without it, the requester notice alone names that record, and a test covers this case.",
+    "4 (test). Full history stays optional at a stable cut: each summary names the record position, the cut position and the first-page continuation command, so a reader can page the full history at the same cut. Closed rows are never inlined.",
+    "5 (judged). TermAl only: the evaluator-brief and request-result paths (src/acceptance_evaluation*.rs, src/acceptance_evidence_selection.rs, one new focused module), their tests, and docs/features/engram-host-adapter.md. Engram's `show --note` text and its done-refusal reminders are out of scope; their compact form is filed as a named Engram follow-up for src/verbs/verification_assessment.rs. Briefs for records without an assessment are unchanged. No existing test expectation changes, except those listed in a provenance note with their old and new lines.",
+    "6 (test). The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note.",
+    "7 (judged). Independent verification: the read-only Codex and Claude review pair has no outstanding in-scope Medium or higher, and the acceptance evaluation is made by an evaluator that never held the item."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "greg-approved-2026-10-04",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "TermAl now reads the whole obligation assessment of every verification record an acceptance brief cites, through show --note and its same-cut continuations, and renders one compact summary per record: total, record and cut positions, counts per (status, reason, recorded), and every row in full except those another record closed (a mismatch is always listed), with the same-cut full-history continuation. Incomplete reads say so with rows read of the total and the resume point. Summaries use only the room the finished brief leaves; a record not carried is named on one line, and a rebuild to make room gives way only on the omission detail and uncited non-holder window entries, keeping every cited record and every holder note byte for byte, otherwise the requester notice alone names it. The request result carries the same summaries as obligationAssessments. Committed as ec0e8a41 (freeze 8, gate 7 test-080184ce, pair 9 clean, evaluation 34dae414 7/7) and landed by Termal::Opus2 as train 44, merge eef3be5f on origin/master (train gate test-96152443 passed, integration pair clean).",
+    "completed_at": "2026-10-05T15:14:29.572259600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

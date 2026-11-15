@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c788-7081-836a-44bc37e030fa",
+  "external_ref": "tm-uwx.3",
+  "title": "Add an opt-in urgent-interrupt class for peer messages",
+  "outcome": "Provide an explicit urgent delivery class for safety-relevant cross-session messages such as STOP-the-line or commit-halt instructions. Urgent messages may surface inside a receiver's running turn using the agent platform's mid-turn reminder path instead of waiting behind a long test or build. Ordinary messages remain asynchronous and queued.",
+  "acceptance": [
+    "A sender can append an authorized class=stop message and receives its durable id and delivery disposition. A compatible active receiver sees the pointer plus complete bounded body before its next externally visible action and explicitly cursor-acks it after processing. Oversized STOP is rejected or clearly flagged to the sender. STOP cannot be superseded; release requires an authorized reference. Unsupported-agent fallback, rate limits, duplicate releases, restart, and abuse controls are tested."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c787-7eb0-87d9-543a5293bb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

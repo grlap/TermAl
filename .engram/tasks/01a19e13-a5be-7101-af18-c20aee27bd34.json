@@ -1,0 +1,38 @@
+{
+  "id": "01a19e13-a5be-7101-af18-c20aee27bd34",
+  "external_ref": null,
+  "title": "Abandoned bounded source/content captures outlive host shutdown and keep running Git in the workspace",
+  "outcome": "Host retirement, through trigger_shutdown_signal, either joins or cancels every bounded source/content capture thread it started. No capture spawns Git in a workspace after the host that started it has shut down. A test's root-cleanup barrier observes no capture still running in its root.",
+  "acceptance": [
+    "After trigger_shutdown_signal returns (or a documented shutdown join completes), no termal-content-revision capture thread started by that host is still running or spawning Git",
+    "Each join is bounded by the capture's own existing Git budget, or the capture is cancelled between Git operations; no new timeout, sleep or retry is introduced",
+    "A focused test makes a bounded capture exceed its caller budget, retires the host, and pins that the capture has finished (or was cancelled) before the host's root cleanup receipt, with no Git operation against the root afterwards",
+    "acceptance_evaluation_api.rs's use of the same helper is covered by the same mechanism"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "shutdown"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed capture lifetime ownership and certified native cleanup in master47fdba2f; bounded cancellation/join preserves root custody on incomplete cleanup. Exact-input review pair has no Medium+, full gate passed and focused Windows/Linux regressions cover abandonment, acceptance capture and descendant custody.",
+    "completed_at": "2026-11-03T06:21:40.941518300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

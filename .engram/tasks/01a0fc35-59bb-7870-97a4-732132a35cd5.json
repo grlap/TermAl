@@ -1,0 +1,27 @@
+{
+  "id": "01a0fc35-59bb-7870-97a4-732132a35cd5",
+  "external_ref": null,
+  "title": "Kept body-delta buffer never prunes entries at or below appliedSeq, and exhausted owner tail-read retries chain new reads with no backoff",
+  "outcome": "Kept body-delta buffer never prunes entries at or below appliedSeq, and exhausted owner tail-read retries chain new reads with no backoff",
+  "acceptance": [
+    "Kept body-delta buffer never prunes entries at or below appliedSeq, and exhausted owner tail-read retries chain new reads with no backoff is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "conversation-view",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

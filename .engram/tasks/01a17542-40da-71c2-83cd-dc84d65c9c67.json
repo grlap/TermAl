@@ -1,0 +1,31 @@
+{
+  "id": "01a17542-40da-71c2-83cd-dc84d65c9c67",
+  "external_ref": null,
+  "title": "Mailbox alias refusal guidance suggests unusable forms for ambiguous and multi-segment names",
+  "outcome": "Refusal guidance directs ambiguous bare names and multi-segment host-label references to exact host UUID/native or canonical participant targets without changing recipients.",
+  "acceptance": [
+    "Ambiguous bare names without :: receive a parseable host-UUID or exact-id suggestion, rather than another ambiguous literal or host:name without a separator.",
+    "A reference fenced by a host label containing :: never suggests a form that parses as another host; focused controls cover both shapes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "mailbox-alias",
+    "pre-existing",
+    "review-follow-up",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a174c9-ea52-79e1-a235-8837ca2accca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

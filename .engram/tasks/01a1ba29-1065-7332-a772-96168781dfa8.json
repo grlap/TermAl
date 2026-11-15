@@ -1,0 +1,58 @@
+{
+  "id": "01a1ba29-1065-7332-a772-96168781dfa8",
+  "external_ref": null,
+  "title": "Relay mailbox receipt ACK returns 409 'native mailbox association is missing at its local home' after a successful read; persists after locator refresh",
+  "outcome": "A domain session that reads a relay mailbox page can acknowledge that page with its unchanged receipt. If the acknowledgement cannot be recorded, the refusal names the actual missing association and a recovery that works, rather than a locator refresh that returns the same locator and the same refusal.",
+  "acceptance": [
+    "Record a code-only diagnosis of the reported successful relay read followed by local-home association ACK refusal, distinguishing source-proved behavior from the incident's unavailable runtime metadata. Record the reporting session's single post-restart read/ACK result when supplied; use no new live probe, store access or other sessions' mailbox read.",
+    "A valid issued relay page receipt can be acknowledged by its original participant at its original mailbox/home through the existing authority path. Missing association metadata is distinguished from membership, identity, home and receipt failure; any refusal names the actual missing metadata and an applicable recovery rather than prescribing a locator refresh that cannot change the condition. No locator or receipt alone reconstructs membership or grants authority, and existing authentication, issuance, cursor, outcome-uncertainty and wake rules remain intact.",
+    "Deterministic behavioral tests cover successful read-to-ACK handling, the relevant missing-association failure/recovery path and unchanged-cursor controls for foreign/unissued receipts, wrong participant or home. The test fixture states which metadata-loss or routing boundary it injects; it does not claim that ordinary restart deletes metadata.",
+    "Record passing registered focused coverage on the final source, an independent Codex/Claude review pair with no outstanding in-scope Medium-or-higher finding, and a passing full five-stage gate on the exact final committed input before landing any repair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "needs-triage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed scoped relay ACK guidance and deterministic recovery controls in combo16; original historical association-loss cause remains unknown.",
+    "completed_at": "2026-11-08T21:25:30.689514700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

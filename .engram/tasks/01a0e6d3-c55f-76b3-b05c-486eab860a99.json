@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c55f-76b3-b05c-486eab860a99",
+  "external_ref": "tm-lvi",
+  "title": "Claude turns finalize while background Task subagents are still running",
+  "outcome": "src/claude_spawn.rs treats a {\"type\":\"result\"} stream message as end-of-turn, but Claude Code runs Task subagents in the background so result can arrive mid-work: the session shows idle and delegated reviewers return truncated packets (repro: session-3301 returned no findings while still compiling). Fix: track outstanding Task/tool-use ids and finalize only when none remain; until then treat a reviewer packet that admits pending work as failed.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

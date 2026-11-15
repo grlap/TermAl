@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-8002c9695ab4",
+  "external_ref": "tm-5fsy.8",
+  "title": "Document exact freeze endpoint validation and busy status semantics",
+  "outcome": "Claude session-6885 Low docs/architecture.md:391. Current docs mismatch no-delegation 409, missing child record 404, serde unknown/type fields 422 versus semantic validation 400. Freeze busy is 409, Work busy 429. Document actual behavior or deliberately align it with tested contract; Work route documentation stays in tm-m6r1.5.",
+  "acceptance": [
+    "Endpoint table and feature brief agree with route tests for400/404/409/422/429 and observed verification failure versus transport failure; busy uses429 and authority/attempt conflicts409."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 re-check b80d766c; applied by Termal::Fable2): CLOSE-DONE. A busy freeze answers 429 (src/review_freeze_api.rs:181 TOO_MANY_REQUESTS), and docs/architecture.md:412 documents \"429 capacity exhausted (retry the same read)\".",
+  "completion": null
+}

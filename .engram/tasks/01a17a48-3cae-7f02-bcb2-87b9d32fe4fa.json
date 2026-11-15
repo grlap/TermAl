@@ -1,0 +1,25 @@
+{
+  "id": "01a17a48-3cae-7f02-bcb2-87b9d32fe4fa",
+  "external_ref": null,
+  "title": "Remote state snapshot localization holds StateInner across the whole apply (remote_routes.rs:1717)",
+  "outcome": "Remote state snapshot localization holds StateInner across the whole apply (remote_routes.rs:1717)",
+  "acceptance": [
+    "Applying a remote state snapshot no longer holds StateInner across localizing the whole remote StateResponse; the localization runs outside the lock and the locked section only validates authority and commits, with a measured bound on the hold.",
+    "A focused regression shows that an apply of a live-sized remote snapshot does not block an unrelated locked operation for the duration of the localization."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a15c52-8556-7f80-8395-6081e4d4759d",
+  "external_ref": null,
+  "title": "Probe reports a post-reap pipe-drain timeout as a retryable child timeout",
+  "outcome": "A bounded-read pipe-drain timeout that occurs after the child was reaped is attributed distinctly from a child deadline timeout. It covers a surviving descendant holding the pipe open, or a stuck reader. The federation probe does not tell the caller \"timed out; retry the check\" for it, unless a coordinator records why retry is the right advice there.",
+  "acceptance": [
+    "Probe reports a post-reap pipe-drain timeout as a retryable child timeout is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

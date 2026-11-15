@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c78f-7ae0-aa5f-17599947b60d",
+  "external_ref": "tm-uwx.10.13",
+  "title": "Define and test canceled mailbox wake semantics",
+  "outcome": "Queued mailbox notification prompts can be canceled or cleared, but the durable-row and recovery behavior are undocumented and unpinned. Define whether cancellation suppresses a notification, requeues it, or requires acknowledgement, while preventing autonomous loops and silent stranding.",
+  "acceptance": [
+    "Documentation states cancellation semantics; deterministic tests cover cancellation before dispatch, later ordinary dispatch or recovery, explicit read and acknowledge, and absence of duplicate autonomous turns."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

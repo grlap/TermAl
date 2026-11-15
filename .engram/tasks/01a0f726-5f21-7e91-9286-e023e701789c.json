@@ -1,0 +1,28 @@
+{
+  "id": "01a0f726-5f21-7e91-9286-e023e701789c",
+  "external_ref": null,
+  "title": "Diagnose the grant-recovery test's 400 response before the expected authority-retirement failure",
+  "outcome": "Find and remove the cause of the intermittent 400 in failed_background_authority_retry_does_not_fail_an_unrelated_settings_edit without retries, timeout inflation or weakening the authority-retirement assertion. Determine whether it is product, fixture/runner or environment/resource; preserve original evidence.",
+  "acceptance": [
+    "Diagnose the grant-recovery test's 400 response before the expected authority-retirement failure is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-readiness",
+    "test-failure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

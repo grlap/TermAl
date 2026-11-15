@@ -1,0 +1,28 @@
+{
+  "id": "01a0f0a9-2dd0-78d1-818d-b5db2ca8e778",
+  "external_ref": null,
+  "title": "Authority-text landings: resend Greg the wording after every change, and have the integration owner check that (b) covers the final wording",
+  "outcome": "c2d7c5a landed although condition (b) covered only earlier wordings. The final forms of (c), C5, H1 and Step 7, revised through nine review rounds, reached Greg only after the landing (TermAl w-8344693cabbf, evaluation 2069ec31, criterion 3).\nNothing in the process caught it:\n- the final-diff audit checks concurrence (a), not what Greg was sent;\n- the integration owner's push check names the audit, not (b).\nThe fix, in the tracker's practice first and in the text if the coordinators agree:\n- every change of wording after Greg was sent it is sent again, whole, before the landing;\n- the final-diff audit also records, for each changed passage, the message that carried its final form to Greg, and fails when one is missing.\nAny change to the text is authority text itself: (a), (b) and (c) apply.",
+  "acceptance": [
+    "For every changed passage of an authority-text landing, the audit record names the message that carried its final wording to Greg before the landing, and the audit fails when one is missing.",
+    "If the rule text changes, it does so under (a), (b) and (c) with both coordinators' concurrence on the exact wording."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

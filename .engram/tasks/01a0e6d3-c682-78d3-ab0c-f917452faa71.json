@@ -1,0 +1,58 @@
+{
+  "id": "01a0e6d3-c682-78d3-ab0c-f917452faa71",
+  "external_ref": "tm-oixt",
+  "title": "Stop must suppress queued and delegation-driven Codex resumes",
+  "outcome": "Observed live in session-4982: after the user stopped the active Codex turn/review, a pending delegation wait completed and the parent started running again. Plain stop_session currently defaults dispatch_queued_prompts_on_success=true, does not consume waits owned by the stopped parent, and leaves no persistent pause latch for later mailbox/delegation wakeups. Expected: Stop interrupts the active turn and leaves the session idle until an explicit user prompt; pending delegation fan-in and routine mailbox wakeups must not reactivate it.",
+  "acceptance": [
+    "C1 [bound: test] Through the public Stop route, Stop on an Idle session whose only pending work is a delegation wait succeeds. The wait is consumed with reason parentSessionStopped, and the session stays Idle with the explicit-resume latch set. When the awaited delegation then completes, no fan-in prompt is dispatched and no runtime starts until an explicit Resume or user prompt.",
+    "C2 [bound: test] Same as C1 for a pending test-run wait: Stop consumes it, and its later result starts no turn until an explicit Resume or user prompt.",
+    "C3 [bound: test] After such a Stop, an explicit Resume or a new user prompt lifts the latch and the session dispatches normally. Stop on an Idle session with no pending wait still returns 409.",
+    "C4 [unbound, fail-first] The C1 test fails on unchanged master d9c13717: a holder note quotes the failed run's exact command, its result counts and the 409 response, and the unchanged-product revision it ran on. Where the host recorded the run, the note also cites that record; where it didn't, the note states why.",
+    "C5 [unbound] The full gate (node scripts/test-launcher.mjs full) passes on the committed tree, with a host-recorded credited run."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Stop now brakes an Idle session that waits on delegations or test runs. It consumes the session's pending delegation waits (parentSessionStopped) and test-run waits (sessionStopped), sets the explicit-resume latch and operator pause, drops queued workflow continuations except an Engram-held head, and records one stopped message, in one durable commit with full rollback. The Engram admission/retry Stop shortcut also consumes the waits. Idle with no wait still answers 409, and the Active Stop path is unchanged. Docs updated. Landed in 6cd915ed after full gate test-f22d604c (record 783d44a9); evaluation 22c0a6d4 passed 5/5.",
+    "completed_at": "2026-10-09T06:18:19.626956Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

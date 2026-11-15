@@ -1,0 +1,27 @@
+{
+  "id": "01a10c9f-e51e-7291-87c4-b6f4d5b306f6",
+  "external_ref": null,
+  "title": "Paused-queue card: the 'other' cause line can show a stale preview (last assistant excerpt) as the reason for the pause",
+  "outcome": "The paused-queue card never presents a preview that is not a pause cause (a last-message excerpt, 'Waiting for activity.') as the reason the queue is paused: it labels the line neutrally or shows it only for known pause causes.",
+  "acceptance": [
+    "Paused-queue card: the 'other' cause line can show a stale preview (last assistant excerpt) as the reason for the pause is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4fe-7c72-bb48-9e5f4ca6ad5a",
+  "external_ref": "tm-f0oh",
+  "title": "Extract Engram MCP revocation lifecycle into an owning module",
+  "outcome": "The reviewed revocation subsystem is split across turn_lifecycle.rs types and locked helpers, session_crud.rs off-lock orchestration, and session_lifecycle.rs Stop-failure transfer. Create src/engram_mcp_revocation.rs with the project provenance header; move the subsystem types, claim/rollback/transfer helpers, and teardown orchestration there while leaving only thin CRUD/Stop call sites and the terminal record mutation in turn_lifecycle.rs. Preserve fence ownership, callback replay, and all lifecycle behavior as a pure structural extraction.",
+  "acceptance": [
+    "One module owns and documents the revocation protocol; session_crud.rs no longer hosts runtime-death orchestration; existing runtime-stop ownership and revocation tests remain behaviorally unchanged; required Rust gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

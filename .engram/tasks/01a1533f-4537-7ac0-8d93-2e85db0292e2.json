@@ -1,0 +1,29 @@
+{
+  "id": "01a1533f-4537-7ac0-8d93-2e85db0292e2",
+  "external_ref": null,
+  "title": "Clarify the inactive drain hook for mailbox continuation settlement",
+  "outcome": "Comments and drain integration accurately describe where mailbox continuation coverage can settle.",
+  "acceptance": [
+    "Inspect production drain callers and either remove the inactive settlement call or document its defensive role accurately, without suggesting it removes continuations after the session is Idle.",
+    "Preserve successful turn-end settlement before Engram checkpoint intent selection and all coverage and authority fences; validate affected behavior with an appropriate focused check."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "maintainability",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

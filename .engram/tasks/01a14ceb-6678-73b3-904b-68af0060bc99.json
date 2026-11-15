@@ -1,0 +1,35 @@
+{
+  "id": "01a14ceb-6678-73b3-904b-68af0060bc99",
+  "external_ref": null,
+  "title": "Satellite onboarding toolchain probe should not require an undocumented host rustc installation",
+  "outcome": "Satellite onboarding toolchain probe should not require an undocumented host rustc installation",
+  "acceptance": [
+    "An operator-provisioned TermAl satellite can report its configured build/toolchain identity without an undocumented host-installed rustc dependency, or the supported prerequisite is explicitly specified and verified.",
+    "A failed toolchain measurement is reported as a named version/platform probe failure rather than an authenticated forward-RPC failure.",
+    "Focused regression coverage exercises the supported host-toolchain prerequisite and its named failure path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low",
+    "toolchain"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-abb8-7110-a31d-c593b94cf600",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

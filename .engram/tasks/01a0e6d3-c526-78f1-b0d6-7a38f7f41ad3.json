@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c526-78f1-b0d6-7a38f7f41ad3",
+  "external_ref": "tm-heis",
+  "title": "Content revision: cut per-capture cost with a stat-keyed per-file cache",
+  "outcome": "Follow-up from the tm-5gi4 phase 1 review pair (Claude Medium, 2026-09-27). Every content-v1 capture reads and hashes every listed file: at turn begin and close, at each check's start and end, and twice per evaluation. Parents are canonicalised once per capture since phase 1. On large repositories, or on Windows with scanning, a capture can pass the 20 s REVIEW_FREEZE_TIMEOUT and silently drop the basis, leaving obligations only waivable. A capture of 2 s or more is now logged with entries and bytes; use those logs to measure. Remedy: a per-file cache keyed by (path, size, mtime, file id) holding the normalised content hash, with an explicit staleness rule, e.g. re-hash when mtime is within the racy window as Git does.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete: it proposes a stat-keyed cache for content-v1 capture, but the content-v1 producers are being deleted under w-6f42c416b0c7 (C6). Consumers already use source_id since db52491e. Optimizing code that's being removed isn't worth the work. Raised by Kimi::Consultant (TermAl mailbox 852a55c9 #189).",
+  "completion": null
+}

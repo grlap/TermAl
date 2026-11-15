@@ -1,0 +1,27 @@
+{
+  "id": "01a19676-50ff-7a10-a351-c8217aa0869e",
+  "external_ref": null,
+  "title": "Import-reconciliation activation: apply the state-path redirection check before writing and the post-commit integrity check after",
+  "outcome": "activate_engram_import_reconciliation_sqlite rejects a redirected state path before its transaction and verifies commit integrity after commit, before the read-back and the effect, like every other metadata writer; a failure is treated as a failed acknowledgement.",
+  "acceptance": [
+    "Import-reconciliation activation: apply the state-path redirection check before writing and the post-commit integrity check after is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-import-reconciliation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

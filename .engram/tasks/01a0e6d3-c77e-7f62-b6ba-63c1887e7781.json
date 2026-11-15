@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c77e-7f62-b6ba-63c1887e7781",
+  "external_ref": "tm-uw7j.1",
+  "title": "Minimize and globally bound the retired Engram authority ledger",
+  "outcome": "The host-level retired-authority ledger persists the raw work-authority grant even after revocation is confirmed and is bounded only per store identity. Because store identities are unbounded and survive project deletion/restart, ~/.termal/termal.sqlite can retain an unbounded collection of obsolete operator credentials. Preserve fail-closed retry/reuse semantics while replacing confirmed raw grants with an equality-safe digest, adding a global/age retention policy that never drops unconfirmed entries, and documenting the retention boundary.",
+  "acceptance": [
+    "Confirmed entries retain no raw grant secret; unconfirmed entries remain retryable and are never evicted by normal bounds; total confirmed ledger growth is globally bounded or age-pruned; reuse rejection remains correct; persistence/reload and eviction tests pass; the feature brief documents the policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

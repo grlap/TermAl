@@ -1,0 +1,29 @@
+{
+  "id": "01a16913-756a-7ba3-be3f-379ae1a61434",
+  "external_ref": null,
+  "title": "Preserve Claude shell placement after qualified Bash escaped-quote test filters",
+  "outcome": "A qualified literal-pipe command with escaped Bash quotes does not unnecessarily lose the remembered shell directory for later commands whose runtime reports no cwd.",
+  "acceptance": [
+    "Add a Claude-provenance cwd-None witness that runs a supported escaped-quote literal-pipe test and then a later test in the same session, proving both retain the correct placement.",
+    "Use the qualified command reading for shell-move tracking or document a precise supported one-call workaround; retain conservative refusal for actual untracked directory changes.",
+    "Focused validation and independent review cover the final fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16827-bfc6-7af3-948f-ba7f38f569aa",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

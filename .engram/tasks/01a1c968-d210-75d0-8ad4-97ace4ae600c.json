@@ -1,0 +1,36 @@
+{
+  "id": "01a1c968-d210-75d0-8ad4-97ace4ae600c",
+  "external_ref": null,
+  "title": "Expose aggregate closing-job states, reasons and UTC dates through diagnostics",
+  "outcome": "A privacy-preserving diagnostics route makes resident closing-job distribution observable without opening the live store.",
+  "acceptance": [
+    "GET /api/diagnostics/closing-jobs returns only aggregate resident closing-job counts by terminal/retrying state, by fixed reason category (focusScopeChanged/sourceRefused/maxAttempts/other, derived only from stored attempts and the producing code paths' constant message prefixes, with anything else counted as other), and by UTC adopted-at day (unknown for invalid dates), plus serverInstanceId and revision; no job text, identities, paths or commands are exposed.",
+    "The handler performs one non-mutating pass under StateInner without cloning job bodies, opening a store, retrying work or changing revision; HTTP fixture controls cover mixed sessions/states/reasons/dates, unknown legacy data, UTC boundaries, privacy and unchanged custody.",
+    "Focused author validation demonstrates the route's behavioral RED then GREEN on recorded inputs; the green candidate passes cargo fmt --check and the independent full review pair before integration handoff."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "diagnosis",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1c961-7839-74e1-b12f-1676809af512",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered GET /api/diagnostics/closing-jobs aggregate resident state/reason/UTC-day diagnostics, privacy and unchanged-custody HTTP coverage. Independent acceptance6cfe7b5664bd447480b780660c94337e, delegationaa43afd4-c233-4fb8-9224-3f47427e2327/session17421 attempt1, fresh3/3pass at unchangedcff10811. Complete authoritative packet, command/file inventories and all2625Bfulloutput read, no gaps; tracker full verdicts read before consuming fresh pass. Own registered native testcf2ad774 PASS3/0/0, verification9f5918023dbc450da601e8bb4fbad8d6 satisfiedall5obligations. Foundation full pair plus scoped UTC confirmation pair complete, no outstandingMedium; fourLow/Notefollowups separatelyfiled. Integration FULLpassedallstages onidenticaltree before landing. Original source/run/review archives retained for open researchparentw1676809af512; evaluator archive .evidence/closing-job-diagnostics-12327/acceptance/aa43afd4-attempt1 retained until parent diagnosis intake/completion and no open item needs originals. Only empty native testtempdirectories removed;0files. Closing this routechild does not certify live census/cause classification, parentcompletion, hostrestart or runningbuildavailability.",
+    "completed_at": "2026-11-11T11:04:00.986135200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

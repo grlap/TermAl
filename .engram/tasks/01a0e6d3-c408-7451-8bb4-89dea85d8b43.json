@@ -1,0 +1,50 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-89dea85d8b43",
+  "external_ref": "tm-7cu.21",
+  "title": "Initial session view waits ~12s past data arrival: 7s server state-lock stall (workspace PUT + mailboxes) and client first-paint gated on the full startup barrier",
+  "outcome": "GREG REPORT 2026-08-01: 'getting initial session view (last 20 messages) takes a lot of time — maybe because we get the last messages with the minimap? Those should be two different calls.' MEASURED: his proposed split ALREADY EXISTS and both calls are fast; the latency lives elsewhere. Full waterfall from a cold page load (session-630 26.8k + session-2098 26k msgs, two open tabs):\n  660ms workspace GET 23ms; 1291ms overview x2 ~26ms each; 1376ms tail=20 x2 ~100ms each; 1405ms git status 884ms; 1526ms workspace PUT **7106ms**; 1550ms mailboxes **7106ms** (then RETRIED at 8815ms completing in 25ms); FIRST MESSAGE PAINT: 13,804ms.\nAll data needed to render the transcript is client-resident at ~1.5s. The remaining ~12.3s is waiting.\n\nDEFECT A (server, likely dominant): workspace PUT and session mailboxes stalled 7.1s EACH, in parallel, identical duration — the signature of one long state-lock hold (both waiting on the same mutex/actor released at ~8.6s), not slow handlers (the mailboxes retry took 25ms). Something early in serving a fresh page-load holds app state ~7s — candidates: a large synchronous persist, coordination-store work, overview blob backfill, session-store scans. INSTRUMENT: log lock/actor acquisition+hold durations over ~250ms with the holder's call site; reproduce with a cold page load against big sessions. Fix the holder (chunk it, move it off the hot path, or drop the lock during IO).\n\nDEFECT B (client): first transcript paint gates on the whole startup barrier (including the stalled workspace PUT + mailboxes) instead of rendering messages when the tail lands. Messages must paint when TAIL data is available; mailbox summaries, git status, workspace PUT are progressive enhancements that hydrate in after. Overview/rail already arrives fast; if its render currently rides the same barrier, decouple it identically (Greg's instinct — tail paints, rail paints, independently). ACCEPTANCE: cold load with both stalls artificially injected (delay middleware in test) still paints last-20 within ~500ms of the tail response; mailbox cards/git chips fill in later without layout jump.\n\nNOT THE DEFECT, on the record: the overview call (26ms, ~800B) and the tail call (100ms) — Greg's minimap hypothesis is disproven by measurement, and the in-memory simplified overview state he suggested effectively already exists (server-computed compact blob). No change needed there.\n\nPRIORITY: P1 — first-open latency is the first impression of every session, and 13.8s for data that arrived at 1.5s is a 9x self-inflicted wait.",
+  "acceptance": [
+    "On the declared source revision, record that de60's general-commit projection repair and e297's test-run projection index are reused, identify the remaining initial GET/SSE full-summary lock path, and distinguish it from the unattributed historical 7.1-second hold and heuristic 13.8-second paint report. No new live-store capture, latency bound, or attribution is inferred from source or fixtures.",
+    "Initial GET /api/state and initial or lag-recovery SSE state payloads use the existing immutable snapshot owner: capture and exhaustively validate one exact cut under StateInner, then materialize session DTOs and serialize after releasing that guard. Deterministic route-level regressions pause actual materialization after capture and show an unrelated real workspace save and local mailbox validation can complete before release; concurrent mutations cannot mix the captured revision or session/collection metadata. No sleeps, wall-time pass threshold, fabricated durability, or alternate cache establishes the result.",
+    "Preserve fresh agent readiness, the complete existing response shape and membership, unstamped queue/metadata validation, pause/body-sequence/instance epochs, hidden/deleted/recreated records, snapshot/delta/lagged ordering and shutdown behavior. Reuse de60 and the existing queue-validation owner; do not introduce session archival, a payload protocol change, or another snapshot cache. Existing required children A and B keep their separately recorded test and delivery scope; this change does not assert their completion.",
+    "Relevant deterministic regressions and independent whole-final Codex/Claude reviews accompany one exact-input READY handoff; Merger performs the maintained full gate before landing under the current procedure. Preserve original RED evidence and any unlanded test-only packages. No acceptance evaluation, host-credit, restart, or post-restart latency claim is a coding or merge prerequisite."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

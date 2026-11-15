@@ -1,0 +1,30 @@
+{
+  "id": "01a11eb7-917c-7571-bc5d-0f6d0531e819",
+  "external_ref": null,
+  "title": "A gate launched soon after a new worktree's checkout is refused credit for the checkout's own file writes",
+  "outcome": "Files written by `git worktree add` before a root is named, or before the launch turn, never count as a change \"while it was being launched\". A gate launched in the first turn after naming a freshly checked-out worktree is credited when nothing wrote the tree afterwards.",
+  "acceptance": [
+    "Diagnose, with source locators, why the host attributed ui\\src\\transcript-proof-boundary.test.ts (written at 03:17:42Z by the checkout) to gate test launched at 03:18:29.115Z, e.g. delayed watcher events from the checkout delivered after the naming took effect.",
+    "A test or drill creates a worktree, names it, launches a recognized run in the next turn and shows it credited, while a genuine write during the launch is still refused.",
+    "The refusal text, when it rightly applies, names the file and the time of the write it saw."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "test-credit",
+    "worktree"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

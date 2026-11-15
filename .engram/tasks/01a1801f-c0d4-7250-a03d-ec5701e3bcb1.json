@@ -1,0 +1,33 @@
+{
+  "id": "01a1801f-c0d4-7250-a03d-ec5701e3bcb1",
+  "external_ref": null,
+  "title": "Keep restored-observation timeout diagnostics available when the live state mutex is held or poisoned",
+  "outcome": "The existing ReportingTurn timeout diagnostic reports a held/poisoned live-state mutex or an absent session without indefinitely blocking or losing the original timeout context; successful observations and product locking remain unchanged.",
+  "acceptance": [
+    "The existing timeout diagnostic handles an unavailable or poisoned live-state mutex and an absent session without unbounded lock acquisition or a panic under the state lock.",
+    "Successful observation behavior, receive timeout, original test assertions and production locking semantics remain unchanged; reuse existing diagnostic/poison handling where applicable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "gate-failure",
+    "investigation",
+    "low",
+    "macos",
+    "state-lock",
+    "test-robustness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17ff7-19c4-7971-9774-fd4fde41ccc7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1be9e-1ebd-7ca3-8a6c-e1d8a02d1acb",
+  "external_ref": null,
+  "title": "Exercise the naming retry deadline directly through a kept-name request",
+  "outcome": "A deterministic scripted-clock fixture observes the retry helper's own deadline refusal, attempt count and absence of further canonical reads without relying on the outer control wrapper.",
+  "acceptance": [
+    "Exercise the naming retry deadline directly through a kept-name request is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "named-root",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be12-2a94-7573-99d2-e40047ef7d1b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

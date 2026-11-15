@@ -1,0 +1,29 @@
+{
+  "id": "01a17999-b34b-7360-87d9-3deacc60c4c3",
+  "external_ref": null,
+  "title": "Poisoned state mutex expect() during unwind turns a test assertion into a fail-fast abort (federation_snapshots.rs:65)",
+  "outcome": "A panic inside a test that holds or poisons the state mutex reports its own assertion failure instead of escalating to a second panic and a 0xc0000409 fail-fast abort that hides the remaining tests.",
+  "acceptance": [
+    "A deterministic test shows that a panicking test holding the state lock reports its original assertion and the binary continues, with no 0xc0000409 abort.",
+    "The fix reuses an existing poison-tolerant pattern and changes no production lock semantics on the non-panicking path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "low",
+    "state-lock",
+    "test-robustness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

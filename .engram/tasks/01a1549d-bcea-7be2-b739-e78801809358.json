@@ -1,0 +1,35 @@
+{
+  "id": "01a1549d-bcea-7be2-b739-e78801809358",
+  "external_ref": null,
+  "title": "Fence unfinished prompt-owned Claude foreground calls after their turn's terminal result",
+  "outcome": "A current-runtime Attempt foreground call without a correlated tool end remains a hazard after Idle or Error, so fresh peer checks cannot gain credit until that call reports its end.",
+  "acceptance": [
+    "A foreground Bash entry owned by a host prompt remains hazardous after that prompt's success or error result when no correlated tool_result arrived, even if runtime and turn generation are unchanged; checks begun afterward in an overlapping workspace are fenced.",
+    "Only a correlated completion releases the current restriction, stored check fences remain sticky, and ordinary active prompt-owned foreground work retains its existing writer-overlap behavior.",
+    "Deterministic production-frame regressions cover terminal success/error before tool_result and a fresh peer check afterward; the final input passes focused tests, the full gate and the independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a0fd7e-4f31-7cc1-8f54-83e7593f2158",
+  "external_ref": null,
+  "title": "A checkpoint refused for a source-revision mismatch must lead to an honestly reported change and a fresh check, not a dropped report and a closed grant",
+  "outcome": "When Engram refuses a turn checkpoint with execution_observation_source_revision_mismatch, TermAl reports the real source change with its cause and time and keeps the turn's checks. It doesn't drop the report to the fallback or to empty and close the grant without them.",
+  "acceptance": [
+    "A test drives a checkpoint refused with execution_observation_source_revision_mismatch (whole checkpoint rolled back, key not consumed) and shows that TermAl's retry carries an honestly reported source change plus the turn's checks, never the fallback or empty report followed by a grant close.",
+    "Other remote refusals keep the existing drop-to-fallback-then-empty behavior that prevents a grant from being held open forever; a test covers one such refusal unchanged.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "engram-interop",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

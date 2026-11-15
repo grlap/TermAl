@@ -1,0 +1,24 @@
+{
+  "id": "01a158f6-93f2-7650-b688-69ab63429fec",
+  "external_ref": null,
+  "title": "Evaluation brief drops gate obligation assessments and reports \"current control authority requires recovery\", so a passing gate evaluates 0/N insufficient",
+  "outcome": "An acceptance evaluation whose cited gate and live verification records carry matching obligation assessments receives those assessments and the canonical criterion-evidence index in its brief (or an explicit, actionable recovery path), instead of an insufficient-evidence verdict caused by host-side brief surfacing.",
+  "acceptance": [
+    "Evaluation brief drops gate obligation assessments and reports \"current control authority requires recovery\", so a passing gate evaluates 0/N insufficient is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a0fe58-d9bd-74b2-8740-1984d9b9fac6",
+  "external_ref": null,
+  "title": "Make repository-contained test scratch preserve nongit fixtures and fit Windows Git paths",
+  "outcome": "Repository-contained test scratch must not cause nongit fixtures to discover an ancestor repository, and fixture worktree metadata paths must fit supported Windows path limits.",
+  "acceptance": [
+    "Make repository-contained test scratch preserve nongit fixtures and fit Windows Git paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "environment-sensitivity",
+    "test-infrastructure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

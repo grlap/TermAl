@@ -1,0 +1,28 @@
+{
+  "id": "01a11edf-5803-70b1-9b8d-9434ed3c96b4",
+  "external_ref": null,
+  "title": "Control-process evidence on the send-failure and Disconnected paths can report TermAl's own termination as the failure's exit state",
+  "outcome": "Every controlProcess exit state reports what was observed when the failure happened. On the send-failure and RecvTimeoutError::Disconnected paths of ProcessEngramControlTransport::request, the worker's own pre-termination observation is reported, or the state is labelled as observed after the host terminated the worker. Session find also indexes the controlProcess identity and exit state shown on the card.",
+  "acceptance": [
+    "Control-process evidence on the send-failure and Disconnected paths can report TermAl's own termination as the failure's exit state is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,58 @@
+{
+  "id": "01a15a23-842a-7c72-b323-c931b0f63084",
+  "external_ref": null,
+  "title": "Native cross-host mailbox reads return 503 \"central mailbox response unavailable\" while a full gate loads the central host",
+  "outcome": "A satellite participant's native mailbox read (and a reply append) through the central host stays available and gives a definite answer while a full test gate runs on the central host. Reading a page never depends on a persist-writer deadline that gate load routinely misses. If the receipt issuance must be durable, the read returns the page with a typed \"receipt pending, retry with the same key\" answer within budget, not a bare 503 with an unknown outcome.",
+  "acceptance": [
+    "The holder's note names, with file:line locators, the code path by which a satellite's native mailbox read is proxied to the central host and why it returns 503 'central mailbox response unavailable; central mailbox outcome may be unknown' under gate load. It also names which durable write (e.g. receipt issuance) the read waits on, and its deadline. It correlates the 2026-10-20 occurrences: the O1-Mac read at about 16:24:45Z and the reply append at about 16:14:45Z, both during the CSharpProof full gate test-899d1493.",
+    "A fail-first test reproduces a native mailbox read through the central host while the persist writer is slow (a controlled delay seam, not real load) and shows today's 503 or unknown outcome.",
+    "With the fix, under that same slow-writer seam, the read returns the page within the documented budget, either with an issued receipt or with a typed, retry-safe 'receipt pending' answer that a retry with the same key resolves to the same page (within one central process incarnation; after a central restart a same-key retry returns a typed readKeyExpired and the client reads afresh under a new key). A reply append under the same seam gives a definite committed or not-committed answer. Tests cover both.",
+    "The full five-stage gate passes on the exact committed tree, and an independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "gate-load",
+    "greg-directed",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered cross-host mailbox availability fix: append commit receipt independent of owned wake dispatch, authenticated certified refusal classes, bounded frozen read pages with separate receipt issuance and exact-key recovery, explicit mailbox2/2 upgradeRequired. Landed exact treef16d642d as52252238 onorigin/master, fast-forward from8077d3b3 at00:32:59Z, verified byintegrationownerOpus2. Full5stagegateebcc1353 and focused192175b16e0 passed exact source; original and allfixdelta/carry reviewpairs have no remainingMedium+. Independent fresh evaluation0ade8c2b passes4/4. HistoricalRED andfailedgate investigations retained, fiveoptionalLowchildren filed. Implementation complete; coordinatedallhost rollout/restart/fresh9/9/activation remain coordinator-owned and are NOT claimedcomplete.",
+    "completed_at": "2026-10-21T00:34:31.430848600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

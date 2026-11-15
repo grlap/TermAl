@@ -1,0 +1,28 @@
+{
+  "id": "01a167af-4d9d-7ee1-a70c-67d782a4d711",
+  "external_ref": null,
+  "title": "Document the acceptance-evaluation endpoints' retryable 503 refusals in docs/architecture.md",
+  "outcome": "The acceptance-evaluation endpoint rows in docs/architecture.md list the retryable 503 refusals next to the final ones, so callers do not mistake a retryable refusal for a final one: \"authority transition in flight\" (wait the named seconds and repeat the identical request) and the durability-pending acknowledgement.",
+  "acceptance": [
+    "docs/architecture.md's acceptance-evaluation request and submit rows name the retryable 503 \"authority transition in flight\" (with its retry-after wording) and the durability-pending 503, each with what the caller should do, distinguished from the final 409 refusals."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "docs",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

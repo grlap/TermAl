@@ -1,0 +1,32 @@
+{
+  "id": "01a111ee-c262-71e1-a59e-59d270b393d3",
+  "external_ref": null,
+  "title": "Declared test commands: validate NUnit, MSTest and Microsoft Testing Platform (MTP) result shapes beyond the xUnit/VSTest TRX pilot",
+  "outcome": "A declared .NET test command using NUnit, MSTest, or the Microsoft Testing Platform is judged PASS/FAIL/UNKNOWN correctly from its result artifact, each shape proven with real captures, or explicitly documented as unsupported.",
+  "acceptance": [
+    "For each of NUnit (via VSTest TRX), MSTest (via VSTest TRX) and MTP (its TRX extension or native report), a real sanitized capture of a passing, a failing and a zero-test run is added as a fixture and the TRX reader classifies each correctly, or the docs state the shape as unsupported with the reason.",
+    "Host-observed pass and fail runs in a disposable .tmp scratch repository for each supported shape credit or publish as the docs state."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "dotnet",
+    "greg-directed",
+    "team-pilot",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10cfc-06d2-7f81-82e0-8e72f7e16778"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

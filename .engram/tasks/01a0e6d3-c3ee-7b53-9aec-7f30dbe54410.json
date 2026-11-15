@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-7f30dbe54410",
+  "external_ref": "tm-5fsy.1",
+  "title": "Keep Claude runtime permissions aligned when crossing read-only mode",
+  "outcome": "Consolidated review of dc489248/8670fd85 (Codex session-6724 clean, Claude session-6725 Low): src/session_config.rs:530 hot-applies Claude approval mode using SetPermissionMode without respawning. Entering ReadOnlyAutoApprove through the local API therefore does not install the spawn-only ask-all/no-hooks/no-sandbox-auto-allow overlay. Leaving the mode can retain the overlay. Reject caller-supplied internal read-only mode or reset runtime on boundary crossings; test both transitions through the settings API, including preservation of active delegation settings locks.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

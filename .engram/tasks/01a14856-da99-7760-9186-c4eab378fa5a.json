@@ -1,0 +1,30 @@
+{
+  "id": "01a14856-da99-7760-9186-c4eab378fa5a",
+  "external_ref": null,
+  "title": "Strengthen the allocated-revision contract for failed narrow observation persistence",
+  "outcome": "The allocated commit revision remains explicit or mechanically checked on both success and persistence error, so a future pre-allocation failure cannot silently publish a duplicate TestRunChanged revision.",
+  "acceptance": [
+    "The persistence helper/caller boundary encodes or asserts whether a revision was allocated on every error path without changing current persistence and failure publication semantics.",
+    "A regression retains factual Failed publication at exactly one newly allocated revision for actual synchronous persistence failure and preserves contiguous observation revisions.",
+    "The focused observation/publication and persistence tests pass on the final input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-followup",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

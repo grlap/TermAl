@@ -1,0 +1,31 @@
+{
+  "id": "01a0f588-6636-77f1-9b02-3c8360599302",
+  "external_ref": null,
+  "title": "Preserve unavailable cleanup attempts and persist a distinct successor reporter",
+  "outcome": "Preserve unavailable cleanup attempts and persist a distinct successor reporter",
+  "acceptance": [
+    "Preserve unavailable cleanup attempts and persist a distinct successor reporter is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "named-root",
+    "post-import",
+    "recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

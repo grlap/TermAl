@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-7fcbf89277fd",
+  "external_ref": "tm-5fsy.4",
+  "title": "Freeze checker: disable Git lazy fetch and repository transport execution",
+  "outcome": "Codex session-6884 High, src/review_freeze.rs:108. Git environment stripping omits GIT_NO_LAZY_FETCH. A partial/promisor clone can fetch missing objects during diff, write objects and invoke repository-configured transport (including core.sshCommand). Source-confirmed missing guard; no exploit executed. Disable lazy fetching with a supported fail-closed mechanism and reject unavailable objects.",
+  "acceptance": [
+    "Missing-promisor-object regression with transport sentinel proves no helper runs and no repository objects are written; ordinary complete-repository verification still succeeds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

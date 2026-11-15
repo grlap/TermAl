@@ -1,0 +1,45 @@
+{
+  "id": "01a10f4a-0f85-7671-8267-7e11e5d43d24",
+  "external_ref": null,
+  "title": "Operator action 'abandon local continuation' for held sessions whose recovery data is lost or unverifiable",
+  "outcome": "Operator action 'abandon local continuation' for held sessions whose recovery data is lost or unverifiable",
+  "acceptance": [
+    "A separate visible operator action, 'abandon local continuation', is offered only for a local held continuation in either of two classes: (a) historical orphan uncertainty, with a recorded uncertain grant and no retained head, classified under the explicitly documented legacy-schema compatibility assumption selected in provenance option A; or (b) modern recovery data whose local cancellation identity, original text or applicable audit cannot be verified. Any surviving modern envelope, marker, audit, cancellation tuple or live owner prevents historical fallback; absence of all modern discriminators is an assumption, not proven writer provenance, and complete erasure remains outside that guarantee. Ordinary unresolved records with a verifiable cancellation tuple use the foundation's cancellation route, including when only transport replay fields are invalid. The new action is reachable without a queue head or a busy runtime and is not offered for other held states or healthy sessions.",
+    "Before confirmation, the action shows the recorded grant and authority where available, the known facts, and explicitly unknown or unverifiable facts. It explains that only the local continuation will be abandoned, that remote grant closure is not established, and that missing message contents cannot be restored by this action. Existing raw recovery data, history and unrelated session data are preserved. No text, key, head or historical identity is invented and nothing is replayed. Unknown cause is shown as unknown; host-caused loss remains a defect rather than being relabelled as external corruption.",
+    "On explicit operator confirmation, the host reserves a new local abandonment operation identity and revision bound to the current session and exact local obligation snapshot, without requiring or fabricating a missing historical Begin identity. It revalidates that ownership and eligibility before mutation and release. The operation fences old local delivery capabilities and durably records the operator acknowledgement, captured known/unknown facts, retained raw audit and terminal local-abandonment disposition as one coherent image. Only exact ACK/readback of that image plus current-owner revalidation releases that operation's local continuation hold. A failed or ambiguous ACK retains the same owner's retryable operation and hold; a stale or superseded completion cannot release, overwrite or reinstate ownership over a successor. Retries and reload preserve the terminal disposition and cannot revive an old local delivery capability, replay, duplicate an abandonment or retire a successor head.",
+    "Local abandonment never claims or synthesises remote Engram grant closure or verified original-message cancellation, fabricates a restart checkpoint, or clears independent Stop/pause, source-observation, abort or work-authority duties. Missing, null or different remote status is not settlement proof. Any later admission still requires genuine Engram authority and applicable settlement requirements; this action promises no immediate reuse and cannot bypass those requirements.",
+    "Tests cover both eligible record classes, the displayed facts and unknowns, preserved raw/history/unrelated data, confirmation and rejection/cancellation of the confirmation, exact-image ACK success, failure, ambiguity, stale ownership, idempotent retry and reload, permanent old-capability invalidation, no successor-head retirement or successor-hold release, independent duties, and no invented text/key/identity/replay/remote closure. Negative controls exclude healthy sessions, ordinary held or unresolved sessions outside the two classes, transport-only corruption with a verifiable cancellation tuple, and historical fallback when any modern discriminator survives. The action lands after foundation Stage B on its actual reviewed input. Its own final input passes the maintained full gate, including cargo test --bin termal and UI tests, and carries the required exact-input independent review, host verification and acceptance evidence; foundation evidence is not substituted for this item's checks."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "begin-recovery",
+    "operator-action",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

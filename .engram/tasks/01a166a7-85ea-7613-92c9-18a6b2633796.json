@@ -1,0 +1,30 @@
+{
+  "id": "01a166a7-85ea-7613-92c9-18a6b2633796",
+  "external_ref": null,
+  "title": "Cover ordinary marker fence failures and intervening owner or authority changes",
+  "outcome": "Cover ordinary marker fence failures and intervening owner or authority changes",
+  "acceptance": [
+    "Inject a real classified marker-fence failure and assert interrupted retained marker, PersistenceUnknown, no process-only permission and no provider/checkpoint/verification credit.",
+    "Exercise owner replacement, changed admission settings and operator pause between ordinary pre-fence and post-fence checks, proving that a stale attempt neither enqueues nor modifies a successor.",
+    "Exercise Resume on a live in-process marker head and preserve the restart refusal control; focused tests, full gate and independent review pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a0e6d3-c4be-7bb2-bcc2-049ac52c3f72",
+  "external_ref": "tm-b4o7",
+  "title": "Reconcile ambiguous Codex unarchive before retry and archive compensation",
+  "outcome": "Consolidated R3 Claude Low: pre-existing thread/unarchive Timeout/Transport may mean the remote operation completed or is still pending, while local thread state/release remain Archived. Current follow-up rollback compensates only confirmed Restored. Source evidence: codex_thread_actions.rs unarchive RPC returns early on error; delegation_followup_admission.rs rollback checks Restored. Do not infer no restore from absence in archived inventory or from an immediate archived sample: the original RPC may complete later. Need typed restore ambiguity and origin ownership, positive reconciliation, safe retries and late-notification compensation; deterministic lost-reply plus late completion tests. Separate from tm-gtdi confirmed-success/rejected-admission regression; no source fix yet.",
+  "acceptance": [
+    "A Codex thread/unarchive timeout or transport failure retains typed ambiguity bound to the exact session, thread, runtime origin and restore owner. Before retrying, the host positively reconciles the restore outcome; absence from archived inventory, an immediate archived sample or a failed probe does not prove that the original operation cannot complete later.",
+    "A rejected, unadmitted follow-up or evaluator reuse explicitly disposes of its exact prepared attempt as undelivered or withheld, retaining durable attempt identity and history. Ambiguous or admitted brief delivery remains fenced; retries do not duplicate a brief, provider command or attempt key.",
+    "A matching late unarchive completion permits only cleanup or recovery owned by that exact attempt. Manual restore, Stop or Cancel, a changed thread or runtime, an admitted successor, persistence failure and restart cannot authorize stale compensation or resurrection.",
+    "Deterministic fail-first regressions cover lost replies with late completion, positive Active reconciliation, definitive rejection, a live origin with an archived sample, an orphaned evaluator preparation, a follow-up to a completed delegation whose unarchive times out, preservation of the previous terminal result and duplicate callbacks. The maintained full gate passes on the exact final tree with a clean independent Codex and Claude review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

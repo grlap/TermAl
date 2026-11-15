@@ -1,0 +1,28 @@
+{
+  "id": "01a1d587-5558-79f3-9843-fa5d5de5b740",
+  "external_ref": null,
+  "title": "Integrate combo92 on 2a873f3b: c593 5f65a032 (K3 S2b typed test request custody; byte-identical carry of ac86a4d5)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 5f65a0325b97f061ef3a8acfead5eda61a0da620 (tree d21f3476ff94768de579dbd0698aedda4cd16fc3) is on origin/master, where master was moved to it by a fast-forward from 2a873f3bfd160cd2aded3cdbdd6610631c656f11.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is d21f3476 passed every stage, with equal source ids before and after and an eligible clean input; the Windows leg on the exact candidate passed (Node 17 via test-launcher-request-message.test.mjs, and the 13-filter Rust selection of 42 tests); and no review finding of Medium or higher is outstanding: the candidate's contribution against 2a873f3b is byte-identical (same 54 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to ac86a4d5's contribution against ab787fa2, whose whole-54 review pair (Codex 17823, Claude 17824) found no Medium or higher, and the candidate adopts that pair.",
+    "The release binary built from tree d21f3476 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

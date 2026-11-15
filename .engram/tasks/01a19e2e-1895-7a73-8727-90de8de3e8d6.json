@@ -1,0 +1,39 @@
+{
+  "id": "01a19e2e-1895-7a73-8727-90de8de3e8d6",
+  "external_ref": null,
+  "title": "EO documentation: reconcile ordinary dispatch and nonblocking-send contracts",
+  "outcome": "The current docs match the code after the per-turn gating removal: no page describes a gated admission or recovery route, verification_bind credit, or a removed client field as current behaviour, and the execution-observability page states the one remaining synchronous Engram read on the send path accurately.",
+  "acceptance": [
+    "docs/architecture.md endpoint table (about line 450) describes ordinary dispatch for an omitted origin and conservative retention of unknown deliveries for queue/resume, with no gated admission or gated recovery.",
+    "docs/features/host-architecture.md no longer presents verification_bind binding batch members (about lines 373 and 990) or engramBootRecoveryPending (about line 1125) as current; either the paragraphs are updated or the historical disclaimer covers them.",
+    "docs/features/execution-observability.md (about line 67) either qualifies 'Sends, queue drains, Resume and mailbox wakes do not wait for Engram' for the context-nudge read (prepare_engram_context_nudge_off_lock, up to about 7 s), or that read is taken off the send path in a separate change.",
+    "The records-from-earlier-builds text states that retained observation envelopes whose stored request carries routing_token settle as LocalFailure runtime_observation_invalid_retained_image without being sent, and the deliberate removal of the Claude gate write guard is recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No doc change was needed: all four criteria were already met on master 2a873f3b by earlier landings, as recorded with exact line quotes in note 112653ca.\n- architecture.md endpoint table: ordinary dispatch and conservative retention.\n- host-architecture.md: no current verification_bind or engramBootRecoveryPending.\n- execution-observability.md: sends never wait on an Engram context read. The read left the send path in 5e1fd9a4.\n- engram-host-adapter.md: routing_token LocalFailure, and the gate write guard's removal is recorded.\nThe independent evaluation passed all four.",
+    "completed_at": "2026-11-13T16:45:33.642192800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

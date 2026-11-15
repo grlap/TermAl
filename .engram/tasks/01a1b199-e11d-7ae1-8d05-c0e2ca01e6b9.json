@@ -1,0 +1,28 @@
+{
+  "id": "01a1b199-e11d-7ae1-8d05-c0e2ca01e6b9",
+  "external_ref": null,
+  "title": "Native S0 source snapshot exhausted its 8 s budget on a tiny test repository on Central; the slow stage is unmeasured",
+  "outcome": "Native S0 source snapshot exhausted its 8 s budget on a tiny test repository on Central; the slow stage is unmeasured",
+  "acceptance": [
+    "The slow S0 stage is identified from recorded per-stage timings (from a real-owner test or a real dispatch), with the run id, and classified as product, test or runner, or environment/resource.",
+    "If it is product, it is fixed or filed with its measured cost; the 8 s budget is not raised merely to obtain green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

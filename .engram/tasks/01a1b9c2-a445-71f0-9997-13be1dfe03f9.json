@@ -1,0 +1,38 @@
+{
+  "id": "01a1b9c2-a445-71f0-9997-13be1dfe03f9",
+  "external_ref": null,
+  "title": "Switch acceptance and evaluation capture and freshness from content-v1 to the full source_id (C6 prerequisite, group 2)",
+  "outcome": "TermAl's acceptance and evaluation paths capture, compare and copy the full source_id for NEW records, instead of a content-v1 revision string. The paths are the judged, current and stored sources, freshness, and evidence selection. Historical records stay readable as stored. The wire with Engram is agreed bilaterally first. After this, no new-record producer in this group reaches content_revision.rs.",
+  "acceptance": [
+    "New TermAl acceptance/evaluation capture, declared/judged/current/stored basis, freshness and evidence-selection paths use the complete existing source_id through the DTO agreed with Engram, comparing identity with the existing same_source semantics, without a revision-string fallback or a new authority, eligibility or credit condition.",
+    "Historical records remain readable as stored. named_root_sighting_read is used only for presence and a bounded display summary, never identity comparison; evaluator-facing briefs and automatic context contain summaries, never the full source_id.",
+    "The exact DTO alternatives, match points and mixed-version behavior are agreed with the Engram owner before coding. Engram lands acceptance of both record shapes before TermAl sends source_id; the exact TermAl candidate is independently reviewed and gated, with behavioral coverage for matching/mismatching identities, evidence selection and submission freshness. Operational acceptance evaluation remains OFF, and this item does not delete content-v1."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "greg-reported",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed complete-source acceptance/evaluation migration on master db52491e, with exact-input independent review and both full gates; installed proof recorded a real independent pass and a changed-source completion refusal with no seal. Operational evaluation remains OFF.",
+    "completed_at": "2026-11-09T06:13:42.976184400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

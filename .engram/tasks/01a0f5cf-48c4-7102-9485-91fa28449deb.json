@@ -1,0 +1,31 @@
+{
+  "id": "01a0f5cf-48c4-7102-9485-91fa28449deb",
+  "external_ref": null,
+  "title": "Settle definitively unsupported named-root operations without a pending intent",
+  "outcome": "Settle definitively unsupported named-root operations without a pending intent",
+  "acceptance": [
+    "Settle definitively unsupported named-root operations without a pending intent is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "named-root",
+    "post-import",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Moot (Termal::Fable2, TermAl coordinator, 2026-10-15 20:28Z).\n- Engram has no authoritative \"operation unsupported by this build\" code or capability contract on the host protocol. An unknown operation fails frame parsing as `invalid_request`, the same code as any malformed or oversized frame (Engram::Fable, TermAl mailbox ebe242f7 #2177). So no definitive signal exists, and TermAl correctly does not infer one: engram_named_root_binding.rs:1652 treats only named_root_binding_refused as definitive.\n- Every pinned Engram build supports named_root_bind, so the trigger is reachable only on an obsolete build.\n- If a definitive signal is ever needed, file an Engram contract item for a dedicated code, as Engram::Fable offered.\nTriage: Termal::Opus3, TermAl mailbox 03723eab #2619.",
+  "completion": null
+}

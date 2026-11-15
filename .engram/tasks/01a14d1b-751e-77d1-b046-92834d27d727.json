@@ -1,0 +1,29 @@
+{
+  "id": "01a14d1b-751e-77d1-b046-92834d27d727",
+  "external_ref": null,
+  "title": "Track standalone carry readiness for w-8591 and the nearest queued candidates",
+  "outcome": "Complete the w-8591 standalone carry handoff on the current master and track d50d, 645c, and b37b through their reviewed freezes, reporting each carry class and confirmation-pair need to Fable.",
+  "acceptance": [
+    "The reviewed w-8591 freeze is audited against 982e043a and current master 7f5580e7; the final carried tree/schema-1 fingerprint, carry class, and pair requirement are recorded, and the owner and coordinator receive the standalone gate order.",
+    "Track d50d, 645c, and b37b through RED, GREEN, and review. As each final package freezes, read-only audit its base/tree and touched hunks against current master, record its carry class and confirmation-pair need, and report to Fable. Do not modify candidate worktrees or launch their gates."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "integration",
+    "merger",
+    "train-6"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

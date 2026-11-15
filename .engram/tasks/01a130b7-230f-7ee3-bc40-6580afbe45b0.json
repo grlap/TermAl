@@ -1,0 +1,28 @@
+{
+  "id": "01a130b7-230f-7ee3-bc40-6580afbe45b0",
+  "external_ref": null,
+  "title": "Receipted delivery: carry the turn generation in AcpPromptCommand instead of reading it when the runtime takes the prompt",
+  "outcome": "Receipted delivery: carry the turn generation in AcpPromptCommand instead of reading it when the runtime takes the prompt",
+  "acceptance": [
+    "An ACP prompt's delivery outcome settles the receipt of the turn its command was dispatched for, carried in the command, never the session's current turn at take-up time",
+    "A test shows an ACP outcome processed after the session's turn advanced on the same runtime token leaves the newer turn's receipt untouched"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1acaa-1063-7fc0-af45-561c06a03f96",
+  "external_ref": null,
+  "title": "Complete simple committed-input submodule conformance fixtures and call-count evidence",
+  "outcome": "Add evidence for the documented simple submodule contract without changing the admission rule.",
+  "acceptance": [
+    "Focused fixtures cover an old-form .git directory child, a staged gitlink pin, a child outside the root through a symlink, and a child that is not its own worktree, with named refusal where required.",
+    "Record actual outer and internal Git process counts for representative initialized direct-child captures; distinguish source-derived outer counts from observed subprocess counts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

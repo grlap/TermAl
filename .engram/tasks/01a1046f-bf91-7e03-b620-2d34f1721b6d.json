@@ -1,0 +1,53 @@
+{
+  "id": "01a1046f-bf91-7e03-b620-2d34f1721b6d",
+  "external_ref": null,
+  "title": "Budget-clock B4c: CheckedTurn::start_with_opening chooses its scripted budget clock through the guarded slice-1 selection",
+  "outcome": "CheckedTurn::start_with_opening (src/tests/engram_turn_checks.rs, :849 at c98d041) replaces its unguarded install_test_engram_budget_clock(EngramBudgetClock::scripted()) at :860 with the guarded slice-1 selection, at the same point before enable at :884. The clock each caller sees does not change, since it is already scripted before enable. An inventory confirms that for all 161 CheckedTurn:: call sites across 11 files: engram_turn_checks 52, engram_turn_observations 23, engram_one_call_checks 21, engram_lost_shell_overlap 16, engram_carried_credit_outcomes 13, engram_claude_outstanding_work 11, engram_carried_checks 9, engram_claude_runtime_turns 8, engram_claude_adopted_terminalization 4, engram_carried_credit_corrections 3, engram_first_extraction 1. No production change. Criteria are to be drafted in the test-only template and agreed before the batch starts.",
+  "acceptance": [
+    "Scope at c98d041: CheckedTurn::start_with_opening (engram_turn_checks.rs :849) and its 138 CheckedTurn:: call sites across 10 files (engram_turn_checks 52, engram_one_call_checks 21, engram_lost_shell_overlap 16, engram_carried_credit_outcomes 13, engram_claude_outstanding_work 11, engram_carried_checks 9, engram_claude_runtime_turns 8, engram_claude_adopted_terminalization 4, engram_carried_credit_corrections 3, engram_first_extraction 1). The fixture chooses its scripted clock through select_test_scripted_engram_budget_clock at the same point, before Engram is enabled and before any target or worker snapshot, and asserts the clock is unread before enable. install_test_engram_budget_clock no longer appears in it.",
+    "A note gives the transitive caller inventory per file and constructor, showing that no caller installs, selects, declares or advances a clock itself. It also classifies each real-time source in those files (wait guards such as Instant::now() + DEADLOCK_GUARD, and others) as a liveness guard or a subject of its test.",
+    "Every test in scope that is compiled on the gate's platform passes with the guarded selection. A test in scope that is compiled out on that platform is listed in a note with its cfg attribute, and the note shows that the fixture change it reaches is unconditional, so the same code runs there. The clock each caller sees is unchanged, since it is scripted before enable as before. No expectation is weakened, no timeout grows, and no retry is added.",
+    "No production change. Shared fixtures outside this fixture stay unchanged.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a102f3-27ce-76a3-9b8c-8fb4c2131717",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "CheckedTurn::start_with_opening now asserts that the Engram budget clock is unread, then selects the scripted clock through the guarded slice-1 boundary before Engram is enabled. The unguarded install is gone. All 244 tests that reach it, across 10 files, see the same scripted clock as before. Test-only, one file. Acceptance 673bc74b passed 5/5 on criteria rev 3. Landed in train 35 as master 992d71a, a merge of c14a1324 onto 2933a6a. The integration gate test-d4a6e17e passed. The integration pair had one Low, the inline guard, which is already w-70c418dbb126. The push time recorded is an upper bound: Opus2's landing message at 07:07:28Z reports the push as already verified by fetch and ls-remote.",
+    "completed_at": "2026-10-04T07:07:57.689740900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "id": "01a1800c-ea48-74a1-ac0f-1342015d1040",
+  "external_ref": null,
+  "title": "Session list: show a discreet remote marker left of the agent icon on remote session tiles",
+  "outcome": "In the session list, a session hosted on a remote host shows a small, clearly readable remote marker immediately LEFT of the existing agent icon on the right side of its tile. Local sessions show no marker.",
+  "acceptance": [
+    "A session tile for a remote-hosted session renders a remote marker placed immediately left of the existing agent icon. The marker uses one consistent symbol, has an accessible label or tooltip naming it as remote (with the host label where the session data provides one), and does not shift or hide the agent icon.",
+    "A local session tile renders no remote marker, and its layout is unchanged.",
+    "Remote-ness comes from existing session or host data that the UI already receives. No backend or API change is made unless one is strictly required, and if so it is stated in a note.",
+    "Vitest component tests cover a remote tile showing the marker in the correct position relative to the agent icon, and a local tile without it. `cd ui && npx tsc --noEmit` is clean.",
+    "The standard full gate passes on the exact landed tree, with the review pair having no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed by evidence (closure batch A). Landed in da6c938b, which is on master. On master 57a762c8 a remote session tile shows the remote marker left of the agent icon, and a local tile shows none (ui/src/session-row-remote-marker.tsx, used in AppControlSurface.tsx). Registered test-35e8c755 passed: vitest session-row-remote-marker and App.session-remote-marker. The independent evaluation (delegation-ed647b6e) recorded all 5 criteria as passed.",
+    "completed_at": "2026-11-13T05:16:30.073771700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

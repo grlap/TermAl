@@ -1,0 +1,27 @@
+{
+  "id": "01a1b50a-717e-7573-a0dd-0f9b9968f65a",
+  "external_ref": null,
+  "title": "Console-route declared result reads the artifact even for Unknown/NotFinished exits (extra IO on the provider event path)",
+  "outcome": "Console-route declared result reads the artifact even for Unknown/NotFinished exits (extra IO on the provider event path)",
+  "acceptance": [
+    "Console-route declared result reads the artifact even for Unknown/NotFinished exits (extra IO on the provider event path) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "eo-followup",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

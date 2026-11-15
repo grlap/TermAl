@@ -1,0 +1,50 @@
+{
+  "id": "01a1691b-f8cb-7033-9f71-e11e95cf8b8c",
+  "external_ref": null,
+  "title": "One implementation of the told-once late-end rule (in-turn path and reported-end path)",
+  "outcome": "The rule \"a late end under a closed check's key is told once and its closure retired\" lives in one function, used both by note_engram_command_finished_with_capture's in-turn path and by note_engram_reported_end.",
+  "acceptance": [
+    "C1. The in-turn late-end tell in note_engram_command_finished_with_capture calls engram_tell_late_end_of_closed_check, adapting its exit argument, and the duplicated guard, position/remove and publish are gone.",
+    "C2. The comments on EngramHost::codex_reported_end, codex_events' late-end handling and the engram_reported_ends.rs header describe the id-less hand-over and the told-once tell.",
+    "C3. Existing late-end tests (engram_unended_closures, silent_check_outcome, reported_ends) pass unchanged.",
+    "C4. A regression test drives one late end that reaches both paths: Codex reports it tagged with the active turn, so both take_shared_codex_late_command_end and the in-turn route see it. The holder is told exactly once.",
+    "C5. The review pair has no outstanding finding of Medium or higher; focused checks pass on the frozen input; it lands after w-1b4f."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

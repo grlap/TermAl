@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c641-7d23-a6b8-6f8ebcdf48c8",
+  "external_ref": "tm-mhi2",
+  "title": "Poisoned TEST_HOME_ENV_MUTEX cascades one test panic into dozens of unrelated failures",
+  "outcome": "Observed by Codex during tm-7p9z.3 (2026-09-05): one test panicked (a stale fs::read assertion after a preferences-only save) while holding the shared test-only static TEST_HOME_ENV_MUTEX (src/tests/mod.rs); every later test that takes the guard with .lock().expect(\"test env mutex poisoned\") then failed before its body ran - 26 cascading failures masking the single real defect. The same shape applies to the sibling TEST_KILL_CHILD_PROCESS_FAILURE_MUTEX. Desired: test-only guards recover a poisoned lock (lock().unwrap_or_else(PoisonError::into_inner)) because the protected state (process env / kill-failure injection) is reset by each holder and does not become invalid on panic; keep the guards serialized; one failing test must produce one failure. Acceptance: a test that panics while holding the guard leaves the next holder runnable (regression test using catch_unwind); the expect(\"... poisoned\") sites are gone; full wrapper green.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "reliability",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

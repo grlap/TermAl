@@ -1,0 +1,28 @@
+{
+  "id": "01a1d251-e4eb-7492-809a-93b7ddac4528",
+  "external_ref": null,
+  "title": "source-identity.md still describes content-v1 as the live ordinary measurement after its producers were removed",
+  "outcome": "docs/features/source-identity.md describes only the current source_id contract for new measurements and states content-v1 solely as a stored historical form that remains readable.",
+  "acceptance": [
+    "docs/features/source-identity.md no longer says the host retains or produces content-v1 for ordinary measurements (for example the 'Consumer migration and authority' section and the 'Ordinary content: preserve content-v1' section); content-v1 appears only as a stored historical form that stays readable, and what ORDINARY_COMMIT_INPUT_DEFAULT=false means today is stated from the code. No production behaviour changes, and no test reads the Markdown."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "legacy",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

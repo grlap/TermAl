@@ -1,0 +1,38 @@
+{
+  "id": "01a1bd71-6541-7220-8be8-19ff4238acaa",
+  "external_ref": null,
+  "title": "w-efeee post-landing live proof: cross-host mailbox/prompt after installed-build update",
+  "outcome": "Collect the original federation post-landing live central–Mac delivery and acknowledgement proof after landing, install and Greg's coordinated restart of both hosts; preserve this obligation independently of the code-landing item.",
+  "acceptance": [
+    "After landing and Greg's restart of both hosts, a live cross-host mailbox message between central and the Mac is delivered and acknowledged with no manual profile refresh, recorded with its message and receipt ids."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "live-proof",
+    "mac",
+    "post-landing",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Narrow Oct26 central–Mac delivered/read+receipt-ACK proof closed on preserved evidence after Fable2697 criterion mapping; w-7a2237755088 was detached into this independent item. No manual profile refresh; manual Allow and retrospective timing limits retained. Stronger unattended proof stays open in w-9b6940770927.",
+    "completed_at": "2026-11-08T23:15:29.812510900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

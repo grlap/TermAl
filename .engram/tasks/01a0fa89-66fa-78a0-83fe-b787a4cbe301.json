@@ -1,0 +1,26 @@
+{
+  "id": "01a0fa89-66fa-78a0-83fe-b787a4cbe301",
+  "external_ref": null,
+  "title": "Duration report: bound the recorded lists in results.json by UTF-8 bytes, not UTF-16 code units",
+  "outcome": "Duration report: bound the recorded lists in results.json by UTF-8 bytes, not UTF-16 code units",
+  "acceptance": [
+    "Duration report: bound the recorded lists in results.json by UTF-8 bytes, not UTF-16 code units is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

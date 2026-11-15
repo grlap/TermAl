@@ -1,0 +1,30 @@
+{
+  "id": "01a1d32c-08b3-7ea1-8cfd-de9f39b667a4",
+  "external_ref": null,
+  "title": "Tail-read backstop spacing resets on reads that carry no new demand, so busy workspaces stay near 3 s",
+  "outcome": "The backstop's per-session spacing resets only when that session's tail demand actually changes. An unrelated state event or a watchdog re-read leaves an uncertified session's backoff in place.",
+  "acceptance": [
+    "The spacing resets on a real change in that session's demand, for example a per-session demand generation that advances when its observed body sequence moves or a certified tail becomes dirty. It no longer resets on every non-backstop read or request, such as the startVisibleTranscriptRepairs and adoptSessions sweeps or the 15 s watchdog's reads.",
+    "A Vitest test shows that a state event leaving this session's bodySeq unchanged keeps its backed-off spacing, and that the existing reset tests still pass.",
+    "The change lands under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "sse",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

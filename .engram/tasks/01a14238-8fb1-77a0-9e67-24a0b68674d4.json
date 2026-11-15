@@ -1,0 +1,37 @@
+{
+  "id": "01a14238-8fb1-77a0-9e67-24a0b68674d4",
+  "external_ref": null,
+  "title": "The withheld-credit line tells the holder to \"run it again on its own\" even when no criterion or obligation needs that check",
+  "outcome": "When an ordinary check is withheld as overlapped, the holder's line says \"Run it again on its own to record it\" unconditionally. For a check nothing needs, such as a release installation build after an already credited full gate and accepted evaluation, that invites an unnecessary credit-only rerun, which the project's rules forbid. The line should distinguish a check that a bound criterion or open obligation still needs (rerun guidance stays) from optional credit (it states plainly that no rerun is needed).",
+  "acceptance": [
+    "The withheld line advises a rerun only when an open obligation or an unsatisfied bound criterion of the holder's item could use that check kind; otherwise it says the check was not recorded and no rerun is needed. A test covers both cases.",
+    "The change shares the withheld line with w-4f5100c27046 (cause naming) without duplicating its implementation.",
+    "The full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "engram-host",
+    "ux"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

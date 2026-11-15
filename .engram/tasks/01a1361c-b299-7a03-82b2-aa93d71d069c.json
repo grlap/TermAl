@@ -1,0 +1,28 @@
+{
+  "id": "01a1361c-b299-7a03-82b2-aa93d71d069c",
+  "external_ref": null,
+  "title": "Operator removals of a receipted head settle as a retryable Rejected that keeps the prompt's retry entry",
+  "outcome": "Operator removals of a receipted head settle as a retryable Rejected that keeps the prompt's retry entry",
+  "acceptance": [
+    "A removal that is an operator decision (cancel_queued_prompt, clear_queued_prompts_by_source*, retired promotion, child detach), settled through settle_removed_handing_off_head (src/prompt_delivery.rs), drops the retry entry or carries a distinct cause on the receipt, so requeue_rejected_prompt_delivery refuses it and a producer cannot re-queue a prompt the user cancelled; a transport rejection stays re-queueable.",
+    "a_removed_head_promoted_for_its_hand_off_is_rejected_durably_and_never_sent (src/tests/prompt_delivery.rs) asserts the removal is not re-queueable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

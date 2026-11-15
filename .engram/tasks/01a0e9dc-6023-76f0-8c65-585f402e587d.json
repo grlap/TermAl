@@ -1,0 +1,27 @@
+{
+  "id": "01a0e9dc-6023-76f0-8c65-585f402e587d",
+  "external_ref": null,
+  "title": "Remove tracker ids from the header comment of src/engram_check_paths.rs",
+  "outcome": "The header comment of src/engram_check_paths.rs (line 2) cites tracker ids (\"Engram w-108a13d58018 criterion 2, tm-winf step 2\"). The Engram section of CLAUDE.md and AGENTS.md forbids Engram or Beads ids in source comments. The comment came in with commit 5fee74f, and the earlier comment-only cleanup missed it.",
+  "acceptance": [
+    "src/engram_check_paths.rs carries no Engram or Beads id in any comment; the header still says what the module owns in plain words; a search of src/ for w-[0-9a-f]{12} and tm-[a-z0-9]{4} in comments finds none introduced by this change"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "hygiene",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

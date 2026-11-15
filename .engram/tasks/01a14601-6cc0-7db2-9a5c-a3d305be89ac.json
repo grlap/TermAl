@@ -1,0 +1,29 @@
+{
+  "id": "01a14601-6cc0-7db2-9a5c-a3d305be89ac",
+  "external_ref": null,
+  "title": "Extract withheld-check publication from the large checkpoint function",
+  "outcome": "Move the checkpoint's pending source-change/need selection/publication loop into a cohesive helper owned by engram_withheld_feedback.rs, retaining off-lock reads, same-binding/grant/connection revalidation and unchanged credit behavior.",
+  "acceptance": [
+    "Extract withheld-check publication from the large checkpoint function is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "check-credit",
+    "engram-host",
+    "maintainability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2f8-1e31-7b91-9aed-4f5100c27046",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1a58a-f6a7-7670-ac8f-643e1acc08c7",
+  "external_ref": null,
+  "title": "Extract other-root placement notice fixtures from the oversized source-root naming test module",
+  "outcome": "The optional other-root placement notice fixture, observer wait and related tests live in a focused test module without changing their assertions or runtime behavior.",
+  "acceptance": [
+    "Move the other-root placement notice fixture and its related tests out of src/tests/engram_source_root_naming.rs into a focused module, preserving deterministic observer synchronization and the existing behavioral assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "maintainability",
+    "refactor-deferred"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

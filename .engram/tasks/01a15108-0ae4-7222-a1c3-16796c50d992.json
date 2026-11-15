@@ -1,0 +1,35 @@
+{
+  "id": "01a15108-0ae4-7222-a1c3-16796c50d992",
+  "external_ref": null,
+  "title": "Cover native-creation refusal branches and same-key reference provision races",
+  "outcome": "Cover native-creation refusal branches and same-key reference provision races",
+  "acceptance": [
+    "Cover native-creation refusal branches and same-key reference provision races is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14e57-ba33-7180-8413-d9f08fe63a7a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

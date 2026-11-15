@@ -1,0 +1,55 @@
+{
+  "id": "01a16862-bf1b-7950-b638-ca7e9c7cef1c",
+  "external_ref": null,
+  "title": "Cold workspace-save publication must not block unrelated mailbox lookup on full-state projection",
+  "outcome": "A cold-load workspace save preserves its exact commit cut while unrelated local mailbox validation can proceed independently of deferred full-state projection; the existing snapshot repair is adopted rather than duplicated.",
+  "acceptance": [
+    "A source note on the declared revision maps cold-load workspace PUT, local mailbox validation/listing, overview/backfill and persistence lock boundaries, distinguishes a state-lock waiter from a holder, and records that the historical 7.1-second event has no retained holder attribution. Existing snapshot and ACK repairs are reused rather than reimplemented; unrelated candidates remain explicitly unproven.",
+    "A deterministic regression drives a real workspace PUT and local mailbox-session validation with connected production persistence and broadcast paths. With deferred full-state projection paused after its immutable commit-cut capture, the workspace response and unrelated mailbox validation complete without waiting for that projection. The pre-fix path fails at a lock-scope assertion; no sleeps, wall-time pass threshold, fabricated durability or synthetic load establishes the result.",
+    "Workspace layout contents, label preservation, layout/global revisions, persistence acknowledgement policy and exact snapshot-before-delta publication order are preserved. Mailbox local-root/delegation/hidden-session checks and pending/ownership rules are unchanged; concurrent session mutation cannot mix the published commit cut.",
+    "Host-recorded focused regressions and the maintained full gate pass on the exact final source input, with an independent whole-input Codex/Claude pair free of outstanding Medium or higher. This source child establishes the cold-load route lock-scope contract; historical incident attribution, client first-paint behavior and any live latency claim remain separate and require independent evidence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated",
+    "cold-load",
+    "state-lock",
+    "workspace"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c408-7451-8bb4-89dea85d8b43",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a164ff-dc1b-71f3-bda3-de6021f4b32f"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,39 @@
+{
+  "id": "01a19ef2-54b4-7661-a602-1fd8f197b596",
+  "external_ref": null,
+  "title": "Read-only legacy removal census after Execution Observability on master 87f49ed0",
+  "outcome": "A ranked, evidence-backed census on the fixed post-EO master identifies removal or migration candidates without changing code, deleting backups, or risking historical data and persisted-shape readers.",
+  "acceptance": [
+    "A ranked table under .evidence/legacy-scan/ covers gated-era dead code, stale docs/briefs, unused UI/CSS, scripts and cfg branches; each candidate names file:line, description, legacy rationale, caller/reference evidence, risk and proposed delete/migrate/keep-passive action.",
+    "The report inventories target/release .bak binaries with paths and byte sizes, without deleting or changing them.",
+    "Historical data and persisted-shape readers/validators required by old stores are explicitly retained unless unreachability is proven; incomplete evidence is labelled as uncertainty.",
+    "The report records the exact 87f49ed0 commit/tree basis and search method, and a summary is delivered to Fable2 for assigning later removals. No source edit or deletion is performed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "legacy-scan",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Reconciled and delivered the read-only legacy census on 87f49ed0998ec5b9b7d949f76757d18d3b5cdcc4 / tree 84fee45de0efb5282a02901b4a3a2e4d1396a85a: 18 ranked candidates, historical 169-backup inventory, protected-reader keep decisions and explicit uncertainty. All follow-ups are completed, superseded or explicitly kept. Lasting 18-row disposition record da3844a219624690949276c5522bbeef retained in Engram.",
+    "completed_at": "2026-11-14T00:13:46.960606500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

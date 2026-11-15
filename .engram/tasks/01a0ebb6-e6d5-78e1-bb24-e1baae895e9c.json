@@ -1,0 +1,26 @@
+{
+  "id": "01a0ebb6-e6d5-78e1-bb24-e1baae895e9c",
+  "external_ref": null,
+  "title": "Live-check that Codex honors the thread-level tool_timeout_sec TermAl sets for the delegation MCP server",
+  "outcome": "Raised by the Kimi /review-code child in the w-33bee3bec3f0 review round 5 (delegation-38e5e05d-7430-44e5-a389-29de15d78100, session-8481). w-33bee3bec3f0 writes tool_timeout_sec (about 226 s) into the termal-delegation entry of the Codex thread config (thread/start and resume `config.mcp_servers`). The installed codex-cli 0.157.1 binary has tool_timeout_sec in its MCP server config struct (checked by string search). Whether Codex honors it in thread-level overrides, not only in config.toml, has not been seen live: the Codex quota is exhausted until 2026-10-03. If it is ignored, behavior falls back to Codex's 60 s default, the pre-change behavior. If a Codex build validated unknown keys strictly, thread start would fail. That is unlikely given the struct field.",
+  "acceptance": [
+    "A live Codex session started by TermAl on the installed Codex build shows a delegation tool call (for example source-root naming under a slow capture, or a review-freeze check) outlasting 60 s without Codex ending it, or the thread start is shown to reject the key and TermAl stops sending it"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

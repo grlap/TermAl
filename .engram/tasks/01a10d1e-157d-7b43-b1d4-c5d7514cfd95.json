@@ -1,0 +1,28 @@
+{
+  "id": "01a10d1e-157d-7b43-b1d4-c5d7514cfd95",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance's 409 \"no acknowledged canonical naming history; request a fresh acceptance evaluation\" names no usable remedy (the refused call is the remedy it suggests)",
+  "outcome": "When an acceptance evaluation is refused because the work has no acknowledged canonical naming history, the refusal states the actual cause and an actionable remedy. For example: the claim's source root is not yet named and acknowledged; call termal_name_source_root for the worktree and request the evaluation in a later turn, or wait for an in-flight naming to be acknowledged. It never tells the caller to repeat the identical refused call. The refusal logic itself is unchanged.",
+  "acceptance": [
+    "termal_evaluate_acceptance's 409 \"no acknowledged canonical naming history; request a fresh acceptance evaluation\" names no usable remedy (the refused call is the remedy it suggests) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "notice-wording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a11022-8d12-7473-8edc-b42554407c26",
+  "disposal_reason": "Duplicate (net-reduction sweep, Termal::Fable2, 2026-10-15). Both items report the same defect: termal_evaluate_acceptance's 409 \"no acknowledged canonical naming history; request a fresh acceptance evaluation\" tells the caller to repeat a call that will refuse again, instead of giving a remedy that can succeed. w-b42554407c26 covers it fully: real criteria (proceed on the documented fallback basis, or refuse with a typed reason whose remedy can succeed) and a test-bound criterion. This item has only a placeholder acceptance. Its outcome's example remedy (name a source root, then request in a later turn) is criterion 1's second branch in w-b425. New occurrence today: Termal::Opus3's four verification-only evaluations were refused this way (mailbox 03723eab #2495).",
+  "completion": null
+}

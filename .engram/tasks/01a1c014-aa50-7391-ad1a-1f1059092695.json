@@ -1,0 +1,28 @@
+{
+  "id": "01a1c014-aa50-7391-ad1a-1f1059092695",
+  "external_ref": null,
+  "title": "Retain session and underlying read failure in prospective root refresh host diagnostics",
+  "outcome": "A failed prospective root read can be diagnosed from the host console by session and underlying failure, while agent notices and retained report scope stay safely redacted.",
+  "acceptance": [
+    "A prospective focus/root refresh refusal logs its session id and the underlying read or parse failure to the host console, distinguishing at least unavailable transport from a canonical refusal; the static agent notice and original retained closing scope are unchanged and carry no source payload or raw canonical claim/work identifiers."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1802d-43cc-7c53-be5b-aa0121f4066c",
+  "external_ref": null,
+  "title": "UI is not subscribed to /api/events?stateDiff=1 and polls overview, mailboxes and per-session tails instead",
+  "outcome": "The running UI keeps a live /api/events?stateDiff=1 subscription and relies on diffs and deltas for updates. Polling is only a bounded, deliberate fallback when the stream is genuinely unavailable, and the stream is re-established when possible.",
+  "acceptance": [
+    "The cause is diagnosed from evidence (UI code paths and the observed DevTools behaviour): is the stream never opened, closed after an error or lag and never reopened, or is polling an intended design? It is recorded in a note.",
+    "If it's a defect, the UI holds the diff stream in normal operation, and any polling fallback is bounded and recovers to the stream. Vitest tests cover stream loss and reconnection. The fix lands under the standing rule.",
+    "After the fix lands, a fresh load of the UI served from the master checkout is observed. Every TermAl tab is closed first, or a new browser window is used, so the live-events SharedWorker starts anew. The observation shows an open GET /api/events?stateDiff=1 in that SharedWorker's network activity, and stateDiff counters advancing in /api/diagnostics/persistence while the UI is open. While the workspace is otherwise quiet, repeated GET /api/sessions/{id}?tail=N for a visible session are spaced out rather than repeating every 3 s. The observer is a browser-capable agent session using a disposable repo-local browser profile against the master-checkout UI, read-only, with no store or config access; Greg may do it instead if he chooses, but it is not required of him. The observation is recorded in a note with what was seen and by whom."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "sse",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

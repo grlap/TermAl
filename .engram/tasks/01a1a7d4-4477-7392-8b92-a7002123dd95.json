@@ -1,0 +1,37 @@
+{
+  "id": "01a1a7d4-4477-7392-8b92-a7002123dd95",
+  "external_ref": null,
+  "title": "Remove the Foreground turn / Background work text labels from Sessions list rows",
+  "outcome": "Session rows no longer show the words 'Foreground turn', 'Background work' or their combinations. How sessions work, how they're counted as Working or Completed, and every other indicator stay as they are.",
+  "acceptance": [
+    "No row in the Sessions list renders the text 'Foreground turn', 'Background work', 'Foreground turn + background work' or 'Foreground turn + running work (mode unknown)', either as visible text or as a tooltip; a component test asserts this for a foreground turn, background-only work, both, and neither.",
+    "A session busy only with background work is still counted under Working, not Completed, and the row's status badge and the Working chip's foreground/background breakdown are unchanged; existing tests for these still pass without weakening.",
+    "The exact input has the review pair with no outstanding Medium-or-higher finding and passes the full gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "greg-directed",
+    "session-status"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Removed session-row work labels while preserving classification, counts, filters, split chip and status badges; landed130d38e6 after clean reviewed byte-equal carry and exact-tree FULL PASS. Remaining Lows separately tracked.",
+    "completed_at": "2026-11-04T21:52:05.487655400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

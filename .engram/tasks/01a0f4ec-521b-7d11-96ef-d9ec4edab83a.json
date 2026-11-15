@@ -1,0 +1,31 @@
+{
+  "id": "01a0f4ec-521b-7d11-96ef-d9ec4edab83a",
+  "external_ref": null,
+  "title": "Verify read-only tracker capability before approving Codex child MCP tools",
+  "outcome": "Verify read-only tracker capability before approving Codex child MCP tools",
+  "acceptance": [
+    "A compatible read-only tracker remains usable for the five admitted read words, and a binary or wrapper tolerating an unsupported --read-only flag cannot expose writing variants with selective approval.",
+    "TermAl omits selective MCP tool approval for an incompatible configured tracker binary, using a bounded capability or pinned identity check."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation",
+    "mcp",
+    "read-only",
+    "regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f4b9-c4d0-7831-9965-27f08e988f1e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

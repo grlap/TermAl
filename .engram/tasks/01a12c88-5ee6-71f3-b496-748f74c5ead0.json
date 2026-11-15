@@ -1,0 +1,26 @@
+{
+  "id": "01a12c88-5ee6-71f3-b496-748f74c5ead0",
+  "external_ref": null,
+  "title": "Abort-retry and bind-retry previews omit when automatic recovery ends under an enforced admission budget",
+  "outcome": "While a retry is scheduled for a head whose 240-second admission budget is enforced, every retry preview names the wait, the attempt, the next time and when automatic recovery ends, as docs/features/engram-host-adapter.md says. Today only engram_admission_retry_preview appends engram_admission_budget_preview_suffix. The acknowledged preview of a BeginPreparation abort retry (\"delivery not attempted; retrying automatically at …\", src/engram_abort_retry.rs ~:291) and the bind-retry previews do not. Either add the suffix (and the attempt) to those previews, with a test, or narrow the doc sentence.",
+  "acceptance": [
+    "Abort-retry and bind-retry previews omit when automatic recovery ends under an enforced admission budget is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

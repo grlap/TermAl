@@ -1,0 +1,42 @@
+{
+  "id": "01a1219e-1682-74f3-9bbc-e19cc72d5c89",
+  "external_ref": null,
+  "title": "Host API calls time out (30 s) while the machine is CPU-saturated: mailbox read and acknowledge requests failed about 17:00Z on 2026-10-09",
+  "outcome": "Under heavy CPU contention on the machine, the TermAl host's control API (mailbox read, acknowledge, send) stays responsive within its client timeout, or degrades with a typed, retryable answer rather than a silent 30 s transport timeout whose outcome is unknown.",
+  "acceptance": [
+    "The holder's note identifies, with evidence, why mailbox read and acknowledge requests exceeded 30 s at about 17:00Z on 2026-10-09 (for example: runtime thread starvation, a lock held across slow I/O, or CPU saturation of the whole process), with file:line where the code is implicated.",
+    "A test or measured drill under induced CPU contention shows the chosen remedy: the API answers within its timeout, or returns a typed retryable error, and acknowledgements stay idempotent.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-responsiveness",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

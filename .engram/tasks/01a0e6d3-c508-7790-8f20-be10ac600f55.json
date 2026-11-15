@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c508-7790-8f20-be10ac600f55",
+  "external_ref": "tm-fwij",
+  "title": "Open a different saved workspace in a new browser tab",
+  "outcome": "Greg wants to open Empty from the saved-workspace switcher alongside the current workspace. Add a real link and explicit Open in new tab action on non-current saved rows. Preserve the saved ID and other URL context; retain existing same-tab navigation and deletion. Do not offer current-workspace duplication, copy, fork or seeding. Coordinator Fable confirmed scope and file ownership.",
+  "acceptance": [
+    "Non-current rows expose native target=_blank links using the saved workspace ID. Current row exposes no such link. Native modifier/middle-click behavior remains available. Opening the link does not invoke same-tab, new-workspace, rename or delete callbacks. Focused tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 final batch 58fdd104, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 53858e4 (ancestor of master) with native-link tests; markers are in note 58fdd104. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

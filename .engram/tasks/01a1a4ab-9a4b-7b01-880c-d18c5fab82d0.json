@@ -1,0 +1,32 @@
+{
+  "id": "01a1a4ab-9a4b-7b01-880c-d18c5fab82d0",
+  "external_ref": null,
+  "title": "Focused test runs on a many-core host don't show their test-thread count, so results aren't comparable with a gate",
+  "outcome": "Anyone reading a focused run's result can see how many test threads it used, and the documentation and runner brief explain why a direct cargo test on a many-core host is harsher than a gate, without changing the default.",
+  "acceptance": [
+    "A focused launcher run records the effective test-thread setting or states that libtest chose it, in its results and summary, with a test; the launcher's existing results readers still parse it",
+    "docs/test.md and the runner brief state that a direct focused cargo test skips scripts/test-rust.sh, that a test passing only at 4 threads is a finding, and that the thread count isn't set to make a failing test pass; focused runs keep their current default"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Focused launcher runs now record the test-thread setting in results.json and print it in the summary, and docs/test.md explains why a direct cargo test on a many-core host is harsher than a gate. The default is unchanged. Landed in 91a3da13; seen on a real run on Windows B. Acceptance evaluation not requested, per Greg's rule (memory greg-acceptance-evaluation-non-blocking-2026-11-02).",
+    "completed_at": "2026-11-04T05:48:42.029297900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

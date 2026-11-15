@@ -1,0 +1,29 @@
+{
+  "id": "01a12d9a-ff57-7bd1-877c-75dde64f5bc5",
+  "external_ref": null,
+  "title": "Move the begin-preparation failure classification out of the dispatch loop in engram_host_adapter.rs",
+  "outcome": "The prepared-begin failure decision in the dispatch loop (the pending, possibly-sent and late classification, kept_pending_unsent, issued_unbegun arming, the hold note, the transient settle, and the applied-after-deadline branch) lives in helpers in engram_begin_preparation_retry.rs. engram_host_adapter.rs shrinks accordingly, and the move is a pure code move with no behaviour change.",
+  "acceptance": [
+    "The classification is moved into engram_begin_preparation_retry.rs helpers that return a decision (card code, issued_unbegun arming, hold note, transient settle). The dispatch loop calls them, and engram_host_adapter.rs is smaller by the moved lines.",
+    "The move is a pure code move: no renames, no signature changes beyond the extracted helpers, and the existing begin-preparation, begin-replay and admission-retry tests pass unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "refactor",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

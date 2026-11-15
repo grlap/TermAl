@@ -1,0 +1,48 @@
+{
+  "id": "01a15634-4c46-7993-a9ff-af6f6b740b15",
+  "external_ref": null,
+  "title": "Check federation join generation overflow before mutating binding and directory",
+  "outcome": "join_federation_mailbox_session computes federation_next_generation after assigning the session binding and inserting its directory participant. With an exhausted version, the returned conflict leaves partial in-memory mutation without persistence/version settlement. Move the fallible generation computation before mutation and verify refusal is atomic.",
+  "acceptance": [
+    "An exhausted federation version causes local join to refuse before changing session binding, directory, federation version or durability state.",
+    "A regression covers the exhausted-version refusal and preserves the successful join behavior."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "remote-mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a155a8-a901-7301-bd37-350f9926899a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

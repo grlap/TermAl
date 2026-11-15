@@ -1,0 +1,24 @@
+{
+  "id": "01a15d1d-1e4f-7290-99ea-0bb9293119ee",
+  "external_ref": null,
+  "title": "Make the admission-repro outside-scratch seed test independent of the test binary's location",
+  "outcome": "Make the admission-repro outside-scratch seed test independent of the test binary's location",
+  "acceptance": [
+    "Make the admission-repro outside-scratch seed test independent of the test binary's location is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

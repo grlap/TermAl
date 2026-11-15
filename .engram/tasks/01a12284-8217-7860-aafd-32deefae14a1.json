@@ -1,0 +1,27 @@
+{
+  "id": "01a12284-8217-7860-aafd-32deefae14a1",
+  "external_ref": null,
+  "title": "Evaluation request refuses a non-holder observation note as evidence without naming the reason",
+  "outcome": "A termal_evaluate_acceptance request that cites a non-holder observation either accepts it as citable evidence, or refuses with text that names the offending locator and the reason (for example, that it is a non-holder observation, not a citable record).",
+  "acceptance": [
+    "Evaluation request refuses a non-holder observation note as evidence without naming the reason is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "actionable-refusals",
+    "evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0ffab-5024-73a2-ba10-f7b6b009a849",
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: duplicate — Non-holder selected-record generic refusal is a subset of the kept per-cause selected-evidence diagnostics item, already implemented there. Source: src/acceptance_evidence_selection.rs:693. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

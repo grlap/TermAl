@@ -1,0 +1,28 @@
+{
+  "id": "01a18503-f31d-7382-9f28-1082e3a1a6d2",
+  "external_ref": null,
+  "title": "Claude gate write guard does not protect a launcher full gate still in its launch turn (active_turn_checks, before the holder's checkpoint carries it)",
+  "outcome": "The Claude gate write guard also denies Write/Edit/MultiEdit/NotebookEdit into the worktree of a launcher full gate that is unended and unfenced in active_turn_checks, between its launch and the holder's checkpoint that carries it. If that is not done, docs/test.md states the window explicitly.",
+  "acceptance": [
+    "Claude gate write guard does not protect a launcher full gate still in its launch turn (active_turn_checks, before the holder's checkpoint carries it) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

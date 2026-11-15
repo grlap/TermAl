@@ -1,0 +1,32 @@
+{
+  "id": "01a19996-bee7-7bc2-ad5a-fdbb4fb85a50",
+  "external_ref": null,
+  "title": "Explain pending or failed closing sightings in named-root evaluation preflight",
+  "outcome": "With turn gating off, naming a source root and running a host-recorded check records an eligible sighting, so a requested acceptance evaluation can start; evaluation stays non-blocking",
+  "acceptance": [
+    "The measured named-root sighting producer and named-root evaluation preflight are identified in current source; evidence distinguishes the existing grant-free closing-observation path from an evaluation requested before its eligible receipt and shows that registered committed-input admission does not require a sighting read.",
+    "With turn-gated control OFF, naming a source root and running a host-recorded check there records an eligible sighting, using Engram's grant-free named-root and observation route (build f35eec36 or later), with no turn grant; a test drives this path",
+    "An acceptance evaluation requested after such a check is no longer refused for a missing sighting; one live occurrence after install shows an evaluator starting",
+    "No gated authority is reintroduced: the route grants no turn admission, and the evaluation stays independent and non-blocking"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "greg-directed",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c440-70b3-9e6d-baf3ca0102b6",
+  "external_ref": "tm-adeg",
+  "title": "Share one slash-command tail-splitting fixture between the Rust and Vitest suites",
+  "outcome": "From the Claude /review-code of tm-p619 (delegation-d65b3097, 2026-09-25). The note-separator parser exists twice: split_mcp_agent_command_tail (Rust MCP bridge) and splitAgentCommandResolverTail (TS composer). Only hand-mirrored case tables in two languages keep them in step: split_mcp_agent_command_tail_pins_note_separator_edges and the Vitest table. tm-p619's backtick cases were copied into both by hand, and the whitespace difference (the parity bug filed alongside) got through because the two tables differ.\n\nDo:\n(1) One JSON fixture of (tail, arguments, note) triples, read by both suites.\n(2) Move the pure-parser `describe(\"splitAgentCommandResolverTail\")` cases out of the large AgentSessionPanel.test.tsx into session-agent-command-submission.test.ts, the module's own test file, and fix the odd `%s` test titles.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

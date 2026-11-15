@@ -1,0 +1,28 @@
+{
+  "id": "01a0fb47-d5ce-7fb1-8123-a1bff8497d62",
+  "external_ref": null,
+  "title": "Read-only Claude refusal for a denied for-loop names the loop rule, not the rule its body command broke",
+  "outcome": "When the read-only Claude gate denies a `for NAME in …; do …; done` line, the refusal names only the loop shape: \"the only loop allowed is …, and every command in its body must pass on its own; run a body command alone to see the rule it breaks\". It does not name the rule the body broke, for example `git -C` in `for d in a b; do git -C $d status; done`.\n\nFix direction: when the header and clauses parse (claude_bash_top_level_semicolon_clauses, the literal checks), expand the body the way claude_bash_literal_for_loop_is_read_only does, and return claude_bash_refusal_rule for the first failing expansion. Fall back to the shape rule otherwise.",
+  "acceptance": [
+    "A denied well-formed literal for-loop whose body breaks a rule is refused with that body rule named; a malformed loop keeps the shape rule; tests cover both.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "delegations",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

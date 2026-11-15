@@ -1,0 +1,29 @@
+{
+  "id": "01a10009-386a-73b3-951d-b0b079c3e515",
+  "external_ref": null,
+  "title": "Reword the remaining present-tense Beads references in docs after Beads' removal",
+  "outcome": "docs/dev-team-pattern.md's \"Roadmap — open improvements\" entry and docs/features/shared-codex-app-server.md:182 no longer speak of Beads as the current tracker: they name Engram (with the Beads id as external_ref) or are marked historical.",
+  "acceptance": [
+    "docs/dev-team-pattern.md (the 'bead ids pending implementer filing' roadmap entry and its .beads-writes wording) and docs/features/shared-codex-app-server.md ('spec in beads `tm-d22`') name Engram items (Beads ids as external_ref) or are explicitly marked historical.",
+    "The review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-removal",
+    "docs",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

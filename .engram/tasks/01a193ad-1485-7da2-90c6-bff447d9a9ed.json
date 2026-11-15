@@ -1,0 +1,24 @@
+{
+  "id": "01a193ad-1485-7da2-90c6-bff447d9a9ed",
+  "external_ref": null,
+  "title": "Move the launcher's committed-input helpers out of scripts/test-launcher.mjs into a small module",
+  "outcome": "scripts/test-launcher.mjs is back toward the architecture lens's ~1,500-line threshold for utility modules; it grew from about 2,011 to 2,183 lines with w-decd61d62831. The pure committed-input helpers (commitInputStatusClean, commitInputNotCleanReason, commitInputOutcome, commitInputSummaryLine and the refuseNotClean builder) move by pure code move into scripts/test-launcher-commit-input.mjs, with a provenance header. createRun and executeRun keep only the call sites, behaviour is unchanged, and scripts/test-launcher-commit-input.test.mjs stays green. Provenance: w-decd fix-delta review, Low (Claude delegation 69811a29).",
+  "acceptance": [
+    "Move the launcher's committed-input helpers out of scripts/test-launcher.mjs into a small module is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

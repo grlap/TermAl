@@ -1,0 +1,38 @@
+{
+  "id": "01a12ddb-0a24-7553-8735-0a8c5dc07206",
+  "external_ref": null,
+  "title": "Positive watcher-routing tests for .tmp paths: a nested worktree's own gate is fenced, and the stale-key regression proves its cache was warm",
+  "outcome": "Tests show that routing .tmp-naming paths by the fresh resolution still fences the gates it must. A source write in a gate worktree nested under another checkout's .tmp/ (this repository's own .tmp/wt-* layout) fences that gate. A source change in a scratch subdirectory that became a repository fences that repository's own carried gate and leaves the enclosing gate unfenced. The stale-key regression asserts the remembered key was still live when it ran, so it cannot pass vacuously on a cold cache.",
+  "acceptance": [
+    "A test with a carried gate in <root>/.tmp/wt-x shows a source write in <root>/.tmp/wt-x/src fences that gate.",
+    "A test with a carried gate targeting a repository created under <worktree>/.tmp/<subdir>/ while the enclosing root's key is remembered shows a source change in that repository fences its gate and not the enclosing one.",
+    "The repository-transition regression asserts, before its second change, that the remembered worktree key for the fixture directory still names the enclosing worktree (warm cache), so it fails on the old routing deterministically.",
+    "The tests pass on a host-recorded focused run."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

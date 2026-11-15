@@ -1,0 +1,32 @@
+{
+  "id": "01a192eb-84ea-78d0-9910-7e7cc49528b9",
+  "external_ref": null,
+  "title": "summary_snapshot holds the state lock ~340 ms scanning and projecting every session's metadata",
+  "outcome": "immutable_state_snapshot_locked (used by summary_snapshot/snapshot callers and general commits) captures only cheap immutable inputs under StateInner and does the per-session scan, projection, serialization and hashing off-lock, by extending the existing immutable-cut/cache owner from w-de6021f4b32f rather than adding a parallel cache, with snapshot/delta ordering and revision cuts unchanged.",
+  "acceptance": [
+    "Under the state lock, building a summary snapshot no longer scans, projects, serializes or hashes every session's metadata and queue identities; it captures immutable shared inputs (or reuses validated cached projections) and the per-session work runs after release, through the existing immutable-cut/cache owner.",
+    "Tests show the materialized StateResponse is equal to the current implementation's for representative states, including cache-hit, cache-miss and concurrent-mutation cases, and that snapshot/delta ordering, revision cuts and cache validation are unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a167b7-3a7c-7ff3-aabb-7bc33299e17a"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

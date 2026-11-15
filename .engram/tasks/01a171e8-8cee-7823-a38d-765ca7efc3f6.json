@@ -1,0 +1,29 @@
+{
+  "id": "01a171e8-8cee-7823-a38d-765ca7efc3f6",
+  "external_ref": null,
+  "title": "Relay wake diagnostics and descriptor-error listing fallback hide deferred failures",
+  "outcome": "Expose bounded relay-worker failure diagnostics and distinguish genuine missing federation identity from listing failures without silently omitting relay history.",
+  "acceptance": [
+    "Controlled worker failures produce bounded non-secret diagnostics identifying failed operation and status without raw bodies, tokens or locator leakage.",
+    "A genuine standalone root still lists its mailboxes, while a non-identity descriptor/store failure is not silently represented as verified empty relay history."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-host",
+    "greg-reported",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1711f-eab5-7671-a7e1-559787f77f80",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

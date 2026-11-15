@@ -1,0 +1,31 @@
+{
+  "id": "01a136d6-1407-77a0-ba63-eeac7f69c62b",
+  "external_ref": null,
+  "title": "Refresh focused launcher interval contract comments for bounded observation latency",
+  "outcome": "The command-start and shared focused-validator comments describe the existing ten-second observation slack and completed-before-observation refusal, so maintainers do not restore the obsolete strict host-start comparison.",
+  "acceptance": [
+    "The command-start comment and shared focused-validator comment accurately describe the current bounded latency and early completed-run refusal without changing behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "build-checks",
+    "coordination-cost",
+    "cross-project",
+    "documentation",
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a122b5-d458-7ee0-9fdf-ae2cb3b52259",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

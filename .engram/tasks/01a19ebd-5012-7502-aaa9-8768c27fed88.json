@@ -1,0 +1,32 @@
+{
+  "id": "01a19ebd-5012-7502-aaa9-8768c27fed88",
+  "external_ref": null,
+  "title": "Clarify the relayed-word conditions in the Commit and push rule (which mailbox and sequence, who names the change, the scope of 'any other session', which item)",
+  "outcome": "The relayed-word bullet in AGENTS.md and CLAUDE.md is unambiguous about four things: which mailbox id and sequence are recorded, whether Greg's quoted words or the relay must identify the change, how the 'any other session' sentence is scoped against the standing rule's 'by any route' widening clause, and which item records the quote when none is claimed.",
+  "acceptance": [
+    "A wording change, landed through the authority-file procedure ((a) both coordinators concur, (b) Greg is sent the wording, (c) the final-diff audit), resolves each of the four ambiguities that Claude's review delegation-f9b41093 raised on candidate b702e562.",
+    "src/tests/agent_commands.rs pins the clarified sentence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "authority-files",
+    "cross-project",
+    "greg-directed",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19e94-80e0-7a61-8794-e695378f6405",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

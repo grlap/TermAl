@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c645-7110-919d-6450c8dfbdb6",
+  "external_ref": "tm-mkvv",
+  "title": "Keep include! fragments rustfmt-clean with a maintained check",
+  "outcome": "Follow-up from tm-56c0 (Greg has not yet decided; filed so the question is not lost). cargo fmt only follows mod declarations, so cargo fmt -- --check never covers the 132 include!() fragments under src/ (or their #[path] test children); after 72df019 and 47a061e they are all rustfmt --edition 2024 clean, but drift can return silently. Options: (a) a small script (e.g. scripts/fmt-fragments.mjs or a shell wrapper) that runs rustfmt --check --edition 2024 over every include! target and exits non-zero on any Diff, wired as a launcher stage or documented as a pre-commit step; (b) leave it manual. Decide with Greg before implementing; the launcher must not gain a stage without his approval.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

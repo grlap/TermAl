@@ -1,0 +1,49 @@
+{
+  "id": "01a14b42-75ec-7b92-8009-1aa58df438ff",
+  "external_ref": null,
+  "title": "A host restart during a detached full gate leaves the passed run's check association unknown, so its pass is never recorded as the item's verification and the gate must be rerun",
+  "outcome": "When the TermAl host restarts while a registered, detached, item-bound full gate is still running, and the launcher then finishes the run after the new host is up, the passing run is either recorded as the bound item's verification on that item's claim, through a supported revalidation of its exact original binding, or the host states exactly which proof is missing and what supported action re-establishes it. A restart that is Greg's act does not silently cost a full-gate rerun.",
+  "acceptance": [
+    "A regression starts a registered, detached, item-bound full run, restarts the host mid-run, and lets the launcher finish after boot. The finished passing run then yields one verification record on the bound item at the original claim and revision, OR the run detail names the exact missing proof and a supported recovery action that produces the record without rerunning the tests.",
+    "A run whose binding genuinely changed across the restart (claim replaced, root renamed with different content, source changed) is still refused credit; a regression covers it.",
+    "The full five-stage gate passes on the exact committed tree, with a clean independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "restart",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

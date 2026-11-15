@@ -1,0 +1,35 @@
+{
+  "id": "01a11df9-e808-7003-9577-f17475a3b7bb",
+  "external_ref": null,
+  "title": "declared-test-commands.md still says PLANNED after the implementation landed in 2b1e3f85",
+  "outcome": "The Status line of docs/features/declared-test-commands.md says the host side is implemented on master since 2b1e3f85 (with TRX), that a running host recognizes declared commands only after a restart onto a build that contains it, and that the live post-restart proof is pending (w-529b31db8e07) until it closes.",
+  "acceptance": [
+    "docs/features/declared-test-commands.md no longer says PLANNED or NOT YET AVAILABLE; its Status line names 2b1e3f85 as the landing commit, says recognition needs a running host built from it or later, and says the post-restart live proof is still pending.",
+    "The JUnit and TRX availability statements in the same file stay consistent with what 2b1e3f85 implements."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "declared-tests",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Availability docs landed f5a965829569727027fbd2a5b1a42cd6c5b6f063 on origin/master. TRX implemented since2b1e3f85/running-host prerequisite/pendingliveproof/JUnit proposed. Exact treeb746 actualpair clean and shared full9d2 PASSED cited byholder1029842a; independentbc59c4f62PASS fresh. Opus2 mailbox4917faac#185 FULLread coversboth; localmaster+ls-remote verifiedexact. Binary unchanged e3702155; no running-host update needed.",
+    "completed_at": "2026-10-09T03:19:42.259901900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a12a4d-bd62-7c31-8456-ae0e795c877d",
+  "external_ref": null,
+  "title": "Move the begin-preparation decision code out of engram_host_adapter.rs's dispatch loop into engram_begin_preparation_retry.rs",
+  "outcome": "About 120 lines of begin-preparation decision code leave the dispatch loop in engram_host_adapter.rs for a helper in engram_begin_preparation_retry.rs that returns a small decision enum. Behaviour is unchanged, as a pure code move per CLAUDE.md. The moved code: the pending lookup, the kind selection, the mapping from failure to card code, the branch that keeps an unsent Begin pending while the budget is enforced, and the swap of Rejected for PersistenceUnknown on settlement.",
+  "acceptance": [
+    "Move the begin-preparation decision code out of engram_host_adapter.rs's dispatch loop into engram_begin_preparation_retry.rs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "refactor",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a12d9a-ff57-7bd1-877c-75dde64f5bc5",
+  "disposal_reason": "Duplicate of w-75dde64f5bc5: the same begin-preparation decision-code extraction (pending, kind, card code, kept-unsent, transient settlement), same source and target files. Note b45dd01c is an earlier round of the same parent w-cfcf10b68c9b. The pure-move restriction and any unmatched wording carry onto the survivor, and the extraction is NOT claimed delivered. Evidence: Sol-a7bb's triage (f59d4581 #344, item 17), under Greg's net-reduction directive.",
+  "completion": null
+}

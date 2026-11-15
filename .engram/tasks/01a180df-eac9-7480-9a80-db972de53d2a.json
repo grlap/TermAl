@@ -1,0 +1,27 @@
+{
+  "id": "01a180df-eac9-7480-9a80-db972de53d2a",
+  "external_ref": null,
+  "title": "ReviewInputRefusal::into_api_error uses unreachable! on request paths; make it exhaustive",
+  "outcome": "ReviewInputRefusal::into_api_error (src/delegation_review_input.rs ~327) has no unreachable!(\"handled above\") arm. It runs on the submission and publication-fence request paths, so a future variant that missed both match levels would panic a handler instead of returning an ApiError. Replace the arm with an exhaustive inner match with no wildcard, or with a generic fallback message.",
+  "acceptance": [
+    "into_api_error contains no unreachable!/panic arm and every variant maps to an ApiError; cargo check is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

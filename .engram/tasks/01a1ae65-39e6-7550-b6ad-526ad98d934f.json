@@ -1,0 +1,29 @@
+{
+  "id": "01a1ae65-39e6-7550-b6ad-526ad98d934f",
+  "external_ref": null,
+  "title": "Execute the ignored old-reader live row for w-5e2f with the pinned old binary after landing",
+  "outcome": "The pinned-reader live probe row that w-5e2f changed (it now asserts the changed SQLITE_SCHEMA_VERSION diagnostic on the unchanged false branch) has been executed once against the exact pinned old binary, and its result is recorded as compatibility evidence for the native-test-completion floor.",
+  "acceptance": [
+    "The ignored old-reader live row touched by w-5e2f is executed once on the landed source, against the exact pinned old binary (sha256 cba9ef654032bd0753f55bcbf74e14228138b459c2fb3ece27d264acacad4d12, 49,166,848 B), with the binary's provenance recorded; no substitute or installed binary is used.",
+    "The run's result and log are recorded on this item; a failure is investigated and classified, never retried to green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "compatibility",
+    "follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

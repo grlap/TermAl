@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c679-7303-a6ef-6691a5481fa1",
+  "external_ref": "tm-nrnn",
+  "title": "Result packet invents an 'Unspecified' finding from summary prose when the packet says 'Findings: - None'",
+  "outcome": "Reported by Engram::Coder (2026-09-27, mailbox #13) at 20:31Z, on server 78152502, full-output revision 13454446.\nThe all-wait delegation-wait-101d3b61, for acceptance child session-8093 (delegation-1158c4d7), reported: 'Unspecified - Reviewer summary reports an actionable finding, but the result packet omitted its structured details. Inspect the full reviewer output.'\nThe child's summary only said that both criteria pass and the submission was recorded. The full output (termal_get_session_result, offset 0, limit 8192) came back complete: true, totalBytes 980, summaryFallback: false, with an explicit 'Findings:\\n\\n- None.'\nEngram recorded evaluation 18c565ecb9484a8586865b5adde8b469, 2/2 pass. The main tree was clean with no changed files.\n\nMechanism, from reading the code on master: delegation_result_summary_fallback_finding (src/delegation_result_parser.rs ~371) builds a synthetic finding when the summary's token heuristic decides it reports an actionable finding. Words from the finding-noun list (failure, issue, gap, risk...) near discovery words, without resolution words, set it off. The summary here reportedly mentioned the earlier 'failure and review corrections' as history, and the heuristic read that as a present finding.\nThe guard exists on purpose: test delegation_result_packet_never_reports_clean_when_declared_finding_details_are_missing keeps a contradictory packet non-clean. But it has no way to tell a past-tense or historical mention from a current one.\n\nFix direction, to decide:\n(a) Skip the prose fallback for packets whose structured result or acceptance submission is authoritative. Acceptance evaluations record verdicts in Engram.\n(b) Make the heuristic ignore mentions framed as history ('earlier', 'previous', 'was', 'after the').\n(c) Report it as a parser warning beside the result, not as a finding.\nKeep the existing contradiction test. Add one for a historical mention with 'Findings: - None' that must come back clean or warned, never with an Unspecified finding.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

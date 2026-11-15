@@ -1,0 +1,31 @@
+{
+  "id": "01a1be5e-e57b-7742-8493-9e58b0a74b5a",
+  "external_ref": null,
+  "title": "Integrate joint evaluation train on combo19: complete source identity (w-13be with w-7c5d)",
+  "outcome": "The jointly authored evaluation change is on master as one candidate commit, gated on DL560 and Windows B, pushed and installed on Central and DL560, ready for the restart and the confirming evaluation.",
+  "acceptance": [
+    "Integrate joint evaluation train on combo19: complete source identity (w-13be with w-7c5d) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The joint evaluation change landed on master as one candidate commit db52491e, gated on DL560 and Windows B, pushed, and installed on Central and DL560, ready for the restart and the confirming evaluation.",
+    "completed_at": "2026-11-09T05:23:28.889083300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

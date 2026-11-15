@@ -1,0 +1,65 @@
+{
+  "id": "01a16c84-3074-7c63-9d50-aa7bb4e4e47f",
+  "external_ref": null,
+  "title": "Avoid cloning and serializing unchanged retained messages on each persistence tick",
+  "outcome": "After a durable baseline, session persistence captures, serializes and submits only changed message bodies while preserving transcript semantics, atomic durability and StateInner responsiveness; serialized payload metrics remain distinct from actual SQL row changes and physical device writes.",
+  "acceptance": [
+    "After an initial durable baseline, production persistence of a session metadata-only change serializes and submits zero unchanged message rows/JSON bytes; append or edit of k messages serializes and submits only those changed/new messages, independent of unchanged retained transcript size, with explicit safe full-replacement handling for reorder/truncation/import and no on-disk schema change.",
+    "Deterministic isolated SQLite regressions measure serialized/submitted message rows and bytes separately from actual inserted/updated/deleted message rows, cover unchanged ticks, metadata-only changes, streaming edits, append, truncation/reorder and cold-prefix retention, and prove no lost, duplicated or reordered messages after reload.",
+    "Failure-before-commit, retry/reopen and concurrent message mutation preserve the existing transaction, watermark and fence semantics: no acknowledgement of uncommitted content, no skipped newer change, and exact message/order recovery after reload.",
+    "Production snapshot collection does not deep-clone or JSON-serialize unchanged retained message bodies while holding StateInner; deterministic phase-controlled regression verifies the lock boundary, and source/diagnostic analysis distinguishes collect-wait, collect-hold, serialize and SQL time without claiming w-d428 API-stall closure from payload counters alone.",
+    "Focused regressions and the full gate pass on the exact final input that lands, with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "performance",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Message-delta persistence repair already landed as a94ed7e9; closure reconciled exact landed FULL and final pair, and current-root registered focused check34746b98 passed22/0/0 with actual Test ACK d3980666. Same independent evaluator17974 attempt2 recorded40207218a8354fc8a0568069a2704ab2 at2026-11-14T06:53:53.600158900Z, revision5/evidencecut451, all5PASS; independently read full verdicts and stale=null. C1–4 observed on current Test; C5 judgment on exact historical landing FULL+pair. Full accepted packet/ALL1647B prose/config/tracker-record archived and hashed before completion. Source remained clean e8be/treeaa0be; no duplicate gate or new evaluator child. Dedicated closure-root cleanup follows after sealing; shared artifacts retained only where open work still needs them.",
+    "completed_at": "2026-11-14T06:54:52.397732100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

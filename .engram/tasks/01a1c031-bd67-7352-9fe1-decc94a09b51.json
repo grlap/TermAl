@@ -1,0 +1,28 @@
+{
+  "id": "01a1c031-bd67-7352-9fe1-decc94a09b51",
+  "external_ref": null,
+  "title": "Align committed-evaluation source contracts and logs with the unheld sighting route",
+  "outcome": "Comments and host diagnostics accurately distinguish holders' committed-input admission from the unheld requester's additional canonical sighting, preserving both admission paths.",
+  "acceptance": [
+    "Committed-flow source comments, naming-token descriptions and host log messages state that the holder route does not read a sighting while the unheld retained-root route does, without altering admission, source capture or authority behavior; no test reads Markdown or pins source comments."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "diagnostics",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

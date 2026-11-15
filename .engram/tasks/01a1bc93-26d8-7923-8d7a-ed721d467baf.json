@@ -1,0 +1,28 @@
+{
+  "id": "01a1bc93-26d8-7923-8d7a-ed721d467baf",
+  "external_ref": null,
+  "title": "Assert a live docked surface in standalone Host count coverage",
+  "outcome": "The standalone host-count case reads the currently mounted docked panel when checking surface independence.",
+  "acceptance": [
+    "After opening a standalone Sessions tab, the count test re-queries the docked surface or requires its node to remain connected before asserting Host and rows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b4ac-b691-77a3-9373-2050f215638d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

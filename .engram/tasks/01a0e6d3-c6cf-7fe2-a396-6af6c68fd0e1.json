@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6cf-7fe2-a396-6af6c68fd0e1",
+  "external_ref": "tm-s9su",
+  "title": "Mount engram_source_root_naming.rs from tests/mod.rs instead of by #[path] under the turn-observations test module",
+  "outcome": "Raised as a Note by Claude /review-code in tm-5gi4 round 17 (delegation-49be8fca, src/tests/engram_turn_observations.rs:1818).\nsrc/tests/engram_source_root_naming.rs is mounted with #[path] inside tests::engram_host_adapter::turn_observations so it can reuse that module's fixtures. tests/mod.rs has a pointer comment, but the file cannot be found from mod.rs's module list.\nIt depends on 6 turn_observations helpers (ClaimedRoot, add_claimed_root_worktree, received_prompt, named_root_turn, finish_claimed_turn, content_revision_of) and 5 engram_host_adapter test helpers (bind_reply, grant_reply, begin_reply, checkpoint_reply, test_control_work_binding).\nFix: move those fixtures into a shared test-support module, or widen them to pub(crate), and mount the file directly from tests/mod.rs. Test-only; land it as a pure move, separate from features.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a13aeb-2d53-74d1-9259-3ddae1ef8721",
+  "external_ref": null,
+  "title": "Move the active test-run count from the global header chip to a badge on the left-rail test icon",
+  "outcome": "The global header no longer shows the persistent yellow \"Tests: N running · restart impact …\" chip. Instead, the left-rail flask/test icon carries a compact badge with the active-run count N, keeps an accessible label/tooltip, and shows no badge when no run is active. Per-run status and restart-impact detail stay in the test view/panel.",
+  "acceptance": [
+    "The global header no longer renders the persistent top-level \"Tests: N running · restart impact …\" chip.",
+    "With N > 0 active test runs, the left-rail flask/test icon shows a compact badge with N, and its accessible name/tooltip states the active-run count.",
+    "With zero active test runs, the icon shows no badge or warning styling.",
+    "The test view/panel still shows per-run status and restart-impact detail, unchanged.",
+    "UI tests cover the badge for N = 0, N = 1 and N > 1, and the absence of the header chip; tsc and the full gate are green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "coordination-cost",
+    "host-recording",
+    "restart-safety",
+    "test-launcher",
+    "test-run-visibility",
+    "ui",
+    "user-authorized"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a137e1-ffbc-7a83-8866-654bf2d34f93",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a13bdb-d3e2-7ab0-9eb8-24e762d4b116",
+  "disposal_reason": "Fable2 assignment in mailbox #79 authorizes this UI follow-up after registry stage 2 landed. Its optional parent is now completed, so continue independently without reopening the completed registry work.",
+  "completion": null
+}

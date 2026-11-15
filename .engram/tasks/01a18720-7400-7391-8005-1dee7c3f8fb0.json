@@ -1,0 +1,32 @@
+{
+  "id": "01a18720-7400-7391-8005-1dee7c3f8fb0",
+  "external_ref": null,
+  "title": "w-c205 slice A: control transport classifies proven-unsent failures before the worker hand-off",
+  "outcome": "ProcessEngramControlTransport tells a request that provably never reached Engram from one dispatched without a valid reply, and that classification reaches the causal failure, availability, accounting and Begin replay consistently.",
+  "acceptance": [
+    "For the control transport, a failure before any byte of the request frame is handed to the control worker is classified proven-unsent, and every failure after that hand-off stays dispatched-without-valid-reply; timeout or cancel alone is never treated as rollback.",
+    "A proven-unsent request keeps its original identity and arguments: it does not mark Engram control unavailable, a transport-unsent Begin keeps its transport accounting and protocol disable, and it is resolved only by an identical replay with its original key, never with a newly built identity.",
+    "Tests show the classification on both sides of the hand-off boundary and the transport-unsent Begin's disclosure and identical replay through the admission scheduler."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "engram-interop",
+    "lost-reply",
+    "w-c205-slice"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18617-8de1-79e3-b1cb-c205c0fecb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

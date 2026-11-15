@@ -1,0 +1,28 @@
+{
+  "id": "01a111c3-ebc8-79e1-b715-809aadd3dfa3",
+  "external_ref": null,
+  "title": "Make Codex exec error 206 notices recognize localized Windows startup errors",
+  "outcome": "A known unified-exec startup error206 can receive the diagnostic when Windows formats its message in another UI language, while unrelated filename errors remain unannotated.",
+  "acceptance": [
+    "Make Codex exec error 206 notices recognize localized Windows startup errors is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex-runtime",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

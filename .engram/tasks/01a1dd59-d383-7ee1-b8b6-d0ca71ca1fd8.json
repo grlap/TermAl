@@ -1,0 +1,29 @@
+{
+  "id": "01a1dd59-d383-7ee1-b8b6-d0ca71ca1fd8",
+  "external_ref": null,
+  "title": "Avoid stale opening-root selection after a same-claim rename followed by another claim name",
+  "outcome": "A same-claim root change followed by a deferred other-claim selection does not force the original turn's closing capture onto a stale root.",
+  "acceptance": [
+    "A behavior test opens A on R1, renames A to R2, then names B and closes A; the report follows the agreed root semantics without a spurious scope-changed failure, while unrelated root changes retain their authority fences."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

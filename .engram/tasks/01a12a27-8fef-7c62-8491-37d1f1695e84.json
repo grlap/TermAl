@@ -1,0 +1,28 @@
+{
+  "id": "01a12a27-8fef-7c62-8491-37d1f1695e84",
+  "external_ref": null,
+  "title": "The exhausted admission-budget preview always names begin_preparation_unacknowledged and counts every automatic attempt since acceptance",
+  "outcome": "The preview 'automatic re-admission exhausted after N attempts; last cause …' names the actual last cause: a pending prepared Begin (begin_preparation_pending), or the outage code of a bind or admission retry. N counts only the re-admission attempts actually made after the first prepared-Begin hold, never declined drains. The pending card's causal-failure originalCode matches its card code, or the split is documented. Tests cover each cause.",
+  "acceptance": [
+    "The exhausted admission-budget preview always names begin_preparation_unacknowledged and counts every automatic attempt since acceptance is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

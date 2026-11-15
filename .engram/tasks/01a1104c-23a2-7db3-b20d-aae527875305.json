@@ -1,0 +1,28 @@
+{
+  "id": "01a1104c-23a2-7db3-b20d-aae527875305",
+  "external_ref": null,
+  "title": "Withhold short bearer credentials from Codex reviewer MCP diagnostic reasons",
+  "outcome": "Low in both Pair7 results src/codex_reviewer_mcp.rs:158. Recognizable short Bearer text not matching a parent environment secret can pass the heuristic and persist. Source counterexample, not an observed credential leak. Add short bearer/child-only-env controls, keep useful bounded diagnostics and explicitly avoid arbitrary-secret guarantees. Inventory only: no assigned implementation owner or scheduled trigger. Holder must establish concurred acceptance before evaluation.",
+  "acceptance": [
+    "Withhold short bearer credentials from Codex reviewer MCP diagnostic reasons is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

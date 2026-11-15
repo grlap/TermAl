@@ -1,0 +1,37 @@
+{
+  "id": "01a1cc97-b346-7271-bd50-cf4b3964cb0d",
+  "external_ref": null,
+  "title": "Work panel: make Urgent (P0/P1) its own view tab before Dependencies instead of an embedded mini strip",
+  "outcome": "Work panel: make Urgent (P0/P1) its own view tab before Dependencies instead of an embedded mini strip",
+  "acceptance": [
+    "The Work panel's view switcher shows an \"Urgent\" view button immediately before \"Dependencies\". Selecting it shows the P0/P1 items that the Urgent strip shows today, from the same rows and the same urgency rule, with the same select-to-details behaviour. The embedded Urgent strip above the Dependencies graph is removed, so urgent items appear in exactly one place.",
+    "The default view and the behaviour of the Dependencies, Hierarchy, Labels, Table and Memories views are unchanged. Paging, local filters, selection and expanded details keep working in every view, including Urgent. An empty Urgent view shows a short empty state.",
+    "Behavioural UI tests (vitest) cover: the Urgent button sits before Dependencies; selecting it lists an unlinked P0 and a held P1 and opens their details; the strip is no longer rendered above Dependencies; the existing view tests still pass, updated only where they assert on the removed strip's placement. `cd ui && npx tsc --noEmit` is clean, and the whole vitest suite passes on the author run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "greg-requested",
+    "work-panel"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered standalone Urgent view before Dependencies with shared filters, paging and inline details; removed embedded strip. Landed origin/master9cba6226cf6e39e26734ff4f1e2a09a20cb4b144. Fresh independent Claude17582 evaluation742ab589da2541caba483c14caa487f6 recorded/unstale/all3judgmentcriteriaPASS, attempt1/cut162; compact packet and complete2755byte full output plus all3 tracker rationales read. Exact source HEAD/tree/status clean at END2026-11-12T00:34:15Z. Qualified pair17561/17562 adopted through identical9rawrows, noMedium+. Same-tree integrationFULL965308a3 all6stagesPASS; own eligible focusedb6f152e2 PASS19/0 settledTestACKbf52ed55. Project filter excluded two heavy files; accepted prior-heavy and same-treeFULL coverage inholder393ad6b249bf40009ea7a88ff45420db. Original wrong-CWD failure/category partial-credit limits retained. Four Lows a0c6603b7afe/4960a0f39721/a87e7d76e79e/51639366fa21 remain open/unfixed; retain review-2004 exports until last closes. Task-only raw evidence and owned worktree cleanup follows with path checks, lasting proof in holder notes/evaluation. Initial done with author links was refused before completion by work_criterion_link_invalid; corrected by omitting unsupported links, with evaluation still fresh. No evaluator retry. No author ref remains. UI/dist install remains integration-owner work; no independent live observation claimed.",
+    "completed_at": "2026-11-12T00:34:46.110776800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

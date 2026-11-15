@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4c1-75e3-a8e8-61ca4952467c",
+  "external_ref": "tm-bcj",
+  "title": "Implement a fail-closed PowerShell read-only reviewer command checker",
+  "outcome": "Windows reviewer sessions currently deny PowerShell tool calls wholesale because routing PowerShell syntax through the Bash read-only parser enabled security bypasses and arbitrary execution from the reviewed tree. Design and implement a dedicated PowerShell parser/checker that only approves an explicit read-only command subset, preserves fail-closed behavior for substitutions, redirection, script invocation, and path execution, and add Windows-focused allow/deny regressions before enabling the PowerShell tool.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

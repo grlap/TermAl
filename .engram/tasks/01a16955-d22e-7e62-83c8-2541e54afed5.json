@@ -1,0 +1,50 @@
+{
+  "id": "01a16955-d22e-7e62-83c8-2541e54afed5",
+  "external_ref": null,
+  "title": "Carried-binding refusal: position fallback can compare the wrong criterion when a bound criterion is reworded and moved, or removed while another shifts into its slot",
+  "outcome": "Carried-binding refusal: position fallback can compare the wrong criterion when a bound criterion is reworded and moved, or removed while another shifts into its slot",
+  "acceptance": [
+    "When the words of a criterion that a carried or newest failing evaluation judged bound are no longer in the current criteria, the pre-spawn refusal compares its judged binding only with the current criteria that carry none of that evaluation's judged criterion words: the request proceeds when one of them keeps the judged binding (same kind, and the judged pin when it was pinned), and is refused when none does or none remains, the refusal naming the judged criterion, its words and the compared criteria's bindings. A test shows a reworded-and-moved criterion that keeps its binding proceeding, a removed criterion whose slot another judged criterion now holds being refused, and a criterion reworded in place without its binding still being refused; it fails on the unchanged w-58aa code.",
+    "Every existing carried-binding and carried-failure test passes unchanged.",
+    "The Carried failure paragraph of docs/features/engram-host-adapter.md describes the candidate rule in place of the position fallback.",
+    "The full gate passes on the landed input.",
+    "The /review-changes pair has no outstanding in-scope Medium or higher finding on the reviewed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

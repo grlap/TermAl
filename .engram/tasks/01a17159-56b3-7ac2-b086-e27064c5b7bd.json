@@ -1,0 +1,27 @@
+{
+  "id": "01a17159-56b3-7ac2-b086-e27064c5b7bd",
+  "external_ref": null,
+  "title": "The automatic retry hold is shown before the retry tick meets a source-observation barrier",
+  "outcome": "The automatic retry hold is shown before the retry tick meets a source-observation barrier",
+  "acceptance": [
+    "The automatic retry hold is shown before the retry tick meets a source-observation barrier is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

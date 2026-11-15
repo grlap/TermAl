@@ -1,0 +1,31 @@
+{
+  "id": "01a1981d-73dd-7db2-bef1-ba8d28acb0fd",
+  "external_ref": null,
+  "title": "Gated control OFF really disables it: ordinary dispatch, queue progression, Resume and wakes run despite retained old control state",
+  "outcome": "Gated control OFF really disables it: ordinary dispatch, queue progression, Resume and wakes run despite retained old control state",
+  "acceptance": [
+    "An inventory, cited to source, lists every path where retained control state (grants, retained or unknown-outcome heads, session obligations, checkpoints, rebind or abort duties, old-duty guards) can withhold ordinary operation while turnGatedControl is false: fresh Human dispatch, queue progression and drain, Resume, mailbox and other wakes, and boot recovery",
+    "With turnGatedControl false, none of those paths is withheld by retained control state: an idle session with queued ordinary prompts (Human, mailbox wake, automated) dispatches them in order, Resume works on an empty or non-empty queue, and wakes start turns; each path is proven by a test driving a session that holds retained or unknown old control state",
+    "Old unknown-outcome operations are preserved separately with their ids, content, outcome and markers, never replayed, and never placed where they block ordinary operation at OFF; their settlement is not a precondition for anything at OFF",
+    "Runtime evidence after install: a live OFF session that held retained old control state dispatches a queued ordinary prompt and a wake without operator recovery action; a false setting alone is not accepted as proof"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Coordinator Fable2720/message1e98f4de-258c-404c-bff1-c9d91e06b20d directs cancellation after last open children dispositioned. Literal turnGatedControl OFF experiment no longer exists following landed physical removal87f49ed0; obsolete, not fixed or tested by this administrative disposition. Former live criterion4 was never established (operator Resume correction retained); do not turn lack of current switch into a PASS. Preserved children: w2241 independently concurred narrow FIFO criteria completed with historical review/FULL/landing evidence, seal45e3f728183e42ed8bc421317f86a1d9; wf39 obsolete specific rollback path cancelled with provenance ebd2d6e154a04d19ab815797d4a03e5c; wdacc and wf865 already cancelled. No product change, test, live-store access, retained user prompt execution or acceptance evaluation performed here. Historical failed runs remain failed; original audit artifacts retained while serving other open failure/classification/physical-removal work.",
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6c3-7183-aba7-757b5a4650e8",
+  "external_ref": "tm-rl10",
+  "title": "Extract structured delegation review-result subsystem",
+  "outcome": "Structured-review validation, durable mailbox recovery, compact-result projection, lifecycle promotion, and their tests now span oversized mailbox/delegation modules and a very large delegation test file. Extract a focused delegation_review_results module with dedicated tests while keeping mailbox append primitives and delegation lifecycle orchestration at their existing boundaries.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. The extraction exists: src/delegation_review_results.rs on master f7db2c58.",
+  "completion": null
+}

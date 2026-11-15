@@ -1,0 +1,29 @@
+{
+  "id": "01a1c257-194a-7cf2-8013-4761868f2437",
+  "external_ref": null,
+  "title": "Retained review attempts lose their start and end times: only the latest attempt's timing is readable",
+  "outcome": "A parent can read when each retained review attempt of a delegation started and finished, not only the latest one, without reading internal mail.",
+  "acceptance": [
+    "termal_get_session_result for a retained submission attempt returns that attempt's started and completed times.",
+    "Earlier attempts' times remain readable after later attempts run, shown by a behaviour test with at least two attempts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "diagnostics",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

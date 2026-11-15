@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c6cd-7271-83da-1a2d77dedcad",
+  "external_ref": "tm-s678",
+  "title": "Delegation children can stall indefinitely: no turn inactivity watchdog or delegation lifetime deadline",
+  "outcome": "Observed live 2026-09-02 (read-only inspection, verifier Termal::Fable): two reviewer delegations of session-5132 (Engram::Codex) — delegation-e58d01c3 (child session-5980, Codex) and delegation-835773d9 (child session-5981, Claude, read-only-auto-approve) — created 01:39:24/01:39:30 stayed status=running for 80+ minutes. Both children's history ends at 01:44:37 / 01:45:13 after successful read-only commands; no review-result submission, no final answer, no error. Their processes are idle: claude.exe 43348 used 0.14 s CPU per 4 s, the shared codex app-server 0 s, their delegation-mcp bridges 0 s. The parent's delegation wait (delegation-wait-aa59c8e4, mode all, created 01:40:54) remains open. Root cause class: TermAl has no turn-level inactivity watchdog and no delegation lifetime deadline (grep: only the ACP stdin-write watchdog and the stop-path watchdog exist); completion is the only settle path and it never stops the child (settle_terminal_delegation_child_locked sets Idle) — so a child whose CLI stops emitting output for any reason is never failed, never stopped, and blocks its parent forever. Cost per stalled reviewer on this machine: CLI ~300 MB (claude.exe) or a thread of the shared codex app-server, plus inherited MCP server trees ~270 MB, plus a 16 MB delegation-mcp bridge; operator sees 'processes that stay'. Expected: (1) a bounded inactivity watchdog per delegation child turn (no stream output for N minutes, N configurable, default e.g. 10) that fails the delegation with a diagnostic and stops the child; (2) an absolute delegation deadline as a second belt; (3) a parent-visible failure (card + wait completion) so /review-changes does not hang; (4) an explicit operator action to stop finished/stalled children. Note: the stall window (01:42–01:45) coincided with full quality-gate chains saturating the machine (vitest 791 MB node + cargo), the same load-sensitivity class as tm-gldd — the trigger is unproven; the missing watchdog is the defect regardless of trigger. No Beads IDs in code comments.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated",
+    "delegations",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

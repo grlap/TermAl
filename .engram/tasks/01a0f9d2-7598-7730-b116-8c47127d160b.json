@@ -1,0 +1,30 @@
+{
+  "id": "01a0f9d2-7598-7730-b116-8c47127d160b",
+  "external_ref": null,
+  "title": "Boot reconciles an interrupted mailbox handoff by exact attempt, without taking ownership first: attempt-bound evidence, unknown held, and a per-session recovery barrier",
+  "outcome": "At boot, every persisted in-flight or preparing mailbox attempt is reconciled without first taking or clearing its durable ownership. TermAl reads the immutable candidate, reads any external evidence off StateInner, then retakes the lock, compares the exact obligation and attempt identity, and applies ONE replacement:\n- delivered (confirmed handoff evidence for that exact attempt);\n- known unsent (an attempt that provably could not have sent before a separately durable arming transition) → queued;\n- unresolved (anything else) → held as unknown and never replayed.\nA witness read failure, a metadata failure or a crash anywhere in this sequence leaves a recoverable owner; no empty intermediate state is ever committed. Evidence is bound to the exact attempt identity (w-e157f102bbec). The mutable notification_disposition column is never the attempt journal; legacy uncorrelated records stay explicitly uncertain. A per-session recovery barrier holds until the replacement is durably settled, so HTTP calls and callbacks cannot race boot. An acknowledged outstanding wake survives a restart without relying on unread rows and starts at the session's next activation.\n\nProvenance: Architect2's decisions f639826d and 534b4697 on w-3bd74078208d; item 3 of the decomposition in TermAl mailbox 03723eab #42, accepted in #43. This item carries w-3bd74078208d's former criterion 7 (restart survival), which moves here by the coordinator's decision.\nReview findings it carries:\n- round-2 High (Codex 87de46bf): a restart between queue promotion and handoff loses an acknowledged continuation, because the active boundary is not persisted;\n- round-3 High (Codex 39fa80aa; Claude 34e81e3e as a Low): boot restore commits the cleared in-flight boundary before resolving it, so a crash or failure in between loses the continuation.\nAn attempt journal in coordination.sqlite would need a coordination schema v3 migration (coordination_persist.rs:16, 189-317). Criteria to be proposed by the holder and concurred by the coordinator.",
+  "acceptance": [
+    "Boot reconciles an interrupted mailbox handoff by exact attempt, without taking ownership first: attempt-bound evidence, unknown held, and a per-session recovery barrier is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "boot-recovery",
+    "mailbox",
+    "session-blocking",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,33 @@
+{
+  "id": "01a1d6fa-8b13-72f3-a746-6291d90ac3ae",
+  "external_ref": null,
+  "title": "Normalize orchestrator references after runtime transcript quarantine",
+  "outcome": "Normalize orchestrator references after runtime transcript quarantine",
+  "acceptance": [
+    "Runtime quarantine leaves no orchestrator session-instance, pending-transition or stop-tracking reference to the removed session, while preserving quarantined durable transcript rows.",
+    "A behavioral test exercises runtime quarantine of a referenced cold session and verifies normalization and durable preservation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "greg-reported",
+    "lazy-transcript-tails",
+    "performance",
+    "post-restart",
+    "review-low",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a104f3-6a62-7422-9bd9-f011463137a5",
+  "external_ref": null,
+  "title": "Report exact named-root retirement success when a same-work successor exists",
+  "outcome": "After an acknowledged exact selection retirement, a later selection for the same store/work must not cause a false 'retained name was not cleared' refusal. Preserve pre-read exact-selection/replacement fences and do not clear or claim to clear the successor.",
+  "acceptance": [
+    "Report exact named-root retirement success when a same-work successor exists is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

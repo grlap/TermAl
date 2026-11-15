@@ -1,0 +1,28 @@
+{
+  "id": "01a13321-e1dd-7d52-aeb8-98d0add8c5bb",
+  "external_ref": null,
+  "title": "Agents have no supported route to create a ROOT session (with agent and model); only parent-scoped child delegations can be spawned",
+  "outcome": "A coordinator can provision a fresh root session (a named agent such as Codex with a model such as gpt-6.1-sol, in a given workdir) through a supported, documented, authority-checked tool or API, instead of needing Greg to create it in the UI. Who may create root sessions, and how many, is decided before implementation.",
+  "acceptance": [
+    "Agents have no supported route to create a ROOT session (with agent and model); only parent-scoped child delegations can be spawned is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "design-pending"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

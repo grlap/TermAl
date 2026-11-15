@@ -1,0 +1,37 @@
+{
+  "id": "01a0e6d3-c4f1-7ca1-8783-c27cacb8198e",
+  "external_ref": "tm-dsmm",
+  "title": "Delegation fan-in prompt carries each reviewer's full command and inspected-file lists",
+  "outcome": "Reported by Engram::Fable (2026-09-27, mailbox-703fddd4 #2). The fan-in prompt queued to the parent includes every reviewer's complete Commands run and Files inspected lists (often 50+ entries each), while the parent needs findings, status and freeze verification. Request: the fan-in carries findings, status and freeze verification; the rest stays available through termal_get_session_result. Related: tm-9do (UI collapse of fan-in prompts), a different surface.",
+  "acceptance": [
+    "The per-child section of a queued delegation completion fan-in retains status, summary, findings and recorded notes (including freeze verification and scope caveats), while replacing the typed Commands run and Files inspected lists with evidence counts; arbitrary notes beginning with 'Inspected' are retained.",
+    "The full recorded Commands run and Files inspected evidence remains available through termal_get_session_result using delegationId; the fan-in names that retrieval route and the outputOffset/outputLimit full-output paging route, and rendering its compact section does not mutate the stored result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verified delivered compact delegation fan-in and retained on-demand evidence. Exact real criteria revision2 externally concurred by Fable2 c1617632d2cc432cb9e55f0bb9a88add/proposal1a878e4155aa45c5a562dc8ecb17e8d6; independent Claude session12678/delegation-a02d5b8c-491f-4683-a5af-9f5d74be2866 recorded evaluationa7d6cc77e80b4c5e842e0325cf4f9603 PASS2/2 (judgment), stale:null verified before done. C1bb49df6028f9493a8806538f8ff4ac5d; C2b4e49a1edc754f95a661895ef7a0acd2. Delivery499c5af2 is ancestor1495e8d3. No source edit, test/build, commit/push/deploy; existing test bodies inspected only and ordinary supported result reads observed.",
+    "completed_at": "2026-10-15T15:30:04.189476600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

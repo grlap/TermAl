@@ -1,0 +1,44 @@
+{
+  "id": "01a183fc-d1ba-71b1-b169-c009e0659697",
+  "external_ref": null,
+  "title": "Registration history test asserts the production 5 s real-time durability fence and fails under concurrent full-gate load",
+  "outcome": "tests::persist_fence::test_run_registration::history::candidate_registration_is_independent_of_real_history_reads proves its structural independence-from-history-reads claim deterministically, without depending on wall-clock writer scheduling under arbitrary concurrent load. The full gate must not need a quiet machine. There must be no timeout inflation and no weakened assertion. Either the test's durability deadline becomes scriptable through a supported product seam, or the underlying writer-stall cause is fixed.",
+  "acceptance": [
+    "The test-run registration durability fence computes and waits on its 5 s deadline using the state's Engram budget clock, as the observation fence already does. Production keeps the real clock and the same 5 s budget and typed 503 durability-pending outcome, and the diagnostics' remaining-budget uses the same clock.",
+    "candidate_registration_is_independent_of_real_history_reads selects a scripted budget clock before any read and keeps every existing assertion (201 ACK, durable registration with COMMIT before ACK, exact stored and recovered identity, single rescan trace ordering, and history reads and excerpts). A deterministic witness holds the test's own writer past 5 s of real time with an explicit schedule hook (not load or a sleep-based race). The registration still ACKs 201 once the writer proceeds, because the scripted clock has not advanced.",
+    "A deterministic deadline regression shows that advancing the scripted budget clock past 5 s while the fence is queued still yields the typed 503 durability-pending result with deadline diagnostics, so the deadline semantics are preserved.",
+    "The ignored scheduled 3200-run measurement keeps real time and its 2 s POST-plus-GET budget. The review pair has no Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-load",
+    "host-persistence",
+    "test-determinism"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

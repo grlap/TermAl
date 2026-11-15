@@ -1,0 +1,28 @@
+{
+  "id": "01a16ed2-5b52-7dd0-959b-64a786a31fe4",
+  "external_ref": null,
+  "title": "Tests: waiting-reason restore and queue drain on the project-reset error releases (authority branch, failed delete, abort with checkpointed grants)",
+  "outcome": "Every way a project-reset fence ends has a test that a waiting reason shown during the fence is restored at a newer revision and the held queue drains.",
+  "acceptance": [
+    "Tests: waiting-reason restore and queue drain on the project-reset error releases (authority branch, failed delete, abort with checkpointed grants) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

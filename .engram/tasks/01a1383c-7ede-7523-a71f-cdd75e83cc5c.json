@@ -1,0 +1,27 @@
+{
+  "id": "01a1383c-7ede-7523-a71f-cdd75e83cc5c",
+  "external_ref": null,
+  "title": "A rejected operator prompt silently cancels capacity recovery before admission succeeds",
+  "outcome": "Cancel and publish capacity recovery only when a genuine operator prompt is accepted or queued; unresolved peer identities must not masquerade as operator input.",
+  "acceptance": [
+    "A rejected operator prompt silently cancels capacity recovery before admission succeeds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity-recovery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

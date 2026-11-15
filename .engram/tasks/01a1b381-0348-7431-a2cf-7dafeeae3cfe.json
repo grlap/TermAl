@@ -1,0 +1,37 @@
+{
+  "id": "01a1b381-0348-7431-a2cf-7dafeeae3cfe",
+  "external_ref": null,
+  "title": "Delete all tests that check the content of AGENTS.md, CLAUDE.md and other agent instruction files; forbid adding them (Greg, urgent)",
+  "outcome": "Delete all tests that check the content of AGENTS.md, CLAUDE.md and other agent instruction files; forbid adding them (Greg, urgent)",
+  "acceptance": [
+    "Every test that reads or asserts the content of this repository's AGENTS.md, CLAUDE.md or other agent instruction files (.claude/commands, .claude/reviewers, skills) is deleted, together with helpers used only by them; AGENTS.md, CLAUDE.md and the instruction files themselves are kept.",
+    "AGENTS.md and CLAUDE.md (kept identical) state, outside the Commit and push section, a permanent rule never to add tests that check or pin the content of AGENTS.md, CLAUDE.md or other agent instruction files, quoting Greg's word verbatim with its source.",
+    "The change lands under the standing rule (review pair, FULL gate) as its own candidate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "greg-directed",
+    "instructions",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Deleted every test that reads Markdown or pins agent instruction files, banned tautological tests in AGENTS.md and CLAUDE.md, and made the testing review lens flag them at Medium. Landed in master c656bf20.",
+    "completed_at": "2026-11-07T03:11:37.243556400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "id": "01a13435-3823-7bb3-8bb3-aab0b16aca1b",
+  "external_ref": null,
+  "title": "A root session paused solely by confirmed provider capacity resumes itself with bounded backoff, without duplicating a possibly delivered request",
+  "outcome": "A root session paused solely by a confirmed typed provider-capacity failure automatically performs the existing manual Resume operation on bounded minute-scale backoff: it drains the current eligible queued head as a new turn, or only unpauses an empty queue. It dispatches exactly what today's manual Resume would dispatch and nothing more; it never reconstructs a request, and never replays one whose delivery is unknown or whose turn had started. Unknown delivery, unresolved reconciliation, provider-owned retries, remote-compaction progress and operator holds stay manual or provider-owned. Recovery stops after eight automatic attempts with a visible exhausted state and Resume action.",
+  "acceptance": [
+    "C1 (test): A root session paused solely by a confirmed typed provider-capacity failure (classified from structured fields, never from error prose) automatically performs the existing manual Resume operation on the bounded schedule: it unpauses and dispatches the current eligible queued head as a NEW turn under the existing queue, ownership and admission guards. Automatic Resume dispatches exactly what today's manual Resume would dispatch and nothing more; it never reconstructs a request, and never replays one whose delivery is unknown or whose turn had started. This applies after a started turn produced output or ran tools, subject to C3. With an empty queue it only unpauses and sends no request. A fail-first test shows unchanged code keeps the capacity-paused queue held until manual Resume.",
+    "C2 (test): The retry schedule is minute-scale and bounded (Greg, 2026-10-13): 2 min, 5 min, then 10-minute steps, at most 8 AUTOMATIC Resume attempts after the initial capacity failure (2, 5, 10, 10, 10, 10, 10, 10 minutes, about 67 min in total). There is no sub-minute attempt, and each delay keeps +/-20% jitter. Each attempt invokes Resume once and promotes at most one current eligible queued head as a new turn; it never dispatches any request twice. A successful recovered turn or an empty-queue unpause clears the retry state; a confirmed capacity rejection of the attempted recovery advances the same bounded schedule. Tests cover the cadence, duplicate ticks and terminal budget.",
+    "C3 (test): UNKNOWN delivery, an unresolved request or manual reconciliation hold, capacity failure after remote-compaction progress, and a provider error with willRetry=true are never replayed or automatically resumed; their existing manual or provider-owned recovery stays in force. Untyped error prose, usage/credit exhaustion, stale or mismatched request/runtime/turn/generation events, and explicit operator pause, Stop or Cancel never start or continue automatic capacity recovery. Output or completed tool execution before a confirmed terminal capacity failure does not prevent automatic Resume of queued work, but recovery never reconstructs a request or replays one whose delivery is unknown or whose turn had started. Tests cover each boundary.",
+    "C4 (test): While recovery is scheduled, the session shows 'Waiting: provider at capacity, retry N/8 at HH:MM' instead of presenting the retry as an ordinary error; mailbox senders get a disposition naming the capacity wait instead of heldBehindPausedQueue. Manual Resume or Stop works and cancels the schedule. The retry's own waiting indicator clears when the attempt fires or is fenced; otherwise an automatic empty-queue unpause preserves exactly the status and preview produced by today's manual Resume, including the existing Error preview. After 8 automatic attempts are exhausted, the queue holds with 'Paused: provider at capacity, retries exhausted (8 attempts, last error <code>); Resume to retry'.",
+    "C5 (test): The maintained full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "agent-runtime",
+    "control-plane",
+    "greg-directed",
+    "retry"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented bounded automatic Resume for confirmed provider-capacity pauses, with duplicate-delivery and operator-hold safeguards. Independent acceptance evaluation d48edae5677d476e811fb089658b1988 passed 5/5; full gate test-b59f48a1 passed 5/5 on committed tree bea31ec27925dd67924f42c4773e0317c86cd0b2 (tree 731b2aa6f08653c6c2fb64e87743a928494436a1). Commit is ready for integration by Opus2.",
+    "completed_at": "2026-10-14T07:51:09.896669700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

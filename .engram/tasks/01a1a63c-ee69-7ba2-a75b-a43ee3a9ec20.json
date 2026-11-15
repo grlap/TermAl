@@ -1,0 +1,28 @@
+{
+  "id": "01a1a63c-ee69-7ba2-a75b-a43ee3a9ec20",
+  "external_ref": null,
+  "title": "A failed live fixture deletes its nested launcher's run files, so a diagnosis has only the outer log",
+  "outcome": "When a live test that runs a nested launcher fails, the nested run's results and log are still available for diagnosis, and passing tests still leave nothing behind.",
+  "acceptance": [
+    "After a panic in a live fixture that ran a nested launcher, that launcher's results and focused log are available afterwards, either retained on disk or quoted in full in the failure output",
+    "A passing run leaves no extra files, and the test temp guard's accounting of leaked roots stays correct"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

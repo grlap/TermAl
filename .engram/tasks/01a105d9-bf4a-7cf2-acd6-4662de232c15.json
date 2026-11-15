@@ -1,0 +1,28 @@
+{
+  "id": "01a105d9-bf4a-7cf2-acd6-4662de232c15",
+  "external_ref": null,
+  "title": "Correct the unresolved-remote-proxy overlap wording and the stale engram_other_writer_in references",
+  "outcome": "Correct the unresolved-remote-proxy overlap wording and the stale engram_other_writer_in references",
+  "acceptance": [
+    "The unresolved-remote-proxy cause text and the engram_unresolved_writers doc say that this count does not resolve a proxy's workdir (a turn start may already have resolved it), and no source comment or feature doc still cites engram_other_writer_in."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

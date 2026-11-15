@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8abf7e983b9e",
+  "external_ref": "tm-7cu.37",
+  "title": "Preserve explicit FOLLOW while transcript Find remains open",
+  "outcome": "Scroll review through commit 856d5df. Leave a nonempty Find query open, explicitly return to the bottom with Send, End or New response, then allow transcript content to change. SessionPaneView.scroll.ts:3069-3084 unconditionally calls setTailFollowIntent(false) whenever hasSessionFindQuery is true and the content transition is not residentHistoryOnly. This cancels user-selected FOLLOW, even if the query has zero matches. Earlier temporary hook probe used a no-match query: explicit bottom navigation reached 800 and FOLLOW=true, then an assistant append changed FOLLOW=false and showed the indicator without new reader input. Probe removed; latest code-only review confirms the branch remains. This is a remaining gap in the Send fix tracked by tm-7cu.34. Distinct from search-match object replay: this reproduces with no match and no search scrollIntoView. Content changes must not override explicit follow state under the September 3 specification.",
+  "acceptance": [
+    "After accepted Send, End, reaching bottom or clicking New response, FOLLOW persists on subsequent transcript growth even if Find remains open, including a query with no matches. An explicit later search navigation or upward reader gesture can select STAY; ordinary content changes cannot. Retain STAY behavior for approvals/user-input activity. Add regressions for the real Send integration and bottom-navigation/content-update path; demonstrate failure before the fix. TypeScript and affected suites pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

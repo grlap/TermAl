@@ -1,0 +1,38 @@
+{
+  "id": "01a13c12-b6cf-78c0-b708-675597aa7762",
+  "external_ref": null,
+  "title": "Undiagnosed Windows Git bounded-pipe test failure (test-6e40a16b, failed after 1.2 s of a 39.8 s budget)",
+  "outcome": "The 2026-10-07 Windows failure of the Git bounded-pipe test (run test-6e40a16b, failed after 1.2034008 s against a 39.7592523 s budget) is diagnosed to a cause: product, test/runner, or environment/resource. The confirmed cause is fixed or recorded with evidence. A later passing discriminator alone does not close it.",
+  "acceptance": [
+    "A causal diagnosis of the test-6e40a16b failure is recorded from its retained artifacts and a focused discriminating reproduction, classifying it as product, test/runner, or environment/resource, with falsifiable evidence.",
+    "If the cause is a product or test defect, it is fixed with a fail-first regression; if environment, the evidence and any mitigation are recorded. No retry, tolerance or timeout increase substitutes for the diagnosis.",
+    "The retained original run evidence (retention note 689cfc57e12844a5b932459a02536c8a on w-7f8a1e8f6564) is disposed of only after the diagnosis is recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "bounded-reads",
+    "incident",
+    "test-failure",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Diagnosed the original bounded-pipe failure as a test/runner raw Node spawn inheritance defect, already repaired by a6c655a482318b3311ffd831b80ff4579fe8e22f. Deterministic raw/guarded discrimination passed; existing fail-first process-creation guard passes on the restored clean source. No new product diff or landing.",
+    "completed_at": "2026-10-14T22:24:55.177838Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

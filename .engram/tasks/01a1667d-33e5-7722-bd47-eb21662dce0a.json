@@ -1,0 +1,58 @@
+{
+  "id": "01a1667d-33e5-7722-bd47-eb21662dce0a",
+  "external_ref": null,
+  "title": "An unresolvable runtime-started Claude turn end leaves the session's queue paused with authorization held (\"Resume or Cancel\") until it self-recovers",
+  "outcome": "A turn Claude Code starts by itself (a self-scheduled job or loop tick) is recognised and adopted as a runtime-started turn even when its frames carry Claude's own command identity, so the session is Active while it runs and queued prompts wait behind it instead of being admitted, begun and handed off mid-turn into an automatic Engram hold (queue paused, authorization held, \\\"Resume or Cancel\\\"). Criteria concurred verbatim by Termal::Fable2, note 155908b7.",
+  "acceptance": [
+    "A turn Claude Code starts by itself, whose top-level frames carry an identity TermAl did not write, while no turn is open and no waiting prompt has that identity, is treated as a runtime-started turn (cause NoPrompt, or TaskNotice after a task notice), not as unresolved/Unassigned: on an idle session it is adopted (Active under a new turn generation, notice \"Claude Code started this turn by itself…\"), and its result naming that same identity ends it through the adopted path.",
+    "While such an adopted turn is open, a queued head is not handed off to the runtime: it waits behind the turn and proceeds when the turn ends, with no Resume/Cancel hold, no paused queue and no grant held for the duration of the self-started turn. Covered by a fail-first test (self-started turn with an unknown uuid, then a queued head, then the turn's result, then the head dispatched).",
+    "A waiting prompt whose own `started` arrives inside a self-started turn's interval is never retired unfinalized by a result naming both: it is settled by its own result, or the session does not stay Active with an ended attempt. Covered by a fail-first test.",
+    "Genuine contradictions (plural or malformed identities, a frame naming an attempt other than the open turn's owner) still close unresolved with today's notices; the existing claude_frame_router / engram_claude_runtime_turns tests pass unchanged except where they encode the old Unassigned reading of a lone unknown uuid, each such change named.",
+    "The full five-stage gate passes on the exact final input, and the independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "admission",
+    "claude-runtime",
+    "greg-reported",
+    "queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

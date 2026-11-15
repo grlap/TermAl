@@ -1,0 +1,35 @@
+{
+  "id": "01a18bb6-3543-7810-8cce-490ed5301c72",
+  "external_ref": null,
+  "title": "Preserve Linux utilization interface rates across transient enumeration failures",
+  "outcome": "A disappearing interface does not discard valid counters or rate baselines for interfaces that remain present; incomplete enumeration stays explicit and bounded.",
+  "acceptance": [
+    "A deterministic disappearing-interface fixture preserves measurements and rate baselines for unaffected interfaces.",
+    "Incomplete or oversized interface enumeration remains explicit; no fake zero counters or silently complete truncated roster is reported.",
+    "Focused validation and the required independent review cover the final change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-directed",
+    "host-utilization",
+    "linux",
+    "network",
+    "observability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18ac3-0c9b-7e60-9738-24c75af616ab",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

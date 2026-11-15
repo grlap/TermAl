@@ -1,0 +1,57 @@
+{
+  "id": "01a0e6d3-c3e0-76f0-a9ea-d889be50979e",
+  "external_ref": "tm-xc0b.1",
+  "title": "Add a physical-line size guard for every Rust source file, with a shrink-only baseline",
+  "outcome": "TermAl has one enforceable Rust file-size guard in the normal gate: every Rust source file is at most 2,499 physical lines, except a reviewed, shrink-only baseline of the files over that cap at the guard's own landing input, each held at its count there.",
+  "acceptance": [
+    "A shared Rust test in the normal validation path inventories every Rust source file under src/ and tests/ recursively, including future extraction destinations, counts physical lines (blank and comment lines included, LF and CRLF counted alike, a nonempty unterminated final line counted once), prints a deterministic sorted per-path inventory as 'PATH: N physical lines (limit 2499)', and fails on an unreadable or missing root or file, an empty inventory, or duplicate or conflicting entries.",
+    "Every file is held to at most 2,499 physical lines except the files listed in one explicit reviewed baseline of the files over the cap at the guard's own reviewed integration input, each with its count there as its ceiling. A listed file fails above its ceiling; an unlisted file fails at 2,500; a listed entry that is missing or at or under the cap fails as stale. The baseline is never regenerated automatically, transferred by rename, widened by a glob or raised. The output separates remaining baseline debt from strict-cap success, and a passing run is not reported as either parent's completion.",
+    "Tests cover the 2,499/2,500 boundary, LF versus CRLF and an unterminated final line, a new unlisted file over the cap, an unreadable and an empty inventory, a stale baseline entry, and a listed file growing past its ceiling.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated",
+    "file-size",
+    "refactor",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3df-7ae2-9176-fb2b0d02457c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

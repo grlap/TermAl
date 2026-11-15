@@ -1,0 +1,80 @@
+{
+  "id": "01a10c85-3888-7713-8bc7-58cf44d04f2c",
+  "external_ref": null,
+  "title": "A turn_begin that ends control_unavailable leaves a begin-unknown hold whose armed session-status repair never runs on its own, so the session stays parked (\"Waiting/Unknown … resume to retry or cancel\") until a manual Resume",
+  "outcome": "A retained prompt whose turn_begin outcome is unknown reconciles automatically by replaying the exact durable begin key, canonical intent and grant on a valid control connection, with separate host dispatch evidence. Applied begins retain their receipt; verifiably expired unbegun grants recover through safe ordinary admission. The common bounded retry schedule, exact attempt ownership, durable boot reconstruction and explicit diagnostics preserve the prompt without manual Resume or duplicate delivery. Null status never proves that begin was not applied; neighboring closing-checkpoint settlement remains separate.",
+  "acceptance": [
+    "C1 (unbound fail-first): On baseline master f476060e90b608bef82c7b28110c6afea6f496ee, a production admission-path witness loses the turn_begin reply after sending, retains the original head as begin-unknown, then restores control and advances the shared retry clock without Resume. It demonstrates that automatic begin reconciliation and provider delivery do not occur. A holder note preserves the failing host check, input, log path and SHA-256; the failure is distinguished from setup or runner errors.",
+    "C2: Before the first turn_begin is sent, its exact canonical intent, begin idempotency key, grant and expiry basis, stable session/project/store/binding authority, head identity and recovery phase are durably acknowledged. A failed or ambiguous local persistence result withholds the send. After reload or lost acknowledgement, reconciliation replays those same request semantics and key on a valid current control connection; it never substitutes a restart checkpoint, a new begin key, or a new intent.",
+    "C3: Reconciliation uses the producer-confirmed exact turn_begin replay contract: an applied begin returns its retained receipt; a still-issued live grant is begun at most once; a grant is proven never begun only by stale_fence, task_unbound, task_access_denied, grant_expired, policy_epoch_changed or task_admission_epoch_changed, and only then can the head proceed through fresh ordinary evaluate, after exact-authority validation proves that route safe. Tests cover grant_expired as that proof and grant_scope_mismatch as an ambiguous shape: the hold stays, settling as applied only when producer status shows open_grant_id equal to the held grant, with no fresh evaluate. Missing grants, null or different session status, stale identity, unknown_control_schema and a fresh evaluate are never treated as harmless probes or proof that no begin occurred; warm rebind never clears a prepared-begin hold on status alone. A replay receipt does not prove provider dispatch: retained host delivery evidence permits one handoff of an undelivered head and forbids a second handoff of a delivered head.",
+    "C4: The default control timeout of 20,000 ms is documented. A synchronous Begin uses max(configured call bound, 10,000 ms), capped at 20,000 ms. After a begin whose outcome is unknown (lost reply, or transport failure after the send), the host replays only the SAME durable begin (the stored exact key string, intent and grant; never a new grant, key, evaluate or turn) on the existing common schedule (2/5/10/20/30/60 s, then every 60 s, at most 20 percent positive jitter, circuit/bind not-before times, the one-head guard and the host-wide slot cap) until Engram returns a definite outcome: begun (deliver exactly once), never-begun/expired (proceed only as C3 allows), or refused (an explicit hold with its reason). No deadline converts an unresolved replay into a hold that needs Resume. Tests cover: a delayed success at 2,000 ms and one near the 10,000 ms bound; transient-then-success reconciling without Resume; unavailability lasting past 20 s keeping scheduled replays with the same key and no new grant, then recovering when control returns; and a cap deferral charging neither the attempt index nor the first-held time. Stop, Cancel and operator pause end the replay immediately; replacement and stale late replies can neither restart it nor permit delivery.",
+    "C5: A unique exact-owner attempt is reserved under the state lock across off-lock transport and guarded durable result settlement. Competing boot, Resume, admission, bind, Stop, Cancel, reset and revocation paths join, defer or take over that owner explicitly. Controls cover cancellation or owner replacement before reservation, while the request is in flight, and before local commit: late results cannot release a successor grant, resurrect a removed head, clear another attempt, bypass operator pause, or duplicate provider delivery. A remote-success/local-persistence-failure window remains a visible recovery hold.",
+    "C6: The retained hold records the original raw transport or backoff error kind and message and the observed control sidecar identity and exit state, using an explicit unavailable value when these were not captured; it never infers success from latency or invents historical process evidence. While eligible recovery is scheduled, the preview names begin reconciliation, attempt and next due time. Fatal, identity, protocol, operator and local-persistence holds remain distinguishable and do not claim automatic admission.",
+    "C7: Boot reconstruction of durable begin-unknown recovery is delivered by the required child item w-c4792b86b3b9 (boot reconstruction of a begin-unknown replay after a TermAl restart), whose own criteria, credited gate, review pair and independent evaluation cover reconstruction ahead of competing cold or restart-checkpoint recovery, the preserved cadence and owner, new-format and old-format restart witnesses that resolve an applied-begin case and an expired-unbegun case without Resume and deliver exactly once, and recovery of a pre-fix hold only from verifiable retained request or producer authority, never a fabricated envelope. This criterion is met when that child is completed and this item's final tree contains its landing, verified by this item's own passed host Test record on that tree.",
+    "C8: docs/features/engram-host-adapter.md documents the begin-unknown replay, durable ownership, scheduler, diagnostic visibility and cases that stay held. The maintained five-stage full gate passes on the exact final input with this item's own passed host Test record, the independent read-only Codex/Claude pair has no outstanding in-scope Medium or higher with all remaining Lows filed, and an evaluator that never held the item evaluates these exact criteria independently."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 8,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "pilot",
+    "reliability",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

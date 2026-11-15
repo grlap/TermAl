@@ -1,0 +1,28 @@
+{
+  "id": "01a14203-fabb-7b12-9d33-09e1942bceeb",
+  "external_ref": null,
+  "title": "Let omission metadata give way before evidence in the brief's clipping and outcome steps too",
+  "outcome": "Once evidence must give way in the independent evaluator brief, the shrink order still prefers verbose omission metadata over citable evidence and outcome text. The detail-major clipping loop should try the Compact omission detail at each window before clipping more entries. The outcome should be shortened only after the Compact (and Minimal) windows are exhausted.",
+  "acceptance": [
+    "Let omission metadata give way before evidence in the brief's clipping and outcome steps too is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

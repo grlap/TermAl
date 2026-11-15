@@ -1,0 +1,37 @@
+{
+  "id": "01a110a4-a74f-7783-b11e-5ae65abfc4d6",
+  "external_ref": null,
+  "title": "Classify a turn observation reporting source_changed=true whose closing revision equals the revision an earlier evaluation declared (Engram w-fbc931f1b6ac)",
+  "outcome": "For observation 91abfd5d, we know whether the host's source_changed=true was correct per-turn semantics (the turn's own start, or last reported check, differed from its close) or a host defect, and either the defect is fixed or the semantics are documented for the Engram consumer.",
+  "acceptance": [
+    "The turn behind observation 91abfd5d63a843c28a27e3f266c8c53d (session-9551, root .worktrees/ev954 generation 563, observed 2026-10-06T09:52:18.595Z) is classified from evidence: which branch of engram_turn_execution_observation set source_changed (reported check vs end, start basis vs end, or the file-change tracking fallback), and the start/reported revisions that were compared.",
+    "If the flag was wrong for that turn (for example the tracking fallback counting a commit's .git writes, or a start basis taken on a different root or state), the defect is fixed with a regression test reproducing the shape: a commit that leaves tree bytes unchanged inside the turn reports source_changed=false.",
+    "If the flag was right per-turn, docs/features (the source-observation or Engram host contract doc) states that source_changed compares the turn's own opening basis or last reported check with its close, not any evaluation's declared revision, and Engram::Fable is sent the reference."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "source-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Observation 91abfd5d classified from host and Engram evidence: not a turn's own observation (no branch of engram_turn_execution_observation; the turn that committed reported source_changed=false at a5c1e4d9 on w-59f19d400edd's run) but the host's inter-turn source observation for w-954e2d30bf4d's sighting scope at the next turn's opening, comparing that scope's accounted baseline bc8c706e (09:00:17Z) with the opening sighting a5c1e4d9 — two claims naming one root are two scopes. The flag was correct per the host's per-scope semantics (criterion 2 not triggered). Criterion 3 delivered: docs/features/engram-host-adapter.md gained the block \"What each comparison measures, and what it does not\" (turn flag; inter-turn observation per work/run/claim scope; neither compares with an evaluation's declared revision; when the change is reported, incl. that Engram treats an accounted unadmitted change after the cut as new evidence whatever revision it reports) and a qualified \"Continuity between turns\" sentence; three review rounds (Codex + Claude), full gate test-eff26db9 PASS (5 stages, vitest 4585/0, host record e24663fd), independent evaluation 3c3a0e3f passed; landed by Opus2 as fast-forward e4fa6686 on 151c0b0d; Engram::Fable sent the classification and the reference. Follow-ups: w-5c5daa854838 (design, cross-project) and w-ac306683fbf2 (docs Low). Installed binary sha256 5bbf5f30… (docs only, no restart).",
+    "completed_at": "2026-10-06T11:23:20.327251700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

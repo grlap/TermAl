@@ -1,0 +1,37 @@
+{
+  "id": "01a1c68a-0571-72f3-837d-3a0e510ee34c",
+  "external_ref": null,
+  "title": "UI activity animations while sessions work drive an Intel integrated GPU to 100%",
+  "outcome": "UI activity animations while sessions work drive an Intel integrated GPU to 100%",
+  "acceptance": [
+    "The decorative cost of visible activity indicators is reduced: badge rings and loading glyphs use stepped motion with phase alignment when first visible and on visibility or motion-preference resume, while transcript working dots/labels and session activity strips remain static. The item records what changed and how it reduces continuously animated work.",
+    "Activity motion pauses when indicators are offscreen or their document is backgrounded, and hidden indicators do not keep activity animation loops running. This behavior is supported by the existing browser functional checks and source review; no additional GPU measurements or diagnosis of the transient 100% laptop GPU event is required.",
+    "Activity indicators still show that a session is working, prefers-reduced-motion is honoured, and the existing UI tests pass; any new test checks observable behaviour, not CSS text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Reduced decorative activity animation cost with synchronized stepped badge/loading motion, static transcript dots/labels and session strip, and visibility/reduced-motion pause behavior. Landed in combo42 as5be407c3/tree17024; independent evaluation5b33101ce44d4897aff5cac8f36ae2c3 passes3/3 at revision5/evidencecut228 and is fresh. Own registered classifiedBuild6a1e969e passed/eligible at exactnamedHEAD, typedrecordc8a55c63 settled; exacttreeintegrationFULL all6passed withUI5090/Rust7586 plusbrowser96 behavioral evidence. Three unfixedLows filed separately; no100%laptopcause/fixclaim, no newmeasurements afterGregscope. Full evaluatorpacket/all3058Bprose/trackerrecord archived/readback beforedone. Six source observations remain honestly accounted as untested, not backfilled. Ownedroot cleanup follows; raw retained while openLowfollowups need provenance.",
+    "completed_at": "2026-11-10T22:10:44.614830100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

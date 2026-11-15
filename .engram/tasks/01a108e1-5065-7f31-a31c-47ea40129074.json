@@ -1,0 +1,28 @@
+{
+  "id": "01a108e1-5065-7f31-a31c-47ea40129074",
+  "external_ref": null,
+  "title": "doctor_deadline_covers_a_pipe_held_after_direct_child_exit timed out waiting for its fixture descendant (60 s) in a loaded focused run",
+  "outcome": "doctor_deadline_covers_a_pipe_held_after_direct_child_exit timed out waiting for its fixture descendant (60 s) in a loaded focused run",
+  "acceptance": [
+    "The cause of the timeout is confirmed with recorded evidence (the doctor result and elapsed times at the failure), and the test no longer depends on its fixture descendant starting within the doctor's 5 s deadline under load, with no deadline inflated and no retry added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

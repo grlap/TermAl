@@ -1,0 +1,33 @@
+{
+  "id": "01a1b17b-76e0-7f31-928d-ca892693897b",
+  "external_ref": null,
+  "title": "Cover alternate launcher locator forms and dirty-source notice retention",
+  "outcome": "Native launcher delta tests discriminate STARTED/results locator forms, overlong prefixed lines, and retention of the original correlated advice after source changes.",
+  "acceptance": [
+    "Tests cover RUN, STARTED and results: .../results.json forms, including split input where relevant.",
+    "An overlong locator-prefixed line reaches its specific invalidation branch, separately from the existing oversized single-delta control.",
+    "The dirty-after-receipt control asserts that honest original registered-launcher advice remains, so an empty line cannot satisfy it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "codex",
+    "cross-project",
+    "diagnostics",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

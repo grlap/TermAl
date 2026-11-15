@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c429-7781-9e80-8805080ec987",
+  "external_ref": "tm-8ern",
+  "title": "Surface persistent Engram background revocation retry failures",
+  "outcome": "A failed retry of an older unconfirmed authority revocation must not fail an unrelated settings edit, but stderr-only reporting makes persistent failure invisible to the operator. Add a durable, redacted diagnostic surface (for example last error/count on the retired-authority ledger or a bounded project/session notice) without restoring request failure or exposing grant hashes.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 7f6052c (ancestor of master); engram_cleanup_warning in src/session_crud.rs.",
+  "completion": null
+}

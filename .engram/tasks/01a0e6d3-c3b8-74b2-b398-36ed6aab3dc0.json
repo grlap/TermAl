@@ -1,0 +1,56 @@
+{
+  "id": "01a0e6d3-c3b8-74b2-b398-36ed6aab3dc0",
+  "external_ref": "tm-1mqo",
+  "title": "Rust test fixtures leak termal-test-state temp roots into %TEMP% on every run",
+  "outcome": "Observed 2026-09-06 (read-only inventory by Termal::Fable): C:\\Users\\grzeg\\AppData\\Local\\Temp holds 22083 top-level entries, 11457 of them termal-test-state-<uuid> directories created by TestTempRoot::create (src/test_temp_root.rs) through test_app_state() in src/tests/mod.rs and the persist fixture in src/tests/persist.rs; 2712 are younger than one day and 9805 younger than a week, so the leak happens on ordinary runs, not only on killed processes. Cause: TestTempRoot removes its directory in Drop, but test_app_state() hands the root to the AppState inside an Arc that the background workers (persist thread, SQLite connection cache, runtime threads) keep alive until the test process exits, so the destructor never runs; on Windows an open termal.sqlite also makes remove_dir_all fail with a sharing violation and the fixture only prints test temp root not removed. The module header disclaims stale-directory sweeping, so crashed or killed runs (several stray cargo test processes were observed today) accumulate as well. Impact: tens of thousands of directory entries in the user temp folder, several gigabytes of leaked SQLite state, slow temp enumeration and antivirus scanning, and disk saturation during test runs. Fix, red-first: (1) a test-owned AppState guard that stops the persist worker and closes runtime handles before the root drops, with removal retried briefly on Windows sharing violations, so a test that finishes normally leaves nothing behind; (2) a bounded stale sweep at test-process start (once per process) that removes termal-test-state roots older than one hour whose files are not locked, owned by a small new module rather than TestTempRoot; (3) scripts/test-rust.sh reports the number of termal-test-state roots before and after the run and fails when the delta is positive, so the leak cannot return silently. Acceptance: a full scripts/test-rust.sh run leaves zero new roots; a killed test process leaves roots that the next run sweeps; the wrapper prints the before/after count.",
+  "acceptance": [
+    "src/tests/mod.rs and src/tests/persist.rs have no raw std::env::temp_dir() fixture roots and no swallowed `let _ = fs::remove_dir_all`; every fixture root goes through TestTempRoot or test_temp_dir().",
+    "A green full gate on Windows reports zero remaining entries in its run root and zero new termal-* entries in user temp, and the run root is gone afterwards.",
+    "A leftover inside the run root after an otherwise green run fails the run, keeping the root for inspection; a wrapper test pins it, replacing the current exit-0 expectation.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Rust test fixtures no longer leak temp roots.\n- Every fixture root in the test suite goes through a TestTempRoot guard, or through the product test directory with checked removal: persist.rs, mod.rs, review_freeze.rs, bounded_read_process.rs, content_revision.rs, engram_source_roots.rs, kimi_read_only.rs and test_run_cards.rs. Swallowed removals are gone, and multi-directory cleanups try every directory and then report all failures together.\n- TestTempRoot::create writes a sibling <root>.owner file naming the creating test.\n- The test-temp wrapper fails a green run whose run root still holds entries, keeps it, and names the test behind each leftover. Its reads are bounded, follow no links, and strip control and bidi characters.\n- Three tests that held SQLite files open past their root now release them: two persist-worker joins and one struct-update fix.\n\nLanded as 3381d27 on origin/master after two review rounds (both round-1 Mediums fixed) and gate test-6273cd22. The independent evaluation ef0fc6420ed549be90ed5d9c7e166b79 passed all 4 criteria.",
+    "completed_at": "2026-10-02T12:11:37.470625900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

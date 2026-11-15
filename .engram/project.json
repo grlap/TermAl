@@ -1,0 +1,16 @@
+{
+  "project": {
+    "format": "engram-task-planning-v1",
+    "project_id": "github.com/grlap/TermAl"
+  },
+  "profile": {
+    "include_notes": false,
+    "origin_machine": null
+  },
+  "folder_exchange": {
+    "complete": true,
+    "export_basis": {
+      "inventory_fingerprint": "66ad6796e5eb201b0662cd8084fd063ffcd41c9174212190dac5381708bab861"
+    }
+  }
+}

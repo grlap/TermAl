@@ -1,0 +1,28 @@
+{
+  "id": "01a1d78f-b3fb-7ac2-9b76-5ff40fcdeba1",
+  "external_ref": null,
+  "title": "Remove unreachable terminal launcher carry branches and re-scope vacuous tests",
+  "outcome": "Remove terminal carry states made unreachable by immediate lifecycle retirement, and retain tests that discriminate reachable behavior.",
+  "acceptance": [
+    "Audit terminal_conflict, terminal timing in retired-launch ambiguity, post-terminal potential, late ended fencing and test_run_projection_carried_matches against current retirement. Remove unreachable branches or document a concrete reachable caller.",
+    "Drop or re-scope the four named vacuous tests while preserving the existing meaningful running/interference, exact identity and consumed-reservation controls."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

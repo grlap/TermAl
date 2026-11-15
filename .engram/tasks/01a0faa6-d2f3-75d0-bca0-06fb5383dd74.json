@@ -1,0 +1,49 @@
+{
+  "id": "01a0faa6-d2f3-75d0-bca0-06fb5383dd74",
+  "external_ref": null,
+  "title": "Uncredited-test host line names no command, and the one-call guidance omits that pushd keeps the shell in DIR",
+  "outcome": "An agent can tell which command an uncredited-test host line means, and the one-call guidance says that pushd keeps the Bash shell in DIR and what keeps a carried gate's credit, so a correctly launched gate is not lost to a misread line or a later command in the worktree",
+  "acceptance": [
+    "The host line for a recognised test that gets no check names the command it is about. That covers the near misses (after another command on its line, after the form's pushd with something the form does not take, a Git Bash spelling of DIR) and the withheld and unconfirmed cases. The line carries a bounded excerpt of that command line, as the carried-gate void line identifies its line, so an agent can tell which command it means. A test runs a turn with an earlier `cd … && cargo test` line and a later one-call launch, and asserts the line names the earlier command and does not name the launch.",
+    "The up-front one-call guidance (the named-root line) says pushd leaves the Bash shell in DIR for later calls, and that while a detached or background gate is carried, a command run in that worktree keeps its credit only if it only reads, and no file in the worktree may change. docs/test.md says the same. A test pins the host line's wording.",
+    "The full gate passes on the landed input.",
+    "The /review-changes pair has no outstanding in-scope Medium or higher finding on the reviewed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

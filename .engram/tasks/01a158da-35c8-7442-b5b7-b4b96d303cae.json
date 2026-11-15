@@ -1,0 +1,30 @@
+{
+  "id": "01a158da-35c8-7442-b5b7-b4b96d303cae",
+  "external_ref": null,
+  "title": "Scope test-only reference-publication durability diagnostics to their originating caller",
+  "outcome": "Prevent shared federation mutation/binding/activation/recovery failures from being mislabeled as a reference-publication failure in test output, while retaining underlying error details needed by publication diagnostics and leaving production behavior unchanged.",
+  "acceptance": [
+    "Unrelated federation durability failures and recovery ticks cannot be mistaken for a reference provisioning request in the captured diagnostic output; reference-specific origin is scoped or explicitly labeled.",
+    "A deterministic test distinguishes reference provisioning diagnostics from an unrelated shared durability failure; existing authority, error mapping, timeout and retry behavior remains unchanged.",
+    "The exact-input independent review pair and maintained full gate satisfy repository landing policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1697a-0ead-7323-91b3-2e3605d69cdd",
+  "external_ref": null,
+  "title": "Make turn_evaluate latency attributable: split the card's evaluate into bind-phase sub-steps and timestamp the persistence-writer tick ring",
+  "outcome": "Make turn_evaluate latency attributable: split the card's evaluate into bind-phase sub-steps and timestamp the persistence-writer tick ring",
+  "acceptance": [
+    "Make turn_evaluate latency attributable: split the card's evaluate into bind-phase sub-steps and timestamp the persistence-writer tick ring is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "engram-host-adapter",
+    "gate-load"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

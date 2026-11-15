@@ -1,0 +1,52 @@
+{
+  "id": "01a1423e-8fac-78e2-b439-10e26de61e49",
+  "external_ref": null,
+  "title": "Assert stale fan-in restoration result classes alongside non-mutation",
+  "outcome": "Strengthen stale orphaned-workflow fan-in restoration controls to distinguish explicit ownership refusal from the exact retained-owner no-op, preserving existing no-clone and no-dispatch assertions.",
+  "acceptance": [
+    "Stale callback-first and unsafe-receipt controls assert the expected Err result from requeue_rejected_orphaned_workflow_prompt in addition to unchanged queue, receipt identity, generation and provider-command assertions.",
+    "An exact retained rejected-wake positive control asserts the expected Ok no-op while preserving one original prompt/receipt and its later single legitimate delivery.",
+    "Focused regression checks and the maintained full gate pass on the exact reviewed input, without weakened state assertions or timeout inflation."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "fan-in",
+    "provider-error",
+    "review-follow-up",
+    "testing",
+    "wake-recovery",
+    "wakes"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a11d9d-2bd0-7af1-b87b-5656beda1d33",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

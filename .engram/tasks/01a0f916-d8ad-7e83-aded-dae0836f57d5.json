@@ -1,0 +1,38 @@
+{
+  "id": "01a0f916-d8ad-7e83-aded-dae0836f57d5",
+  "external_ref": null,
+  "title": "Fence detached-loss targeted metadata refresh against older response stamps",
+  "outcome": "Fence detached-loss targeted metadata refresh against older response stamps",
+  "acceptance": [
+    "A public regression for a local session with an admitted paired tail, creation or fork body response in the current instance delays a targeted tail or action response with a known numeric stamp until after newer known idle/status/preview/queue metadata is adopted and proves the older response cannot roll those fields or their mutation stamp back in ref, store or render, including when its admissible tail bodies are adopted.",
+    "The exact corrected input passes focused regressions, the full five-stage gate and a fresh complete independent Codex/Claude pair with no outstanding in-scope Medium-or-higher finding.",
+    "The same-instance known-older-stamp check is at D7's central owner commit gate, only for local sessions with an admitted paired tail, creation or fork body response in the current instance. The guard compares two known numeric stamps; absent or null stamps are incomparable and retain master's global admission. Remote, foreign-epoch and never-paired sessions remain unguarded. A current targeted response retains authoritative omitted-empty queue/marker clearing; a known older response within the guard domain preserves resident metadata. An accepted instance reset clears the comparison domain."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-8d6c-7ea0-bb05-e3abb15d4151",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

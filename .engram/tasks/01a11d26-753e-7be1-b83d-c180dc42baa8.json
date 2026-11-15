@@ -1,0 +1,28 @@
+{
+  "id": "01a11d26-753e-7be1-b83d-c180dc42baa8",
+  "external_ref": null,
+  "title": "The Engram control card enters the public transcript before the writer commits it",
+  "outcome": "A Message::EngramControl card is published (wire session, tail, history, message deltas) only after the writer acknowledges its COMMIT. A failed save never makes later messages invisible.",
+  "acceptance": [
+    "The Engram control card enters the public transcript before the writer commits it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "architecture-decision-needed",
+    "pre-existing",
+    "transcript-publication"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a077e2be6c8",
+  "external_ref": "tm-7cu.26",
+  "title": "Viewport-height clamp detaches virtualized tail follow",
+  "outcome": "A native upward scrollTop delta with unchanged scrollHeight is treated as user movement, but clientHeight changes can produce the same clamp while the reader remains pinned. Composer collapse, prompt-chip removal, or a taller window can therefore hard-detach bottom authority mid-stream. Track previous clientHeight or maxScrollTop geometry and require stable geometry before classifying a negative delta as reader input; add handler-level coverage for pinned viewport growth.",
+  "acceptance": [
+    "Viewport-height-only clamps keep tail-follow attached; genuine stable-geometry upward input detaches; composer collapse and window-height regressions are covered; TypeScript and Vitest pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

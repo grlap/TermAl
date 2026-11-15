@@ -1,0 +1,27 @@
+{
+  "id": "01a177b6-26ce-79b0-83af-72cf978468d0",
+  "external_ref": null,
+  "title": "Zero-row first-batch drain witness does not cover a short page (fewer than 8 wakes)",
+  "outcome": "A witness seeds fewer than 8 relay home wakes with a one-shot zero-row first batch and asserts every wake is delivered after the drain, so the home_attempted == rows.len() conjunct of the recorded scan-complete flag is discriminated.",
+  "acceptance": [
+    "Zero-row first-batch drain witness does not cover a short page (fewer than 8 wakes) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox-relay",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

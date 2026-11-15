@@ -1,0 +1,29 @@
+{
+  "id": "01a15b4b-ed74-7ef0-9d6f-ab59901a2846",
+  "external_ref": null,
+  "title": "Explain and finish a declared-adapter Unknown observation after its provider task ends",
+  "outcome": "A declared-adapter Unknown row whose provider task later reports completion retains its judged verdict while exposing a truthful completion timestamp and a useful explanation, without changing verification or native exit facts.",
+  "acceptance": [
+    "A production-path control associates an Unknown declared result with ended_at absent, then supplies a terminal task notice and checks the documented completion/reason behavior while preserving the adapter outcome and evidence.",
+    "Any implementation fills only missing completion or explanation facts, preserves existing native exit/Passed/Failed/evidence associations, and does not invent verification or alter the separate unbound restart-risk policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

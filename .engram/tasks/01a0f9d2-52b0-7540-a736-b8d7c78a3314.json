@@ -1,0 +1,30 @@
+{
+  "id": "01a0f9d2-52b0-7540-a736-b8d7c78a3314",
+  "external_ref": null,
+  "title": "Turn failure, exit and Stop transfer mailbox wake ownership atomically: split restore-unsent from open-recovery-episode, and treat channel-accepted ambiguity as unknown",
+  "outcome": "Every turn failure, runtime exit and Stop path changes the mailbox wake's ownership through the transition owner (w-e157f102bbec) in one persisted image. None clears the active boundary, commits, and then relies on a later best-effort requeue.\n- A known pre-send rejection closes that exact attempt as not sent and restores the same obligation.\n- A failure, exit or Stop after a confirmed handoff opens an explicitly identified recovery episode for the eligible unread scope, keeping the delivery history and the existing Stop/failure suspension. If the mail was already acknowledged, no recovery episode is opened.\n- Where the command channel accepted the prompt but the provider's start is uncertain (the Codex turn/start error and the missing turn/started watchdog), the outcome is unknown and is never treated as not sent.\n- requeue_rejected_mailbox_notification is split into these two distinct commands.\n- The pre-existing gap where start_turn_on_record sets the active boundary and can then return Err without resetting it is closed.\n\nProvenance: Architect2's structural decision f639826d on w-3bd74078208d; item 2 of the decomposition in TermAl mailbox 03723eab #42, accepted in #43. Read-only map: the boundary is taken, committed, then requeued in a separate step at turn_lifecycle.rs 590/893/1440/1792/2152 and session_lifecycle.rs 1100. The requeue helper serves pre-send rejection (api.rs 95: five causes) and post-acceptance failure (seven sites). The start_turn_on_record gap is at turn_dispatch.rs 354-365 and 515-533.\nReview findings it carries:\n- round-1 Medium (Codex a52270f5 and Claude 4bd98449): a rejected handoff of an acknowledged continuation loses the wake;\n- round-3 Medium (Claude 34e81e3e): after a delivered turn fails, is Stopped or dies, reads say delivered although a recovered or held wake is queued (with the D5 projection).\nCriteria to be proposed by the holder and concurred by the coordinator.",
+  "acceptance": [
+    "Turn failure, exit and Stop transfer mailbox wake ownership atomically: split restore-unsent from open-recovery-episode, and treat channel-accepted ambiguity as unknown is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "mailbox",
+    "session-blocking",
+    "turn-lifecycle",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

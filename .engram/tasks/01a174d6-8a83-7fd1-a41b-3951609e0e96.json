@@ -1,0 +1,31 @@
+{
+  "id": "01a174d6-8a83-7fd1-a41b-3951609e0e96",
+  "external_ref": null,
+  "title": "Index current automatic mailbox install-intent lookups during catalog discovery",
+  "outcome": "Avoid the per-candidate linear scan of retained binding install intents under StateInner during automatic remote catalog discovery, while preserving exact binding/native creation/current-authority checks.",
+  "acceptance": [
+    "Current participant discovery uses an indexed intent lookup with exact binding and native creation validation; document any remaining placement scan cost rather than claiming constant time.",
+    "Focused multi-root and retained-intent coverage preserves refusal and directory behavior, and review confirms no authority widening."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

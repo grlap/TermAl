@@ -1,0 +1,32 @@
+{
+  "id": "01a192ea-ba9a-7e00-8b8c-ca972161c634",
+  "external_ref": null,
+  "title": "Tag state-lock Held/Waited diagnostics with the initiating operation so live holds can be attributed",
+  "outcome": "Each state-lock Held/Waited diagnostic line names, besides its acquisition site, a bounded static tag for the operation that initiated the lock (e.g. api:session_tail, api:summary_snapshot, delegation:refresh_child, engram:checkpoint_confirm), propagated through snapshot wrappers and worker hand-offs. Live holds like Greg's 330–349 ms entries can then be attributed to an entry kind without guessing.",
+  "acceptance": [
+    "Every StateMutex Held/Waited report carries the existing acquisition site plus a bounded static initiating-operation tag; an untagged acquisition reports an explicit 'untagged' value rather than omitting the field. Tests cover a tagged direct lock, a tag propagated through the snapshot()/summary_snapshot() wrappers, and one propagated across a spawn_blocking or worker hand-off.",
+    "The tags are static strings only: no session ids, prompts, paths, tokens or other request content, and the reporter's queue stays bounded. A test pins the reporter output shape.",
+    "The change adds no measurable work under the lock beyond carrying the tag, and the existing hold-measurement behaviour and thresholds are unchanged; any change to thresholds or a per-request correlation id is out of scope for this item.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "diagnostics",
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Greg's direction relayed by Engram::Advisor (TermAl mailbox b9d13887 #2895, 17:03Z): 'nie, lepsze podejscie bedzie z kodu … Nie zaczynac od nowej diagnostyki/logowania; profil tylko jesli analiza i poprawki nie wystarcza.' The work is redirected to code fixes that remove the expensive operations under the lock at the repeatedly logged sites. A diagnostic or profile capture comes only if those fixes prove insufficient.",
+  "completion": null
+}

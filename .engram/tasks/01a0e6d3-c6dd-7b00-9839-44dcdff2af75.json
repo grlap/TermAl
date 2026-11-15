@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c6dd-7b00-9839-44dcdff2af75",
+  "external_ref": "tm-tn5",
+  "title": "Restore prompt history independently of transcript paging",
+  "outcome": "Prompt history is reconstructed from the hydrated session.messages window. Bounded transcript paging now supplies only the newest 20-64 messages, so empty-composer ArrowUp/ArrowDown often sees no history or only the latest prompt. Introduce a bounded recent-prompt projection independent of visible transcript hydration and cover reload, paging, and keyboard navigation.",
+  "acceptance": [
+    "Empty-composer ArrowUp recalls recent prompts after summary-state load and bounded tail hydration; repeated Up/Down traverses history and restores the empty draft; prompt history is bounded and preserved independently of visible transcript pages; backend/frontend contracts and persistence remain valid; relevant full quality gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

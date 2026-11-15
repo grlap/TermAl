@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3c5-7c81-b0d1-6c26be028f60",
+  "external_ref": "tm-2ywl",
+  "title": "Codex home sync can overwrite a newer, refreshed auth.json with an older one because it copies whenever sizes differ",
+  "outcome": "src/codex_home.rs sync_codex_home_file copies source -> target when the lengths differ OR the source is newer. For auth.json that means an OLDER ~/.codex/auth.json replaces a NEWER target in ~/.termal/codex-home/<scope> whenever the token lengths differ. The Codex app-server refreshes tokens in the TermAl-owned home (refresh tokens rotate), so the next spawn's prepare_termal_codex_home can roll the shared home back to a rotated-out refresh token / expired access token -> 401 until re-login. Context (suspected contributor, not proven): 2026-09-25 22:43 UTC a Codex reviewer child (delegation-28ed2a75, session-7691, spawned by Engram::Opus) failed with 401 'Incorrect API key provided: sk-svcac…' at chatgpt.com/backend-api/codex/responses; reviewers at 22:21 and 22:27 were fine. Afterwards the shared-app-server copy was rewritten 22:44:50 and ~/.codex/auth.json re-created 22:46:35 (chatgpt mode, fresh tokens, no API key); the pre-failure files are gone, so the cause cannot be discriminated now (revoked/expired key in the source vs a sync rollback). Fix direction: for auth.json never copy an older source over a newer target (compare mtime, or last_refresh inside the file); consider syncing credentials in the direction of the newest refresh or not copying auth.json after first seed. Test: newer target with a different length is not overwritten by an older source.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

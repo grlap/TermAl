@@ -1,0 +1,28 @@
+{
+  "id": "01a130b7-3159-7e90-b990-d55aac36c761",
+  "external_ref": null,
+  "title": "Receipted delivery: Codex pre-send early exits record a Rejected delivery outcome",
+  "outcome": "Receipted delivery: Codex pre-send early exits record a Rejected delivery outcome",
+  "acceptance": [
+    "Every Codex dispatch exit that returns before turn/start is written settles a receipted prompt's delivery as Rejected (pending while its head is still queued), never leaving it to become Ambiguous",
+    "A test drives each such pre-send exit and asserts the receipt is not Ambiguous and nothing reached Codex"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

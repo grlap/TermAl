@@ -1,0 +1,31 @@
+{
+  "id": "01a19f9a-bd83-7fb3-96ab-b17cf6d383b7",
+  "external_ref": null,
+  "title": "Preserve completed UI-switch samples when trace completion times out",
+  "outcome": "Preserve completed UI-switch samples when trace completion times out",
+  "acceptance": [
+    "Completed page-side samples, long tasks and interactions survive a later trace-completion timeout and are marked separately from incomplete trace evidence.",
+    "Failure evidence bounds or omits raw trace chunks while retaining useful diagnostic context; focused coverage exercises trace timeout after completed switches."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "greg-reported",
+    "performance",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f45-4449-7d20-86da-ee3a64e5d7d0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

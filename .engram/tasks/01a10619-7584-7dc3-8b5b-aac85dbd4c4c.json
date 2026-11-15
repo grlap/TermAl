@@ -1,0 +1,26 @@
+{
+  "id": "01a10619-7584-7dc3-8b5b-aac85dbd4c4c",
+  "external_ref": null,
+  "title": "On Unix, a delegated child's descendant processes have no guaranteed cleanup after a natural exit or a cancel",
+  "outcome": "On Unix, a delegated child's runtime and MCP descendants are reliably cleaned up after a natural exit or a cancel, with a single owner of the reaping wait, matching the Windows job-object guarantee of the cancelled-child cleanup work.",
+  "acceptance": [
+    "On Unix, a delegated child's descendant processes have no guaranteed cleanup after a natural exit or a cancel is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

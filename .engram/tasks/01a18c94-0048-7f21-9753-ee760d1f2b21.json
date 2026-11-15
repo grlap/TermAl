@@ -1,0 +1,31 @@
+{
+  "id": "01a18c94-0048-7f21-9753-ee760d1f2b21",
+  "external_ref": null,
+  "title": "Bounded reset refusals that already carry a kind are serialized as engram_project_reset_in_progress",
+  "outcome": "Bounded reset refusals that already carry a kind are serialized as engram_project_reset_in_progress",
+  "acceptance": [
+    "Bounded reset refusals that already carry a kind are serialized as engram_project_reset_in_progress is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "api",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "outage",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a188dd-2eb5-7c30-b8b5-3af0aab58d4c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1bdc9-8cc1-7a60-a866-b16169837175",
+  "disposal_reason": "Fable2722 obsolete-feature sweep: completed parent w3af0 blocks claim; tracker-advertised independence is used only for removal-provenance disposition, not renewed gated-control implementation.",
+  "completion": null
+}

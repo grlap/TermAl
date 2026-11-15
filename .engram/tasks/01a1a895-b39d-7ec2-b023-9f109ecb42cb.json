@@ -1,0 +1,30 @@
+{
+  "id": "01a1a895-b39d-7ec2-b023-9f109ecb42cb",
+  "external_ref": null,
+  "title": "Decide how selected Resume should handle the post-ACK worktree metadata interval",
+  "outcome": "The transient conservative selected-resume409 caused by post-ACK worktree metadata is explicitly accepted with user guidance, or repaired without allowing stale/replaced prompt content to resume.",
+  "acceptance": [
+    "A product/UI owner decides and records whether the conservative refresh refusal is acceptable; if changed, the decision preserves exact queued-prompt ownership and stale/replacement rejection.",
+    "A deterministic post-ACK interleave demonstrates the chosen behavior, preserving prompt content, historical receipt data, durability fences and no duplicate handoff."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "durability",
+    "human-queue",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

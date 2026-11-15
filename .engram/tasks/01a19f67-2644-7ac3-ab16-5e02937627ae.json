@@ -1,0 +1,37 @@
+{
+  "id": "01a19f67-2644-7ac3-ab16-5e02937627ae",
+  "external_ref": null,
+  "title": "The unconfirmed-source-root notice reads as a stop: make explicit that only evidence and credit are withheld and work may proceed",
+  "outcome": "The opening notice for an unconfirmed source root says plainly that the agent's work proceeds normally: Git, build, test and tool actions are not refused, and only source, check and evaluation evidence is withheld from credit for that turn. It also says what, if anything, the agent can do to get credit in a later turn. Agents stop halting real work because of it.",
+  "acceptance": [
+    "The unconfirmed-source-root opening notice states that the turn's work is not refused (Git, build, test and tool actions proceed normally) and that only this turn's source, check and evaluation evidence is withheld from credit.",
+    "The notice says what the agent can do to earn credit in a later turn and that it does not take effect in the current turn, and it keeps the failing-check reason.",
+    "A focused test asserts the new wording on an unconfirmed opening, the existing unconfirmed-reason tests pass, and the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "ux"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed the concurred unconfirmed-root opening notice clarifying ordinary work continues and evidence/credit is withheld for this turn, with reason and later-turn remedy; provider handoff/capture regression PASS19 and exact-tree Windows B FULL gate.",
+    "completed_at": "2026-11-09T16:40:55.423399200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

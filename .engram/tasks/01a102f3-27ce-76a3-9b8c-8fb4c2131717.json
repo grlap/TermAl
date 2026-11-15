@@ -1,0 +1,30 @@
+{
+  "id": "01a102f3-27ce-76a3-9b8c-8fb4c2131717",
+  "external_ref": null,
+  "title": "Budget-clock migration B4: the small Engram test modules and the ClaimedRoot consumers",
+  "outcome": "An audited migration, through the state-owned clock boundary from slice 1, of the following modules:\n- delegation_followup_admission.rs: 3 calls.\n- engram_turn_observations.rs: 2 calls, partly scripted already. This includes ClaimedRoot::new at :562 and its consumers, such as engram_source_root_naming.rs and its TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK hook at :249, with their removed-root deadline assertions.\n- engram_phase_compat.rs: one helper that fans out to its tests.\n- engram_codex_profile_exit.rs.\n- engram_root_dispatch.rs: plus 1 direct deadline_ms site. root_fixture itself is owned by B4a, w-f607a5f78af2.\n- engram_work_binding_refresh.rs.\n- engram_turn_checks.rs: partly scripted already.\n- engram_unqueued_bind_budget.rs: a budget test.\nFor each converted test, the batch lists its time sources and assertions, adds focused boundary controls, and keeps the negative scheduling and timeout assertions. It inventories the transitive test callers of every changed shared fixture. A full run validates the batch; it does not classify it. No production change. The decomposition is note 7c38dafc37c5410391ab42881615461a on w-8f9988de4cb3, with f842da36050949b3ba884f5884c64766. Criteria are to be agreed before this batch starts.",
+  "acceptance": [
+    "B4a, B4b, B4c and B4d are done, each with its own landed commit.",
+    "A note at the integrated revision shows that every enable_test_project_engram and every fixture reached in B4's modules chooses its clock through the slice-1 boundary or declares Real, with no remaining install_test_engram_budget_clock in them, or names the residual item it is left to."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a0f327-0986-7243-9a76-8c50b6cec3bb",
+  "external_ref": null,
+  "title": "An acceptance evaluation is voided as \"the source changed after evidence basis N\" although neither the named root nor the session's workdir changed",
+  "outcome": "TermAl reports a source revision on a holder's checkpoint only for the place the held item's work is measured in, and the same unchanged tree always yields the same revision, so an evaluation of an unchanged named root is never voided by the holder's own later turn. The cause of the reported voids is named from the recorded observations, not guessed.",
+  "acceptance": [
+    "A test reproduces that cause: a holder's turn closing after an evaluation request, with the named root unchanged, reports no source revision that differs from the one the evaluator declared; it fails before the fix.",
+    "If the cause is one already tracked (w-43a20265fe9d or w-4a3324d6da5c), this item is superseded by it with the evidence moved there; otherwise the fix lands with the full five-stage gate passed on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "The note on the item names, from the observations Engram recorded after the evaluated cut on the reported run (their source revision, workspace and reporting turn), which TermAl report moved the basis and why its revision differed from the evaluator's declared fingerprint."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f315-4d7e-75e3-9a0e-4a3324d6da5c",
+  "disposal_reason": "Same cause, as this item's third criterion provides. The voids came from an evaluation requested for an item that was not the session's bound claim: TermAl measured and ran it in the session's workdir and gave it the other item's claim, so it declared the workdir's revision (content-v1:28bab8c7…) while the holder's turns reported the named root's live revision (content-v1:b3c23b90…) on the run; Engram then voided it correctly. Read from source by explorer delegation-503cda99-1aff-467e-bae8-619cf767c460 and matched to the store read by Engram::Fable and Engram::Kimi recorded here. The turn-time value was not stale, as two earlier notes on this item guessed; the evaluation was measured in the wrong tree. The evidence and the fix, with a reproducing test for both reports, are on w-4a3324d6da5c (now P1).",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a15816-7365-7070-b40e-2f32c4a1db6c",
+  "external_ref": null,
+  "title": "Preserve Windows process-owner stop reasons beyond generic pipe-interrupt labels",
+  "outcome": "Windows owned-command results retain the specific launcher stop reason for observation/protocol/oversize failures while preserving the native owner's original trigger and truthful failed cleanup result.",
+  "acceptance": [
+    "Preserve Windows process-owner stop reasons beyond generic pipe-interrupt labels is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "diagnostics",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1c781-fd5a-77e3-beaf-587d349d11f7",
+  "external_ref": null,
+  "title": "Complete bounded acceptance scans beyond 32 coherent never-started registrations",
+  "outcome": "A claim with more than 32 coherent never-started registrations can reach the appropriate evaluation flow without a permanent ScanIncomplete refusal, while request work remains bounded and newer failures or incoherent evidence are preserved.",
+  "acceptance": [
+    "A claim with more than 32 coherent never-started registrations can reach the appropriate evaluation flow without being permanently refused solely because those registrations exhaust one scan.",
+    "The request remains bounded, and genuinely started newer failures or unreadable or incoherent evidence cannot be skipped in favor of an older pass.",
+    "Behavioral tests cover more than 32 coherent never-started registrations and preserve newest-result and failure selection."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "registered-runs",
+    "split-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

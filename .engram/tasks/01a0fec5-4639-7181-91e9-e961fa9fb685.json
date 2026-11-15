@@ -1,0 +1,37 @@
+{
+  "id": "01a0fec5-4639-7181-91e9-e961fa9fb685",
+  "external_ref": null,
+  "title": "Prune transcript repair generations and fence stale in-flight cleanup",
+  "outcome": "Dirty-session and in-flight repair bookkeeping remains bounded across deletion and server epochs without stale cleanup disrupting a newer request.",
+  "acceptance": [
+    "Removed sessions are pruned from dirty authority and in-flight repair bookkeeping; steady-state deltas do not incur full-session scanning solely for removed dirty entries.",
+    "Server-epoch change and delayed old-request finally cannot clear a newer request's in-flight ownership; a regression checks bounded request counts and convergence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

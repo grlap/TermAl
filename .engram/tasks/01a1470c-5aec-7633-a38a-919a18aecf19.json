@@ -1,0 +1,29 @@
+{
+  "id": "01a1470c-5aec-7633-a38a-919a18aecf19",
+  "external_ref": null,
+  "title": "The initial SSE state snapshot on GET /api/events exceeds 8 MB, paid on every UI or observer connect",
+  "outcome": "Connecting to the event stream costs a bounded, small initial payload. Full session transcripts are fetched on demand, not pushed whole in the first frame.",
+  "acceptance": [
+    "A measurement note records the initial snapshot's size broken down by component, and the state-lock hold time while it's built, on a host with the current session count.",
+    "The initial snapshot excludes or bounds the large components (for example by omitting message bodies beyond a recent window, with lazy fetch through existing endpoints), and the UI still renders and refreshes sessions correctly; covered by tests.",
+    "With the same session set, the initial frame is at most 1 MB (or a documented bound agreed by the coordinator), and cargo test --bin termal plus the UI vitest suite are green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

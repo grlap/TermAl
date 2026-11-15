@@ -1,0 +1,30 @@
+{
+  "id": "01a0f9d2-b104-7002-b666-499717fb15a6",
+  "external_ref": null,
+  "title": "Mailbox notificationState projected from the session wake authority, with recovery episodes and terminal history; truthful labels across Cancel, Scheduled handoff and failure",
+  "outcome": "Each message's current notificationState is projected from one snapshot of its recipient session's wake authority, taken per target and mailbox for the whole read response after the store locks are released, on both the range read and the exact-message read.\n- The state follows the latest applicable explicit obligation or recovery episode for that row: queued, held, recovered, in flight or unknown.\n- Historical delivered and cancelled facts govern where no valid newer episode covers the row. Ordinary later mail never reopens them through maximum-boundary overlap. A Cancel applies to an obligation identity.\n- A handoff that is only scheduled (Codex Fast discovery, an Engram handoff deferred behind a Stop) never reads delivered. No row claims a pending wake when none exists, including when a Cancel lands before a send records its outcome.\n- No mutable stored label decides anything. Trusted witnesses are named and bound to the exact attempt. The immutable send receipt is unchanged.\n\nProvenance: Architect2's decisions 44f47ca8, 534b4697 and f639826d on w-3bd74078208d; item 5 of the decomposition in TermAl mailbox 03723eab #42, accepted in #43. The projection was prototyped in w-3bd74078208d's withdrawn round-3 freeze 72af47cf (src/mailbox_wake_obligation.rs), which did not land.\nReview findings it carries:\n- round-1 Medium (Codex a52270f5): a Cancel racing initial send finalization leaves the row queued with no wake;\n- round-2 Medium (Codex 87de46bf): Cancel misses handoffScheduled rows and unfinalized coalesced sends;\n- round-3 Medium (Claude 34e81e3e): delivered-wins precedence after a failed, Stopped or died delivered turn (with w-b8d7c78a3314);\n- round-3 Notes (Claude): cancelled ranges are not merged, and the boundary-scan allowlist is broad.\nCriteria to be proposed by the holder and concurred by the coordinator.",
+  "acceptance": [
+    "Mailbox notificationState projected from the session wake authority, with recovery episodes and terminal history; truthful labels across Cancel, Scheduled handoff and failure is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "mailbox",
+    "notification-state",
+    "session-blocking",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

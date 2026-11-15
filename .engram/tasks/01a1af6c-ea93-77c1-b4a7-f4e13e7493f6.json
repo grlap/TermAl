@@ -1,0 +1,28 @@
+{
+  "id": "01a1af6c-ea93-77c1-b4a7-f4e13e7493f6",
+  "external_ref": null,
+  "title": "A test command that fails to launch before any process exists (CreateProcessW 'Access is denied') is recorded as a 'reported failed' test check",
+  "outcome": "When a recognized test command cannot be started at all, with no process created, no exit code and no artifact (for example the runtime's CreateProcessW refuses with 'Access is denied'), the host reports it as a launch failure or UNKNOWN that names the cause. It doesn't report a test check with result 'reported failed'. A real test failure from a process that ran stays a failure.",
+  "acceptance": [
+    "A test command that fails to launch before any process exists (CreateProcessW 'Access is denied') is recorded as a 'reported failed' test check is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

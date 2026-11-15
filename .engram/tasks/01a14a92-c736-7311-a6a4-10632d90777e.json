@@ -1,0 +1,29 @@
+{
+  "id": "01a14a92-c736-7311-a6a4-10632d90777e",
+  "external_ref": null,
+  "title": "Codex session whose thread rollout file is missing fails every turn (\"failed to resolve rollout path … file does not exist\") instead of recovering",
+  "outcome": "A Codex session whose persisted thread can't be resumed, because its rollout file is gone, recovers to a usable state: a new thread, with the loss clearly reported to the operator. It doesn't fail every turn and park its queue.",
+  "acceptance": [
+    "A test with a missing rollout file shows the session recovering to a new thread (or an explicit operator choice) with a visible notice, and the queued prompt is delivered once.",
+    "The error state and the queue pause give the operator a stated reason and a next action; Resume doesn't loop into the same failure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "reliability",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

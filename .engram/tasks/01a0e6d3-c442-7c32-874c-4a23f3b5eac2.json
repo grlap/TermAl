@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c442-7c32-874c-4a23f3b5eac2",
+  "external_ref": "tm-alcs",
+  "title": "File watcher falsely marks every session dirty and repeatedly defers persistence",
+  "outcome": "Greg reports repeated persist snapshot still deferred after bounded retry for all1378 sessions. src/sse_broadcast.rs record_active_turn_file_changes calls session_mut_by_index before eligibility and scope checks; this eagerly advances mutation_stamp on every session for every nonempty file-change event, including idle, hidden, remote and unrelated sessions. The persist planner rejects candidates when the stamp changes between selection and per-record materialization. Fix read-before-mutate, preserve actual active/grace file-change behavior and runtime-only grace expiry, and prove irrelevant file events leave persistence candidates stable. Separate from workspace404 and possible browser connection starvation; do not claim this alone fixes them.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The watcher scan no longer stamps sessions (src/sse_broadcast.rs:578-584; reviewed at 4dec5eb). Closed by evidence.",
+  "completion": null
+}

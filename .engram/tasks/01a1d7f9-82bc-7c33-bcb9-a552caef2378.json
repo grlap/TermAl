@@ -1,0 +1,31 @@
+{
+  "id": "01a1d7f9-82bc-7c33-bcb9-a552caef2378",
+  "external_ref": null,
+  "title": "Cover retired nested summary fields during lazy remote project binding",
+  "outcome": "A behavioral regression reaches ensure_remote_project_binding on an unbound remote project and proves the shared remote-only project-response decoder accepts the three retired summary fields in its nested state while production binding and authority guards stay intact.",
+  "acceptance": [
+    "A regression exercises ensure_remote_project_binding through an actual remote project POST for an initially unbound project and accepts a nested state whose summaries contain the three retired fields.",
+    "The regression observes the resulting local project binding and keeps rejection of genuinely unknown summary fields and existing authority checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "remote-sync",
+    "review-low",
+    "review-medium",
+    "tests",
+    "wire-compatibility"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1d6f6-b654-7632-aa40-96c9afec3aa6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d937-20ef-7e02-8a06-8280c7af91fe",
+  "disposal_reason": "Parent w-96c9afec3aa6 completed with fresh independent acceptance; retain this optional follow-up as independent work with its recorded raw-evidence retention, rather than leave it blocked by the completed parent.",
+  "completion": null
+}

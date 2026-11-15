@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a95e0a2f275",
+  "external_ref": "tm-7cu.35",
+  "title": "Extract transcript observer and tail-boundary test suites",
+  "outcome": "Validated Codex /review-code finding from the 2026-09-04 staged scroll patch: ui/src/SessionPaneView.scroll.test.ts is 6,381 lines and the new ResizeObserver lifecycle matrix at line 405 has a cohesive boundary alongside tail-history demand tests. Extract observer/layout-ownership and tail-boundary scenarios into focused sibling test modules, retaining the shared fixture seam and all assertions. Existing tm-onbw was inspected: its keyboard/selection extraction is already implemented and is a different test family, so this is not a duplicate. Keep this pure-move work separate from the behavioral and test-confidence fixes on tm-7cu.34.",
+  "acceptance": [
+    "Focused observer and boundary-demand suites have clear ownership headers, retain all existing assertions, and reuse shared fixtures; no production behavior changes; full TypeScript and Vitest gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 4, spot-checked by Termal::Fable2): CLOSE-DONE. Transcript observer and tail-boundary suites are extracted: ui/src/SessionPaneView.scroll-observers.test.ts and .scroll-boundaries.test.ts exist on master.",
+  "completion": null
+}

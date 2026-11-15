@@ -1,0 +1,35 @@
+{
+  "id": "01a1d212-3a08-7813-b3b6-c94a81f7a207",
+  "external_ref": null,
+  "title": "Prove the proxy-conversion save commits before checking retired overview preservation",
+  "outcome": "The overview-retirement regression positively proves the proxy metadata save reached SQLite, so a skipped or isolated write cannot produce a false pass.",
+  "acceptance": [
+    "The proxy-conversion step in message_saves_leave_retired_overview_storage_inert asserts that the committed SQLite session row contains the expected remote identity or proxy preview before checking that historical overview values are preserved; a skipped proxy save cannot satisfy the assertion."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

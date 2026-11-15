@@ -1,0 +1,27 @@
+{
+  "id": "01a1668a-90d1-7c31-a8f8-76effd2d2b76",
+  "external_ref": null,
+  "title": "The exhausted admission hold says \"This invocation's outcome is unknown\" for dispatch_budget_exhausted, which sent nothing",
+  "outcome": "EngramSpentInvocation::of_cause (src/engram_begin_preparation_retry.rs) classifies only begin_preparation_unacknowledged and begin_preparation_pending as NotSent, so dispatch_budget_exhausted falls through to Unknown. On the path where the budget expires before evaluate (evaluate_engram_turn_off_lock, local_hold with remote_application NotStarted), a spent window's preview and card say \"This invocation's outcome is unknown.\" although nothing was sent. The wording should follow the recorded NotStarted classification, with no claim about earlier attempts, and a regression should cover exhaustion before transport.",
+  "acceptance": [
+    "When automatic admission exhausts with last cause dispatch_budget_exhausted recorded as NotStarted, the exhausted hold's preview and card do not say the invocation's outcome is unknown, and make no claim about earlier attempts; a regression test drives exhaustion before transport and asserts the wording."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

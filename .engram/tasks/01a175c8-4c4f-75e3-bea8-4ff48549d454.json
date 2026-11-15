@@ -1,0 +1,32 @@
+{
+  "id": "01a175c8-4c4f-75e3-bea8-4ff48549d454",
+  "external_ref": null,
+  "title": "Return retained alias-send outcomes without requiring unrelated peer availability",
+  "outcome": "An identical alias-addressed retained send can recover its original outcome during an unrelated peer outage without reinterpreting the target or weakening ambiguity checks.",
+  "acceptance": [
+    "Committed and unknown-outcome alias retries preserve the exact retained identity/digest/key and make no second append when an unrelated peer becomes unavailable.",
+    "Either the original receipt is returned under a safe retained-target check or the refusal explicitly names the authoritative retry route; new ambiguous aliases remain fail-closed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

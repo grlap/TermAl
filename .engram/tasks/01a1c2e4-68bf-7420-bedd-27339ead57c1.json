@@ -1,0 +1,28 @@
+{
+  "id": "01a1c2e4-68bf-7420-bedd-27339ead57c1",
+  "external_ref": null,
+  "title": "Refresh retired content-v1 producer documentation and source references",
+  "outcome": "Documentation and comments describe the owner-source path after C6, without claiming that ordinary measurements retain content-v1 or referencing deleted producer source.",
+  "acceptance": [
+    "Update docs/test.md (retaining content-v1 sentence), docs/features/engram-host-adapter.md (deleted content_revision.rs reference), docs/features/execution-observability.md and src/engram_trx_artifact.rs to match the shipped owner-source behavior, preserving historical-record reader descriptions. No tests pin Markdown text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "severity-low",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

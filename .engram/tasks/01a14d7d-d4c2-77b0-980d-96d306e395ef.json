@@ -1,0 +1,33 @@
+{
+  "id": "01a14d7d-d4c2-77b0-980d-96d306e395ef",
+  "external_ref": null,
+  "title": "Bound pre-auth federation header and idle connection lifetimes",
+  "outcome": "Unauthenticated partial headers and idle keepalive connections cannot indefinitely occupy all four dedicated federation socket slots.",
+  "acceptance": [
+    "A stalled pre-auth connection returns its slot within a bounded header/idle deadline without requiring host shutdown; legitimate authenticated requests retain existing request bounds.",
+    "Regression tests cover four stalled pre-auth sockets, subsequent authenticated service, and shutdown; required gate and review evidence accompany the fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

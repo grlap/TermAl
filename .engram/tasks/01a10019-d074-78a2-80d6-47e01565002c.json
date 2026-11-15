@@ -1,0 +1,29 @@
+{
+  "id": "01a10019-d074-78a2-80d6-47e01565002c",
+  "external_ref": null,
+  "title": "Control-transport fixture does not reset TERMAL_TEST_FIXTURE_TREE_PIDS, so an inherited stale list would poison the awaited process set",
+  "outcome": "src/tests/fixtures/engram-control-fixture.ps1 sets $env:TERMAL_TEST_FIXTURE_TREE_PIDS = \"$PID\" before starting engram-descendant.ps1, as engram-doctor-pipe-fixture.ps1 does. The awaited set of the real_process_* process-tree tests then never depends on the environment the test binary inherited, and those tests also wait for their fixture root. Today the generated descendant script appends to whatever value is inherited. A stale value would make the readiness worker panic opening a gone PID, or wait the whole DEADLOCK_GUARD on an unrelated live one. That is theoretical, since nothing outside the fixtures sets the variable.",
+  "acceptance": [
+    "engram-control-fixture.ps1 resets TERMAL_TEST_FIXTURE_TREE_PIDS to its own PID before launching the descendant, and a test shows that an inherited stale value does not reach the awaited set.",
+    "The real_process_* process-tree tests still pass and also wait for the control fixture's root process."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-design",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

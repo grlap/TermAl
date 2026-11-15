@@ -1,0 +1,25 @@
+{
+  "id": "01a17a6d-7809-7252-a592-0a01eb946f42",
+  "external_ref": null,
+  "title": "Cross-host native relay send reports durableButNotWoken even when the recipient is woken and replies",
+  "outcome": "Cross-host native relay send reports durableButNotWoken even when the recipient is woken and replies",
+  "acceptance": [
+    "A native relay send to a cross-host recipient whose wake is delivered reports a disposition that does not claim the recipient was not woken; when the wake outcome is not known at response time the disposition says unknown or pending rather than durableButNotWoken.",
+    "A focused regression covers a cross-host relay send whose recipient wake completes after the send response, and asserts the reported disposition is truthful."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

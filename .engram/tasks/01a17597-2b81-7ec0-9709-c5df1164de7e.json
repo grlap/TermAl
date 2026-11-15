@@ -1,0 +1,27 @@
+{
+  "id": "01a17597-2b81-7ec0-9709-c5df1164de7e",
+  "external_ref": null,
+  "title": "Relay tests call run_mailbox_relay_wake_batch once and assume every pending home wake is delivered within its 2 s budget",
+  "outcome": "Relay tests that need every pending home wake delivered drain them deterministically: repeated bounded batches until none is undelivered, bounded by the obligation count rather than time. None depends on one batch finishing inside the worker's 2 s wall-clock budget or the 2 s writer-lock budgets.",
+  "acceptance": [
+    "Relay tests call run_mailbox_relay_wake_batch once and assume every pending home wake is delivered within its 2 s budget is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox-relay",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

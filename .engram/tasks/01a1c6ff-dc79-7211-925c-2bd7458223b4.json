@@ -1,0 +1,32 @@
+{
+  "id": "01a1c6ff-dc79-7211-925c-2bd7458223b4",
+  "external_ref": null,
+  "title": "Remove TermAl's remaining legacy source-identity code (content-v1 counter, git-commit replay and judged-revision paths) in step with Engram w-9fcb",
+  "outcome": "Remove TermAl's remaining legacy source-identity code (content-v1 counter, git-commit replay and judged-revision paths) in step with Engram w-9fcb",
+  "acceptance": [
+    "Before Engram w-9fcb stage 3 ships, TermAl treats Engram's stage-3 refusal of a legacy commit-form verification record or evaluation input as final (no indefinite retry): either Engram uses an existing final code or TermAl's final-refusal list includes the agreed new code; a test drives that refusal and shows the record settles as rejected, not pending.",
+    "TermAl production code no longer sends any legacy source-identity input to Engram: no git-commit or content-v1 source_revision or source_fingerprint is built for any outgoing verification record, observation or evaluation, including replays of retained pre-cutover bodies, which are settled (rejected or completed) instead of resent; tests show a retained Commit-input body and a retained git-commit fingerprint are not sent.",
+    "The ContentV1 wire classifier/counter and the other production-only legacy helpers listed in the inventory note are deleted once Engram w-9fcb has landed, with no fallback; stored historical records stay readable as stored, and any change to TermAl's persistent schema or stored shapes ships with a forward migration and a test reading pre-migration data.",
+    "Every TermAl consumer of the removed helpers is accounted for (a source search cited on the item), the review pair has no outstanding Medium or higher finding, and the full gate passes on each landing input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "legacy-removal",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

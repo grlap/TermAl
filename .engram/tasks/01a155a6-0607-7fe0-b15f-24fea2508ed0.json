@@ -1,0 +1,34 @@
+{
+  "id": "01a155a6-0607-7fe0-b15f-24fea2508ed0",
+  "external_ref": null,
+  "title": "Preserve central ACK outcome when satellite executor evidence persistence fails",
+  "outcome": "Classify and expose local post-commit executor evidence failure after an authenticated central mailbox ACK without claiming no mailbox write committed, and reconcile all remaining local affected rows from retained positive evidence.",
+  "acceptance": [
+    "A fault after central ACK commit but before local executor Processed evidence preserves an accurate central outcome, never reports certified non-application of the central ACK, and supports bounded replay/recovery of remaining local evidence without settling unknown runtime effects.",
+    "A production-path regression and exact-input full gate pass with an independent read-only review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-c160-77c3-b4e2-c50515867f37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

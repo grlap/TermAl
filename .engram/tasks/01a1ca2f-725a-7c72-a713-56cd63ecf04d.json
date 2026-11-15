@@ -1,0 +1,29 @@
+{
+  "id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "external_ref": null,
+  "title": "Greg's 60 s rule beyond Engram calls: inventory and raise other operation-aborting limits under 60 s (Git captures and others)",
+  "outcome": "Every operation-aborting or operation-resetting limit in TermAl outside the Engram call paths that w-18a1ae323de4 covers is at least 60 s with a 10 s non-aborting warning, or carries recorded evidence for Greg; no local exception is made.",
+  "acceptance": [
+    "Every operation-aborting or resetting limit under 60 s in TermAl's non-Engram paths (Git source captures, process waits, HTTP or child-process deadlines and similar) is listed on this item with its value and caller.",
+    "Each listed limit is raised to at least 60 s with a 10 s warning that does not abort, longer limits are unchanged, and where the minimum is believed to cause a real problem the evidence is recorded on this item for Greg without introducing an exception. Escalation after an already-issued stop and retry cadence are out of scope.",
+    "Behavioural tests with scaled clocks (no real 60 s waits) cover a representative slow-but-under-60-s operation succeeding with one warning and one past the limit failing with the existing handling."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "limits"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

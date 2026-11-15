@@ -1,0 +1,41 @@
+{
+  "id": "01a0e4d9-eeac-7b90-9baa-cd7ff09d32a4",
+  "external_ref": null,
+  "title": "Live proof preflight: recognised check on a named root",
+  "outcome": "Live proof preflight: recognised check on a named root",
+  "acceptance": [
+    "The preflight is written up",
+    "cargo test --bin termal live_proof passes in the named root"
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "live-proof"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Live proof preflight complete. The fixture (live_proof.rs byte-identical to the preserved 2026-09-28 original, one mod.rs line) was recreated in the named root .tmp\\wt-liveproof-preflight-9332 with the coordinator's approval; the pre-fix run recorded indeterminate and surfaced the Kimi output/exit recognition gap (w-2ce9db8872a0); after that fix landed and the host restarted onto it, the rerun recorded host verification b3269e5e as PASSED with the result line captured. Independent Codex evaluation 217e999bd1c74194b0631f24c87cbebb passed 2/2 at source fingerprint content-v1:95c16685.",
+    "completed_at": "2026-10-06T05:27:12.885854400Z",
+    "actor": {
+      "actor_id": "greg/kimi",
+      "actor_kind": "agent"
+    }
+  }
+}

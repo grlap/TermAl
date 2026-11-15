@@ -1,0 +1,30 @@
+{
+  "id": "01a15020-4c73-7fd0-a934-bf0df00bda70",
+  "external_ref": null,
+  "title": "Legacy remote executor trusts a foreign listener's 200 on the forwarded port before checking its own ssh child (ensure_available and wait_for_remote_health)",
+  "outcome": "Remote availability requires an owned live ssh child; a foreign listener on the forwarded loopback port can no longer mask ownership or receive this host's remote requests",
+  "acceptance": [
+    "Both sites require an owned live ssh child before trusting health: RemoteConnection::ensure_available (src/remote.rs:1030-1035 at 776b8cff) and wait_for_remote_health (src/remote_ssh.rs:365-396, where health is polled before child.try_wait). Health counts only while the handle is alive; an exited child is a failure whatever health says; with no handle the process is started or the existing typed failure (bad_gateway 502 + RemoteConnectionUnavailable) is returned",
+    "A regression test runs a foreign HTTP listener answering health on the forwarded port, both with no owned child and with an owned child that has already exited, and shows the host neither reports the remote available nor sends a request to that listener",
+    "Fixtures that serve health without a child use an explicit seam; the federation path stays unaffected (A1 attestation rejects a foreign peer)",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "remote"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

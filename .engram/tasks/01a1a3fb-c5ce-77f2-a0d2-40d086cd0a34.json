@@ -1,0 +1,28 @@
+{
+  "id": "01a1a3fb-c5ce-77f2-a0d2-40d086cd0a34",
+  "external_ref": null,
+  "title": "Correct the wording of the recovery hold test's ignore reason and record what its commit message attributes to Greg",
+  "outcome": "The recovery hold test's ignore reason, or whatever replaces it, describes the bound accurately, and the record shows which goal in the commit message was not Greg's word.",
+  "acceptance": [
+    "If the ignore attribute survives the redesign, its reason says the bound is on the p99 of each call's worst hold; if the redesign removes the attribute, that is recorded here as resolving this",
+    "This item records that the phrase 'so that it can still detect a linear scan' in the commit message of ba5d071943864ab8c765817885c77e153de381d4 is not part of Greg's recorded words, and where the goal came from"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "test-infrastructure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1a3de-24f8-79f2-9e45-58c80a82bfe4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1a51a-5a40-77e0-89f8-6a4fe400ba14",
+  "disposal_reason": "Parent w-58c80a82bfe4 completed; closing this on its own, since the landing resolved it.",
+  "completion": null
+}

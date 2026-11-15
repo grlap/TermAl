@@ -1,0 +1,29 @@
+{
+  "id": "01a16836-b68f-7982-b10b-5f4b3ceab3e4",
+  "external_ref": null,
+  "title": "Distinguish per-window StateInner evidence coverage from lifetime loss counters",
+  "outcome": "StateInner observer evidence distinguishes coverage of the observed wait window from cumulative process-lifetime loss and eviction totals.",
+  "acceptance": [
+    "Define per-window coverage semantics with independent concurrence before implementation.",
+    "Keep cumulative loss and eviction totals available as informational counters while partial/unavailable reflect any missing coverage for the requested window.",
+    "Deterministic tests cover a fully retained recent window after historical evictions and a window whose relevant holder was lost or evicted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

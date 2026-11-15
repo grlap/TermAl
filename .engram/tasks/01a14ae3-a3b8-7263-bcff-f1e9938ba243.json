@@ -1,0 +1,29 @@
+{
+  "id": "01a14ae3-a3b8-7263-bcff-f1e9938ba243",
+  "external_ref": null,
+  "title": "Extend disk-preflight tests at native Windows and non-full boundaries",
+  "outcome": "Tests cover native Windows child-environment selection and lowercase Cargo bootstrap overrides, keep the native smoke independent of mocks, and pin unknown capacity as warn-only outside full gates.",
+  "acceptance": [
+    "Windows-specific tests compare a real child environment's case/duplicate selection with the preflight and prove lowercase cargo_target_dir prevents default-target bootstrap.",
+    "The native statfs smoke proves it uses an unmocked reader even after fixture mock lifetimes or is isolated from those mocks.",
+    "A focused or live execution with an unavailable statfs query completes its harmless stage while recording an unknown warning without full-gate refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

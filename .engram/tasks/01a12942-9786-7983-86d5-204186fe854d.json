@@ -1,0 +1,64 @@
+{
+  "id": "01a12942-9786-7983-86d5-204186fe854d",
+  "external_ref": null,
+  "title": "State lock: file-change attribution canonicalizes paths outside the global lock, with explicit turn identity (package 3)",
+  "outcome": "Per Greg's direction (memory greg-decision-2026-10-11-scope-freeze-state-lock, #615) and the joint architecture briefs (Termal::Architect2, TermAl mailbox 3d06f738 #619/#620 package 3; Engram::Architect1, eba21fd2 #17 package C): record_active_turn_file_changes (src/sse_broadcast.rs :551-699) no longer calls path_contains/fs::canonicalize (src/paths.rs :479-495) while holding the global state lock. Unique event paths and captured workdirs are normalized and canonicalized once off-lock, and containment and matching are applied under a short guard from the owned results. Before coding, the exact turn/runtime/workdir/root/grace identity token is enumerated (a message count alone is not ABA-safe). A turn ending or changing during computation cannot shift evidence to its successor or silently drop it: the existing late-summary and recovery treatment, or an explicit unresolved observation, is retained. Named-root lexical matching, scoped/unscoped dedup, local/hidden filtering, deletion fallback, case/junction semantics and the once-only late summary are preserved. If an explicit capture token needs SessionRecord, turn_dispatch or turn_lifecycle changes, those exact additions are stated before editing. No generic event service or durable queue rewrite; no timeout change.",
+  "acceptance": [
+    "A blocked-canonicalize barrier test shows ordinary state reads proceed while canonicalization is in progress, so no filesystem I/O happens under the global guard.",
+    "Tests show that Stop, a new turn, a workdir change or a root replacement during capture never attributes an old event to the successor's accumulator and never silently erases it while its original owner session still exists; if the original owner was deleted before capture completed, its events are discarded exactly as today with a counted diagnostic, never reassigned.",
+    "Tests show that deleted-path, junction and case handling, the late/grace boundary, once-only merging of the same event, and named-root sibling events behave as before, with existing file_changes and named-root watcher attribution tests passing unchanged.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "file-changes",
+    "greg-direction",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the file-event attribution lock fix, gated and reviewed on the exact tree, committed as f2becb2b8fa4f5ea5d93097c29be0379335166a1 and pushed to origin/master.",
+    "completed_at": "2026-10-11T22:49:07.634387800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

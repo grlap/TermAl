@@ -1,0 +1,41 @@
+{
+  "id": "01a17537-1ca6-7602-8267-779340bdd05d",
+  "external_ref": null,
+  "title": "Three federation policy fixture fences remain queued past five seconds without a reproduced cause",
+  "outcome": "Determine and repair or explicitly resolve the observed fixture writer-queue deadline misses without blind retries, deadline inflation or weakening durable-content checks; preserve the original failing run and distinguish later non-reproduction from diagnosis.",
+  "acceptance": [
+    "The three failures in test-e9251cd8-b4af-4617-a7db-db7652625dc9 are investigated with phase-specific evidence that identifies the cause or establishes an explicit bounded unresolved disposition accepted by the coordinator; later passing tests alone are not diagnosis.",
+    "A focused discriminating regression reproduces the identified cause and validates its repair while preserving the existing five-second durability budget and exact content/readback checks, or an independently concurred environment/runner resolution documents what changed and why.",
+    "The original failure, diagnostic timing data, relevant source identities and final findings remain recorded with durable evidence; the parent readiness exception does not silently close this defect."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cause-unresolved",
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "macos",
+    "operator-ui-works",
+    "persistence",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a161d4-c882-7b71-b84c-a8af3a34d80a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

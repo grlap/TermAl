@@ -1,0 +1,30 @@
+{
+  "id": "01a18095-1b1b-7e61-bc20-4a7b1d568fc8",
+  "external_ref": null,
+  "title": "Named-root clear returns 502 when the control reply misses its budget, and the identical retry then gets 409 because the pending producer intent belongs to the original call",
+  "outcome": "A termal_name_source_root clear whose control reply arrives after its budget can be settled by the documented identical retry: the retry returns the original outcome instead of a 409 conflict. Or the 502 states a different, working settlement route. A pending producer intent never stays unsettled indefinitely after the caller's claim ends.",
+  "acceptance": [
+    "A note identifies, from source, why an identical retry of a named-root clear whose first attempt returned 502 ('named-root control reply arrived after its budget; retry the same request to settle any pending intent') is refused with 409 ('pending producer intent belongs to its existing owner; entry retained'): what identifies the intent's owner, and why the retry is not recognized as the same owner and request.",
+    "The identical retry settles the pending intent and returns its final outcome, or the 502's guidance is corrected to a working route. A pending intent left after its claim is released or completed is settled or retired by a documented rule, with no live claim touched.",
+    "Focused tests reproduce a late control reply for a clear request followed by an identical retry; the full gate passes and an independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "named-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

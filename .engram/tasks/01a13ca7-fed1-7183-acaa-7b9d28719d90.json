@@ -1,0 +1,30 @@
+{
+  "id": "01a13ca7-fed1-7183-acaa-7b9d28719d90",
+  "external_ref": null,
+  "title": "Recover or explicitly settle an ordinary prompt superseded by a Stop that later fails",
+  "outcome": "Define and validate recovery for a non-Engram prompt whose final handoff returned Superseded during pending Stop when that same Stop later fails. Avoid an orphaned Active turn or silently lost proven-unsent prompt while preserving exact ownership, operator pause and the prohibition on replay after uncertain provider acceptance.",
+  "acceptance": [
+    "Recover or explicitly settle an ordinary prompt superseded by a Stop that later fails is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "design-pending",
+    "review-low",
+    "stop-semantics",
+    "turn-dispatch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

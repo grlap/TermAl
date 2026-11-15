@@ -1,0 +1,28 @@
+{
+  "id": "01a167e3-bf63-7a63-b5bc-d9cf5cb5d4c2",
+  "external_ref": null,
+  "title": "Retry-hold predicate doesn't mirror dedicated_cleanup_holds_admission, so a stuck dedicated cleanup is reported as an automatic retry",
+  "outcome": "While record.dedicated_cleanup_holds_admission() holds a session's retry, the session's queueHold and its mailbox wake disposition don't claim an automatic retry that will run by itself.",
+  "acceptance": [
+    "engram_automatic_retry_hold (src/engram_retry_hold.rs) returns None while record.dedicated_cleanup_holds_admission() holds, mirroring engram_admission_retry_step and engram_bind_retry_step (they Wait) and the *_releases checks (they require it false), or else it names the hold distinctly; either way it never says 'no action is needed' for a cleanup that won't clear by itself.",
+    "A regression test drives a real dedicated-cleanup hold over a scheduled automatic retry and asserts the plain-pause projection (full and summary queueHold absent, disposition heldBehindPausedQueue) while the cleanup holds, and the automatic-retry projection once it clears."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "session-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

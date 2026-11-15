@@ -1,0 +1,27 @@
+{
+  "id": "01a176f9-1880-7302-897d-c1ff0b19cb5b",
+  "external_ref": null,
+  "title": "Report ordinary checkpoint receipt-capacity refusal without publishing a durable duty",
+  "outcome": "Report ordinary checkpoint receipt-capacity refusal without publishing a durable duty",
+  "acceptance": [
+    "Report ordinary checkpoint receipt-capacity refusal without publishing a durable duty is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "checkpoint-diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

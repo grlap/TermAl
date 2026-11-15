@@ -1,0 +1,27 @@
+{
+  "id": "01a14072-19cc-7a53-9290-972fbbbc338d",
+  "external_ref": null,
+  "title": "Clarify the keyed session-switch boundary in the marker-history callback test",
+  "outcome": "The centered-history callback regression makes its lifecycle coverage explicit: same-session renders exercise callback reference stability; changing activeSessionId exercises SessionConversationPage's keyed remount. Readers do not mistake this for dependency invalidation across IDs inside one mounted page.",
+  "acceptance": [
+    "The focused callback test or adjacent test documentation explicitly states that switching session IDs remounts SessionConversationPage, so the switched-ID leg checks per-instance reference and ID forwarding rather than the hook dependency list across one mounted instance."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "documentation",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

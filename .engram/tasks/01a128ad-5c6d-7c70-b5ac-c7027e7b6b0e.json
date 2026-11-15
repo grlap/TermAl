@@ -1,0 +1,28 @@
+{
+  "id": "01a128ad-5c6d-7c70-b5ac-c7027e7b6b0e",
+  "external_ref": null,
+  "title": "Process-heavy host tests serialize every child spawn behind one launch lock, so outside load multiplies their run time (about 45x seen)",
+  "outcome": "The turn-checks tests run in a bounded time under the shared machine's normal gate load, or the launch lock's cost under load is measured and the suite's behaviour under it is a documented, accepted limit.",
+  "acceptance": [
+    "The inheritance-lock wait and hold time per spawn is measured quiet and under a concurrent full gate, and the cause of the slowdown is recorded with that evidence.",
+    "If the lock is the cause, the change that bounds the turn-checks module's run time under gate load keeps the handle-inheritance guarantee, and a test covers that guarantee."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

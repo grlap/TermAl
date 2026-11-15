@@ -1,0 +1,27 @@
+{
+  "id": "01a1383c-80b1-7772-a279-38800baa919f",
+  "external_ref": null,
+  "title": "Capacity failure preparation can leave an orphan queue block when terminal handling defers or fails",
+  "outcome": "Rollback or retain an explained manual hold when terminal handling refuses, defers or fails; leave no unadvanceable capacity state.",
+  "acceptance": [
+    "Capacity failure preparation can leave an orphan queue block when terminal handling defers or fails is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity-recovery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c6b9-7c32-b7cd-a6a15a4df8a6",
+  "external_ref": "tm-rd0f",
+  "title": "Bound the session-scoped Git status panel cache",
+  "outcome": "The module-level Git status cache is keyed by project, session, and workdir but has no eviction. Long-running control rooms that visit many sessions can retain full status snapshots and expansion maps indefinitely. Add bounded eviction or lifecycle invalidation at the narrowest correct cache scope.",
+  "acceptance": [
+    "Cache growth is bounded across session churn; active/recent panel cache behavior remains correct; tests cover eviction and revisit behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

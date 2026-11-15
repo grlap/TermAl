@@ -1,0 +1,31 @@
+{
+  "id": "01a1d1d9-f568-7e23-8bab-75da7ab8a474",
+  "external_ref": null,
+  "title": "Document removed-recipient native relay notification retirement",
+  "outcome": "The relay feature brief explains why removed-recipient wakes can retire while canonical mail remains unread.",
+  "acceptance": [
+    "The Wakes and recovery documentation explains retirement at boot and ordinary recovery only for confirmed removed local recipients, preserves hidden/quarantined/incomplete-inventory obligations, and states that no canonical message, unread cursor, ACK or delivered bit is fabricated."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "greg-reported",
+    "native-relay",
+    "post-restart",
+    "relay",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d135-c3d4-7072-9d47-d8f2e3a93e49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

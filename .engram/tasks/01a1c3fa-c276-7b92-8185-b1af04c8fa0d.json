@@ -1,0 +1,29 @@
+{
+  "id": "01a1c3fa-c276-7b92-8185-b1af04c8fa0d",
+  "external_ref": null,
+  "title": "Correlate Codex quota error observations with the active turn",
+  "outcome": "A stale or uncorrelated Codex error notification cannot create the Auto evaluator vendor quota window; existing terminal and provider retry behavior stays unchanged.",
+  "acceptance": [
+    "A mismatched turnId and a missing turnId are exercised through the production Codex notification path; neither creates a quota window without a documented existing current-turn ownership proof.",
+    "A current correlated non-retrying usageLimitExceeded terminal still affects Auto, while stale, retry and overload cases preserve their existing behavior; explicit evaluator preference remains unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "codex",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

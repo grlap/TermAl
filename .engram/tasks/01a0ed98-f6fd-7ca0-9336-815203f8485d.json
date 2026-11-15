@@ -1,0 +1,27 @@
+{
+  "id": "01a0ed98-f6fd-7ca0-9336-815203f8485d",
+  "external_ref": null,
+  "title": "A session removed and re-created under the same name strands its mailbox: sends to the old id return 404 \"target session not found\" and the queued, undelivered messages are not offered to the successor",
+  "outcome": "A session removed and re-created under the same name strands its mailbox: sends to the old id return 404 \"target session not found\" and the queued, undelivered messages are not offered to the successor",
+  "acceptance": [
+    "A session removed and re-created under the same name strands its mailbox: sends to the old id return 404 \"target session not found\" and the queued, undelivered messages are not offered to the successor is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "stuck-session-cluster"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

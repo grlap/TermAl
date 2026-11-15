@@ -1,0 +1,49 @@
+{
+  "id": "01a160af-4a85-77c2-93f3-106397216592",
+  "external_ref": null,
+  "title": "Leading PowerShell call operator silently prevents focused Node verification recognition",
+  "outcome": "A single native test/build invocation using PowerShell's leading call operator receives a truthful host-recognition result without weakening compound-command or source/provenance guards; supported forms can produce recognized verification, and unsupported forms explain why no record follows.",
+  "acceptance": [
+    "A deterministic regression captures the leading PowerShell call-operator command reported by Codex and the observed absence of a host verification despite a valid native Node14 PASS artifact; the fix either recognizes the safe single invocation or explicitly reports the unsupported form with no fabricated credit.",
+    "Tests preserve rejection of actual compound commands, unquoted control operators beyond a permitted leading call operator, substitutions, malformed argv, foreign or stale artifacts, and missing native execution; ordinary recognized Node/cargo commands keep their existing behavior.",
+    "The exact final input has the maintained full gate, independent review pair and independent acceptance required by project policy."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-recognition",
+    "host-recording",
+    "powershell"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

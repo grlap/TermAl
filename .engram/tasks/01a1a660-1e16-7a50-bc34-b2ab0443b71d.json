@@ -1,0 +1,29 @@
+{
+  "id": "01a1a660-1e16-7a50-bc34-b2ab0443b71d",
+  "external_ref": null,
+  "title": "Assert the first-closing premise and observed check outcome in pinned launcher tests",
+  "outcome": "Pinned launcher tests explicitly fail when the first-close checkpoint premise, null closing source change or ordinary observed check result stops matching the behavior they are intended to witness.",
+  "acceptance": [
+    "The first-closing pinned witness asserts that no compatible prior checkpoint exists and that its closing report has no source change after an unchanged registered check.",
+    "Pinned launcher checks assert the ordinary observed check passes through the applicable completion validator on Windows Node and non-Windows Cargo, alongside the existing native record, receipt and evaluation assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a166a7-8584-7861-8a71-32efb0c3d55c",
+  "external_ref": null,
+  "title": "Pin ordinary preparation recovery when Stop races marker publication",
+  "outcome": "Pin ordinary preparation recovery when Stop races marker publication",
+  "acceptance": [
+    "Use deterministic synchronization to cover Stop before ordinary marker commit and during the local marker fence, followed by both successful and failed shutdown.",
+    "Specify and test the intended recovery: no provider enqueue while Stop is unresolved, successful Stop sends none, and failed Stop retains a visible recoverable exact head or resumes that same owner without duplication.",
+    "Focused validation and the full gate pass, with independent review and no unresolved in-scope Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "session-stop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

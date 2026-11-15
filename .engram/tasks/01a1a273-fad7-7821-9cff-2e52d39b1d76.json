@@ -1,0 +1,33 @@
+{
+  "id": "01a1a273-fad7-7821-9cff-2e52d39b1d76",
+  "external_ref": null,
+  "title": "Cover production declared diagnostic wiring and the unfinished-command exclusion",
+  "outcome": "Regression coverage detects loss of diagnostic wiring at the actual declared completion owner.",
+  "acceptance": [
+    "A regression through production completion wiring confirms a completed PASS and an UNKNOWN emit the fixed internal diagnostic from the same captured result.",
+    "An unfinished command emits no terminal diagnostic, and removing production wiring makes the regression fail without changing runtime semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "declared-tests",
+    "flutter",
+    "greg-directed",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a235-c460-7fc3-a4db-588c5ec325b9",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

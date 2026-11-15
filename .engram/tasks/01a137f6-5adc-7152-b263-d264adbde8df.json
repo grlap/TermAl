@@ -1,0 +1,45 @@
+{
+  "id": "01a137f6-5adc-7152-b263-d264adbde8df",
+  "external_ref": null,
+  "title": "Dry run of the supervised-pilot onboarding doc by a non-author agent on a clean C# fixture clone",
+  "outcome": "An agent session that never held w-affe8a4dee48 follows only docs/features/supervised-pilot-onboarding.md (the review-clean version) on a clean clone of a no-submodule, no-LFS C# xUnit fixture, and reaches a credited declared dotnet/TRX PASS, then a FAIL on one failing test, then UNKNOWN with the artifact removed. Every deviation the reader needed is listed, so it becomes a doc fix before the doc lands. This is the evidence for w-affe8a4dee48's criterion C3.",
+  "acceptance": [
+    "A host-recorded passed Test record for the doc's declared dotnet test command, run in the clean clone named as this item's source root, is cited on this item with its run id and session.",
+    "A host-published FAIL record for the same declared command after one test is made to fail as the doc describes, and an UNKNOWN outcome because the declared artifact is missing when the command ends (the doc's procedure: the declaration's artifact repointed, in its own turn, before the run), are cited on this item with their run ids. The PASS, FAIL and UNKNOWN runs may be in any order.",
+    "A note lists every step where the reader had to deviate from or guess beyond the doc (quoting the doc line and what was done instead), or states that none were needed; each listed deviation is forwarded to w-affe8a4dee48's holder."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "docs",
+    "live-proof",
+    "pilot",
+    "planning",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a10cf0-744c-76b3-b151-affe8a4dee48",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a14c49-f7d3-72a2-ab93-f352d626e89f",
+  "disposal_reason": "Greg superseded the fixture-clone dry run on 2026-10-16 (Advisor #853/#854: \"Do not run the fixture-clone dry run now ... perform the pilot validation on the Phoenix project\"; \"select one safe independent P3 item ... Report ... Do not start ... until that report is sent\"). Replaced by the Phoenix pilot validation item w-f352d626e89f. Conflict flagged by Architect1 from Codex's w-affe review.",
+  "completion": null
+}

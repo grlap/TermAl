@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6c6-7111-a226-af60fe81e574",
+  "external_ref": "tm-rqd",
+  "title": "Extract workspace session-reference helpers",
+  "outcome": "Move session-reference collection, delegated-child reference detection, and adjacent reconciliation helpers out of ui/src/workspace.ts to stay below the active size threshold.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

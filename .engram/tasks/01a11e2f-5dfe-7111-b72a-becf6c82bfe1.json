@@ -1,0 +1,28 @@
+{
+  "id": "01a11e2f-5dfe-7111-b72a-becf6c82bfe1",
+  "external_ref": null,
+  "title": "Codex review-code children skip the required termal_review_freeze_check, treating it as an excluded tool",
+  "outcome": "A read-only Codex /review-code child whose brief requires the freeze check calls termal_review_freeze_check before and after its review and reports both results, the same as Claude children do, or refuses the review explicitly if the tool isn't available to it.",
+  "acceptance": [
+    "Codex review-code children skip the required termal_review_freeze_check, treating it as an excluded tool is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "review-freeze",
+    "review-pair"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

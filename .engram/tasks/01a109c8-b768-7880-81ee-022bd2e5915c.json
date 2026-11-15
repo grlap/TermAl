@@ -1,0 +1,28 @@
+{
+  "id": "01a109c8-b768-7880-81ee-022bd2e5915c",
+  "external_ref": "engram:w-723c67128ce0",
+  "title": "A request can race the Engram control worker's idle exit and fail as control_unavailable although it was never sent",
+  "outcome": "ProcessEngramControlTransport::process_for (src/engram_control_transport.rs:100-149 at d1d92bbb) returns a cached process when worker_finished is false. The worker's idle recv_timeout can then exit (about :355-357) before request() hands it the request (:194-206), so the request fails as 'control worker is unavailable' or a disconnected reply (:219) during an ordinary idle reap. A request that provably never reached the Engram process is retried once on a fresh process, or reported as a definite not-sent error that is never mistaken for an uncertain exchange. A possibly-written request is never replayed blindly. A deterministic test pins the boundary between the worker deciding to exit and the request hand-off; the existing idle-reap test waits for completed termination and misses it.",
+  "acceptance": [
+    "A request can race the Engram control worker's idle exit and fail as control_unavailable although it was never sent is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-control-transport",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

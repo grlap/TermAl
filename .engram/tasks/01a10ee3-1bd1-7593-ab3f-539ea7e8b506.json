@@ -1,0 +1,50 @@
+{
+  "id": "01a10ee3-1bd1-7593-ab3f-539ea7e8b506",
+  "external_ref": null,
+  "title": "Evaluator submission refused 409 \"source root changed while it was evaluated\" although the evaluated work's root, claim and generation did not change (worktree also named by a second item)",
+  "outcome": "Evaluator submission refused 409 \"source root changed while it was evaluated\" although the evaluated work's root, claim and generation did not change (worktree also named by a second item)",
+  "acceptance": [
+    "The holder's note identifies, with file:line, the host state that makes acceptance_evaluation_root_changed_locked refuse a submission whose evaluated root, claim, generation and naming revision are unchanged, and the host path that creates that state around the requesting session's next turn.",
+    "A fail-first test requests an evaluation on a named root, then puts the work's naming authority into the state a source-root reconcile guard leaves (unresolved, not published) without any naming change, and shows the submission refused as final on the unchanged code.",
+    "With the fix, that submission is accepted and recorded, while a real change during the evaluation (a re-name to a new generation, a different root, a lost or displaced claim, or a pending naming event for the work) is still refused as final; tests cover each case.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

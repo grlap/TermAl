@@ -1,0 +1,43 @@
+{
+  "id": "01a121d2-7c7f-7a31-ba16-668765e67e02",
+  "external_ref": null,
+  "title": "The evaluation refusal \"source root changed while it was evaluated\" doesn't say which condition failed",
+  "outcome": "When the host refuses an evaluator's submission because the work's source root changed, the refusal names which of the conditions in acceptance_evaluation_root_changed_locked failed, as a fixed code plus the relevant non-secret ids. The holder and the coordinator can then pick the remedy (wait, re-name, restart) without guessing.",
+  "acceptance": [
+    "The refusal from acceptance_evaluation_source_root_changed_error carries a fixed code for each failing condition of acceptance_evaluation_root_changed_locked: the naming token differs from the current one, the naming epoch differs, the work's authority is unresolved, a naming event for the work is pending, the claim's journal requires reconciliation, the claim's journal was displaced, the recorded root is no longer named for the work and claim at its generation, another claim named the work since, and the work was named since for a workdir evaluation. The refusal also carries the relevant non-secret values: the recorded and current naming revision, and the recorded and current generation.",
+    "Tests drive each condition and show its code in the refusal. The existing finality of every refusal is unchanged.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "diagnostics",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

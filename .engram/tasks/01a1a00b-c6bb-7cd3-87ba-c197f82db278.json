@@ -1,0 +1,29 @@
+{
+  "id": "01a1a00b-c6bb-7cd3-87ba-c197f82db278",
+  "external_ref": null,
+  "title": "After the Central restart DL560 stays unverified with localInstallFailed and retries in backoff",
+  "outcome": "After a Central restart DL560 re-authenticates like the Mac and Windows B, or the reason it cannot is identified and fixed.",
+  "acceptance": [
+    "The failing local install step for DL560 (host e83d08f4) is identified with its quoted error or log line and the code path, and classified as a DL560-side state, a central defect or expected behaviour.",
+    "A defect gets a fix with a regression test and a clean review pair, and DL560 reaches authenticated after a Central restart."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

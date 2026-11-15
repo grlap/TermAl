@@ -1,0 +1,32 @@
+{
+  "id": "01a1665f-f495-7711-992b-1e5d82eeb8b4",
+  "external_ref": null,
+  "title": "Keep an unchanged federation link through unresolved post-install qualification durability",
+  "outcome": "Automatic qualification distinguishes a post-install unresolved durability disposition from a material authority change without weakening persistence or stale-image fences.",
+  "acceptance": [
+    "Phase-controlled tests cover own-fence failure/deadline after qualification install and exact persisted-image supersession, preserving all durability and stale-authority refusals.",
+    "A safe unresolved state retains or recovers the original current authorization without unnecessary healthy-link teardown; genuine continuity or authority changes remain fenced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "persistence",
+    "remote-mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0e9f0-e301-7082-87d6-d36e4fde3efe",
+  "external_ref": null,
+  "title": "A mailbox message must wake a session whose queue a Stop paused; today it waits behind the explicit-resume latch forever",
+  "outcome": "After a Stop, stop_session_with_options (src/session_lifecycle.rs around 1083, pause_automatic_resumes_on_success) sets the explicit-resume latch (auto-dispatch blocked, queue paused). Its comment says: \"user and mailbox prompts remain durable but paused behind the explicit-resume latch\". Mailbox notifications that arrive after the Stop pile up as pending prompts and never dispatch until someone presses Resume. Their senders are told \"queuedBehindActiveTurn\" although no turn is active. The transcript says \"Turn stopped by user.\" whoever called the stop endpoint, and the host records no caller.",
+  "acceptance": [
+    "A Stop records who asked for it (the UI, an API caller, an orchestrator) and the transcript line says so, instead of always 'Turn stopped by user.'",
+    "A mailbox message that arrives for a session paused by a Stop wakes it: its notification dispatches as a new turn (the latch still drops orchestrator continuations, as today); a test covers stop, then a mailbox send, then a dispatched turn",
+    "A mailbox send to a paused session answers with a disposition that names the paused state rather than queuedBehindActiveTurn"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "control-plane",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": "2026-10-03T00:00:00Z",
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

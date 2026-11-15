@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c44d-7401-a666-d6819104f218",
+  "external_ref": "tm-7cu.19.3.1",
+  "title": "Split ResponseBoardPanel into focused tab, staging, preview, and camera modules",
+  "outcome": "ResponseBoardPanel now owns tab CRUD/reorder UI, the shared staging tray, staged preview, camera repair/persistence, canvas gestures, and card mutations in one large module. Extract coherent components and pure camera helpers without changing the current partitioned/legacy behavior. Centralize default-tab capability decisions during the split so UI literals do not drift from the backend contract.",
+  "acceptance": [
+    "ResponseBoardPanel delegates tab bar, staging tray, staged preview, and camera helpers to focused modules with provenance headers; behavior and accessibility stay covered; default-tab delete capability is represented without a duplicated ad hoc literal; TypeScript, focused UI tests, full Vitest, and production build pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c444-70f0-9bab-5c27c26a8fd2",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 re-check b80d766c; applied by Termal::Fable2): CLOSE-DONE. ResponseBoardPanel split: all four extracted modules exist on master (paths in note b80d766c); final architecture review 2026-08-24.",
+  "completion": null
+}

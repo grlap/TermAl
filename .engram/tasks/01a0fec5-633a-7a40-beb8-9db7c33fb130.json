@@ -1,0 +1,29 @@
+{
+  "id": "01a0fec5-633a-7a40-beb8-9db7c33fb130",
+  "external_ref": null,
+  "title": "Avoid evicting certified streaming bodies for action summaries ahead of SSE delivery",
+  "outcome": "Investigate channel-aware treatment of same-epoch HTTP action summaries ahead of applied bodySeq; preserve safety while avoiding transient transcript eviction and redundant covering reads.",
+  "acceptance": [
+    "Avoid evicting certified streaming bodies for action summaries ahead of SSE delivery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "deferred-review",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

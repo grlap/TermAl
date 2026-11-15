@@ -1,0 +1,28 @@
+{
+  "id": "01a14b56-b367-7662-b626-370040ee4e4b",
+  "external_ref": null,
+  "title": "Sample admission trace closure consistently with concurrent span updates",
+  "outcome": "The terminal trace boundary and per-phase aggregates stay internally consistent when a worker starts or finishes a span while the collector closes.",
+  "acceptance": [
+    "Closing a trace samples or clamps timestamps under an ordering that prevents a span endpoint or start from exceeding the terminal boundary and prevents one late active span from subtracting another active span's elapsed time.",
+    "A deterministic concurrency witness covers span creation and completion racing with closure, while confirming late workers cannot change the closed image."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "observability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

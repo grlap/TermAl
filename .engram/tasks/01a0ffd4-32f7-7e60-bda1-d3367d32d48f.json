@@ -1,0 +1,29 @@
+{
+  "id": "01a0ffd4-32f7-7e60-bda1-d3367d32d48f",
+  "external_ref": null,
+  "title": "Document the retained-bind automatic retry in the Engram host adapter brief",
+  "outcome": "docs/features/engram-host-adapter.md describes the retained-bind retry beside the abort retry: what creates its proof, what disarms it, the restart rule (the saved bindRetry journal pauses the queue on load and the proof is never rebuilt), and the Stop rule. The \"Nothing else is retried\" sentence is amended, and src/engram_bind_retry.rs is listed in docs/features/host-architecture.md's module table.",
+  "acceptance": [
+    "The brief's retry section describes the retained-bind retry and no longer says that nothing else is retried.",
+    "docs/features/host-architecture.md lists src/engram_bind_retry.rs.",
+    "The review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

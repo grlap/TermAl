@@ -1,0 +1,50 @@
+{
+  "id": "01a1318c-e40d-75e2-8122-9c9ff6e625f5",
+  "external_ref": null,
+  "title": "Clearing or replacing a session's shared Codex runtime drops its still-running Codex tests' record without proving their commands ended",
+  "outcome": "When a session leaves the shared Codex app-server (Stop, runtime replacement, or an interrupt that failed and detached), a Codex test it left running from an earlier turn either keeps its still-running record (EngramSessionState::running_codex_tests) until an end is confirmed, with the holder told how to release it, or is ended by a kill the app-server confirms before the record is dropped. In both cases a check started afterwards in its worktree is overlapped until then. The kill is a new destructive act and needs Greg's explicit word before it is built.",
+  "acceptance": [
+    "A probe note, from the installed Codex, records whether thread/unsubscribe, thread/archive or thread/delete ends a thread's still-running exec session, with the event or process evidence observed.",
+    "With the fix chosen and, for a kill, Greg's recorded word: a test drives a carried Codex test and then a Stop or runtime replacement, and shows either a confirmed end before its still-running record is dropped, or the record kept, the holder told, and a check started afterwards in its worktree overlapped with it named.",
+    "A test covers a Stop whose interrupt fails, with the same outcome as criterion 2.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "needs-greg"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

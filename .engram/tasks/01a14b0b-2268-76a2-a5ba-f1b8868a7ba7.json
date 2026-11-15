@@ -1,0 +1,30 @@
+{
+  "id": "01a14b0b-2268-76a2-a5ba-f1b8868a7ba7",
+  "external_ref": null,
+  "title": "Clearing an item's named source root makes its next turn fall back to the main workspace, which the host records as a source change that stales the item's passing evaluation",
+  "outcome": "After an own-clear of an item's named source root, or any root release, the next turn's fallback workspace is never attributed to the item as a source change (no assumed-missing-baseline mutation); any staleness of the pre-clear evaluation comes only from Engram's existing named-root binding rule and is explained as such. Owed source-accounting duties captured before the clear are preserved, held and diagnosed locally; canonical completion protection for them is tracked separately as a cross-project dependency.",
+  "acceptance": [
+    "A regression covers: name a root, record a passing evaluation on source S, own-clear the root, then run one more turn of the same claim whose session workdir is a different workspace. No source_changed:true with assumed_missing_baseline, and no other source-mutation observation, is attributed to the item for the fallback workspace. Any refusal or staleness of the pre-clear evaluation comes only from Engram's existing named-root binding rule (an explicit clear, release or rename ends that binding), is reported as such and not as a source mutation, and the fix neither disables nor bypasses that rule. The regression and any live check name the exact Engram version they ran against.",
+    "A genuine source change observed after evaluation while the evaluated root remains the captured source scope still stales the evaluation. A newly named root with different content is measured and does not reuse the old evaluation as current. Confirmed clear/release ends future automatic source observation for that claim until another root is named; it does not assert that the old tree is unchanged and does not discard already captured accounting or carried-check duties: an owed closing observation retained across clear/release is preserved durably, held from provider delivery with an explicit historical-recovery diagnosis, and never presented as unchanged or as accounted, and canonical completion protection for such a duty is explicitly not established by this item and is tracked as a cross-project dependency. Completion with a truthfully supplied different source fingerprint refuses the old evaluation. Regressions cover the bound-root change, owed close preserved and held across clear/reload (including an excursion and revert), re-naming with different content, and the distinction between no post-clear observation and completion-fingerprint mismatch.",
+    "The full five-stage gate passes on the exact committed tree, with a clean independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

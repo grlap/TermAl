@@ -1,0 +1,32 @@
+{
+  "id": "01a11bf1-2f93-7852-9dae-5eaa3a8b3451",
+  "external_ref": null,
+  "title": "Bound role-bridge credential lifetime and define rotation for concurrent bridge processes",
+  "outcome": "Define and enforce credential retirement on session/delegation lifecycle boundaries and intentional configuration rotation, preserving exact-attempt caller isolation and retries for concurrent valid bridge processes.",
+  "acceptance": [
+    "Bound role-bridge credential lifetime and define rotation for concurrent bridge processes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "architecture",
+    "delegations",
+    "harness-roles",
+    "review-low",
+    "user-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a112e4-b83e-7a81-9fb7-7a5ea1183a8f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

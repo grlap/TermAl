@@ -1,0 +1,31 @@
+{
+  "id": "01a19f9a-4929-7031-9a36-ae6fcbf289c7",
+  "external_ref": null,
+  "title": "Bound Unix shutdown of the isolated UI-switch driver's owned browser",
+  "outcome": "Bound Unix shutdown of the isolated UI-switch driver's owned browser",
+  "acceptance": [
+    "After the graceful shutdown deadline, an owned browser that ignores SIGTERM cannot keep the diagnostic driver alive indefinitely; forced termination or handle detachment stays restricted to that owned child and reports failure.",
+    "A focused regression covers an owned child that ignores SIGTERM, and the original R2 review provenance is preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "greg-reported",
+    "performance",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f45-4449-7d20-86da-ee3a64e5d7d0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

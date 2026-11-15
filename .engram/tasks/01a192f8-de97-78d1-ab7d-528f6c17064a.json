@@ -1,0 +1,35 @@
+{
+  "id": "01a192f8-de97-78d1-ab7d-528f6c17064a",
+  "external_ref": null,
+  "title": "Share resident session rows through the existing sequence owner before deferring summary projection",
+  "outcome": "Preparatory slice A authorized by Fable1877 and Architect2 ruling46965054a11b4c62bad8f2e19800bead: generalize existing MessageSequence row-COW owner for live SessionRecord storage, adapt collection/rollback boundaries and use immutable predicates before no-op mutable housekeeping. Projection behavior remains unchanged. Slice B owns off-lock summary/cache work, frozen Windows cleanup input and pending-revocation scan. No additional registry/cache/lifecycle.",
+  "acceptance": [
+    "Resident session records reuse the existing shared-sequence owner with per-row copy-on-write, preserving session membership/order, wire and persisted array shape, persistence mutation stamps and rollback semantics; no mutable row or collection alias bypasses detachment.",
+    "Deterministic tests show a retained cut survives unstamped direct mutation and remove/rollback; ordinary no-op body-sequence housekeeping clones zero rows, while one pending local row detaches only that row and advances its sequence exactly once, leaving remote and unchanged rows shared.",
+    "State summary projection, cache validation and snapshot/delta ordering retain their current behavior in this preparatory slice; no latency improvement or satisfaction of the parent's off-lock snapshot criterion is claimed.",
+    "Focused compile/tests cover the storage and housekeeping changes, the independent review pair has no outstanding Medium-or-higher finding, and the integration owner's full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "immutable-snapshot",
+    "performance",
+    "preparatory",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a192eb-84ea-78d0-9910-7e7cc49528b9",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a167b7-3a7c-7ff3-aabb-7bc33299e17a"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

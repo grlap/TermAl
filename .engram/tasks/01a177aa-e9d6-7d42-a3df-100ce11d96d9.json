@@ -1,0 +1,29 @@
+{
+  "id": "01a177aa-e9d6-7d42-a3df-100ce11d96d9",
+  "external_ref": null,
+  "title": "Restore public-route replay coverage for retained bare-proxy native relay pins",
+  "outcome": "A public send regression proves that a pre-existing native relay pin whose requested target is a bare proxy retains its original outcome after the new bare-proxy initiation refusal, even when the projection is localized or removed.",
+  "acceptance": [
+    "A public-route regression starts with a retained relay pin whose requested_target is the original bare proxy id, changes or removes the projection, and verifies exact duplicate receipt identity with no second canonical append or local native message.",
+    "The test distinguishes new bare-proxy initiation refusal from immutable old-pin replay and removes or updates vestigial proxy setup in the current host-qualified send test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "regression-tests",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

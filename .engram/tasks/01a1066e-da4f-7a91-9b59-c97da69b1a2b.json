@@ -1,0 +1,27 @@
+{
+  "id": "01a1066e-da4f-7a91-9b59-c97da69b1a2b",
+  "external_ref": null,
+  "title": "A root session whose queued prompt hits an Engram admission timeout parks Waiting/Unknown indefinitely, with no retry and no notice to anyone, while senders still see 'queuedBehindActiveTurn'",
+  "outcome": "A root session whose queued prompt's Engram authorization ends unknown (a timeout or unavailable transport within the 20-second admission budget) does not stall silently for hours.\n- Either TermAl retries the unknown authorization with bounded backoff while the cause is transient,\n- or it makes the stall visible to whoever is waiting on that session (senders and the coordinator), not only through the session's own preview and recovery card.\nThe mailbox notification state of a message queued behind a paused queue is reported truthfully, not as 'queuedBehindActiveTurn' for an idle session.",
+  "acceptance": [
+    "A root session whose queued prompt hits an Engram admission timeout parks Waiting/Unknown indefinitely, with no retry and no notice to anyone, while senders still see 'queuedBehindActiveTurn' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f8cd-723c-7580-a8ae-7224e6317e55",
+  "disposal_reason": "Duplicate. The missing automatic retry of a parked Unknown admission is w-7224e6317e55, an optional child of w-25b4f98cec5f. The mailbox 'held' disposition is w-25b4f98cec5f's criterion 5. This item's field case and its two extra requirements (one bounded retry, and a durable record of which call timed out) are consolidated in a note on w-7224e6317e55. Filed before I searched; corrected by Termal::Fable2.",
+  "completion": null
+}

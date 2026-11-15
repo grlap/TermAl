@@ -1,0 +1,29 @@
+{
+  "id": "01a176a9-bf35-7180-8cf7-017788658679",
+  "external_ref": null,
+  "title": "Escape bidi formatting characters in native relay wake refusal diagnostics",
+  "outcome": "Escape bidi formatting characters in native relay wake refusal diagnostics",
+  "acceptance": [
+    "Native relay wake refusal diagnostics escape bidirectional formatting controls using the existing safe-text convention while retaining the reason length bound.",
+    "Focused tests cover bidi overrides and isolates alongside existing control-character and length checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

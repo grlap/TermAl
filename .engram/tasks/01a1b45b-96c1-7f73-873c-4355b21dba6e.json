@@ -1,0 +1,30 @@
+{
+  "id": "01a1b45b-96c1-7f73-873c-4355b21dba6e",
+  "external_ref": null,
+  "title": "Make the CI source-owner compiler selection explicit",
+  "outcome": "The pinned Engram source-owner setup selects its intended Rust toolchain consistently, through an explicit version or the Engram checkout working directory, without introducing an admission-time build or fallback.",
+  "acceptance": [
+    "Make the CI source-owner compiler selection explicit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "ci",
+    "cross-project",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae54-d2e6-7803-9e56-8f4c5e2e071c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

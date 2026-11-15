@@ -1,0 +1,29 @@
+{
+  "id": "01a0ff59-4703-7363-b6b1-34bef7f2857e",
+  "external_ref": null,
+  "title": "Transcript-loss test M2 asserts a same-act dispatch timing (tails not called) instead of the contract",
+  "outcome": "Transcript-loss test M2 asserts a same-act dispatch timing (tails not called) instead of the contract",
+  "acceptance": [
+    "The M2 test asserts the contract (body applied by body sequence, newer metadata kept) and no longer asserts whether a tail read started before the delta was dispatched.",
+    "The UI test suite passes in the full five-stage gate; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "low",
+    "test-design",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

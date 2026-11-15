@@ -1,0 +1,50 @@
+{
+  "id": "01a12cbd-05ae-7331-a5ce-6c1d60662410",
+  "external_ref": null,
+  "title": "A queued prompt enqueued with a durability prerequisite is promoted by no dispatch entry point until its exact persistence acknowledgement",
+  "outcome": "A queued prompt enqueued with a durability prerequisite is promoted by no dispatch entry point until its exact persistence acknowledgement",
+  "acceptance": [
+    "A queued prompt enqueued with a durability prerequisite, bound to its prompt id and exact queued content, is promoted or sent by no dispatch entry point — turn-end auto-dispatch, direct send, mailbox wake, Resume and bypass variants, wait resumes, orchestrator transitions, Engram retries and boot orphan dispatch — until a content-specific persistence acknowledgement of that exact entry is received. A held head blocks automatic FIFO behind it. A failed acknowledgement leaves it held with its reason. A late acknowledgement after Stop, Cancel or removal, or for a replaced entry, releases nothing. An entry read back from the durable row after a restart is eligible because its content is durable; no default flag grants eligibility. Entries without the prerequisite behave exactly as today. Barrier tests hold the writer after the in-memory enqueue, drive each entry point and show zero promotions, then one after the exact acknowledgement.",
+    "No new poller, watchdog, timer, sleep or enlarged timeout is introduced; release happens on the existing acknowledgement and dispatch paths.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "delivery",
+    "prerequisite"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The durability-gated queued prompt implementation is committed as d6c0ca78f86d5e54f1097133ba9f5e7c4ac8ccc7. Its exact-tree full gate passed all five stages (verification bd1702ae0f934f0fbe72bbc08de1a559), and independent acceptance evaluation 64aa02b7d21045b5be5d3063a28da484 passed 3/3 criteria. Commit and evidence were handed to integration owner Termal::Opus2/session-8111; Merger did not push.",
+    "completed_at": "2026-10-12T05:11:52.190415500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

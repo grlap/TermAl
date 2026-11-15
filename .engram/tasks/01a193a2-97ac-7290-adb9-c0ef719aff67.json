@@ -1,0 +1,24 @@
+{
+  "id": "01a193a2-97ac-7290-adb9-c0ef719aff67",
+  "external_ref": null,
+  "title": "verification_record misstates mode and command for category and live committed-input runs",
+  "outcome": "The verification_record body states the run's actual mode and launcher command:\n- a `category NAME --input commit` run is sent as mode category, which Engram's producer accepts, not focused;\n- a live run's command keeps its --engram-binary/--engram-sha256 arguments and test paths.\nThis is done either by recording the actual launcher argv in request.json, which the sender already prefers, or by rebuilding each mode faithfully. Today engram_verification_record_mode (src/engram_verification_record.rs ~689, from w-decd61d62831) maps every non-full, non-live run to focused, and engram_verification_record_run_command rebuilds a focused command. Provenance: w-decd delta review round 2, Low (Claude delegation 2d36d89c).",
+  "acceptance": [
+    "verification_record misstates mode and command for category and live committed-input runs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

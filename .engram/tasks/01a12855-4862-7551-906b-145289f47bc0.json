@@ -1,0 +1,43 @@
+{
+  "id": "01a12855-4862-7551-906b-145289f47bc0",
+  "external_ref": null,
+  "title": "New-session UI stays stuck with no explanation although the session was created server-side (session-11878)",
+  "outcome": "Creating a session from the UI either completes visibly (the new session opens) or shows which phase it is waiting on, and why, with no silent indefinite wait when the server has already created the session.",
+  "acceptance": [
+    "The holder's note identifies, with file:line in ui/src and src/, the UI phase that stayed pending in the occurrence below (for example awaiting the create response, an SSE delta, a post-create bind or Engram readiness step, or tab focus), and whether session-11878 is the session Greg requested.",
+    "The create flow surfaces its current phase in the UI while pending and a clear error or recovery action when a phase fails or exceeds its bound; a test reproduces the stuck case (server created the session but the client never left the pending state) and shows the new behaviour.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "UI",
+    "diagnostics",
+    "session-create"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

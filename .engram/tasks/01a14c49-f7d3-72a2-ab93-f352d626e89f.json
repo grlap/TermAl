@@ -1,0 +1,32 @@
+{
+  "id": "01a14c49-f7d3-72a2-ab93-f352d626e89f",
+  "external_ref": null,
+  "title": "Pilot validation on Phoenix: one safe independent P3 item through the normal runner/test/evaluation path, following the onboarding doc (Greg 2026-10-16)",
+  "outcome": "Pilot validation on Phoenix: one safe independent P3 item through the normal runner/test/evaluation path, following the onboarding doc (Greg 2026-10-16)",
+  "acceptance": [
+    "Before anything starts, a report goes to Greg via Engram::Advisor naming the proposed Phoenix P3 item, why it is safe and isolated, the exact session/project route (whether Phoenix is already a TermAl project with an eligible root session), and the one UI action Greg must take; Greg's reply is recorded on this item verbatim, and nothing starts before it.",
+    "On Greg's go and on current master, the chosen item runs through the normal runner, test and evaluation path following only docs/features/supervised-pilot-onboarding.md (review-clean version), and the host-recorded test check and the acceptance evaluation are cited on this item with their ids.",
+    "A note lists every step where the operator had to deviate from or guess beyond the doc (quoting the doc line and what was done instead), or states none were needed; each deviation is forwarded to the onboarding doc's holder as a doc fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "onboarding",
+    "phoenix",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10cf0-744c-76b3-b151-affe8a4dee48"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c53c-76e0-9a4e-c6d3fa9e5b87",
+  "external_ref": "tm-jgd5",
+  "title": "Content revision: cover submodule content so repositories with gitlinks get a source basis",
+  "outcome": "Follow-up from the tm-5gi4 phase 1 review pair (Codex High, 2026-09-27). content_revision now fails closed on any 160000 index entry, because a presence-only entry gave a false 'unchanged' when a submodule's checkout, content or init state changed. PhoenixCodeNav (external/fsharp, external/roslyn) therefore has no basis, as it had none under schema-1. Wanted: a bounded way to include each submodule's content, e.g. its checked-out commit plus a dirty-state check through the pinned runner run inside the submodule, with deinit as a distinct state. Tests are needed for a changed checkout, an edit inside, and deinit. Also decide how filter config inside a submodule is treated.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "disposal_reason": "Duplicate found in backlog triage w-930e4d333f07 (Architect1 batch 3b; Termal::Fable2). Content revision refusing gitlinks is covered by w-c07c410dac75, filed 2026-10-05 for the team pilot, which covers both submodules and Git filters or LFS and carries the Phoenix and pilot context. This item's notes stay linked as history.",
+  "completion": null
+}

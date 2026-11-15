@@ -1,0 +1,45 @@
+{
+  "id": "01a0f2f9-9443-7552-9879-6b865d826480",
+  "external_ref": null,
+  "title": "The context generation TermAl reports to Engram restarts from termal-1 after a host restart",
+  "outcome": "The token TermAl passes on a session's orientation read (`work next --peek --context-generation termal-<n>`) is never reused by that session across host restarts, so Engram can tell a new context from one it has already acknowledged. Either the token carries a host-incarnation part beside the counter, or the counter is preserved in the persisted session; the choice is recorded on the item with its reason.",
+  "acceptance": [
+    "A session restored after a host restart never sends a context-generation token it sent before the restart: a test restores a persisted session whose generation had advanced and reads the token of its next orientation read.",
+    "Engram's coordinator has confirmed in a note or by mailbox, cited by message number, that the token's new form is accepted by `work next --peek --context-generation` and by the `memories --context-generation` argument Engram is adding.",
+    "Every token the host builds is a plain token as Engram will enforce it: 1 to 256 characters, only ASCII letters, digits, dot, underscore and dash, not starting with a dash; a test checks the exact token, including the host-incarnation part, against that rule.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "Within one host run the token still changes exactly when it does today (a compaction, a replacement, the other existing bumps) and not otherwise; the existing context-nudge tests pass, with any changed expectation listed in a note with its reason."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "context-nudge",
+    "engram-interop",
+    "restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

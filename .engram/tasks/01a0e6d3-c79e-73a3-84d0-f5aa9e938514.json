@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c79e-73a3-84d0-f5aa9e938514",
+  "external_ref": "tm-v9r.18",
+  "title": "Prevent retained-window message ID collisions from aborting persistence",
+  "outcome": "The normalized messages table enforces UNIQUE(session_id, message_id), but retained-window rewrites do not explicitly reject a resident message whose ID already exists in the persisted prefix at another position. Such a collision can abort the entire persistence transaction instead of isolating the affected session and preserving other writes.",
+  "acceptance": [
+    "Before or during a retained-window rewrite, detect a message ID that collides with a persisted prefix row at a different position. Quarantine or fail only the affected session with a precise diagnostic; unrelated session/delegation writes still commit. Add a regression for prefix-ID reinsertion and confirm ordinary same-position replacement remains valid."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

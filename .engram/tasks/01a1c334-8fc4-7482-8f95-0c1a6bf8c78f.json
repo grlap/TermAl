@@ -1,0 +1,31 @@
+{
+  "id": "01a1c334-8fc4-7482-8f95-0c1a6bf8c78f",
+  "external_ref": null,
+  "title": "Cover final delegation capacity admission after a concurrent create passes the precheck",
+  "outcome": "A behavioral race-seam test separately exercises the final locked-insertion per-request capacity check, preserving total six for incoming read-only reviewers and total four otherwise, with no child created by a refused request.",
+  "acceptance": [
+    "A deterministic controlled race or existing seam lets another delegation become nonterminal between the initial precheck and final insertion check; the later request is refused with the actual total and its applicable limit.",
+    "The refused request leaves no child delegation/session or isolated worktree, and coverage distinguishes read-only reviewer capacity from another supported request kind without source-text or instruction-file assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "review",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1c27b-204b-7651-b5ce-59626e4d4004",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c3a9-d481-72d2-a195-699c8b177668",
+  "disposal_reason": "Continue as independent optional Low follow-up after parent w-59626e4d4004 landed and completed; the final-insertion race-seam coverage remains useful but did not block landing. Retain review/author evidence until this follow-up resolves, as note0012a9dc9885402a8553612afd934dd2 records.",
+  "completion": null
+}

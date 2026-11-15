@@ -1,0 +1,28 @@
+{
+  "id": "01a1ca55-f51e-7af0-b456-e76f488e43f8",
+  "external_ref": null,
+  "title": "Remove or independently enable the unreachable inline-delegation boot timing phase",
+  "outcome": "The inline-delegation timing phase either has a reachable enabled execution path or is removed, with accurate fixed-label boot measurements.",
+  "acceptance": [
+    "The delegations_inline phase is removed, or timing enablement is independent of defer_delegations and the enabled inline path is covered by a behavioral test.",
+    "Boot restore behavior and deferred-delegation loading remain unchanged; relevant focused validation passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "boot",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

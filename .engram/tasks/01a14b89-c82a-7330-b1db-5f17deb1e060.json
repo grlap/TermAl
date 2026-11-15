@@ -1,0 +1,56 @@
+{
+  "id": "01a14b89-c82a-7330-b1db-5f17deb1e060",
+  "external_ref": null,
+  "title": "Global snapshots carry test-run counters and bounded session activity; complete run history is fetched on demand",
+  "outcome": "GET /api/state and public SSE carry revision-consistent test-run counters and bounded per-session activity without a global run-summary array. All active, unresolved and historical canonical run identities remain reachable through filtered paged and exact-id reads, with existing evidence, waits and notification semantics preserved. No record or artifact is deleted; retention is a separate item.",
+  "acceptance": [
+    "GET /api/state, initial/reconnect SSE snapshots and incremental public test-run updates carry revision-consistent test-run counters and the bounded activity data required by session badges and wait presentation, without a global list of historical, active or unresolved run summaries. Every active or unresolved run remains stored and reachable by filtered paged or exact-id reads; counts, uncertainty, owner/notify distinctions and notification/wait behavior are preserved. Regressions cover more than200 active/unresolved runs, terminal transitions, aliases and reconnect.",
+    "The existing paged GET /api/test-runs exposes complete canonical history including minimal retained compact identities, with filter-bound continuation and exact-id detail preserving verification associations. UI list/detail views fetch on demand, do not automatically drain history, reject stale responses, and preserve recorded-card fallback when detail is unavailable. No run record, artifact, proof or association is deleted by this change.",
+    "Record comparable before/after /api/state bytes and run counts with observed build/revision, separately report fixture measurements and available lock/projection measurements, and demonstrate that unrelated state publication does not rebuild/sort full test-run history under StateInner. The full gate passes on the exact committed input with a clean independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 0,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "state-flood"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a147c0-22a0-7983-8bb2-b17b985f5dbc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed and running revision-consistent test-run counters with on-demand complete history; live Central state payload reduced49.48%, exact-tree FULLs/pair clean and landed native witness passed.",
+    "completed_at": "2026-11-08T17:37:39.544761900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

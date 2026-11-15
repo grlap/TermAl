@@ -1,0 +1,31 @@
+{
+  "id": "01a17169-96f3-7131-84eb-c2674536568d",
+  "external_ref": null,
+  "title": "Expose UI setup postcondition failures as failed preflight checks on test-run cards",
+  "outcome": "A failed UI dependency preflight has an unambiguous failing code for summary/card selection while preserving the native npm exit separately when necessary.",
+  "acceptance": [
+    "Expose UI setup postcondition failures as failed preflight checks on test-run cards is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "greg-directed",
+    "launcher",
+    "review-low",
+    "test-bootstrap",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a170de-026f-7ca2-8981-0571048015ee",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1a01d-501d-7632-873b-c6ad7b63270d",
+  "external_ref": null,
+  "title": "A rejected Engram verification record keeps only the error code; the host drops Engram's refusal message",
+  "outcome": "When Engram definitively refuses a verification record, the run's retained record keeps Engram's bounded, redacted refusal reason as well as its code, so the refusal can be diagnosed without querying live stores or re-running tests.",
+  "acceptance": [
+    "The definite-remote-refusal branch (src/engram_verification_record.rs around lines 1265–1276 at 47fdba2f) records the refusal code plus Engram's bounded refusal message and any structured reason fields, with a size limit and with secrets excluded.",
+    "A regression test drives a definite refusal carrying a message and asserts that the retained rejected detail includes the bounded message, and the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

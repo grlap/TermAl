@@ -1,0 +1,27 @@
+{
+  "id": "01a0f435-38d9-7c92-9f90-5632f86d61c9",
+  "external_ref": null,
+  "title": "The read-only Codex app-server's PATH drops whole shim folders that hold pwsh.exe (Store aliases, scoop, chocolatey): consider a narrower way to make Codex pick PowerShell 5.1",
+  "outcome": "Low from the Claude review of the read-only Codex sandbox change (delegation-f99b8f27-9012-406c-8632-111db1c373df), left unfixed at landing. path_without_pwsh (src/shared_codex_profile.rs) leaves out of the read-only app-server's PATH every directory that holds pwsh.exe, with everything else in it. Such a directory is often a shared shim or alias folder: the Store's WindowsApps (winget and python aliases), scoop shims, chocolatey bin, or ~/.dotnet/tools. On such a machine the read-only app-server, and every tool and MCP server it starts, can lose git, rg, node or other tools found only through that folder, and reviewers' commands fail. The trade-off is documented in docs/features/agent-delegation-sessions.md, Enforcement Model. On this machine the directories removed are the Store PowerShell package directory and the user WindowsApps alias folder. Options: a narrower rule (leave out only PowerShell's own install directories and the pwsh alias, keeping the other entries of shared folders reachable), an explicit Codex shell setting if Codex gains one, or a measured list of what is lost here. The known limit (Store pwsh under the restricted token) stays the reason.",
+  "acceptance": [
+    "Either the read-only app-server keeps every PATH tool except PowerShell 7 reachable, shown by a test of the PATH it builds, or the item records a measurement on this machine that no tool reviewers use is lost and is closed as documented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

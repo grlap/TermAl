@@ -1,0 +1,29 @@
+{
+  "id": "01a1a1de-811a-7640-9d23-4ad23f3124d7",
+  "external_ref": null,
+  "title": "termal_followup_session to a Kimi reviewer treats a message starting with \"/review-code\" as an unknown ACP command",
+  "outcome": "A follow-up message sent to a Kimi review child is interpreted the same way as the original spawn prompt, or termal_followup_session refuses or documents slash-leading follow-ups before dispatch, so a review round is not silently lost to an 'Unknown ACP command' failure.",
+  "acceptance": [
+    "The difference between spawn-prompt and follow-up handling of a leading '/' for Kimi (ACP) children is identified in code.",
+    "Either a follow-up starting with a skill invocation like '/review-code' runs that skill as the spawn does, or termal_followup_session rejects or escapes it before dispatch with a clear error; a regression test covers the chosen behaviour, and the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation-mcp",
+    "kimi",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

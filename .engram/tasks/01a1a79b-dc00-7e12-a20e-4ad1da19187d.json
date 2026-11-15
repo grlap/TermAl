@@ -1,0 +1,32 @@
+{
+  "id": "01a1a79b-dc00-7e12-a20e-4ad1da19187d",
+  "external_ref": null,
+  "title": "Remove quadratic boolean configuration key deduplication from committed capture",
+  "outcome": "Rust and Node deduplicate discovered boolean keys without quadratic work outside the shared deadline and cancellation budget, preserving Git boolean conversion and record-order diagnostics.",
+  "acceptance": [
+    "Remove quadratic boolean configuration key deduplication from committed capture is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "check-credit",
+    "commit-input-v1",
+    "greg-directed",
+    "low",
+    "review-followup",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

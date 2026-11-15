@@ -1,0 +1,29 @@
+{
+  "id": "01a195d0-eef2-7843-b058-e031de20ff3d",
+  "external_ref": null,
+  "title": "Control-OFF flagged-token re-bind runs only when the agent names a root again, and ignores the bind backoff",
+  "outcome": "A turn-gated-control OFF session whose restored token a reload flagged gets its pending verification records delivered even if its agent never names a source root again. Either a re-bind trigger exists that does not depend on re-naming, or the limitation is documented and the coordinator has accepted it. The naming re-bind of a flagged token respects the session's bind backoff (circuit_open and next_bind_retry_at) as the other binders do, or the coordinator has recorded why it doesn't need to.",
+  "acceptance": [
+    "either a control-OFF session with a reload-flagged token and pending verification records is re-bound without its agent naming a root again, with a test showing the records delivered; or the limitation is documented in docs/features and the coordinator has concurred in a note",
+    "the flagged-token naming re-bind consults circuit_open and next_bind_retry_at with a test, or the coordinator has recorded in a note why the naming budget makes that unnecessary"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "control-off",
+    "engram-control-transport",
+    "found-by-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1b907-436f-7da2-8fe4-7529b970ce3c",
+  "external_ref": null,
+  "title": "Exercise ordinary declared task-END revalidation across an off-lock row change",
+  "outcome": "Deterministic tests detect removal of the original-row and exact-ended-row guards after declared artifact reading.",
+  "acceptance": [
+    "Exercise ordinary declared task-END revalidation across an off-lock row change is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "declared-commands",
+    "greg-reported",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1b88b-a533-71a0-aa76-104f4061e14f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1ba27-95bf-7342-b3c7-93851d87a4c1",
+  "disposal_reason": "Continue as independent work after w-104f4061e14f completed on landed d3499b97. This optional Low/Note follow-up remains open and is not claimed fixed; preserve its evidence and acceptance.",
+  "completion": null
+}

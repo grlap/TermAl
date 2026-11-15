@@ -1,0 +1,29 @@
+{
+  "id": "01a156a8-c506-7032-8d30-d3349edde002",
+  "external_ref": null,
+  "title": "Real-child probe diagnostic tests still run under the production 2 s bound and can time out under parallel test load",
+  "outcome": "The real-child tests in src/tests/federation_probe_diagnostics.rs (success_keeps_fixed_marker_contract, nonzero_exit_is_not_a_spawn_failure, spawn_failure_uses_native_launch_boundary) cannot fail from start-up load: either they run under a test guard bound, with production-bound expiry covered only by the deterministic held-child tests, or the coordinator records why one real child must stay on the production bound and how that exposure is made deterministic.",
+  "acceptance": [
+    "A coordinator ruling on whether a real child must exercise the production bound to completion (a condition Fable2 set on w-31fee749ec69, #3146 iii) is recorded here, and the tests follow it.",
+    "The affected tests are deterministic under gate load (no fixed 2 s exposure without a recorded reason), the full gate is green, and an independent review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "nondeterminism",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

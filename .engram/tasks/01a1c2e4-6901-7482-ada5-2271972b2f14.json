@@ -1,0 +1,28 @@
+{
+  "id": "01a1c2e4-6901-7482-ada5-2271972b2f14",
+  "external_ref": null,
+  "title": "Use production binding recovery in the legacy-root live fixture",
+  "outcome": "Legacy root-recovery live proof establishes post-load association through supported production authority rather than directly seeding session.work_binding, or accurately documents the required re-claim boundary.",
+  "acceptance": [
+    "After load_state, re-establish the real association through validated EngramRootIntentAssociation and bind_fresh_engram_source_root_until or actual claim renewal, preserving forward-naming recovery controls; if production requires a re-claim, document and exercise that supported boundary. No fabricated proof/checkpoint."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "severity-low",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

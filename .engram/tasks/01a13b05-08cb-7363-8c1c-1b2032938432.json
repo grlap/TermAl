@@ -1,0 +1,37 @@
+{
+  "id": "01a13b05-08cb-7363-8c1c-1b2032938432",
+  "external_ref": null,
+  "title": "Resolve the Node option-table probe with the runner's executable rules",
+  "outcome": "Resolve the Node option-table probe with the runner's executable rules",
+  "acceptance": [
+    "The Node option-table probe and subsequent focused stage use the same resolved executable, including the launcher's PATH-only and Windows .exe rules; metadata cache identity uses that resolved path.",
+    "A regression with distinct cwd/PATH candidates verifies consistent probe and runner selection, while supported Node and Vitest invocation behavior remains valid."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "severity-low",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a13894-4981-7120-b08b-ac4361c284dc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a10456-733c-7013-af76-7b072d05675f",
+  "external_ref": null,
+  "title": "Pre-validate a turn observation's source basis on the host, so a basis with bidi or control characters loses only that basis, not the whole observation",
+  "outcome": "Before sending a turn checkpoint, TermAl checks each observation source_basis text for the characters Engram refuses: C0/C1 controls and the complete Unicode Bidi_Control set, which is U+061C, U+200E, U+200F, U+202A-202E and U+2066-2069. When one is found, TermAl drops only that observation basis and the fields derived from it (observed_at, reported_source_change, and evidence derived from the basis), with a holder-visible line, instead of letting Engram refuse the whole checkpoint. Today the refusal ladder (src/engram_turn_observations.rs:761-813) goes from the full report to observations-only, which still carry the basis, to an empty report, so the turn whole observation and any credit it carries is lost. The character set stays identical to Engram source_basis_text_refused rule (Engram bundle 17 with w-cd81066cecc9). No legacy path.",
+  "acceptance": [
+    "Pre-validate a turn observation's source basis on the host, so a basis with bidi or control characters loses only that basis, not the whole observation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "robustness",
+    "turn-observations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

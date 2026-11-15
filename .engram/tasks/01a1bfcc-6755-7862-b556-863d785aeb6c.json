@@ -1,0 +1,25 @@
+{
+  "id": "01a1bfcc-6755-7862-b556-863d785aeb6c",
+  "external_ref": null,
+  "title": "Discriminate substituted naming reporter guards and historical reader routing",
+  "outcome": "Behavior controls prove that the original reporter connection/runtime/settings stay current and recovery keeps the retained historical run association.",
+  "acceptance": [
+    "Negative successor controls change only the original reporter connection, settings or runtime during recovery and show refusal before learning or publication without another producer event.",
+    "Positive renewed/successor controls assert the retried canonical read uses the original reporter and the re-prepared owner's binding remains the historical association, so wrong-reader and live-binding mutants fail."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be12-2a94-7573-99d2-e40047ef7d1b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

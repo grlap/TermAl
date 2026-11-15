@@ -1,0 +1,29 @@
+{
+  "id": "01a17c02-d2e1-7930-a9bb-6a3855441e24",
+  "external_ref": null,
+  "title": "Bound remaining immutable snapshot-cut holds and cold-start latency under the modeled parallel workload",
+  "outcome": "Investigate and repair the remaining snapshot-cut StateInner holds and cold-start latency removed from the trim-only numerical gate by Greg's option-(2) decision, preserving complete state revisions, publication order, queue ownership and durability.",
+  "acceptance": [
+    "Bound remaining immutable snapshot-cut holds and cold-start latency under the modeled parallel workload is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cold-start",
+    "performance",
+    "scope-inventory",
+    "snapshot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

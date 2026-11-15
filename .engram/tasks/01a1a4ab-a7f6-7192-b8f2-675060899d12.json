@@ -1,0 +1,31 @@
+{
+  "id": "01a1a4ab-a7f6-7192-b8f2-675060899d12",
+  "external_ref": null,
+  "title": "A panicking test fixture destructor during unwinding aborts the whole test process and loses the run's other results",
+  "outcome": "One failing test using this fixture reports as one failure; the rest of the run's results survive.",
+  "acceptance": [
+    "The fixture destructor in src/tests/engram_unadmitted_runtime_reporting.rs near lines 213-219 doesn't panic while the thread is already panicking, a regression test shows a failing fixture test doesn't abort its process, and other fixtures with the same pattern are checked and listed"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The fixture barriers no longer panic during unwinding, so one failing test reports as one failure and the run's other results survive. On master 7f8d1b63, gated by test-78f5f61f. Judging the remaining Drop impls is w-203dee9a8cb2.",
+    "completed_at": "2026-11-04T09:06:57.274080500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

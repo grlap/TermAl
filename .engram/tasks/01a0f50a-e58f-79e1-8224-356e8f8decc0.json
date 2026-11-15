@@ -1,0 +1,31 @@
+{
+  "id": "01a0f50a-e58f-79e1-8224-356e8f8decc0",
+  "external_ref": null,
+  "title": "Preserve acceptance paging stop reasons when a continuation has no unread count",
+  "outcome": "Preserve acceptance paging stop reasons when a continuation has no unread count",
+  "acceptance": [
+    "When a captured continuation remains after bounded paging stops but older/notes_omitted is absent, request metadata and brief distinguish an unknown unread count from zero and preserve the host stop reason; a request-path regression covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0ea91-e695-7472-8e21-67e7b8bdcade",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c14d-a654-71a2-8b64-205cd0da6d0e",
+  "disposal_reason": "Fable2 #1217 evaluation triage: current A defect at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825; only stranded beneath a completed parent, with no active blocker or unresolved prerequisite. Continue independently; priority and acceptance unchanged.",
+  "completion": null
+}

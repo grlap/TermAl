@@ -1,0 +1,30 @@
+{
+  "id": "01a0fafb-757a-7121-a427-453e6bd8e9e2",
+  "external_ref": null,
+  "title": "Keep named-root replay retirement and success settlement inside one naming deadline",
+  "outcome": "Keep named-root replay retirement and success settlement inside one naming deadline",
+  "acceptance": [
+    "Keep named-root replay retirement and success settlement inside one naming deadline is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

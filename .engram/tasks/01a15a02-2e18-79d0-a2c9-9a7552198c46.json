@@ -1,0 +1,30 @@
+{
+  "id": "01a15a02-2e18-79d0-a2c9-9a7552198c46",
+  "external_ref": null,
+  "title": "Recognize focused Rust-wrapper test commands without requiring bare Cargo or losing host test credit",
+  "outcome": "A focused run using the maintained scripts/test-rust.sh wrapper through an explicit supported shell can retain temporary-directory containment and still acquire host Test evidence, without treating arbitrary shell scripts as tests or weakening ownership/source/result fences. Document any intentionally unsupported form clearly.",
+  "acceptance": [
+    "Define and independently concur on a bounded allow-list for recognizing the maintained Rust test wrapper inside focused launcher commands, including supported absolute Windows Git shell paths; preserve rejection of arbitrary scripts, build-only flags, compound shell commands and ambiguous placement.",
+    "Regression tests demonstrate fail-first then pass for supported wrapper forms and retain fail-closed non-test/unsupported-form controls; passing credit still requires the real launcher result artifact with coherent executed test counts and existing source/ownership/overlap fences.",
+    "The exact final input passes the maintained full gate and required independent read-only review pair before landing; documentation agrees with supported focused-wrapper forms."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "recognition",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

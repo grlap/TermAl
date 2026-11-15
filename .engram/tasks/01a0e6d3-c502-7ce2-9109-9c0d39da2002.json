@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c502-7ce2-9109-9c0d39da2002",
+  "external_ref": "tm-fcsc",
+  "title": "Revalidate remote project before localizing orchestrator proxy",
+  "outcome": "Remote orchestrator creation clones the local remote-project record, then ensure_remote_project_binding and the remote POST can run before the final inner-lock localization/commit. A concurrent local project deletion can complete its detach sweep during that network window, after which the returned remote orchestrator may be localized from a stale project snapshot. Revalidate project existence and remote identity under the final mutation lock (or otherwise serialize project lifecycle), preserve rollback/error behavior, and add a deterministic deletion-during-remote-create regression.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1 re-check with marker, spot-checked by Termal::Fable2): CLOSE-DONE. Routing-authority changeset ec2786c (ancestor of master); orchestrator race tests in src/tests/project_creation_races.rs.",
+  "completion": null
+}

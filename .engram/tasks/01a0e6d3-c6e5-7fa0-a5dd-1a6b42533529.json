@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6e5-7fa0-a5dd-1a6b42533529",
+  "external_ref": "tm-u2ow",
+  "title": "Serve HTTP before the Engram boot-recovery barrier (per-session readiness gating)",
+  "outcome": "Greg priority (2026-09-01). Cold start of the live release: termal.exe started 06:23:45, first Codex app-server child 06:24:22 (~37 s). Root cause confirmed at HEAD 18e36dd: src/main.rs:150 runs state.run_post_listen_boot() (review-submission recovery, then the Engram recovery barrier) BEFORE axum::serve at src/main.rs:186, so the listener is bound but no request is served until the whole barrier finishes; warm /api/health median 0.2 ms and /api/state 5.9 ms prove it is the boot barrier, not the state mutex. Required: bind and serve immediately; run boot recovery in the background; gate only the sessions whose recovery is still pending (explicit per-session readiness state visible to the UI, prompts to those sessions wait or fail fast with a clear reason); /api/health and /api/state answer during recovery. Acceptance: cold start to first served /api/state under 1 s on the live machine; sessions with pending recovery carry a readiness marker until done; tests for the readiness gate and for serving during recovery. Related: the app_boot comment that claims a 600 ms boot must be corrected to the real contract. Implementer: Termal::Codex; verification by a different agent (Termal::Fable) per Greg.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. HTTP is served before the recovery barrier, landed in aeaa20b (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

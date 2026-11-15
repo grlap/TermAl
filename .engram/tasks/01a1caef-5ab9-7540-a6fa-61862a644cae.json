@@ -1,0 +1,29 @@
+{
+  "id": "01a1caef-5ab9-7540-a6fa-61862a644cae",
+  "external_ref": null,
+  "title": "Keep closing comparison endpoint only for an admitted evaluation request",
+  "outcome": "A request refused after source measurement does not silently establish a closing comparison endpoint that hides an earlier unobserved interval.",
+  "acceptance": [
+    "Behavioral fixture covers missing ordinary baseline, X-to-Y edit, evaluation request that measures Y then is refused, and close at Y; it distinguishes refused admission from a successful request.",
+    "Retention occurs at an appropriate admitted request boundary, preserving scope rechecks, same-turn lifetime, ordinary/registered precedence and successful unchanged evaluation behavior; any alternative contract is explicitly concurred before evaluation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca5f-4ff3-7d92-a00e-ab5d3352bbc0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

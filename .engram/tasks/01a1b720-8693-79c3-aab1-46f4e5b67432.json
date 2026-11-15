@@ -1,0 +1,29 @@
+{
+  "id": "01a1b720-8693-79c3-aab1-46f4e5b67432",
+  "external_ref": null,
+  "title": "Document automatic federation SSH recovery stages and fixed reasons",
+  "outcome": "Connection diagnostics documentation explains automatic cleanup and recovery and accurately describes the existing read-only worker projection.",
+  "acceptance": [
+    "The satellite onboarding Connection diagnostics section describes automatic recovery after proven no-child or exact-child reap, and documents sshStartSettlement, sshCleanupPending, sshCleanupRetry, sshRecovered and recoveryReason without implying permanent quarantine or a new operator action.",
+    "Documentation distinguishes current-basis observation from stale-basis or transient observations and is reviewed against the production contract. No Markdown phrase-pinning tests are added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "federation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

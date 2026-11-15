@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6da-2640-7ed2-b7a2-945f7a10958e",
+  "external_ref": null,
+  "title": "Read-only reviewer delegations: allow read-only git subcommands (grep, log, show, diff) or say so in the brief",
+  "outcome": "Read-only reviewer delegations: allow read-only git subcommands (grep, log, show, diff) or say so in the brief",
+  "acceptance": [
+    "Read-only reviewer delegations: allow read-only git subcommands (grep, log, show, diff) or say so in the brief is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "PI-25",
+    "delegations",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

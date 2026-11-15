@@ -1,0 +1,27 @@
+{
+  "id": "01a1aa51-326d-7d33-97bc-529c543faeaa",
+  "external_ref": null,
+  "title": "Add monitoring interruption endpoint to the central API inventory",
+  "outcome": "The architecture API inventory lists the operator monitoring-interruption endpoint and links its feature contract.",
+  "acceptance": [
+    "docs/architecture.md includes POST /api/test-runs/{run_id}/interrupt-monitoring with its exact-origin body, response, refusals and a link to the Test Runs contract."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

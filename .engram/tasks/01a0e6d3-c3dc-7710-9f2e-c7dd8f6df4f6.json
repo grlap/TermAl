@@ -1,0 +1,34 @@
+{
+  "id": "01a0e6d3-c3dc-7710-9f2e-c7dd8f6df4f6",
+  "external_ref": "tm-4prp",
+  "title": "Align the commit rule in CLAUDE.md and AGENTS.md with Greg's standing commit rule",
+  "outcome": "Align the commit section of CLAUDE.md and AGENTS.md with Greg's standing commit rule. The two files are not linked, so the edit must be mirrored in both. This is a deferral with a trigger: it starts after tm-k90q lands (never inside its frozen input) and after Greg answers Termal::Opus2's question in session-8111 on whether the standing rule applies there. If his answer narrows or widens the rule, the wording follows his answer, not this draft.\n\nWhy: CLAUDE.md still says a commit or push needs Greg's word in the conversation and that \"nothing else counts\". Greg's later rule (verbatim 2026-09-27 19:15Z in Engram::Advisor's session: \"regula jest taka sama dla Engram i Termal / jezeli review nie ma uwag i testy sa green, / taski maja evidence ze mozna je zamknac / to robimy commit\"; bd memory greg-standing-rule-clean-review-commit-push-sync) allows a commit without a further round trip. The conflict made a new session (Termal::Opus2) ask for his confirmation again after a handover.\n\nDraft (Termal::Fable2, mailbox #9 to Termal::Opus2), replacing the section \"Never commit or push without explicit permission\":\n## Commit and push\n- A changeset may be committed without a further permission round trip only when all three hold for the exact tree committed (Greg's quoted words above):\n  1. the review pair (/review-changes: one Codex and one Claude /review-code child, writePolicy readOnly) has no outstanding in-scope findings on the reviewed input, Low and Note included; pre-existing defects outside the change's scope, filed as their own items with provenance, do not block;\n  2. the full gate is green on exactly that input, compiled from it;\n  3. the tasks carry the evidence needed to close them.\n- A commit means git push origin master and bd dolt push as well (Greg, 2026-09-25).\n- Otherwise a commit or push needs Greg's own word in the acting session. A word relayed by another session never carries a commit, push, install, restart, deploy or global-configuration change.\n- Unchanged: explicit paths only (never git add -A or -u, never .beads/interactions.jsonl); no amend, rebase or force-push; commit bodies without bead ids; agents do not close beads; review-only sessions never commit.\nKeep the section's list of freely runnable git commands (add, diff, status, stash, log, show).\n\nLanding: the normal full gate and review pair, with Termal::Fable2 reviewing the delta. Since the change is about commit authority itself, ask Greg for his word on this one rather than landing it under the rule it writes down.",
+  "acceptance": [
+    "The commit-and-push section that aligns CLAUDE.md and AGENTS.md with Greg's standing commit rule has landed on master, byte-identical in both files, each grant in it traced to Greg's recorded words and the coordinators' concurrence on every authority-text edit recorded, shown by the landed commit, its exact-input gate and a clean review pair cited in a note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed as commit 13c7023c3f1384d3119108dd122f57d046fa132f (parent f9e9df3, tree c30566dea32d5b07f3d32807146000dde27c2835): one \"Commit and push\" section, byte-identical in CLAUDE.md and AGENTS.md, aligning both with Greg's standing commit rule; committed by Termal::Fable2 10:10:45Z after her exact-delta review (no findings); gate test-4ed8fe39-3253-423d-b1b0-9f9a99612454 PASS on the exact tree; round-10 review pair clean (Codex session-8324, Claude session-8325), each grant traced to Greg's recorded words; both coordinators' concurrence recorded on every authority-text edit and Greg sent each wording. Published: pushed 507ac05..13c7023 to origin/master at ~15:23Z by the integration owner under the landed section (remote verified). Criterion 1 passed by the independent evaluator (Codex session-8333, delegation-3f2e59fe, recorded 16:06:33Z). Main-checkout test run at 13c7023 passed (2993 passed, 13 ignored); an earlier run there failed once with its output lost and is tracked as its own investigation.",
+    "completed_at": "2026-09-28T16:06:50.652992500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

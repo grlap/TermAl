@@ -1,0 +1,30 @@
+{
+  "id": "01a10010-3515-7012-af3c-35f581ea2a8a",
+  "external_ref": null,
+  "title": "File-size stage: fail the full gate when a Rust file under src/ exceeds 1,000 lines, except allow-listed files frozen at their current size",
+  "outcome": "A new first stage of `node scripts/test-launcher.mjs full`, `file-size`, runs `node scripts/file-size-budget.mjs check`: for every file matching src/**/*.rs it counts physical lines (newline-terminated lines, a last unterminated line counted once, as `wc -l` plus that case) and fails the gate when a file not in scripts/file-size-allowlist.json has more than 1,000, when a listed file has more than its frozen count, when a listed file is at or under 1,000 (stale entry: remove it), or when a listed path does not exist. The allow-list is a sorted JSON map path → frozen line count, generated once from the master the stage lands on. The script has a unit test beside the other scripts tests. CLAUDE.md's Rust section gains one sentence naming the cap and the list; the stage count in docs/test.md is updated. No source file changes in this landing.",
+  "acceptance": [
+    "File-size stage: fail the full gate when a Rust file under src/ exceeds 1,000 lines, except allow-listed files frozen at their current size is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "file-size",
+    "refactor",
+    "tech-debt",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1000f-f7a4-7413-9cd8-bf51025327e7",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d3-c3e0-76f0-a9ea-d889be50979e",
+  "disposal_reason": "Filed in a crossing with Termal::Fable2's #201 (mailbox 2a27fd51), which gives Termal::Architect2 the lead on the existing checker item w-d889be50979e; that item carries the enforcement design. The design notes here (launcher stage, allow-list semantics) stand as second-check input on w-d889be50979e, not as a separate plan.",
+  "completion": null
+}

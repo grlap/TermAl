@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6ce-7a22-aadf-7c4b1290af79",
+  "external_ref": "tm-s7tx",
+  "title": "Capture plumbing: counters on AppState, one bounded-thread primitive, per-call-site limit tests, cheap refusals before captures",
+  "outcome": "Structural notes from the tm-5gi4 phase 1 review pair on input c6140c01 (Claude notes) and Opus's own list (2026-09-27; landed as acd7740).\n\n1. acceptance_source_captures_live and engram_turn_basis_captures_live live in StateInner, so each capture takes the state mutex only to clone an Arc (src/state.rs around line 1440). They are runtime-only and belong on AppState, next to its other runtime handles.\n2. bounded_content_revision_capture repeats the worker-counting thread pattern of EngramCapture::spawn in engram_turn_checks.rs. Merge them into one bounded-thread primitive.\n3. The primitive's limit and panic behaviour are tested, but not that each call site uses its intended limit: 4 for acceptance, 32 for turns.\n4. Cheap refusals before captures. The submit-time recapture (up to the 20 s freeze budget, reading the whole worktree) runs before acceptance_evaluation_cli_args and validate_acceptance_evaluation_command_size (src/acceptance_evaluation_api.rs around line 983). Likewise, the request-time capture runs before the check for an already active evaluator. Build and validate the arguments, and check the evaluator, first; capture last.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

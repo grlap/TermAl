@@ -1,0 +1,56 @@
+{
+  "id": "01a16b51-9c2b-71b2-9d42-6467f27d4ad3",
+  "external_ref": null,
+  "title": "Extract the duplicated expired-pending-begin settlement into one helper",
+  "outcome": "The expired-pending-begin withdrawal and fresh-admission settlement lives in one helper in engram_begin_preparation_retry.rs, used at both sites: the start of the attempt and the send boundary. engram_host_adapter.rs no longer carries two copies that could drift apart. The behaviour is unchanged.",
+  "acceptance": [
+    "The expired-pending-begin withdrawal and fresh-admission settlement is implemented once, in a helper outside engram_host_adapter.rs, and both call sites (the start of the attempt and the send boundary) use it; engram_host_adapter.rs keeps no duplicated copy.",
+    "Behaviour is unchanged: the expired-grant tests (src/tests/engram_begin_expired_grant.rs, including the send-boundary test) and the rest of the root_dispatch, begin_boot, admission_budget and recovery_format tests pass on the frozen input, as they did on the w-34ec freeze it stacks on.",
+    "The full gate is green on the frozen input.",
+    "The review pair (Codex and Claude, read-only) has no outstanding Medium-or-higher finding on the frozen input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "review"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "admission",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

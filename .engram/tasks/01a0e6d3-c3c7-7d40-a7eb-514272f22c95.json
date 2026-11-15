@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3c7-7d40-a7eb-514272f22c95",
+  "external_ref": "tm-31f6",
+  "title": "Preserve Windows folder picker's last-used location",
+  "outcome": "Accepted UX follow-up from Claude7199: create_dialog calls SetFolder(default_workdir), forcing initial location each open. Microsoft SetFolder docs confirm it overrides MRU; SetDefaultFolder preserves recent location with fallback. Consider switching the initial seed to SetDefaultFolder, update native test expectations, and verify repeated opens outside default workdir. Separate from foreground/DPI verification; no current implementation or deployment authorization. Reference https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifiledialog-setfolder",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1b9b3-e3e9-7be1-b45e-79bbe959687d",
+  "external_ref": null,
+  "title": "Clear declared_verdict_pending when boot or the stale sweep interrupts a settling declared observation",
+  "outcome": "An observation that was in declared settlement (declared_verdict_pending = true) when the host restarted, or when the runtime-change stale sweep marked it interrupted/Unknown, has its pending flag cleared. Its run can then compact, and a later off-lock declared-verdict application cannot overwrite an interrupted row to Passed/Failed while interrupted = true and the stale error remain.\nToday (src/test_run_observations.rs about line 147; boot sets Unknown/interrupted but leaves the flag; the only writer that clears it is apply_declared_verdict_to_test_run_with_detail in engram_turn_checks.rs about line 2266; the stale sweep around lines 1113-1116 skips it once interrupted), test_run_compaction_eligible_with (test_run_compaction.rs about line 218) returns false forever for that run.\nFix direction: clear the flag where boot or the stale sweep already settles the row Unknown, or have compaction treat an interrupted pending row as settled.\nSource: Low from the Claude review of combined candidate d3499b97 (delegation 11a2eb9d), in component 0d9fd6be (declared settlement). It is not introduced by the composition. It may duplicate an earlier Low Sol-edfd filed as the \"a389 interruption overwrite\"; if so, supersede one with the other.",
+  "acceptance": [
+    "Clear declared_verdict_pending when boot or the stale sweep interrupts a settling declared observation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "compaction",
+    "declared-checks",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1b8cd-2c9e-7f91-8f0b-95a513ed9ba6",
+  "disposal_reason": "Duplicate of existing boot/stale interrupted-settlement compaction retention in w-95a513ed9ba6, with its delayed-applier overwrite effect already separately tracked by w-a3892579da0a. Both canonical items read in full and annotated with Opus #494 / d3499b97 Claude11a2eb9d provenance. Preserve this item's original text; no defect fixed, no tests run, and no train blocker introduced.",
+  "completion": null
+}

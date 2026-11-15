@@ -1,0 +1,31 @@
+{
+  "id": "01a175f4-0ba7-74c2-9468-20f0f0dc67be",
+  "external_ref": null,
+  "title": "Identify the remaining C: disk queue/write-latency pressure during the post-restart gate window",
+  "outcome": "Identify the workload or writers behind the observed loaded C: disk queue/write-latency pressure, or name the missing attribution evidence and a bounded next discriminator. Preserve the distinction from the central host's aggregate write rate and the historical Windows hard reset.",
+  "acceptance": [
+    "The 2026-10-26 01:47:05Z–01:58:27Z OS capture and concurrent-load timeline are recorded, including raw artifacts, stable host identity, counter coverage and cadence gaps.",
+    "A bounded, coordinator-authorized discriminator identifies the dominant workload/writers or explicitly records why attribution remains unavailable; no live-store access or historical hang-causation claim is used.",
+    "Any proposed mitigation is tied to the observed cause and independently reviewed; if no mitigation is justified, record the evidence and an explicit disposition."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "disk",
+    "observed-evidence",
+    "performance",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

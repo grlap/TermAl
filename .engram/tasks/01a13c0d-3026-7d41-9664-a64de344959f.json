@@ -1,0 +1,29 @@
+{
+  "id": "01a13c0d-3026-7d41-9664-a64de344959f",
+  "external_ref": null,
+  "title": "Cover the ordinary checkpoint summary for non-pipe compound refusals",
+  "outcome": "Regression tests pin unchanged ordinary summary text/result lines for pipe-free compound commands and assert recognition or refusal for every other-compound test row.",
+  "acceptance": [
+    "Cover the ordinary checkpoint summary for non-pipe compound refusals is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-recognition",
+    "host-recording",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a139e0-b00c-7500-8334-b07cc4b2834b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

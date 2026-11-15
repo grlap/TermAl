@@ -1,0 +1,31 @@
+{
+  "id": "01a1cd87-dc0d-7e31-b031-2ed9a57b779c",
+  "external_ref": null,
+  "title": "Move Engram CLI transport behavior tests into their owning test module",
+  "outcome": "Move Engram CLI transport behavior tests into their owning test module",
+  "acceptance": [
+    "Engram CLI retry, admission, wait/warning and operation-floor tests live in a focused test module associated with their transport owner.",
+    "Module mounting preserves the moved observable tests without duplication or production behavior changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance",
+    "engram-adapter",
+    "greg-directed",
+    "limits",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

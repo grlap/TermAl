@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7a4-7010-bd5e-5191453db774",
+  "external_ref": "tm-vgm1",
+  "title": "Cap terminal structured-review recovery polling",
+  "outcome": "A required review that failed closed without a submission retains review_result_schema_version=None, causing every later status/result/output/cancel/followup call to repeat the durable mailbox lookup and state-lock sequence. Add a persisted or otherwise durable terminal recovery-check marker that caps redundant I/O while preserving recovery of envelopes committed before terminalization.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a188bf-4e3b-7a93-bb1d-23b6b3784927",
+  "external_ref": null,
+  "title": "Source-root naming bind adopts a session_bind token without checking status.session_id",
+  "outcome": "The source-root naming bind (src/engram_source_roots.rs, around lines 1959–1978) validates Engram's session_bind answer the same way the turn binder and the recovery replay do. Before adopting the routing token it requires a non-empty token, a phase, and status.session_id equal to the session (engram_validated_bind_answer). Otherwise it fails closed and adopts nothing.",
+  "acceptance": [
+    "Source-root naming bind adopts a session_bind token without checking status.session_id is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

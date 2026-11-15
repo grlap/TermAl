@@ -1,0 +1,28 @@
+{
+  "id": "01a18969-f6a3-7503-90d4-adcb9c101ec4",
+  "external_ref": null,
+  "title": "Give a test after an environment assignment or on a later script line its own uncredited reason and a remedy that keeps the assignment",
+  "outcome": "A recognised test that gets no check because a literal NAME=value assignment comes before it, or because it sits on a later line of a multi-line script, gets a host line naming that reason. Its one-call remedy does not silently drop the assignment, for example a job throttle.",
+  "acceptance": [
+    "Give a test after an environment assignment or on a later script line its own uncredited reason and a remedy that keeps the assignment is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

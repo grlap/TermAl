@@ -1,0 +1,35 @@
+{
+  "id": "01a138d6-e73d-76d2-ba7b-55e011699e9e",
+  "external_ref": null,
+  "title": "Retired Codex handshakes clear deferred terminal and provisional identity state on watchdog expiry and reader exit",
+  "outcome": "Exact owned expiry/reader-exit cleanup clears bounded deferred candidates and provisional/unresolved handshake state consistently with RPC failure cleanup; a newer request is never cleared.",
+  "acceptance": [
+    "On a matching watchdog expiry or reader exit, clear deferred terminal candidates and provisional/unresolved handshake state alongside the existing request flags under the same ownership lock.",
+    "Focused checks cover owned expiry/reader exit and a superseding request; cleanup cannot settle a receipt, dispatch or replay provider work."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "agent-runtime",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

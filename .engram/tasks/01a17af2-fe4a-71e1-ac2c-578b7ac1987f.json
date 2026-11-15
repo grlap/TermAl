@@ -1,0 +1,28 @@
+{
+  "id": "01a17af2-fe4a-71e1-ac2c-578b7ac1987f",
+  "external_ref": null,
+  "title": "Skip stateDiff serialization while no opted-in /api/events connection is subscribed",
+  "outcome": "Skip stateDiff serialization while no opted-in /api/events connection is subscribed",
+  "acceptance": [
+    "The state broadcaster counts opted-in (stateDiff=1) /api/events connections the same way it counts legacy ones: registered before subscribe, and released by a guard that owns the stream's lifetime. It skips stateDiff serialization while that count is zero, without breaking base alignment for the first opted-in client to arrive. A deterministic test shows that, with only legacy subscribers, each cut serializes only the full state."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "review-low",
+    "state-broadcast"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

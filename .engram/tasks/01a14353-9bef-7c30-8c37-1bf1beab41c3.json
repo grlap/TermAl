@@ -1,0 +1,28 @@
+{
+  "id": "01a14353-9bef-7c30-8c37-1bf1beab41c3",
+  "external_ref": null,
+  "title": "Work table: prevent sorted header text overflowing fixed narrow columns",
+  "outcome": "Check and correct sorted header layout at the Work table's minimum width while preserving stable column widths across virtual windows.",
+  "acceptance": [
+    "At the minimum table width, sorting Priority, Lifecycle and Availability leaves each header and its sort indicator readable without overlapping the next column.",
+    "A targeted layout witness discriminates the offending header/indicator overflow and the corrected behavior while column allocation remains independent of mounted rows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

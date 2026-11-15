@@ -1,0 +1,29 @@
+{
+  "id": "01a1461e-417e-7012-8c1b-4f6bcf8b7feb",
+  "external_ref": null,
+  "title": "Log why an optional withheld-check need inspection falls back to unknown",
+  "outcome": "Provide a bounded host-log breadcrumb when the optional work core inspect read fails, times out, cannot decode, or returns incoherent binding data, while preserving explicit Unknown advice and unchanged credit, read budgets and no-retry behavior.",
+  "acceptance": [
+    "Log why an optional withheld-check need inspection falls back to unknown is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2f8-1e31-7b91-9aed-4f5100c27046",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

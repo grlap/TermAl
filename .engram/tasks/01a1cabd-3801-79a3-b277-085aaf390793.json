@@ -1,0 +1,31 @@
+{
+  "id": "01a1cabd-3801-79a3-b277-085aaf390793",
+  "external_ref": null,
+  "title": "Tighten workspace recovery warning timing and identity assertions",
+  "outcome": "The fake-clock workspace recovery tests distinguish the intended warning from unrelated console warnings and catch a warning emitted before 10 seconds.",
+  "acceptance": [
+    "The recovery warning tests assert no warning through 9,999 ms and the intended recovery warning after the final millisecond, without real waits.",
+    "Slow-server and slow-session-metadata success and the deadline-abort case continue to assert one non-aborting warning and existing cleanup and late-result fencing behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "greg-directed",
+    "limits",
+    "review-low",
+    "test-quality",
+    "workspace-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

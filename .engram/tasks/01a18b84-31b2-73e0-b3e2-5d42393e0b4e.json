@@ -1,0 +1,38 @@
+{
+  "id": "01a18b84-31b2-73e0-b3e2-5d42393e0b4e",
+  "external_ref": null,
+  "title": "Cover requested claim and canonical run drift in same-binding maintenance opening classification",
+  "outcome": "Existing request-boundary regression coverage distinguishes a genuine requested-claim or canonical-run/run-generation mismatch from a qualified same-binding unpublished maintenance transition, preserving final409 versus retryable503 semantics.",
+  "acceptance": [
+    "Request-level negative controls using the existing fixture reject requested-claim and canonical active-run/run-generation mismatches with the existing409 while the captured same-binding InFlight predicate itself remains true; the existing valid same-binding503 control remains intact."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "check-credit",
+    "control-plane",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18b2f-32ed-7a12-8c16-c7e091c65727",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

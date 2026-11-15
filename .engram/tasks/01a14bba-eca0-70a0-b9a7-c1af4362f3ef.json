@@ -1,0 +1,37 @@
+{
+  "id": "01a14bba-eca0-70a0-b9a7-c1af4362f3ef",
+  "external_ref": null,
+  "title": "Remote foundations P-mac: macOS satellite lane — transport, process supervision and paths for a macOS satellite, proven by the onboarding checklist",
+  "outcome": "Remote foundations P-mac: macOS satellite lane — transport, process supervision and paths for a macOS satellite, proven by the onboarding checklist",
+  "acceptance": [
+    "A macOS satellite runs the satellite side of L1/M2/M4 natively (process supervision, paths, shell and signal handling), with platform-conditional code covered by tests that run on macOS and do not break the Windows gate.",
+    "The O1 verification checklist passes against the real Mac satellite (MacBookPro) in an operator-authorized session; SSH settings on the Mac are Greg's acts.",
+    "Linux and Windows satellites reuse the same lane structure: the platform-specific parts are isolated so that a later P-linux / P-windows slice adds a platform without redesign.",
+    "Exact-input focused tests, the full five-stage gate on A and an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14b98-032e-7f70-922a-93105e5592c0",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a14bba-5237-7013-b829-8e1fd94e3924"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

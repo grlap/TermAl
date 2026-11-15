@@ -1,0 +1,31 @@
+{
+  "id": "01a16cf8-5e98-74e0-97be-cb1fba285cc3",
+  "external_ref": null,
+  "title": "Route remaining reclamation oracle-only witnesses through the snapshot planner",
+  "outcome": "Cooldown-expiry and live completion witnesses cover production snapshot planning as well as the former locked oracle.",
+  "acceptance": [
+    "The post-cooldown replan in src/tests/engram_named_root_reclamation_readers.rs and planner calls in src/tests/engram_named_root_completion_live.rs compare the snapshot path and former locked oracle without weakening existing assertions.",
+    "Relevant focused tests pass on the changed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-low",
+    "state-lock",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16cac-987f-70f0-8369-c75f102fcb10",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a14f96beaa5",
+  "external_ref": "tm-7cu.27",
+  "title": "Extract and test SessionPaneView document-key authority",
+  "outcome": "Move body/document upward-key ownership predicates and registration out of the oversized SessionPaneView.scroll.ts into a focused module with positive transcript-ownership and negative outside-pane tests. Preserve the production A-to-B-to-A keyboard offset behavior while preventing app-wide body keys from detaching the transcript.",
+  "acceptance": [
+    "Focused module owns document key scoping; positive body-focused transcript case and negative outside-transcript case pass; SessionPaneView.scroll.ts no longer contains the standalone subsystem; UI gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

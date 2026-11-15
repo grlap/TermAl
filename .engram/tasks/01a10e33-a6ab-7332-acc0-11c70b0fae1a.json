@@ -1,0 +1,47 @@
+{
+  "id": "01a10e33-a6ab-7332-acc0-11c70b0fae1a",
+  "external_ref": null,
+  "title": "Landing 2: retain dedicated Windows Claude/ACP cleanup ownership and preserve recovery",
+  "outcome": "Landing 2: retain dedicated Windows Claude/ACP cleanup ownership and preserve recovery",
+  "acceptance": [
+    "On the frozen Landing 2 integration-rework input at prospective Git tree 29a9f9de9f636bf4586b5b263212ae0f429b3808, Windows dedicated Claude/ACP cleanup uses the exact retained process-tree lease: cleanup is bounded and performed outside state/lease/registry locks, job-zero confirmation distinguishes success from uncertainty, and an unresolved current owner remains visible and retriable through the public non-UI Stop route.",
+    "On that same input, the corrected admission/reset/Stop recovery preserves parked admission retries during a dedicated reset, denies admission and bind release while current or predecessor cleanup is held, and preserves an unbegun promoted user head during public Error-owner Stop recovery. Regression controls require the unchanged master semantics: a held current drain returns Ok(None) without external requests, and a saved begin without an active grant records uncertainty/rebind rather than an immediate checkpoint; a separate active-grant control requires its checkpoint.",
+    "The earlier in-scope Medium corrections remain present and reviewed on that same input: visible natural-waiter cleanup failure with retained exact ownership; ACP pending-call drain before EOF; bounded off-lock failed-launch ownership retention; atomic runtime assignment/owner registration; exact Confirmed revocation suppression; ordinary/root callback checkpoint and join ordering; retained Error after late quarantined failure; denied uncertain late-reader projection; and successful-result joining of an exact InProgress owner with locked owner/generation/Stop revalidation.",
+    "The maintained five-stage full gate passes on that exact input, compiled from it, with a passed host-recorded Test verification on this slice's claimed run before independent acceptance evaluation. The judged source revision, named source root, launcher input fingerprint and gate run are explicitly associated; another item's passing check alone does not satisfy this binding.",
+    "The independent read-only Codex/Claude pair reviews every hunk of all 33 staged paths and affected production consumers on that same input, applies all six repository lenses, and has no outstanding in-scope Medium or higher finding. All six remaining Low findings are filed or deduplicated with provenance; reviewer measurements and parent-executed test evidence remain separately attributed.",
+    "This slice makes no claim that the parent is complete: parent acceptance criteria 2–4, including shared Codex isolation, Delete/delegation removal and settlement, and the combined actual-vendor proof matrix, remain open for Landing 3. The parent criteria are unchanged, preserved L3a roots are untouched, and no actual-vendor or Unix descendant-cleanup guarantee is inferred from the protocol fixtures."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "agent-workflow",
+    "delegation",
+    "process-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a10476-5262-7632-86da-24055bbb2390",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered dedicated Windows Claude/ACP retained cleanup ownership and public Stop recovery on exact tree29a9f9de. Independent acceptance b9ab031557fd4ff29c2343aed2ee70e5 remains fresh, all6PASS, own Test0074b38e/test-eadbc5ad five stages passed and exact Codex/Claude pair clean Medium+. Feature commit a5ce6035a1c49d196130ac707d7508f726d8ba1a is integrated per Opus2 mailbox #165/mailbox-message-8a41f341-6a71-445c-8db4-97f736e3b505 into train49 master=origin/master f0dcb9751101b53be03774d5041b7e1d11ee0ef1, treea956517d, staged patch-id equal; integration gate test-a0431588 five stages passed and integration pair no findings are Opus-attributed evidence, not borrowed slice credit. Installation hash not yet supplied and no host restart claimed. Parent criteria2-4/Landing3 remain open; six residual Lows separately filed; no actual-vendor/Unix proof or root cleanup claimed.",
+    "completed_at": "2026-10-06T04:20:38.612598400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

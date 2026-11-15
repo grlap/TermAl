@@ -1,0 +1,29 @@
+{
+  "id": "01a1db7f-51bb-7141-9025-ef74c6284b8a",
+  "external_ref": null,
+  "title": "Central disk sweep 2026-11-14: remove served worktrees of idle/retired sessions (11519, 7422, 11466, 14549, 11465, 8582, 12415, 11865)",
+  "outcome": "Central's C: drive has room again for builds and full runs. Every served, clean worktree of the listed idle or retired sessions is removed without --force. Worktrees that can't be removed safely keep their source and lose only target\\, and they are listed. Nothing in .evidence or .logs is touched.",
+  "acceptance": [
+    "Per root, the record gives the path, HEAD, why it qualified (clean, reachable commit, not a named root, inside .tmp, owner session idle or gone) and the action taken; roots kept or only target-cleaned are listed with the reason.",
+    "The total freed is reported from the disk-free readings before and after, and sent to Fable2."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "central",
+    "cleanup",
+    "disk"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

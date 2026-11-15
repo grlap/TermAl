@@ -1,0 +1,36 @@
+{
+  "id": "01a0f409-f02a-7973-8d27-32618200ad53",
+  "external_ref": null,
+  "title": "Extract the requested-claim resolution from the acceptance request into a helper shared with the held-claims reader",
+  "outcome": "Extract the requested-claim resolution from the acceptance request into a helper shared with the held-claims reader",
+  "acceptance": [
+    "The `work ... core held --json` argument construction exists once, shared by read_engram_held_claims_from_cli and the acceptance request; the requested-claim resolution and row validation live in a helper with its own unit tests.",
+    "The acceptance tests use one shared held-read stub instead of eight repeated ones.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

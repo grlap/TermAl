@@ -1,0 +1,30 @@
+{
+  "id": "01a0f625-e6b3-7ef1-9be6-3ecc288b624f",
+  "external_ref": null,
+  "title": "Order learned naming history independently of foreign generation numbers",
+  "outcome": "Order learned naming history independently of foreign generation numbers",
+  "acceptance": [
+    "Order learned naming history independently of foreign generation numbers is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1410b-5d27-7ce2-a5d3-476a089ca8ae",
+  "disposal_reason": "The parent is completed. Continue as independent work in Sol-a7bb's candidate list; Termal::Opus3 handles it under the TermAl coordinator (Termal::Fable2).",
+  "completion": null
+}

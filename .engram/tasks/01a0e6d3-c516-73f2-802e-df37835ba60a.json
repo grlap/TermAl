@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c516-73f2-802e-df37835ba60a",
+  "external_ref": "tm-gyan",
+  "title": "Cancel delayed response-board source navigation after newer user scroll",
+  "outcome": "AgentSessionPanel's response-board source-navigation subscription requests a bounded around-position history page and retries jumpToMessageId in requestAnimationFrame without checking the shared virtualizer user-scroll generation. If the user wheels, pages, or drags the scrollbar between acceptance and the frame, the delayed retry can yank the viewport. Align this path with useConversationMarkerJump: begin/capture the shared generation, then retry only if request/session/generation are still current; cover scroll cancellation and session-switch cancellation.",
+  "acceptance": [
+    "Delayed Response Board source navigation is canceled by newer wheel, page/arrow keys, scrollbar or touch navigation both before history completion and before the queued jump frame, including when the transcript remains non-virtualized and both handles are null. Without newer navigation, short DOM transcripts still jump successfully. Existing virtualized cancellation, fresh-handle handoff, superseding request, rejection, session-switch and unmount guards remain intact. Add a null-handle cancellation regression that fails before the fix and verify affected suites and TypeScript."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

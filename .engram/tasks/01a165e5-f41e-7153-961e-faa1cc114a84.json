@@ -1,0 +1,59 @@
+{
+  "id": "01a165e5-f41e-7153-961e-faa1cc114a84",
+  "external_ref": null,
+  "title": "Hold measured over-budget retained admissions instead of repeating unchanged retries",
+  "outcome": "Land the schema-neutral latency hold independently while the parent's issued-grant retirement obligation remains open.",
+  "acceptance": [
+    "A typed withheld admission-attempt budget exhaustion on the current still-gated retained head enters an explicit measured latency hold instead of rescheduling an unchanged automatic Evaluate. The hold names the original prompt and generation, measured evaluate (including its separately shown admission fence), total, configured budget and explicit Resume-or-Cancel retry condition, without resetting the original head or recovery window.",
+    "The hold is qualified by the current attempt's typed cause and immutable continuation/owner identity, not elapsed time alone or a stale card. Ordinary proven-no-transmission fail-open, explicit Refuse/Defer, successful grant or grantless delivery, and possibly-sent or restart-ambiguous Begin recovery retain their distinct semantics. No retirement phase, schema change, guessed grant TTL or partial retirement is introduced. The overall admission-lineage window-spent predicate is checked before the per-attempt hold; the running-window branch never resets or extends that lineage window, and the spent-window branch retains its separate exhaustion disposition.",
+    "Focused deterministic clock-seam and production-clock-path controls exercise the real admission, park, causal-card and retry scheduler paths, including repeated recovery ticks, preserved original head/window, explicit Resume and relevant negative boundaries. Existing affected admission/replay regressions pass; assertions do not fabricate measured cards as the sole end-to-end evidence or use synthetic load.",
+    "The exact frozen input passes the maintained full gate and the required independent source-review pair with no outstanding in-scope Medium-or-higher finding, then independent acceptance and the authorized integration handoff preserve that exact-input evidence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "admission-retry",
+    "engram-host-adapter",
+    "gate-load",
+    "p0-profiling-2026-10-22",
+    "required-slice",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a164fe-ad7d-7622-98bb-260d2528bc15",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

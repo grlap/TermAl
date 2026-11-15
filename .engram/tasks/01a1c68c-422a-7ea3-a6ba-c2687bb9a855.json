@@ -1,0 +1,30 @@
+{
+  "id": "01a1c68c-422a-7ea3-a6ba-c2687bb9a855",
+  "external_ref": null,
+  "title": "A root session waiting in termal_resume_after_delegations gets no mailbox wakes until the fan-in fires, so a coordinator can't schedule during a long review",
+  "outcome": "A root session waiting in termal_resume_after_delegations gets no mailbox wakes until the fan-in fires, so a coordinator can't schedule during a long review",
+  "acceptance": [
+    "While a root session has an open termal_resume_after_delegations wait, a new mailbox message can start an ordinary turn for that session; the delegation wait stays armed and still delivers its fan-in prompt once the delegations finish, exactly once; a test shows a mailbox wake handled during an open wait and the later fan-in still delivered.",
+    "The fan-in prompt is never lost or duplicated by an intervening mailbox turn, and a fan-in that becomes ready during an active mailbox turn is queued and delivered after it; a test shows it.",
+    "The sender's notificationDisposition reflects the actual state (for example woken during an open wait) rather than a paused queue; a test shows it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "delegation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c77e-7f62-b6ba-644475d218fd",
+  "external_ref": "tm-uw7j.6",
+  "title": "Retry quarantined Engram runtime teardown during project deletion",
+  "outcome": "Project deletion currently decides whether runtime teardown is needed from the current project settings fingerprint. If a prior disable committed enabled=false but shutdown failed, a live quarantined runtime with an installed Engram descriptor can survive deletion without another teardown attempt. Derive deletion cleanup from installed runtime/quarantine state as well as settings.",
+  "acceptance": [
+    "Deleting a project retries teardown for every affected live installed or quarantined Engram runtime even when settings are disabled; failed cleanup remains durable and visible; a disable-shutdown-failure then delete regression covers the path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

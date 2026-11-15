@@ -1,0 +1,27 @@
+{
+  "id": "01a1872f-6411-7fb1-9b55-eda8d9be214f",
+  "external_ref": null,
+  "title": "Audit the owed-bind GiveUp: an uncertain bind is dropped after 8 attempts or 30 minutes, including across restarts",
+  "outcome": "The owed verification-bind GiveUp (engram_owed_bind_step) is audited against the retention requirement: a decided bind that may have been dispatched is not dropped from custody solely because of its attempt count or age, including after repeated host restarts. Instead it stays retained for an identity-matched readback, or for a durability-confirmed handoff to an existing owner.",
+  "acceptance": [
+    "Audit the owed-bind GiveUp: an uncertain bind is dropped after 8 attempts or 30 minutes, including across restarts is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "lost-reply"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

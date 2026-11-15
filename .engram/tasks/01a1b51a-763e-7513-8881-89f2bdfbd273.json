@@ -1,0 +1,28 @@
+{
+  "id": "01a1b51a-763e-7513-8881-89f2bdfbd273",
+  "external_ref": null,
+  "title": "Make watcher ignore-classification failure visible and keep malformed paths from disabling an entire batch",
+  "outcome": "A persistent ignore-query failure is diagnosable without event spam; classification failure conservatively preserves notification coverage.",
+  "acceptance": [
+    "Make watcher ignore-classification failure visible and keep malformed paths from disabling an entire batch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "followup-proposal",
+    "review-low",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

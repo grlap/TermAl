@@ -1,0 +1,32 @@
+{
+  "id": "01a1a37e-14b0-7f01-ae8c-cd4ee98f02f2",
+  "external_ref": null,
+  "title": "Remove the undefined historical gitlink payload reference from source identity conformance",
+  "outcome": "Remove the undefined historical gitlink payload reference from source identity conformance",
+  "acceptance": [
+    "The conformance requirement is self-contained and specifies typed Git identity with no new content-v1 gitlink chunk, without depending on an unnamed draft."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "architecture",
+    "cross-project",
+    "docs",
+    "docs-only",
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a23f-d694-7041-b135-ccbea5f6c63c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

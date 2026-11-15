@@ -1,0 +1,32 @@
+{
+  "id": "01a1684b-b6d4-7932-8f9c-90379cc709ee",
+  "external_ref": null,
+  "title": "Bound live credit-admission blocking workers after response timeout",
+  "outcome": "Keep total HTTP response bounds while preventing retries from accumulating still-running credit-admission blocking workers stalled in filesystem or other noncancellable I/O. Preserve exact authority/durability guards and candidate retry semantics.",
+  "acceptance": [
+    "Credit-admission workers have an explicit live-work bound that includes workers still executing after their response deadline, and surplus requests receive a typed bounded refusal.",
+    "A deterministic held-worker regression proves the live bound and safe release/retry, without sleeps, inflated deadlines, false acknowledgement or duplicate admission identities."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "host-capability",
+    "launcher",
+    "resource-bound",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16742-3d70-74e2-8a89-273596743af6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

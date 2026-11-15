@@ -1,0 +1,27 @@
+{
+  "id": "01a0f93b-56d1-7042-9ed2-0df837639307",
+  "external_ref": null,
+  "title": "Two Rust tests that build a fresh git repository failed with \"fatal: not a git repository\" in a full gate under heavy concurrent load",
+  "outcome": "The cause of the transient \"not a git repository\" failure is identified and removed or contained, so test fixtures that build a fresh repository fail only for a real defect",
+  "acceptance": [
+    "Two Rust tests that build a fresh git repository failed with \"fatal: not a git repository\" in a full gate under heavy concurrent load is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "gate-failure",
+    "test-infra"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

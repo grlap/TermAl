@@ -1,0 +1,27 @@
+{
+  "id": "01a152b3-4535-75f3-a52b-757bfe2598c8",
+  "external_ref": null,
+  "title": "install_federation_mailbox_binding is never used in the non-test build, so cargo check warns on master",
+  "outcome": "cargo check and cargo test --bin termal build without the dead-code warning for AppState::install_federation_mailbox_binding (src/federation_mailbox_bindings.rs:86). Either a production caller uses it, or it is gated to the configuration that calls it (for example #[cfg(test)], or #[cfg_attr(not(test), allow(dead_code))] with the reason stated, until the planned caller lands).",
+  "acceptance": [
+    "install_federation_mailbox_binding is never used in the non-test build, so cargo check warns on master is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "compiler-warning",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

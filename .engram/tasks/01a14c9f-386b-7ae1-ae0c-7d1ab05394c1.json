@@ -1,0 +1,40 @@
+{
+  "id": "01a14c9f-386b-7ae1-ae0c-7d1ab05394c1",
+  "external_ref": null,
+  "title": "Distinguish embedded host diagnostics from launcher fields and query refusals",
+  "outcome": "Launcher diagnostics unambiguously separate host detail from launcher phase/category and identify GET refusals as query refusals.",
+  "acceptance": [
+    "A host error containing phase/category keys cannot be mistaken for the launcher's own phase/category by the supported diagnostic representation.",
+    "A GET refusal after accepted POST is described as a query refusal; known status remains definitive and causes no execution/retry.",
+    "Relevant authorized tests pass with host-recorded evidence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "host-recording",
+    "registration",
+    "review-follow-up",
+    "test-launcher",
+    "test-run-registration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14278-d7bc-7553-bfce-8591ae50da25",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

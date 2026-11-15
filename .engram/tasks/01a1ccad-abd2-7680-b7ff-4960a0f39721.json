@@ -1,0 +1,29 @@
+{
+  "id": "01a1ccad-abd2-7680-b7ff-4960a0f39721",
+  "external_ref": null,
+  "title": "Remove the unused Urgent reveal path and misleading comments",
+  "outcome": "Urgent-to-view selection code and comments accurately describe remount and reveal behavior.",
+  "acceptance": [
+    "Unused Urgent reveal state, unreachable branches and handlers are removed, or an observable reveal on return is implemented.",
+    "Tests distinguish retained logical selection from an actual reveal request and comments match that behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "ui",
+    "work-panel"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a109a4-72fd-7dd2-a571-3ce8c6b123aa",
+  "external_ref": null,
+  "title": "Exercise a real native-to-native executable alias through Engram host launch",
+  "outcome": "A positive host-launch control creates an owned executable-to-executable symlink, verifies the resolved native target and direct argument shape, and executes a bounded real launch; a resolver that rejects every same-kind native alias fails the witness.",
+  "acceptance": [
+    "Exercise a real native-to-native executable alias through Engram host launch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1ac7c-6180-7b01-84ff-51a78091eacf",
+  "external_ref": null,
+  "title": "Resolve the marker browser check root and bundler dependency before creating scratch output",
+  "outcome": "The manual marker browser check uses the repository root consistently and gives a clear dependency error before creating misplaced scratch directories.",
+  "acceptance": [
+    "The browser check derives or validates its repository root independently of the caller's working directory; running from ui or another directory cannot create a stray ui/.tmp tree before failure.",
+    "The esbuild dependency is explicitly supported or fails clearly before scratch output is created, and the documented root invocation still checks the actual React component in light and dark.",
+    "The unused single-value density dimension is removed or replaced with correctly resolved density coverage, with its actual scope stated."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "UI",
+    "review-followup",
+    "test-tooling"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a1b8b7-2993-7d40-ade6-0bfc97b43f43",
+  "external_ref": null,
+  "title": "Post-done named-root release returns 'superseded authority image' instead of a clear lifecycle result",
+  "outcome": "Clarify and correctly implement releasing an item's named source root after completion: distinguish an already ended binding from a stale authority image, without granting mutation after a claim ends.",
+  "acceptance": [
+    "The cause is recorded from code and this occurrence. It says what `done` does to the item's named source root binding (ends it, keeps it, or leaves it for release), and why a release after `done` returned the 'superseded authority image' 409 instead of a lifecycle result.",
+    "A named-root release after `done` returns a clear, definite lifecycle result. Either it succeeds idempotently with 'already ended by completion' when completion has ended the binding, or it refuses with a named reason that says what the caller should do. No mutation authority is granted after the claim has ended, and a genuinely stale authority image is still refused as today.",
+    "Deterministic tests cover: release after `done` (binding already ended); release after `done` when completion leaves the binding open (if that state exists); and a genuinely stale authority image. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed post-completion own-clear lifecycle results in d3499b97, preserving stale authority refusals; deterministic regressions, independent reviews and both exact-tree full gates pass.",
+    "completed_at": "2026-11-08T07:49:55.615903200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

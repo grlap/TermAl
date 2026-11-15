@@ -1,0 +1,32 @@
+{
+  "id": "01a1684b-b724-7d83-9c8b-42bbeb435048",
+  "external_ref": null,
+  "title": "Retain operational failure causes in credit-admission diagnostics",
+  "outcome": "Preserve bounded internal diagnostic context for credit-admission persistence, fence, transport and request-decoding refusals, correlated with the exact run, while retaining typed public refusal contracts.",
+  "acceptance": [
+    "Operational refusal diagnostics identify the run and distinguish underlying persistence/fence/transport or decoding causes without exposing sensitive bodies or changing typed API refusal semantics.",
+    "Focused deterministic controls verify diagnostic correlation for representative causes, including a failed persist candidate followed by unchanged retry, without granting credit or an early acknowledgement."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "gate-load",
+    "host-capability",
+    "launcher",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16742-3d70-74e2-8a89-273596743af6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a158db-cff1-71e0-b573-6169e432341d",
+  "external_ref": null,
+  "title": "Capture full failure context in the concurrent same-key reference publication test",
+  "outcome": "Capture failure context for the concurrent same-key reference-publication test through its contender/status/body assertion and separate test-only stage/raw-error/SQLite diagnostics, with deterministic forced-error formatting coverage and no production semantics, timing, retry or budget change. This observability increment does not diagnose or close the parent bug.",
+  "acceptance": [
+    "The concurrent same-key reference-publication test's failure assertion reports the failing contender index, HTTP status and response body. For instrumented server-error paths, separate cfg(test) diagnostic output reports the failing stage and raw error, including the SQLite primary and extended result codes when the underlying error is SQLite. A deterministic forced-error test verifies that this diagnostic formatting retains those fields. This increment does not promise per-request correlation, exhaustive coverage of every server-error return or diagnosis of the parent bug.",
+    "The change is test-only or cfg(test)-only observation: production behaviour, error mapping, timing, retries and budgets are unchanged, as shown by the diff and the review pair.",
+    "The full maintained gate passes on the final input, and an independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "concurrency",
+    "diagnosis-required",
+    "federation",
+    "gate-blocker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15894-92a9-7bd0-931c-a083265b93d8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed test-only reference-publication failure context: contender/status/body assertions and cfg(test) stage/raw-error/SQLite diagnostics, with deterministic forced-error formatter coverage. Production behavior unchanged. Exact treec2c3340f pushed as8207cc3f on origin/master.",
+    "completed_at": "2026-10-20T14:18:41.418712200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

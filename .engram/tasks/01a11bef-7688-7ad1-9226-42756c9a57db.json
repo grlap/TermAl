@@ -1,0 +1,28 @@
+{
+  "id": "01a11bef-7688-7ad1-9226-42756c9a57db",
+  "external_ref": null,
+  "title": "Keep one-call Build directory and runtime-exit provenance in rejection summaries",
+  "outcome": "Reuse the existing one-call rendering so a rejected pushd Build retains its directory, and qualify the runtime-reported shell-line exit without falsely attributing it to native Build. Preserve existing association and credit guards.",
+  "acceptance": [
+    "Keep one-call Build directory and runtime-exit provenance in rejection summaries is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

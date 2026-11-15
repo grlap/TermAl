@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c427-7b23-a1cb-48250a81e14c",
+  "external_ref": "tm-8b7y",
+  "title": "Mirror an uncertain Engram turn-begin outcome durably when a delegation child is canceled or fails",
+  "outcome": "Found by Codex /review-code on tm-cr0i round 3 and verified in source. When a child delegation is canceled (or fails) while a turn_begin is in flight: Stop skips the checkpoint because the local grant mirror is still None; settle_terminal_delegation_child_locked -> clear_delegation_child_queue_locked (src/delegations.rs:3492-3501) discards the child's queued prompts and with them any durable queued intent / begun_grant_id marker; the superseded-begin path (src/engram_host_adapter.rs ~4217-4252) fires its compensating turn_checkpoint with let _ = and on failure only sets rebind_required, never mirroring the grant into active_grant_id. A crash in that window leaves: delegation Failed/Canceled persisted, active_grant_id None, no queued intent, routing token present - while Engram still has the grant begun. Today only eager boot recovery reconciles this (token -> session_status -> open_grant_id -> turn_checkpoint). The control fixture models Engram refusing a fresh session_bind while a grant is begun (invalid_control_session), so losing the token or skipping recovery would strand the child. tm-cr0i therefore skips only Completed children at boot and keeps Failed/Canceled eager. Fix direction: persist a durable uncertain-begin marker (or mirror the grant id) on the session record at cancellation/failure and when the compensating checkpoint fails, so local state is trustworthy; then extend the tm-cr0i skip to failed/canceled children and add a regression: cancel during begin, restart before settlement, assert the grant is checkpointed.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 9103e30 (ancestor of master f7db2c58).",
+  "completion": null
+}

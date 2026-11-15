@@ -1,0 +1,24 @@
+{
+  "id": "01a1a9b9-9c40-7f81-96ce-5d5ff290bca4",
+  "external_ref": null,
+  "title": "DL560 Codex runners can't remove small job companions: their command review refuses rm",
+  "outcome": "Finished job companions under /home/greg/github/TermAl/.tmp/r/*-s on DL560 have a supported way to go, or a recorded decision that they stay and until when.",
+  "acceptance": [
+    "DL560 Codex runners can't remove small job companions: their command review refuses rm is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

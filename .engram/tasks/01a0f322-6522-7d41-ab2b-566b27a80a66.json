@@ -1,0 +1,28 @@
+{
+  "id": "01a0f322-6522-7d41-ab2b-566b27a80a66",
+  "external_ref": null,
+  "title": "Engram Work detail reads do not stop when their HTTP handler is abandoned",
+  "outcome": "Pre-existing behavior, outside the Beads removal: get_project_work_detail in src/work_visualizer_detail.rs:169–186 creates no WorkReadAbandonGuard and passes no cancellation flag into read_project_work_detail_with_admission. An aborted detail handler can still acquire capacity and run show, unlike list/memories. Add bounded cancellation ownership and discriminating no-spawn-after-abort coverage without changing ordinary reader identity/cursor behavior. Broader abandoned-read starvation and interruptible permit waiting are tracked separately by w-5567217e796c and w-553d32957dda; this item is the detail route's missing guard/wiring.",
+  "acceptance": [
+    "Engram Work detail reads do not stop when their HTTP handler is abandoned is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-removal",
+    "work-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2d2-0c6c-7590-93e9-78f1b409aeca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

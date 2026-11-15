@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-55854086cd7e",
+  "external_ref": "tm-m6r1.21",
+  "title": "Beads refusal: do not hide same-line store failures as unknown IDs",
+  "outcome": "Parent review Claude session-6981 Low; parent confirmed classifier source. beads_refusal_is_unknown_ids accepts a non-notice line containing both the known missing-ID clause and a database-is-locked suffix. This can map storage failure to detail404 or unread blocker evidence instead of502. Validate the full refusal clause and remainder, preserving legitimate bd diagnostics; add mixed unknown-ID plus store-failure regression. Source finding, not an observed live bd diagnostic.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Its subject, the Beads refusal path, is gone: Beads was removed on 2026-10-03, and no \"beads\" remains in src/work_*.rs on master.",
+  "completion": null
+}

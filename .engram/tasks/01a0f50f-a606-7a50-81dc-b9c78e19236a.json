@@ -1,0 +1,38 @@
+{
+  "id": "01a0f50f-a606-7a50-81dc-b9c78e19236a",
+  "external_ref": null,
+  "title": "Remote sessions get the post-loss body guarantee: the upstream's per-session body sequence and an honest read position through the proxy",
+  "outcome": "A remote session's conversation view has the same guarantee after a transport loss as a local one: the newest message is shown, no stale body passes as current, the resident window is restored, and the repair completes while the session streams. Today the P0 w-1b692f268123 leaves remote sessions as they are on master, because a proxy labels upstream bodies with its own revision and no sequence proves that a remote session's deltas were all received.",
+  "acceptance": [
+    "Every body-changing delta carries the session's sequence, contiguous per session, passed through the proxy unchanged; a server test shows it advances by exactly one per body change and by nothing else, while other sessions change.",
+    "Reads state the position of their bodies: the tail response, the history page and the session summary carry a per-session body sequence read under the same lock as the bodies, and for a remote session the proxy passes the upstream's value through unchanged, never its own counter or revision; server tests pin each.",
+    "The client admits a repair of a remote session by the session's own contiguous sequence, and the P0's liveness rows (plain attached tail, attached with a three-page head, detached, under deltas that never pause) pass for a remote session; a peer that sends no sequence is no worse than master.",
+    "The exact corrected input passes the full five-stage gate and an independent Codex and Claude review with no outstanding in-scope finding of Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "conversation-view",
+    "remote",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded inside the P0 w-1b692f268123, by the coordinator's decision (Termal::Fable2, mailbox 2a27fd51 #93): remote sessions that carry the sequence get it passed through unchanged (S4 of contract note 9a7e6f43436b4385967202c448d296f7), and a session without a sequence is left exactly as on master, pinned by a parity test at lagged. Nothing of this item is left outside those two.",
+  "completion": null
+}

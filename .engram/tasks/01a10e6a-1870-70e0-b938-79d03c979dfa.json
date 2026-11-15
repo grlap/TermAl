@@ -1,0 +1,72 @@
+{
+  "id": "01a10e6a-1870-70e0-b938-79d03c979dfa",
+  "external_ref": null,
+  "title": "Begin recovery slice A: durable exact replay and shared attempt fencing during normal operation",
+  "outcome": "Begin-unknown outcomes created during normal operation recover through exact durably owned replay and one provider handoff, using the existing bounded scheduler. Shared envelope/attempt fencing is reusable by later closing-checkpoint recovery. Saved unresolved begins stay fenced until slice B provides verified automatic boot reconstruction; the parent remains open.",
+  "acceptance": [
+    "A1: Before a first turn_begin can leave the host, a durable immutable begin envelope records the exact grant, delivery tokens, original begin idempotency key, grant expiry basis, retained head and dispatch generation, and stable session/project/store/work-binding authority. Preparation and its durable acknowledgement precede the send. Failed or ambiguous preparation persistence withholds the send and keeps an explicit hold; no runtime cache substitutes for the envelope. Tests discriminate both acknowledged send and withheld send.",
+    "A2: For an eligible begin-unknown created during normal operation, the existing shared retry scheduler automatically replays the exact retained begin semantics and key on a valid current control connection without Resume. An applied begin returns its retained receipt; a live issued grant begins at most once. Separate retained host-delivery evidence allows one handoff of an undelivered original head and prevents a second handoff. The lost-reply witness from the parent becomes passing alongside the healthy control. Existing 2/5/10/20/30/60-second delays, at most 20 percent positive jitter, bind/circuit not-before times, call/dispatch budgets, one-head guard and aggregate four-slot cap remain; timeout/unavailability keeps the same unresolved key, and cap deferral changes neither attempt index nor first-held time. Scheduled preview names begin reconciliation, attempt and due time.",
+    "A3: Begin slice A introduces one reusable envelope/attempt-owner/persistence-fence mechanism agreed with the closing-checkpoint holder. The operation-specific replay payload and outcome logic remain typed and separate. A unique envelope id/revision/attempt id is reserved under Inner and remains the owner through off-lock transport and guarded durable result acknowledgement; no lock spans transport or persistence waits. Stop, Cancel, Resume, ordinary admission, bind, reset, revocation and replacement explicitly join, defer or take over that owner. Barrier controls cover takeover before reservation, in flight and before local result commit: late results cannot clear another attempt, release a successor grant, resurrect a removed head, bypass operator pause or duplicate delivery. Remote success with failed/ambiguous local result persistence remains visibly held.",
+    "A4: An expired never-begun grant can enter fresh ordinary admission only after exact producer authority and the retained envelope validate that recovery route. Tests cover grant_expired as the recoverable expiry shape. Every grant_scope_mismatch, including one that follows a status read or resume expiry, remains explicitly held, with a negative witness, because the producer cannot attribute it to expiry of the exact grant. Missing grants, null/different status, stale identity and fresh evaluate are never negative proof or harmless probes; these cases remain explicitly held. Neither a new begin key nor a fabricated restart checkpoint is used to settle uncertainty.",
+    "A5: Saved unresolved begin ownership is fenced before competing boot, legacy bind, restart-checkpoint, Resume or admission actions can replace or retire it. Both old-format begin-unknown holds and new-format unresolved envelopes remain visible and retained through reload; slice A does not invent a replay envelope for an unverifiable legacy hold or automatically reconstruct boot recovery. Restart controls prove that no legacy wire action or provider handoff bypasses this fence. Verified old/new-format automatic boot reconstruction and completion of sidecar diagnostics remain slice B; neighboring closing-checkpoint settlement is not implemented.",
+    "A6: docs/features/engram-host-adapter.md describes the normal-operation begin recovery, shared ownership/fences and temporary boot hold boundary. Healthy admission/bind/abort, Stop/Cancel and held-mailbox controls remain covered. The maintained five-stage full gate passes on the exact final input with this slice's own passed host Test record; an independent read-only Codex/Claude pair has no outstanding in-scope Medium or higher and all remaining Lows are filed; an evaluator that never held this slice independently evaluates these exact criteria. The holder reports production added/deleted lines against its declared baseline, counting cfg(test) seams in product paths, and proposes another split before exceeding 500 production added lines."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "pilot",
+    "reliability",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10c85-3888-7713-8bc7-58cf44d04f2c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

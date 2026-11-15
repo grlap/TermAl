@@ -1,0 +1,37 @@
+{
+  "id": "01a0f323-f0b9-7411-86b2-3c4fcfcd3bab",
+  "external_ref": null,
+  "title": "The uncredited-test notice tells a session to name a source root it has already named in the same turn",
+  "outcome": "When a test runs in a worktree the session named as its claim's source root during the same turn, the notice says the name takes effect from the next turn and to run the test again then, instead of telling the session to name the root; and it does not contradict the source-basis notice in the same block.",
+  "acceptance": [
+    "A test in a worktree that is not the claim's named root at all still gets today's advice to name it; a test pins it.",
+    "A test names a source root for the claim inside a turn and then reports a recognised test in that root in the same turn: the holder's line says the root named in this turn is measured from the next turn and the test should be run again then, and does not say to name it.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "engram-host",
+    "notice-wording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

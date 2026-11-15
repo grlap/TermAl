@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c705-7031-9ad0-8067411a19d3",
+  "external_ref": "tm-ncc6.3.1",
+  "title": "Spawn the foreground launcher as a hidden, job-object-supervised child and record the receipt",
+  "outcome": "Command builder producing [node, scripts/test-launcher.mjs, preset, ...args] with cwd = root, CREATE_NO_WINDOW/setsid, TerminalProcessTree attach/resume (src/terminal.rs 657-694); read stdout until the receipt (run dir, manifest, expected fingerprint - tm-uex8.12), then detach from the pipes; store pid/run_dir/fingerprint; spawn a reaper thread (pattern: reap_engram_doctor_in_background) that finalizes from results.json on exit.\n\nREVIEW FIXES (F1, F3, F6, F9, F13): drain stdout/stderr to EOF with bounded capture (bounded_read_process.rs:46-110 template), parse the receipt from the stream, host run_id at spawn with state starting, dedicated job without kill-on-close (Windows) / setsid (Unix), CREATE_NO_WINDOW|CREATE_SUSPENDED then attach+resume, env TERMAL_SESSION_ID=<requester>, reaper thread finalizes once from results.json (serialized with boot reconciliation). Fixture: src/tests/fixtures/test-launcher-receipt-fixture.mjs (+ long-stdout variant).\n\nOUTPUT TO FILE (Greg, 2026-09-23): spawn with stdout+stderr redirected to the host-owned HOST_LOG file (opened before spawn, append mode, no pipes; stdin null); read the receipt by tailing HOST_LOG with a bounded wait (parse the one-line receipt from tm-uex8.12); after exit read the final summary from HOST_LOG; store host_log_path on the record. Delete the drain/reader-thread design; keep CREATE_NO_WINDOW|CREATE_SUSPENDED + named non-kill-on-close job + attach + resume, env TERMAL_SESSION_ID, reaper finalizing once from results.json.",
+  "acceptance": [
+    "- Receipt read from HOST_LOG within a bounded time; run_id returned before, run_dir/fingerprint after the receipt.\n- No pipe handles are created for the child (builder struct asserts Stdio::from(file) for stdout/stderr and null stdin).\n- Long final stdout (> 64 KiB) lands in HOST_LOG completely; the record finalizes once.\n- Creation flags asserted on the builder struct; no console window on Windows (GetConsoleWindow() == 0 in the fixture)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a426f8314ee",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

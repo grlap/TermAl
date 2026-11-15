@@ -1,0 +1,32 @@
+{
+  "id": "01a18720-da59-7a52-82f6-e6a66f22e994",
+  "external_ref": null,
+  "title": "w-c205 slice D: work-authority revoke keeps its identity, tells unsent from unknown, and reads back before a re-send",
+  "outcome": "The host's `engram authority revoke` path keeps its identity and arguments across retries, tells a revoke that never ran from one with an unknown outcome, replaces the text-matched lock retry, and reads back before any re-send. docs/features/host-architecture.md sections 5.3 and 2.7 describe the live command.",
+  "acceptance": [
+    "For the work-authority revoke, the original identity and arguments (grant, reason and any idempotency key Engram's CLI supports) are retained before send, and a lost or invalid reply is classified as proven-unsent or dispatched-without-valid-reply; timeout or cancel alone is never treated as rollback.",
+    "A dispatched-without-valid-reply revoke is disclosed as unresolved; it is re-sent only as an identical replay, or after a readback through Engram's supported contract, never under a rebuilt reason or identity and never on a text match alone.",
+    "Tests lose the revoke's reply after dispatch and show the classification, the disclosure and the identical replay or readback-before-retry."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "engram-interop",
+    "lost-reply",
+    "w-c205-slice"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a18617-8de1-79e3-b1cb-c205c0fecb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a18a73-f4ae-7b13-9dc1-a57f9fd3f193",
+  "disposal_reason": "The work-authority revoke this slice targets was deleted from Engram by cut B (commit 182c123, 2026-09-02). Engram has no revoke, grant readback or idempotency key, so the identity and readback criteria cannot be met. The replacement retires TermAl's dead revoke path and settles leftover tombstones visibly. Fable2 decision in TermAl mailbox df007e37 #1196; evidence in this item's note a685ba48.",
+  "completion": null
+}

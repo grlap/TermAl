@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c79d-74d3-a423-fbf46a9eb800",
+  "external_ref": "tm-v9r.17",
+  "title": "Move bounded in-memory history slicing outside the global state lock",
+  "outcome": "get_session_history clones the entire retained Session.messages vector while holding the global AppState mutex before it determines the requested bounded page. Active sessions can retain a large transcript between persistence trims, so one history request can extend the global critical section in proportion to transcript size and stall unrelated session operations.",
+  "acceptance": [
+    "Under the global state lock, capture only immutable metadata and a bounded range or a lightweight handle; perform any larger clone/read after releasing the lock. Add a regression or instrumentation demonstrating lock-held work is bounded by the requested page size for a large active session, while cursor and mutation-stamp semantics remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

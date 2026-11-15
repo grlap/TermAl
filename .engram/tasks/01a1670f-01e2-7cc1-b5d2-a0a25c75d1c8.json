@@ -1,0 +1,28 @@
+{
+  "id": "01a1670f-01e2-7cc1-b5d2-a0a25c75d1c8",
+  "external_ref": null,
+  "title": "Non-opening Claude command identities named inside a self-started turn are not retired when it closes",
+  "outcome": "Identities that are not TermAl's (a second wake-up S2 whose started arrives mid-turn, or one named by the closing result) are retired when the self-started turn closes, or the reason they cannot occur is documented, so a late lone frame naming them cannot open and adopt a phantom turn on an idle session.",
+  "acceptance": [
+    "After a self-started turn closes, a late lone frame naming a non-prompt identity seen in that turn or named by its result opens no turn and adopts nothing; covered by a test, or the impossibility is documented in src/claude_turn_ownership.rs's contract.",
+    "The maintained full gate passes on the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "claude-runtime",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

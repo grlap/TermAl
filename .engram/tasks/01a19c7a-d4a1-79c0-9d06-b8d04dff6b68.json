@@ -1,0 +1,29 @@
+{
+  "id": "01a19c7a-d4a1-79c0-9d06-b8d04dff6b68",
+  "external_ref": null,
+  "title": "Rename the check-line merge prefix and its display text to Execution Observability wording",
+  "outcome": "Host check lines no longer carry the gate-era \"[TermAl] Check credit:\" label: the merge key (ENGRAM_CHECK_CREDIT_LINE_PREFIX) and its display text use Execution Observability wording consistently across set_pending_source_root_line and every line producer, with the line-merging behaviour unchanged.",
+  "acceptance": [
+    "ENGRAM_CHECK_CREDIT_LINE_PREFIX and its display text are renamed to Execution Observability wording without credit language",
+    "set_pending_source_root_line merges the same lines as before under the renamed key, and every producer in engram_carried_checks.rs, claude_outstanding_work.rs and the reported-end/declared-check lines uses it",
+    "Tests that assert the old prefix are updated to the new wording and pass"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

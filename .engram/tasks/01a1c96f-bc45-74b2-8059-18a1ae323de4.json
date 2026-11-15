@@ -1,0 +1,39 @@
+{
+  "id": "01a1c96f-bc45-74b2-8059-18a1ae323de4",
+  "external_ref": null,
+  "title": "Engram call limits: abort only after 60 s, warn after 10 s (Greg's rule), starting with the acceptance-evaluation submission",
+  "outcome": "Operation-aborting limits on TermAl's Engram calls follow Greg's rule: abort only after 60 s, and log a warning after 10 s without aborting. The acceptance-evaluation submission is covered first, and the retained evaluations record.",
+  "acceptance": [
+    "The acceptance-evaluation submission into Engram is aborted only after 60 s; a submission still running after 10 s logs a warning naming the operation and the elapsed time without aborting; the attempt key and replay semantics are unchanged, so a resend after an unknown outcome is a replay under the same key.",
+    "Every operation-aborting deadline on TermAl's Engram calls (every user of ENGRAM_WORK_BINDING_COMMAND_TIMEOUT, comparable fixed call deadlines, and any outer request or background budget that would abort such a call sooner) is listed on this item with its value and caller; each one shorter than 60 s is raised to at least 60 s with the 10 s warning, longer ones are unchanged, and where the minimum is believed to cause a real problem the evidence is recorded on this item for Greg without introducing an exception. Escalation after an already-issued stop, and retry cadence, are not operation-aborting limits and are out of scope.",
+    "Behavioural tests with scaled thresholds and fixture calls, never real 60-second waits, show that a call slower than the warning threshold but faster than the abort threshold succeeds and logs the warning, and that a call past the abort threshold fails with the existing unknown-outcome handling.",
+    "After the change is landed and the host restarted, at least one TermAl-project acceptance evaluation submission made on that build is recorded in the tracker."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "acceptance",
+    "engram-adapter",
+    "greg-directed",
+    "limits"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed e81c97877913f6eb4c9edbce82bccafbaa7ceb40 (tree c7c32f9c335fbd2d3a97e8ba84c656138124f93e): admitted Engram operations receive at least 60 s, warn after 10 s without aborting or resending, and retain original attempt/replay handling. Complete caller/deadline inventories, independent review evidence with no outstanding Medium+, and exact-tree FULL are recorded. Registered native Test caebc6abde1e4feeb8f06c3c3f91c565 passed all 8 selected behavioral tests on clean e81/R18. After Greg's restart, actual TermAl evaluation 62f05cf81bbe46adbd97fd0c9eb20811 was recorded on running image5ea70fde, whose Rust/Cargo content equals landed e81. Fresh independent evaluator17597/delegation-b7615ff5-558d-4b19-92bd-f057399b9e90 recorded evaluation54361853705e4aa8b1f5c2ed8c9c21d1 at2026-11-12T02:09:08.611654800Z, acceptance8/cut836, all4 PASS, replayedfalse. Full result/2782B raw and exact tracker rationales read; parent END remained clean e81/c7c and END+RELEASE sent before completion. Earlier failed/unknown runs and refused evaluator attempt remain historical evidence, not retroactive PASS. Optional Low follow-ups remain independent open work.",
+    "completed_at": "2026-11-12T02:11:15.793190300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

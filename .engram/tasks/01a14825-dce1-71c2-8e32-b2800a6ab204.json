@@ -1,0 +1,28 @@
+{
+  "id": "01a14825-dce1-71c2-8e32-b2800a6ab204",
+  "external_ref": null,
+  "title": "Pin the Worker resolve-once basis through the production prepare seam",
+  "outcome": "Add a deterministic test through prepare_committed_worker_worktree that moves the source ref after resolution and proves creation plus baseRevision use the captured commit; avoid claiming the existing hand-composed helper test covers that seam.",
+  "acceptance": [
+    "Pin the Worker resolve-once basis through the production prepare seam is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-5644319dcdab",
+  "external_ref": "tm-m6r1.37",
+  "title": "Work memories: map bd recall missing-key exit 1 to 404",
+  "outcome": "Claude session-7010 proposed checking actual missing-key behavior. Parent confirmed installed bd 1.2.2 (6c124203e): readonly JSON recall for absent key termal-review-missing-memory-6cecb6d5-246a-4f81-b472-23d198e674f9 returns found:false,key,schema_version:1,value:empty with exit code 1. Current run_beads_read_command rejects nonzero before normalization, producing 502 instead of documented 404. Narrowly classify the exact missing-key receipt without hiding genuine store/transport failures; add Windows/POSIX fixture and HTTP regression. Previous implementation comment confirmed receipt but omitted nonzero exit; this measurement corrects that incomplete evidence.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03; no \"beads\" remains in src/work_*.rs on master.",
+  "completion": null
+}

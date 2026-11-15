@@ -1,0 +1,29 @@
+{
+  "id": "01a16dcf-05c6-7192-9e2b-fafc56b0f5fa",
+  "external_ref": null,
+  "title": "Clarify directory metadata exemption behavior above watched roots and reparse ancestors",
+  "outcome": "Clarify directory metadata exemption behavior above watched roots and reparse ancestors",
+  "acceptance": [
+    "Clarify directory metadata exemption behavior above watched roots and reparse ancestors is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "paths",
+    "review-follow-up",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1a87b-e34c-7dc0-a10d-7c4fa588b7ae",
+  "external_ref": null,
+  "title": "Measure the cost of a landed change: a baseline over real landings",
+  "outcome": "Each landed change has a read-only record of its cost, so a later target (for example 30% less, with no weaker tests or review) can be judged against a measured baseline rather than an impression.",
+  "acceptance": [
+    "A read-only report gives, per landed change, what can be measured from existing records: elapsed time, messages, test runs including duplicates, false refusals, Greg's interventions and queue age, and tokens if any source records them; what can't be measured is named, not estimated.",
+    "A baseline over real landings is recorded after the simple evaluation rule's end-to-end run has passed on Windows and Linux. No new procedure, gate or required step is added to landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

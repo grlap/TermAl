@@ -1,0 +1,39 @@
+{
+  "id": "01a10d4d-90fb-7472-a635-5043851f081f",
+  "external_ref": null,
+  "title": "Registered wait conditions: a session ends a turn with outstanding work only after registering a concrete wait condition, and the host durably guarantees a wake when it resolves, fails, expires or becomes impossible",
+  "outcome": "A turn that ends while its session holds outstanding work (a claim, a carried gate, a pending review or evaluation, an awaited mailbox reply, an expected control transition) carries a registered wait condition with a typed identity. TermAl records the registration durably at the turn's close and guarantees exactly one wake to the owner (and, where configured, its coordinator) when the condition resolves, fails, expires or becomes impossible, including across a host restart. Duplicate registrations and retries are idempotent by condition identity. A turn that ends with outstanding work and no registration is itself surfaced. A periodic silent-holder scan exists only as a safety net, not the primary mechanism. Nobody needs to poll silent holders by hand.",
+  "acceptance": [
+    "Registered wait conditions: a session ends a turn with outstanding work only after registering a concrete wait condition, and the host durably guarantees a wake when it resolves, fails, expires or becomes impossible is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "team-pilot",
+    "wakes"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a10d50-6775-7411-8286-ecb3ffe07100",
+      "kind": "manual",
+      "detail": "PARKED by Greg's scope correction (Engram::Advisor b9d13887 #298, verbatim in memory greg-decision-2026-10-05-wait-condition-wakes rev 2): \"do NOT implement a watchdog now, including timer-based automatic wakes. He wants the working procedure explicit first\". Unblock only after the written handoff/wait procedure is agreed with Engram, dogfooded, and Greg asks for automation.",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-05T18:25:35.599986200Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

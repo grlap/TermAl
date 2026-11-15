@@ -1,0 +1,28 @@
+{
+  "id": "01a14c15-4bea-7982-9e98-37b7b72d1f0d",
+  "external_ref": null,
+  "title": "Read-only gate refuses `git branch -r --contains <commit>`, a listing filter, as if it named or changed a branch",
+  "outcome": "Read-only gate refuses `git branch -r --contains <commit>`, a listing filter, as if it named or changed a branch",
+  "acceptance": [
+    "The read-only `git branch` rule (file:line) admits listing filters that take a commit argument (`--contains`, `--no-contains`, `--merged`, `--no-merged`, `--points-at`) together with listing options such as `-a`/`-r`/`-v`/`--list`, consuming the commit argument so it is not mistaken for a branch name.",
+    "Regressions: `git branch -r --contains <sha>` and `git branch -a --merged <sha>` are admitted; `git branch <name>`, `git branch -d <name>`, `git branch -m …`, `git branch -f …`, `--set-upstream-to` and `--edit-description` stay refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "read-only-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

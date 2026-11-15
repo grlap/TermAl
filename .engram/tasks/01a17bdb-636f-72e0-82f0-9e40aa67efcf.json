@@ -1,0 +1,28 @@
+{
+  "id": "01a17bdb-636f-72e0-82f0-9e40aa67efcf",
+  "external_ref": null,
+  "title": "Release idle stale accepted checkpoint receipt custody after administrative owner removal",
+  "outcome": "Administrative owner deletion releases only inactive stale receipt custody while preserving immutable durable checkpoint debt and active accounting protection.",
+  "acceptance": [
+    "Release idle stale accepted checkpoint receipt custody after administrative owner removal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "containment",
+    "engram-control",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

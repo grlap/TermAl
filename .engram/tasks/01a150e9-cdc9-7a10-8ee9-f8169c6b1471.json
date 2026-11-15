@@ -1,0 +1,56 @@
+{
+  "id": "01a150e9-cdc9-7a10-8ee9-f8169c6b1471",
+  "external_ref": null,
+  "title": "S1: implement the bounded host review identity engine, CLI, API and MCP operation",
+  "outcome": "S1: implement the bounded host review identity engine, CLI, API and MCP operation",
+  "acceptance": [
+    "The host-owned termal-review-identity-v1 engine, one-shot CLI, POST /api/sessions/{id}/review-identity API and termal_review_identity MCP tool implement the approved versioned raw identity and bounded inventory contract for staged index entries, every tracked worktree file, raw nonignored untracked bytes and recursive nested submodules/gitlinks. Named refusals cover unsupported or incomplete input; Engram schema-1 behavior stays unchanged; no caller-controlled shell, script, Git command or write capability is added.",
+    "Focused automated tests pass on the judged source revision and cover the input classes, independent canonical golden vectors, nested and uninitialized repository semantics, Windows/Unix profile and link rules, refusal and resource limits, concurrent-change detection, actual compiled CLI behavior, HTTP observation/authority and Claude/Codex MCP capability boundaries. These tests establish the S1 implementation contract, without claiming an activated live reviewer witness.",
+    "The maintained full five-stage gate passes on the exact S1 input to be landed, and an independent Codex plus Claude read-only review pair has no outstanding in-scope Medium-or-higher finding. This changeset contains engine/CLI/API/MCP implementation and tests; shared review-procedure/authority changes and the post-activation live Claude/Codex witness remain outside this S1 item and owed by the parent."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "beads-in-progress",
+    "beads-migrated",
+    "cross-project",
+    "greg-directed",
+    "host-platform",
+    "review",
+    "review-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a150d2-2cdc-7a72-bcdb-070a55d8cf1e",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed bounded raw review-identity engine, CLI, session API and reviewer MCP tool at exact GREEN15 tree c03e6f6cda91be06288d3710648eab3b1ffdafee in master commit0874ef3f13361d612f708b8c6c3d751898d7763b. Full five-stage gate passed; independent Codex/Claude qualified review chain has no outstanding in-scope Medium+; independent acceptance9aace4c3087c4ba681fc764a488bd0b8 passed3/3 on exact source. Producer preserved claim/rootgen1471 through completion and independently verified remote commit after Opus2 push confirmation.",
+    "completed_at": "2026-10-19T14:49:38.843444500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

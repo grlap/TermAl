@@ -1,0 +1,39 @@
+{
+  "id": "01a0f3fa-fa29-74e3-af52-127b8d67ce2b",
+  "external_ref": null,
+  "title": "Coalesce SSE lag markers under sustained state-broadcast mailbox overflow",
+  "outcome": "Sustained producer overflow preserves correctness without multiplying redundant authoritative snapshots, transcript invalidations and tail fetches for losses already covered by the last recovery.",
+  "acceptance": [
+    "An end-to-end test through AppState's real mailbox and broadcaster demonstrates bounded redundant recovery snapshots during sustained overflow and authoritative recovery of the newest covered state.",
+    "Coalesce or skip loss markers already covered by the connection's authoritative recovery snapshot without losing repair for later uncovered loss or changing monotonic SSE recovery."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "performance",
+    "regression-suspect",
+    "review-followup",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-3abb-7ce0-8d9c-693bd72a15e9",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a167e3-d91e-78e2-877b-af9baf328e65",
+  "external_ref": null,
+  "title": "hold_source_observation_admission doesn't stamp when only source_observation_admission_held flips, leaving a stale queueHold until an unrelated mutation",
+  "outcome": "When a retained source observation engages its admission hold on a session whose latch and preview already match, the session's changed queueHold is still published.",
+  "acceptance": [
+    "hold_source_observation_admission (src/engram_source_sightings.rs) reports changed when it sets source_observation_admission_held from false to true, even when the latch and the preview were already set, so every caller (retry tick, turn_dispatch capacity resume, source-observation recovery) stamps and publishes.",
+    "A regression test sets up a session whose latch and preview already equal the barrier's, with a scheduled automatic retry projected as queueHold, then engages the hold and asserts that the hold change is stamped and published (the queueHold projection is cleared in the published state)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "session-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

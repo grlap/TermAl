@@ -1,0 +1,30 @@
+{
+  "id": "01a11bde-4906-7182-802f-02f3bce82afe",
+  "external_ref": null,
+  "title": "TERMAL_CLI has no help: `--help` and `help` fail with \"unknown argument\"",
+  "outcome": "An agent that runs the TermAl CLI with --help (or -h, or help) sees its subcommands and their arguments instead of a fatal error.",
+  "acceptance": [
+    "`--help`, `-h` and `help`, alone or after a subcommand, print usage that lists the subcommands and their arguments and exit 0; a test covers each spelling.",
+    "Top-level --help, -h and help print useful command usage and exit successfully without starting the host, a runtime, a session or making a backend request.",
+    "Usage describes current supported modes and coordination commands, and clearly states that sessions list lists roots while delegation spawn creates children; root creation is directed to the existing UI/API documentation rather than a nonexistent CLI command.",
+    "Existing sessions/mailbox help and commands retain their behavior; focused tests cover top-level help dispatch and no-side-effect behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "cli",
+    "discoverability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

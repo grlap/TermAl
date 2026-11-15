@@ -1,0 +1,38 @@
+{
+  "id": "01a1c063-694e-7020-a45d-f6ad64c0d0ea",
+  "external_ref": null,
+  "title": "Capture bounded secret-safe Engram control stderr for EOF diagnostics",
+  "outcome": "The owned Engram control child's stderr is drained and retained in bounded form, with secret-safe evidence surfaced when its stdout reaches EOF, without changing control protocol, retry, deadline, authority or cleanup decisions.",
+  "acceptance": [
+    "Owned control children continuously drain stderr with a fixed memory bound and bounded secret-safe diagnostic evidence; raw credentials, request/reply payloads and private paths are not exposed.",
+    "On control startup or request EOF, diagnostics correlate the captured stderr evidence with the existing exact-child PID and observed exit state without delaying EOF reporting or changing protocol, deadlines, retries, authority or cleanup ownership.",
+    "Controlled actual-child tests cover startup and request EOF with a live child on Unix, and bounded noisy stderr and secret exclusion after normal child exit on Windows. Windows live-child EOF is outside this item's acceptance, with the observed limitation retained in test-96c9911f-b05f-41d8-bd76-d59fee1827dd and test-838a015b-ab4f-4cca-930d-52be0b18f6fd. Focused compile/tests including the required persistence guard, a fresh review pair with no outstanding Medium-or-higher finding, and the normal integration gate cover the exact candidate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "engram-host-adapter",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1bfac-2af5-7902-9e5b-3ead12e525b4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered bounded secret-safe control stderr evidence on existing exact-child failure diagnostics, including caller-side timeout/disconnect snapshots before cleanup. Landed as combo30 d6a359fc with fresh composite pair and qualifying same-tree Windows B FULL.",
+    "completed_at": "2026-11-09T22:35:11.963649700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

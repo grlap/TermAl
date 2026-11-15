@@ -1,0 +1,31 @@
+{
+  "id": "01a1c231-7b81-7573-afe8-ac2c4af1328b",
+  "external_ref": null,
+  "title": "Add behavioral cases isolating forward-revision root and authority guards",
+  "outcome": "Behavioral coverage distinguishes the revision-only Bound-root and settled-authority guards from pre-existing proof and preparation refusals, without source-text tests.",
+  "acceptance": [
+    "A settled forward-revision case with an unnamed or released cached root refuses refresh and creates no later named sighting.",
+    "Coverage isolates the settled-authority precondition where practical, and the same-root check is assessed as defense in depth against the existing root_matches and still_current guards."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c1ae-9b67-76a3-bf05-1d8a8991b237",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

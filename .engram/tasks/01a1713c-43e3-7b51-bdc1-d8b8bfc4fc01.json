@@ -1,0 +1,29 @@
+{
+  "id": "01a1713c-43e3-7b51-bdc1-d8b8bfc4fc01",
+  "external_ref": null,
+  "title": "Format watcher provenance facts only when needed for a source-file fence",
+  "outcome": "Avoid formatting and discarding full watcher observation facts on every converted notification when no eligible check can be fenced.",
+  "acceptance": [
+    "Observation facts are formatted only when needed by an eligible source-file fence, preserving recorded receipt/processing clocks, first-event retention and conservative eligibility, with relevant regression coverage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "host-recording",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16d74-2d08-7260-836f-757f2f324d75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

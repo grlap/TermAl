@@ -1,0 +1,28 @@
+{
+  "id": "01a1d32d-e3c2-7cc0-95da-c5a0a94b1d63",
+  "external_ref": null,
+  "title": "Integrate combo84 on 57a762c8: Opus3 e8be8a38 (w-aa01 space out the tail-read backstop per session)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit e8be8a38525960f8a6f301c83264d84429c8cbd8 (tree aa0be4c4f6b6ace266e772b213af415935afbff0) is on origin/master, where master was moved to it by a fast-forward from 57a762c85778230cce06a4c76290bd5726fe28c6.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is aa0be4c4 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the R4 pair on e8be8a38 itself, Codex delegation-2b754904 and Claude delegation-1b4eda06, found no Medium or higher (its Low filed as w-de9f39b667a4), and the Medium findings of rounds R1 to R3 on the earlier candidates were fixed and reviewed again.",
+    "The release binary built from tree aa0be4c4 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a1bf0f-2de4-7643-97b3-5821d6dd1626",
+  "external_ref": null,
+  "title": "Remote exact-read summary drops the explicit no-wake statement for a settled delivery with no wake observation",
+  "outcome": "A remote exact read whose cause carries no wake observation, such as 'mailbox delivery settled' from a routing-only delivery, still states that no remote wake was recorded; a test covers that branch. Found by review of combo24 at src/federation_mailbox_operations.rs:263.",
+  "acceptance": [
+    "Remote exact-read summary drops the explicit no-wake statement for a settled delivery with no wake observation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

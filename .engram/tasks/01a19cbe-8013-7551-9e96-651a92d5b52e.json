@@ -1,0 +1,40 @@
+{
+  "id": "01a19cbe-8013-7551-9e96-651a92d5b52e",
+  "external_ref": null,
+  "title": "Repair three C2 ordinary queue and Codex reload test fixtures",
+  "outcome": "Separate test-only source return for C2 residual seq14/19/23, matching master ordinary delivery/history/reload guarantees.",
+  "acceptance": [
+    "Seq14 asserts DispatchedAfterQueue of A with B retained, keeping every other assertion and documenting master's ordinary manual-send branch.",
+    "Seq19 asserts ordinary_handoff, exact payload, non-runnability and no receipt/provider replay across reload instead of retired interrupted flag; seq23 supplies valid CodexThreadState while preserving quarantine and pause/epoch assertions.",
+    "Return separate source-only diff from fresh named92a root to Sol-03d4 with copy to Fable, with per-assertion master/equivalent rationale; no Cargo or tests, no seq17 change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Three test-only C2 repairs returned separately on exact92a as tree02666e0d and independently source-audited/accepted by integrator305: manual FIFO A/B, unknown Human history exactpayload/receipt/no replay, validCodexState without assertion weakening. No Cargo/compiler/tests; source-delivery completion only.",
+    "completed_at": "2026-11-02T15:10:08.612972200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

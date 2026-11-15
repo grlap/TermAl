@@ -1,0 +1,36 @@
+{
+  "id": "01a15589-1732-7a62-beff-9ca515df2d61",
+  "external_ref": null,
+  "title": "Test-run registration POST can stall past the launcher's 8 s budget (post_headers), aborting a focused run before any test starts",
+  "outcome": "Observed 2026-10-19, filed by Termal::Fable2. (1) Sol-c593's focused run test-e0f5f5da-7981-4efc-9b80-50e2df7c33a9 at about 18:59Z aborted before any Cargo or tests: registration POST send aborted at post_headers after 8004.4 ms against the 8000 ms budget, HTTP unavailable (operation 442436b0-09c6-44be-b9a1-b834a3197785, digest b8294f04…; run directory preserved in its Git-admin review-runs). (2) Coder's M5 full-gate registration at 18:37Z took 5948.8 ms of the 8000 ms budget, with post_headers 0–3750 ms and get_headers 3751–5947 ms. At the time, the central host (instance c25c5f07, just restarted) was running a full gate in vitest, an Engram warm, a TermAl warm and a remote Mac session. /api/health answered in about 40 ms at 18:59Z, and /api/test-runs in 361 ms. Hypotheses to discriminate: host request handling blocked on the shared state lock or a blocking persist during registration; a slow /api/test-runs-style projection on the registration path; or machine load. Do NOT fix by raising the budget. Find where the POST stalls (the host-side span) and remove the blocking cause.",
+  "acceptance": [
+    "The host-side cause of multi-second registration POST latency is identified with evidence (timed spans or a discriminating reproduction under concurrent load), and fixed so registration completes well within budget under that load; a test or measured reproduction shows it, with no budget increase.",
+    "The full five-stage gate passes on the exact input with an independent Codex plus Claude review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-api",
+    "registration",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed and pushed as 5fabca19613d2b4a6cddbb79fadd8fb1ad3d57d1 (tree 6fc434e9, single parent cc72eac2), confirmed by Opus2 mailbox-de3c4e0b #6 and full landing note06e25d82452748e29ae5beccabf3bbb6. Fast-forward origin/master push at2026-10-20T20:20:39Z verified by integration owner with ls-remote and exact gate input. Accepted independent evaluation283729fdcba847b48cc89d19ff75164f passes2/2; host-recorded exact-input fullgatee42a45916ed5487d87590d0a5a4fb15e/test-d22caab9 passed5/5. R1-R5 different-vendor reviews cover owned changes, allMediums fixed/reviewed, Lows independently filed; final disjoint carries preserve patch. Bounded registration ACK/exactGET avoid global rescans; held-rescan and maintained320history controls pass, earlier3200timing evidence remains context. No budget increase or nativeMac/Linux/installed-live performance claim. Install/restart DEFERRED; source root untouched, no agent restart. Evidence .evidence/registration-stall-9ca5-13170 retained for open dependent healthw-ab6cc520ffb4 original-abort/carry/review provenance until health closes; in-worktree runs/shared owned stashes remain for coordinated cleanup, no deletion/drop performed.",
+    "completed_at": "2026-10-20T20:21:49.051412500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

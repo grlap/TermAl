@@ -1,0 +1,30 @@
+{
+  "id": "01a0f09e-b4e1-76e2-9928-dd45ba3a3710",
+  "external_ref": null,
+  "title": "Resend a pending Engram authorization once, with its stored intent and key, when the transport outcome is unknown",
+  "outcome": "Scope as worded by Engram::Coder (TermAl mailbox 62e0c56d #52, remainder of Engram w-3a736198442c).\nOn an unknown authorization transport outcome, perform at most one automatic resend of the same pending operation, using its exact stored intent, key and dispatch generation, before manual Resume is required.\nConstraints:\n- Never resend an explicit policy or protocol denial as transient.\n- Preserve prompt bytes and cancellation.\n- Never duplicate model delivery or supersede a live grant.\n- A cold takeover reconciles issued-but-expired against begun state. Replaying an expired grant is not permission to deliver.\nNo retry loop.",
+  "acceptance": [
+    "A cold takeover with an issued but expired grant reconciles against Engram's begun state and does not deliver on the expired grant; a test covers it.",
+    "An explicit policy or protocol denial is never resent; a test shows it.",
+    "No test path delivers the prompt to the model twice or without a live grant, supersedes a live grant, or changes the prompt bytes; cancellation during the resend is honoured.",
+    "Tests drop the reply to each of bind, evaluate and begin: each is resent exactly once with the same stored intent, key and dispatch generation, and an outcome that stays unknown after that one resend requires manual Resume."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "control-plane",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

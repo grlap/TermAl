@@ -1,0 +1,30 @@
+{
+  "id": "01a159e8-5daf-7042-8c69-a0d8f3e4ff5f",
+  "external_ref": null,
+  "title": "Strengthen the history-load structural test's independence proof or narrow its claim",
+  "outcome": "The maintained history-load test accurately proves or describes its relationship to concurrent scan work without changing the separately scheduled latency measurement.",
+  "acceptance": [
+    "The maintained structural test either deterministically detects registration waiting for an existing scan, without a wall-clock bound, or is named and documented to claim only its actual handshake and overlap checks.",
+    "The separately scheduled 3200-run latency fixture retains the agreed received-triggered scan release and its real parsing, SQL, ACK/GET, ring and cleanup assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "registration",
+    "review-followup",
+    "test-runs",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

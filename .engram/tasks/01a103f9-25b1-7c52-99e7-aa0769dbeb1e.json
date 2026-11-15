@@ -1,0 +1,40 @@
+{
+  "id": "01a103f9-25b1-7c52-99e7-aa0769dbeb1e",
+  "external_ref": null,
+  "title": "engram_root_recovery_live.rs restarted states recover on an undeclared Real budget clock",
+  "outcome": "src/tests/engram_root_recovery_live.rs builds restarted AppStates with AppState::new_with_paths_and_engram_transport_for_test (about lines 998 and 1111 at 62ffe92). Its constructor runs eager boot recovery inline, so those states read the Engram budget clock (the boot budget and per-operation deadlines) on the default, undeclared Real clock. No test chose a clock first. Slice 1's AppState::new_with_paths_engram_transport_and_clock_for_test chooses the clock before the boot's own recovery. engram_boot_recovery_targets.rs, engram_uncertain_begin.rs and the B3 restart tests already use it. These two sites are outside every batch region of the budget-clock decomposition. The final batch's undeclared-Real rejection would therefore fail them.",
+  "acceptance": [
+    "Each restarted AppState in src/tests/engram_root_recovery_live.rs chooses its Engram budget clock before its boot recovery reads it, through new_with_paths_engram_transport_and_clock_for_test: the shared scripted clock, or EngramBudgetClock::Real with its reason in a comment. Any budget-expiry assertion there either advances the same scripted clock across the causal boundary with an unadvanced positive control, or declares Real.",
+    "No production change, and no expectation in that file is weakened.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note.",
+    "A pinned live launcher run, `node scripts/test-launcher.mjs live --engram-binary <absolute path> --engram-sha256 <sha256>`, run as one call in the named root, passes on the exact reviewed tree. Its engram-live stage log shows live_root_restart_after_lost_evaluate_replays_issued_grant_without_rebinding and live_root_restart_after_lost_begin_never_blindly_redelivers passing among the root_recovery_live tests. Its run directory, the binary path and the sha256 are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

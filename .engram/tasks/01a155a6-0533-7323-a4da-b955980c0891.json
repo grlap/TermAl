@@ -1,0 +1,34 @@
+{
+  "id": "01a155a6-0533-7323-a4da-b955980c0891",
+  "external_ref": null,
+  "title": "Bound remote mailbox page wake-state reservation work once per page",
+  "outcome": "Avoid recomputing the bounded remote wake reservation prefix separately for each message on a mailbox read page. Compute one coherent bounded reservation/status view per page or equivalent bounded reuse, preserving current authority and append semantics.",
+  "acceptance": [
+    "A mailbox page with many pending remote wakes computes the reservation view once or with demonstrably bounded shared work; status and capacity causes remain correct under concurrent settlement. Regression coverage discriminates per-message reservation amplification.",
+    "The exact-input full gate passes with an independent read-only review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-c160-77c3-b4e2-c50515867f37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

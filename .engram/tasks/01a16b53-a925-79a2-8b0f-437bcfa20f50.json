@@ -1,0 +1,28 @@
+{
+  "id": "01a16b53-a925-79a2-8b0f-437bcfa20f50",
+  "external_ref": null,
+  "title": "Evaluate unchanged-start association for ACP foreground checks without completion command text",
+  "outcome": "Ordinary ACP Build and focused-Node completion liveness has an explicit tested policy when actual completion command text is absent.",
+  "acceptance": [
+    "Evaluate unchanged-start association for ACP foreground checks without completion command text is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c420-7aa3-84d0-174334da5d50",
+  "external_ref": "tm-7su",
+  "title": "Differentiate Queue action from Send by color",
+  "outcome": "When a session is already busy, the composer primary action changes from Send to Queue but retains the same blue treatment. Give Queue/Queueing a distinct theme-aware color while preserving disabled, hover, focus, and accessibility behavior; add focused coverage and rebuild the served UI bundle.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-DONE. Queue is coloured apart from Send: ui/src/styles.css:9945 `.send-button.composer-queue-button`.",
+  "completion": null
+}

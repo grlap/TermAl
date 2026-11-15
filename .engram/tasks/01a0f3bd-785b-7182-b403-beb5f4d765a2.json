@@ -1,0 +1,29 @@
+{
+  "id": "01a0f3bd-785b-7182-b403-beb5f4d765a2",
+  "external_ref": null,
+  "title": "Bound the advisory held-claims read on turn prompt delivery",
+  "outcome": "Advisory other-root notices do not introduce an unbudgeted held-claims CLI wait on every turn after this session names earlier claim roots.",
+  "acceptance": [
+    "Bound the advisory held-claims read on turn prompt delivery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "latency",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2ff-8ddc-7f51-b0be-43a20265fe9d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

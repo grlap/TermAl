@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c53d-7fe1-ba00-f69c94d77c35",
+  "external_ref": "tm-jmtk",
+  "title": "Inspect SQLite activity in termal (2).DMP",
+  "outcome": "Read-only analysis requested by Greg of C:\\Users\\grzeg\\AppData\\Local\\Temp\\termal (2).DMP. Identify SQLite-active threads, operations and blocking using matched symbols. No live database connection or source changes.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

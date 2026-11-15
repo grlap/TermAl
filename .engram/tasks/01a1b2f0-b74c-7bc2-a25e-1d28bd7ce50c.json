@@ -1,0 +1,30 @@
+{
+  "id": "01a1b2f0-b74c-7bc2-a25e-1d28bd7ce50c",
+  "external_ref": null,
+  "title": "Codex automatic approval review refuses an authorized four-file cleanup on WindowsB (\"blocked by policy\")",
+  "outcome": "Codex automatic approval review refuses an authorized four-file cleanup on WindowsB (\"blocked by policy\")",
+  "acceptance": [
+    "The source of the 'blocked by policy' refusal (Codex runtime reviewer vs TermAl launch policy) is identified with evidence.",
+    "Either the supported route for an authorized in-checkout cleanup on that runner is documented and the four files are removed through it, or the refusal is confirmed as correct policy and the retention is recorded with its end."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "approval",
+    "cleanup",
+    "codex",
+    "cross-machine"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

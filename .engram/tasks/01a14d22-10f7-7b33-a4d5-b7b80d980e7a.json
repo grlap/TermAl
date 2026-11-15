@@ -1,0 +1,29 @@
+{
+  "id": "01a14d22-10f7-7b33-a4d5-b7b80d980e7a",
+  "external_ref": null,
+  "title": "termal_send_to_session idempotency keys are unique per sender across ALL recipients, but the tool text only says \"sender-scoped\", so fanning one message out to several peers with one key fails with 409",
+  "outcome": "termal_send_to_session idempotency keys are unique per sender across ALL recipients, but the tool text only says \"sender-scoped\", so fanning one message out to several peers with one key fails with 409",
+  "acceptance": [
+    "Either the key scope becomes (sender, recipient), so the same key may be reused for the same intent to different recipients (tests: same key + same body to two recipients both succeed; same key + different body to the same recipient still conflicts), OR the tool description, the MCP protocol text and the mailbox docs state plainly that a key is unique per sender across all recipients and recommend recipient-qualified keys for fan-out (doc test or review).",
+    "The 409 message names the existing message's recipient so the cause is obvious."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "api",
+    "docs",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

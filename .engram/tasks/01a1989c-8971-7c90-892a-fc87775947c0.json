@@ -1,0 +1,28 @@
+{
+  "id": "01a1989c-8971-7c90-892a-fc87775947c0",
+  "external_ref": null,
+  "title": "Test temp guard: a termal-delegation fixture root is re-created (state/termal.sqlite) after its TestTempRoot cleanup, failing a FULL gate with all assertions green",
+  "outcome": "The writer that re-creates a termal-delegation-<uuid>/state/termal.sqlite after the fixture's TestTempRoot has been removed is identified with file and line. Its lifetime is bounded so that no test leaves a residual under the run root. A test or a recorded diagnosis proves the residual cannot recur.",
+  "acceptance": [
+    "Test temp guard: a termal-delegation fixture root is re-created (state/termal.sqlite) after its TestTempRoot cleanup, failing a FULL gate with all assertions green is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate",
+    "test-hygiene",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1989b-1004-7613-86cb-c5805e410bf4",
+  "disposal_reason": "Duplicate: Termal::Opus2 filed the same DL560 temp-guard residual (test-a00a6f06) as w-c5805e410bf4 about a minute earlier. Facts recorded here (residual contents, delegation_support.rs:140 creator, the 18 call sites, the Mac-pass discriminator) are carried to the canonical item by note.",
+  "completion": null
+}

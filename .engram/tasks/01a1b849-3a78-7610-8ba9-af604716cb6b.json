@@ -1,0 +1,37 @@
+{
+  "id": "01a1b849-3a78-7610-8ba9-af604716cb6b",
+  "external_ref": null,
+  "title": "A Codex root session created with approvalPolicy \"never\" cannot use TermAl's own MCP tools (\"MCP tool call requires approval, but approval policy is never\")",
+  "outcome": "A root session TermAl creates, including one created through Central POST /api/sessions on a remote host, can call TermAl's own delegation MCP tools (mailbox read, send, acknowledge) when its approval policy is \"never\". Otherwise TermAl refuses or warns at creation with a clear reason, instead of the session failing at its first coordination call.\n\nObserved by Engram::Fable at about 23:00Z on 2026-11-07, Mac, session-16748, created through Central POST /api/sessions in the Mac Engram-runner project with approvalPolicy \"never\". Its termal_send_to_session to Engram::Fable failed with: \"MCP tool call requires approval, but approval policy is never.\" The workaround was reading its final answer with GET /api/sessions/session-16748.",
+  "acceptance": [
+    "The cause is recorded from code and the observed failure. It names where the approval requirement for TermAl's MCP tools comes from (the Codex runtime's MCP approval handling, TermAl's MCP server registration or trust configuration, or the session's approval settings) and why approvalPolicy \"never\" turns it into a refusal.",
+    "A Codex session with approvalPolicy \"never\" that TermAl creates, locally or remotely, can call TermAl's own delegation MCP tools without an approval prompt. Alternatively, if that cannot be done without widening other tools' approvals, TermAl refuses or flags the combination at creation with a named reason. No other MCP server or tool has its approval requirement relaxed.",
+    "A deterministic test covers the session configuration TermAl generates for approvalPolicy \"never\", and checks that TermAl's MCP tools are callable or that creation is refused with the named reason. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Scoped Never-root TermAl MCP approval configuration and deferred refresh landed in a594f305, pushed, installed and restarted. Deterministic author checks and exact-tree integration review/FULLs pass. Live runtime check remains independent w-92bbc26aa350; no live success or acceptance evaluation fabricated.",
+    "completed_at": "2026-11-08T05:45:13.627156200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

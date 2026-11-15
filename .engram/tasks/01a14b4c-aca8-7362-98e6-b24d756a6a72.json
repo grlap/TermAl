@@ -1,0 +1,24 @@
+{
+  "id": "01a14b4c-aca8-7362-98e6-b24d756a6a72",
+  "external_ref": null,
+  "title": "Share automatic abort recovery preview literals within Rust and document UI coupling",
+  "outcome": "Rust preview producers and projection checks share literals, with the frontend dependency documented so wording changes do not silently change hold classification.",
+  "acceptance": [
+    "Share automatic abort recovery preview literals within Rust and document UI coupling is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

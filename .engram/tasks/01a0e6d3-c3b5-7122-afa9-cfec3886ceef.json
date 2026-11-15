@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3b5-7122-afa9-cfec3886ceef",
+  "external_ref": "tm-17b6",
+  "title": "Bound boot-recovery retries for unrecorded finished delegation children whose bind keeps failing",
+  "outcome": "Round-10 review of tm-8b7y (Claude delegation-040ec103): a failed or canceled delegation child loaded from a store written before begins were recorded (begins_recorded=false) stays a boot-recovery target, sorted after live sessions and bounded per boot by bootRecoveryBudgetMs, until one accepted bind marks it recorded. A child whose bind fails for a lasting reason (for example a persistent protocol refusal) therefore costs a bind attempt and a short-lived sidecar on every boot with no upper limit. Consider, if it shows up in practice, stopping the retry or logging such a child after N failed boots, or marking it recorded once Engram's answer is a definitive refusal that proves no begun grant remains.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

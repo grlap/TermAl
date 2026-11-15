@@ -1,0 +1,78 @@
+{
+  "id": "01a15bd4-d351-7003-a7f5-3a671cab5298",
+  "external_ref": null,
+  "title": "Typed \"pending, retry the same identity\" outcome instead of HTTP 500 when a durability fence expires after enqueue (registration, evaluation submission, named-root naming/release)",
+  "outcome": "When a durability fence expires after the operation was enqueued (and may still commit), test-run registration, acceptance-evaluation submission and named-root naming/release answer a typed pending outcome carrying the SAME operation identity, and a retry with that identity resolves to the single stored operation; only a pre-enqueue proven refusal says not-applied; nothing starts, frees a slot or publishes authority before the exact ACK.",
+  "acceptance": [
+    "After enqueue of test-run registration, acceptance-evaluation submission, named-root naming (including clear), or explicit named-root release, expiry of the durability fence returns a versioned, machine-readable pending outcome rather than an unknown-outcome HTTP 500. It identifies the exact existing operation, tells the caller to retry the unchanged original request, and does not claim that the operation was not applied.",
+    "For each of the four surfaces, deterministic barrier/clock tests show that the operation may commit after the pending response and that replay of the unchanged request under its original identity settles the single stored operation, and after a process restart a replay of the unchanged request is decided from durable state by the caller's current claim and the request's own fields: current state, conflict, or applied fresh — never a fabricated acknowledgement of the earlier intent. Registration retains runId and immutable request identity, evaluation retains its attempt identity and verdicts, and naming/clear/release retain their exact claim/generation/owner or release-audit identity. A changed payload or owner cannot silently become that replay.",
+    "Pending is never success: the launcher starts no test stage, the evaluator reports no recorded-success receipt, and naming/clear/release publish no authority or newly free slot before the exact durable acknowledgement and existing ownership checks. Client handling preserves the pending classification and original identity instead of flattening it into a generic error, creating a new operation, or automatically retrying without a bounded, explicitly specified policy.",
+    "Only a refusal proven to occur before enqueue and before any relevant side effect may report not-applied. A deadline, transport loss, process restart or absent local mirror is not such proof. Deterministic tests cover late commit, write/readback failure, changed or superseded owner/content, and retry after reload without fabricating acknowledgement or weakening existing authorization and durability guards.",
+    "The change reuses the existing durable records and identities and adds no durable queue. It changes no persistence scheduling, batching, SQLite pragmas, admission/retry budgets or deadlines. Tests use disposable stores and deterministic clock/barrier seams, with no sleeps or synthetic load; the observer and measured latency repair remain separate work.",
+    "The exact landing input has a passing maintained five-stage gate and an independent read-only Codex/Claude review pair with no outstanding in-scope Medium-or-higher finding, with any authorized capacity substitute recorded. Architect1's API-contract assessment and the disposition of any in-scope concerns are recorded before GREEN implementation; criteria are independently concurred and acceptance is independently evaluated before completion."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "api-contract",
+    "cross-project",
+    "gate-load",
+    "host-persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Typed post-enqueue durability-pending contract delivered for registration, evaluation submission, naming/clear and release. Landed exact producer commit5dd89ba61aaf5588e4e2d6c55c4c7679f3077724/tree0bd64dfdb7385653504c47c61d0a730075885dc2/parent5ef865ac5cabae2d4b6c713569c4804fd57a578e onmaster andorigin/master throughintegrationowner11865. IndependentlyverifiedMAINHEAD/commitTREE+PARENT/gitls-remoteorigin/mastermatch. ExactmaintainedfullgateHOST4878cfd395014a8f8511e718e1460a45PASS5stages, focused44HOST354287274ac040acb98616ba6140dbedPASS, R4Codex/KimipairFULLpacket/proseCLEANcae0811d53424de2bc7e9db22255a19d/currentClaudelimit357be988/oneauthorizedsubstitute. IndependentCodex14089 evaluation7c83602763864c9c9f42248802bf4491 ALL6OBSERVEDPASS/rev3/cut599/source8ac1; FULLverdictsread, POSTLANDINGfreshnessnewesttrue/stalenull/6PASS. Existingidentities/exactACK+ownershipguards preserved; no scheduling/pragma/budget/deadline change ornewqueue. This completesSOURCECHANGE; parentP1latencyincident/runtimeadoption remainsOPEN.",
+    "completed_at": "2026-10-22T04:24:52.689721200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

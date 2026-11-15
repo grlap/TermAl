@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6d0-79e0-a935-c7cf9c162308",
+  "external_ref": "tm-sch1",
+  "title": "Content revision on macOS: an NFD directory name may fail the canonical-parent check",
+  "outcome": "Candidate from Opus's review of tm-5gi4 phase 1 (landed as acd7740). Not verified; no macOS machine was available.\n\ncontent_revision_path (src/content_revision.rs:245-259) requires every directory above a listed path to canonicalise to itself, so that a link or a case difference cannot redirect the read. On macOS, Git with core.precomposeunicode (the default there) lists paths in NFC. A directory whose name is stored in NFD (always on HFS+; on APFS when a tool created it that way) may canonicalise to its NFD name. It would then differ from the NFC listing and fail with 'differs in case from the listing', costing the whole tree its basis. macOS is a P0 platform.\n\nTo do: reproduce on macOS (APFS and, if available, HFS+) with a non-ASCII directory name created in NFD. If confirmed, compare the canonical and listed names after Unicode normalisation on macOS only, while still refusing real redirections.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

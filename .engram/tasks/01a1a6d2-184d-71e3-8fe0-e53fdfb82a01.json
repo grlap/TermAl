@@ -1,0 +1,27 @@
+{
+  "id": "01a1a6d2-184d-71e3-8fe0-e53fdfb82a01",
+  "external_ref": null,
+  "title": "Audit Drop impls that lock with expect: a poisoned mutex there aborts the process during unwinding",
+  "outcome": "No Drop on a path that can run during unwinding turns a poisoned mutex into a process abort, or each remaining case is recorded with why it's safe.",
+  "acceptance": [
+    "Audit Drop impls that lock with expect: a poisoned mutex there aborts the process during unwinding is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

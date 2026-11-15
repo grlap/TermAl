@@ -1,0 +1,42 @@
+{
+  "id": "01a11f21-bb7c-7191-9bff-2deec130442f",
+  "external_ref": null,
+  "title": "Check-credit refusal tells the holder to \"run again\" after the item is completed and its root removed",
+  "outcome": "When the host refuses credit for a check whose claim has already completed, or whose named source root has been retired or removed, its line says the check earned no credit and gives no rerun advice, or says no action is needed. \"Run again\" is given only while the claim is live and a rerun could still change what an evaluation sees.",
+  "acceptance": [
+    "A test shows that a credit refusal settled after the claim completed, or after its named root was retired or removed, carries no \"run again\" advice and says no action is needed for the completed work.",
+    "A test shows that a refusal while the claim is live and the root still named keeps its current rerun advice.",
+    "The refusal line still names the check and its cause, unchanged."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

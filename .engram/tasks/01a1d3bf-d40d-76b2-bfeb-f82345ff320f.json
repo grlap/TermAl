@@ -1,0 +1,58 @@
+{
+  "id": "01a1d3bf-d40d-76b2-bfeb-f82345ff320f",
+  "external_ref": null,
+  "title": "K3 slice 4: prove producer-to-consumer remote credit and complete activation",
+  "outcome": "The integrated K3 sender and consumer are demonstrated through genuine remote completion/admission, then reviewed, gated and rolled out under existing landing and restart authority.",
+  "acceptance": [
+    "Registered exact-input regression evidence exercises the genuine native producer/consumer path (or provenance-preserved actual producer wire against the real consumer) for committed_input verification and landing_gate, complete SourceId pairs, exact input/use mismatch, focused/full policy, failed/interrupted/debris and unsupported outcomes, Unknown then terminal, terminal conflict, exact replay/reuse/moved authority and newer terminal non-PASS guards, without weakening local or historical contracts.",
+    "The exact final input has the required independent vendor review pair with no outstanding in-scope Medium-or-higher finding, a passing maintained full gate and relevant Windows coverage, and a genuine remote completion/admission witness. Any new durable shape's readiness/import/repair/cutover consequence is declared before activation; installation and the coordinated all-host restart/Greg-act reader-floor window remain coordinator-owned, and automatic credit is claimed only after the genuine destination receipt and downstream evidence are verified."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a1d3bf-cfbd-7921-b368-d85ef99ab1c8",
+    "01a1d3bf-d29f-7780-88cc-b979715a441f",
+    "01a1d3bf-d356-70b1-985a-c82b845900a5"
+  ],
+  "blockers": [
+    {
+      "blocker_id": "01a1dc30-24dc-7393-9826-f09dced60edf",
+      "kind": "manual",
+      "detail": "Await genuine integrated producer-to-real-consumer completion/admission receipt and downstream witness on coordinator-approved compatible hosts. Opus1646 directs holding F823 until the joint restart if needed; last landing note says running hosts retain bca until Greg's restart. Registered exact-input C1 evidence and the actual witness are not yet present; scripted sender and direct fixture-consumer conformance are insufficient substitutes. No evaluator or activation until this gap is resolved.",
+      "created_by": {
+        "actor_id": "greg/codex",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-11-14T22:31:45.092006500Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

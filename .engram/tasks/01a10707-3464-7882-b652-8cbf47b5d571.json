@@ -1,0 +1,27 @@
+{
+  "id": "01a10707-3464-7882-b652-8cbf47b5d571",
+  "external_ref": null,
+  "title": "failed_stop_during_in_flight_begin_resumes_the_owned_prompt_delivery times out at its turn_begin fixture phase (60 s) on master c083c33 in a long-temp, 4-thread run",
+  "outcome": "failed_stop_during_in_flight_begin_resumes_the_owned_prompt_delivery times out at its turn_begin fixture phase (60 s) on master c083c33 in a long-temp, 4-thread run",
+  "acceptance": [
+    "failed_stop_during_in_flight_begin_resumes_the_owned_prompt_delivery times out at its turn_begin fixture phase (60 s) on master c083c33 in a long-temp, 4-thread run is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

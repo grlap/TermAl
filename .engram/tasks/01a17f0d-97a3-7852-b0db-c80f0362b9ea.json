@@ -1,0 +1,31 @@
+{
+  "id": "01a17f0d-97a3-7852-b0db-c80f0362b9ea",
+  "external_ref": null,
+  "title": "PowerShell Engram control fixture refuses canonical test homes when Windows TEMP uses an alias",
+  "outcome": "The PowerShell Engram control fixture accepts the existing test home when the allowed Windows user-temp path is spelled through an 8.3 short name or directory junction, while retaining exact component containment, raw parent-traversal and verbatim-prefix refusals. This is a source-inferred, environment-dependent Low inherited from43a55125; known Windows gate hosts are green. It is separate from the Mac shell guard repair and grants no new implementation authority under the current STOP.",
+  "acceptance": [
+    "The existing fixture owner treats lexical and final Windows user-temp spellings as the same allowed root, with a regression using a repository-contained junction or available short-name alias and the canonical TestTempRoot home.",
+    "Outside-root, same-prefix sibling, parent-traversal and existing verbatim-prefix refusal controls retain their exit4/message and prove no outside writes.",
+    "The relevant focused Windows checks and standard review pair pass on the exact proposed input, with no production path-policy or timing-budget change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "portability",
+    "review-followup",
+    "test-fixture",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

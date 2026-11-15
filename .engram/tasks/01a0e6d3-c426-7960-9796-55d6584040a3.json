@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c426-7960-9796-55d6584040a3",
+  "external_ref": "tm-8acc",
+  "title": "Long-lived terminal commands starve the browser connection pool and block the whole app",
+  "outcome": "Symptom (Greg, 2026-08-25): while commands run in session terminals, TermAl stops responding - e.g. other commands do not work. Terminal commands intentionally have NO timeout (users run dev servers / watchers; only the user interrupts) - that design stands and is not the bug. The bug is what a long-lived command HOLDS while alive.\n\nROOT CAUSE A (app-wide blocking, primary): each streaming terminal command holds a fetch()/ReadableStream HTTP connection open for the command's entire lifetime (ui/src/api-terminal.ts:80-116 -> POST /api/terminal/run/stream). The backend serves plain HTTP via axum::serve (src/main.rs:186) with no TLS, so browsers negotiate HTTP/1.1 only, and the per-origin connection limit (6 in Chrome/Firefox) governs ALL app traffic. Budget while terminals run: 1 connection permanently held by the main live-update EventSource + 1 per running terminal command + everything else (prompt sends, slash-command palette fetches, markers, git/mailbox polls) sharing the remainder. A handful of long-lived commands exhausts the pool and every other request stalls in the browser's queue indefinitely - backend idle, CPU low, app appears frozen. DevTools confirmation on the affected machine: blocked requests show as 'Stalled' in the Network panel while the terminal streams stay pinned open.\n\nROOT CAUSE B (terminal-feature cap, secondary): TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT = 4 (src/state.rs:935) with the semaphore permit held for the command's LIFETIME (src/terminal.rs:115-127 non-streaming, and the streaming worker equivalently). Intended as a burst/DoS bound, it acts as a hard cap of 4 concurrent terminals for the blessed long-lived use case: the fifth command gets 429 'too many local terminal commands are already running; limit is 4' until the user manually stops one. Same shape for remote terminals (limit 4, src/state.rs:936).\n\nWHAT IS ALREADY CORRECT (do not re-litigate): command execution runs on spawn_blocking (the round-99 fix keeps blocking I/O off async workers - src/terminal.rs comments); tokio's blocking pool (default 512) is not starved by a few long tasks; the bounded stream event queue provides normal child-output backpressure; no-timeout semantics are deliberate and must be preserved.\n\nSUGGESTED FIX LAYERS:\nF1 (root, transport): stop spending scarce HTTP/1.1 connections on long-lived streams. Preferred option A: multiplex terminal output over the EXISTING app SSE/delta channel - start the command with a short POST returning a stream id, push chunks as session/terminal-scoped delta events, cancel via POST; zero extra connections per terminal and it reuses the established delta plumbing. Option B: a WebSocket (single WS can carry all terminal streams; WS has a separate browser connection budget). Option C (least practical for a localhost tool): TLS+ALPN for HTTP/2 multiplexing.\nF2 (cap semantics): decouple long-lived streaming sessions from the one-shot burst budget - separate semaphores (streaming vs one-shot), or charge streaming permits only during spawn/setup, and make the 429 message actionable (which sessions/tabs hold the budget). Keep A DoS bound - just not one that counts intentionally-infinite user terminals against a burst limit.\nF3 (interim, small): client-side guard - the UI knows how many of its own terminal streams are open; warn or soft-cap before the browser pool starves so users get a clear message instead of a frozen app.\n\nVALIDATION: reproduce by starting 4-5 long-lived commands (e.g. ping -t / a watcher) across terminal tabs, then try sending a prompt or running another command - observe stalled requests in DevTools (Cause A) and the 429 (Cause B). After F1, the same setup must leave prompt sends and other API calls fully responsive; after F2, additional terminals beyond the old cap must start (up to the new streaming bound) with clear messaging at the bound. Regression tests: backend unit tests for the split budgets and permit lifetimes; UI test for the client-side guard messaging; existing terminal stream parsing suites stay green.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

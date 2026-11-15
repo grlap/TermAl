@@ -1,0 +1,34 @@
+{
+  "id": "01a14d7d-cc4d-7e42-89b3-9d0d6c4326ee",
+  "external_ref": null,
+  "title": "Expose federation transport quarantine and explicit reconciliation",
+  "outcome": "Give operators a redacted view of runtime transport quarantine and a reconciliation path that never permits a replacement SSH child before exact prior cleanup is proven.",
+  "acceptance": [
+    "A redacted runtime view exposes each quarantined peer and its typed reason without capability, credential reference, or SSH output.",
+    "Explicit reconciliation permits a successor only after exact prior OS-operation/process cleanup is proven; stale enrollment or generation requests cannot clear a newer quarantine, and admission, reservations and uncertain outcomes are unchanged.",
+    "Regression controls prove unresolved cleanup remains fenced and exact resolved cleanup permits recovery; exact-input focused/full gate and independent pair accompany the fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a15cb8-da1c-79c3-994d-62605c4d61e7",
+  "disposal_reason": "Fable2 #2684 and #2686, messages62fb241f-df69-4e8b-beb8-be85b75f8469/f5d06e4d-7ccc-4a01-a270-9dd3638c06a3, direct consolidation under Greg's automatic recovery direction (Asistant #787). Fable's exact concurrence note7b037a75105a420ea894c895582d954e is installed verbatim as replacement626 revision2 title/outcome/C1-C4. The same prior OS-operation/SSH-child ownership and recovery concern is covered there. The manual operator reconciliation API approach is replaced by automatic supervisor cleanup and retry with at most one live child, existing authentication/basis fences, and redacted recovery observations. No claim that this old candidate or its regressions landed or passed; all historical RED/review/repair provenance remains retained and links forward to626. Implementation and checks start only after EO-adjacent work and Opus slots.",
+  "completion": null
+}

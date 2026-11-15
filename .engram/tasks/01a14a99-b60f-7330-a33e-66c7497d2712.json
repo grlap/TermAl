@@ -1,0 +1,32 @@
+{
+  "id": "01a14a99-b60f-7330-a33e-66c7497d2712",
+  "external_ref": null,
+  "title": "Delegation and Engram recovery decisions use durable per-attempt identities and receipts, not resident transcript scans",
+  "outcome": "Delegation results, outputs, command evidence, card and parent links, follow-up promotion, turn boundaries, and Engram retry, begin, checkpoint and cause decisions read durable per-attempt identities or exact persisted lookups. A missing resident message body never counts as proof of absence.",
+  "acceptance": [
+    "Each identified scan has a recorded disposition: durable per-attempt result/output/command evidence, stable delegation-card/link identity, promoted follow-up identity, global turn boundary, initialized/nonempty-session state, or typed Engram operation/grant/head checkpoint/begin/retry cause. Authoritative reads use those identities/receipts or bounded exact persisted lookups, never negative proof from a missing resident body.",
+    "Deterministic tests exercise >64 trailing records, idle trim/reload/restart, follow-up after prior successful output, missing parent card/bootstrap, removed queued prompt, and delayed checkpoint/publication. Required output/evidence and exact attempt boundary survive; stale attempts cannot supply results or replace card/parent identities; command/watcher coverage or omission is explicit, never silently complete. Watcher observations remain distinct from writer attribution.",
+    "Recovery/hold decisions preserve exact grant/head/source/revision fences, success/failure precedence, Stop/operator pause, prepared/possibly-sent operation ambiguity and existing retry budgets. Missing display cards do not clear a hold, invent a new authority or authorize duplicate dispatch. Use fake clock/barriers and exact persisted fixtures; no speculative incident-cause attribution or broader scheduler/retry policy. Source-level audit alone does not pass these criteria."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "delegation",
+    "engram-control",
+    "residency"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c408-7451-8bb4-8b005a6c4687",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

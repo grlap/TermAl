@@ -1,0 +1,29 @@
+{
+  "id": "01a1b776-d8bb-7ee3-9662-50a99ca59c10",
+  "external_ref": null,
+  "title": "Windows B: rustc 1.99.1 internal compiler error in cargo check (\"macros should have been expanded by now\", rustc_ast_lowering item.rs:575) on source that compiled before",
+  "outcome": "The cause of the Windows B rustc ICE seen in the fdbb53c8 landing FULL is classified with evidence (deterministic toolchain bug for an input, or a host/environment fault such as memory corruption), its originals and environment are kept, and any recurrence is recorded here with the same fields; no toolchain change is made without Greg's word.",
+  "acceptance": [
+    "Windows B: rustc 1.99.1 internal compiler error in cargo check (\"macros should have been expanded by now\", rustc_ast_lowering item.rs:575) on source that compiled before is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "environment",
+    "landing-gate",
+    "toolchain",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Dropped on Greg's word, relayed by Fable2 #4937 (Engram::Asistant 588693a8 #882, 19:23Z): „Jeszcze raz. Nic z tym nie zrobimy”. No extra diagnostic work, no toolchain repair or change for EO; the Windows B FULL is rerun once on the same test ref instead. The original failed run's log stays where it already sits (Windows B .evidence/eo-fdbb-full and Central .evidence/eo-fdbb-winb), and the occurrence is recorded on w-e072a871549f.",
+  "completion": null
+}

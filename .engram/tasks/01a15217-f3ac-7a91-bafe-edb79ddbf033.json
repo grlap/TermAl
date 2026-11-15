@@ -1,0 +1,38 @@
+{
+  "id": "01a15217-f3ac-7a91-bafe-edb79ddbf033",
+  "external_ref": null,
+  "title": "Land the shared test-ref rule (v6.3) in CLAUDE.md and AGENTS.md",
+  "outcome": "CLAUDE.md and AGENTS.md \"Commit and push\" carry the v6.3 test-ref bullet exactly as concurred for TermAl (Engram text at Engram w-121f3fdeee1c note 3288fbff; TermAl adaptation in Fable2's note 6449a3e1 on w-e2b36ee2360e: MERGER = \"the integration owner (as of 2026-10-19: Termal::Opus2)\"), placed immediately after the bullet beginning \"Outside the standing rule's three conditions above\", byte-identical between the two files, with no other change. Landed under the authority-text rule: Greg's recorded word, both coordinators' concurrence on the exact wording, Greg sent the exact text and its consequence, and the final-diff audit.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md \"Commit and push\" each carry the v6.3 test-ref bullet as concurred for TermAl (Engram text at Engram w-121f3fdeee1c note 3288fbff; TermAl adaptation in Fable2's note 6449a3e1 on w-e2b36ee2360e, #3428: MERGER = \"the integration owner (as of 2026-10-19: Termal::Opus2)\"), placed immediately after the bullet beginning \"Outside the standing rule's three conditions above\", byte-identical to each other; nothing else in either file changes.",
+    "Greg's recorded word (verbatim, with source: memory termal-greg-runner-refs-2026-10-19; Engram Advisor #1780/#1783 = TermAl Advisor #1220/#1223; TermAl Advisor #1226) and his answers to open points A-C (Engram Advisor #1787/#1788; TermAl Advisor #1231) are on this item before landing, and Greg has been sent the exact v6.3 wording and its consequence before landing.",
+    "Both coordinators' concurrence (Termal::Fable2 and Engram::Fable) on the exact TermAl wording is recorded on this item.",
+    "The final-diff audit that /review-changes requires is recorded on this item as passed before landing, the Markdown-only landing checks (doc links; AGENTS.md/CLAUDE.md identity of the inserted block) pass, and the review pair on the frozen input has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "greg-directed",
+    "multi-machine"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The shared test-ref rule (v6.3), with the TermAl substitution \"the integration owner (as of 2026-10-19: Termal::Opus2)\", is landed in CLAUDE.md and AGENTS.md \"Commit and push\". It sits immediately after the \"Outside the standing rule's three conditions above\" bullet, is byte-identical in both files, and nothing else changed. Authority-text conditions:\n- (a) concurrence: Fable2 #3103 and Engram::Fable #3474;\n- (b) Greg notice: #1794 and #1810;\n- (c) final-diff audit: PASS on freeze 0bf76ae6.\nGate test-0d3d5476 PASS on all 5 stages. Review pair r1 with no Medium or higher. Acceptance evaluation 3b420023 PASS on all 4 criteria. Committed by Termal::Merger as 7fa57966 (tree eece4df0). Pushed by Opus2 as a fast-forward from 9c698380, confirmed by ls-remote. Docs only: no build install needed.",
+    "completed_at": "2026-10-19T18:51:59.606078600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

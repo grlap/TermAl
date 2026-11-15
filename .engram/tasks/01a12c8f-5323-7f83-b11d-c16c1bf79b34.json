@@ -1,0 +1,27 @@
+{
+  "id": "01a12c8f-5323-7f83-b11d-c16c1bf79b34",
+  "external_ref": null,
+  "title": "Cover the queued bind idempotency key across a replay and a settlement, and align the card's fence latency clocks",
+  "outcome": "Two parts:\n(1) A focused test proves that the queued bind idempotency key, which now includes the owner's dispatch generation (src/engram_queued_admission.rs ~:1320), stays the same across a replay at the same generation and changes after a settlement moves the generation.\n(2) The card's preparation_fence_ms and admission_fence_ms are measured on the same clock and around only their durability waits, or the doc states what each span covers.",
+  "acceptance": [
+    "Cover the queued bind idempotency key across a replay and a settlement, and align the card's fence latency clocks is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

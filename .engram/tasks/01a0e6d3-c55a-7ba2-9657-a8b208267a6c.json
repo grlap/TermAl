@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c55a-7ba2-9657-a8b208267a6c",
+  "external_ref": "tm-lhfl",
+  "title": "Clarify delegation MCP bridge serving-session identity",
+  "outcome": "TermalDelegationMcpBridge.parent_session_id is used as the session served by the bridge, including reviewer-child endpoints, so the name is misleading and can invite future routing mistakes. Rename it to a role-neutral serving-session identifier or document the invariant at the structured review call site, with focused routing coverage retained.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-DONE. Bridge serving-session identity is clarified: serving_session_id is used throughout src/delegation_mcp.rs on master.",
+  "completion": null
+}

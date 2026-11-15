@@ -1,0 +1,33 @@
+{
+  "id": "01a1706e-7ee7-7160-9d04-b832165c6259",
+  "external_ref": null,
+  "title": "Reduce repeated disk parsing for missing-index test-run wait identity checks",
+  "outcome": "Missing-index identity checks read only the request and canonical locator where feasible, preserving all pinned identity and unsupported-replacement semantics, and repeated canonicalization failures have an explicit bounded retry-cost policy.",
+  "acceptance": [
+    "The gone check preserves changed-runId, unsupported-request, native-locator, request digest and pinned fingerprint rejection and matching-original reindex grace.",
+    "A request-only path avoids parsing results.json when checking a missing-index wait, with relevant regression evidence.",
+    "Repeated canonicalization failures have a documented and tested retry/cost policy without weakening ownership or substitution fences."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "merge-workflow",
+    "performance",
+    "review-follow-up",
+    "test-launcher",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17006-54af-7732-931d-9b0cfb7f2485",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

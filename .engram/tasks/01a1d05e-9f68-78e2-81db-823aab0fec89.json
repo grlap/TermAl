@@ -1,0 +1,27 @@
+{
+  "id": "01a1d05e-9f68-78e2-81db-823aab0fec89",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance schema does not state its 16-distinct-record cap on criterionEvidence",
+  "outcome": "The termal_evaluate_acceptance tool description and schema state both criterionEvidence limits (at most 16 criteria and at most 16 distinct records), so callers can size their evidence before calling.",
+  "acceptance": [
+    "The termal_evaluate_acceptance tool description or schema (for example maxItems or a description note) states that criterionEvidence may select at most 16 criteria and at most 16 distinct records, and a test asserts that the advertised limit equals the enforced one."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "mcp-contract"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d05f-0c99-76e3-8191-30b524c2bc6b",
+  "disposal_reason": "Duplicate: Opus2 and Fable2 filed the same 16-distinct-record contract gap at the same time (Engram::Fable #7673/#7675). w-30b524c2bc6b carries it. It renders the limit from the constant and binds a behavioural refusal test, which avoids a test that only pins schema text against the constant.",
+  "completion": null
+}

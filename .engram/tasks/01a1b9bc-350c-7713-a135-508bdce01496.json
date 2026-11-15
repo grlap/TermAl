@@ -1,0 +1,37 @@
+{
+  "id": "01a1b9bc-350c-7713-a135-508bdce01496",
+  "external_ref": null,
+  "title": "Expose a supported count of pending runtime observation reports by wire format, without store access or bodies",
+  "outcome": "An operator or agent can learn, through a supported host surface, how many runtime observation reports are still unsettled or have settled as local failures, split by wire format (legacy content-v1 or source_id). It needs no live-store access, and the surface never exposes request bodies, source_ids or payloads.",
+  "acceptance": [
+    "A supported read-only host surface returns total reports, unsettled and local failure counts plus envelope counts by content-v1, source_id, source-free and unknown, and by delivery state; mixed or malformed rows are classified explicitly, with no bodies, ids, free text or calls to Engram or the store.",
+    "Behaviour tests use mixed states and wires plus reload and prove the output contains only counters and fixed labels, with delivery and state unchanged.",
+    "Ordinary exact focused checks, a review pair and the final gate apply."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "observability",
+    "rollout"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered numeric-only runtime observation custody counts via supported GET, with actual reload/privacy/real-builder coverage; landed in Combo25.",
+    "completed_at": "2026-11-09T09:40:33.938597200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

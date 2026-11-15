@@ -1,0 +1,28 @@
+{
+  "id": "01a1104c-2418-7290-88c7-8b244fe2220b",
+  "external_ref": null,
+  "title": "Back off Codex reviewer MCP status rechecks and establish notStarted startup semantics",
+  "outcome": "Pair7 Claude Low src/codex_reviewer_mcp_lifecycle.rs:234. Source check confirms 100ms requery of starting/notStarted, bounded 60s (~600 requests theoretical maximum). Shared-provider load and lazy notStarted behavior are hypotheses, not observed product failures. Add bounded backoff controls and inspect installed real producer semantics before changing notStarted policy. Inventory only: no assigned implementation owner or scheduled trigger. Holder must establish concurred acceptance before evaluation.",
+  "acceptance": [
+    "Back off Codex reviewer MCP status rechecks and establish notStarted startup semantics is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

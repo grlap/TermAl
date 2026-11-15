@@ -1,0 +1,31 @@
+{
+  "id": "01a178bc-efd3-7c40-9eb7-25199ca6ef59",
+  "external_ref": null,
+  "title": "termal_list_sessions lost status and preview after the 0fb7b034 restart (federated shape), blinding coordinators",
+  "outcome": "termal_list_sessions again lets a coordinator see each session's working or idle status and current preview, as it did before 0fb7b034, alongside the new federated identity fields.",
+  "acceptance": [
+    "Domain MCP rows with an exact existing root-summary match expose agent, status, workdir and preview equal to the existing listing projection, plus projectId from the same exact summary or null if unknown; all P0 identity, address, wake fields and root filtering remain unchanged.",
+    "Duplicate bare native ids across hosts cannot cross-attribute metadata. Absent or unavailable metadata is explicitly unknown; standalone and unavailable-directory fallback retain their current metadata. No new endpoint, request fan-out, poller, cache, protocol or persistent-directory change is introduced.",
+    "One focused regression run using the existing bridge fixture proves qualified metadata retention and collision/unknown behavior while keeping the relevant directory/native-addressing controls. The final input receives one independent Codex/Claude review pair with no outstanding in-scope Medium or higher finding and one complete READY handoff to the integration owner."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "engram-reported",
+    "post-p0",
+    "regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

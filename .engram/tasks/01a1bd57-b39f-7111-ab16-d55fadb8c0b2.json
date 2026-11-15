@@ -1,0 +1,38 @@
+{
+  "id": "01a1bd57-b39f-7111-ab16-d55fadb8c0b2",
+  "external_ref": null,
+  "title": "Transient 503 on native mailbox relay sends and reads: identify the home failure and missing diagnostic reason",
+  "outcome": "It is established from code whether `termal mailbox read` and the MCP termal_read_mailbox take different paths for a relay mailbox on a satellite, and whether that explains the 503. Any confirmed defect is fixed, and otherwise the disposition and remaining unknown cause are recorded.",
+  "acceptance": [
+    "Record the source comparison of CLI and MCP native relay reads and sends, including shared routing, request/receipt handling, and the exact signed-response boundary that produces the generic 5xx label; keep the actual causes of historical occurrences UNKNOWN unless correlated evidence identifies them.",
+    "For each authenticated native relay request that produces a 5xx response on its home, retain a bounded process-local diagnostic record, readable through the existing /api/diagnostics/mailbox-relay-wakes endpoint, containing UTC time, allowlisted operation, HTTP status, fixed stage or typed reason, and a validated request id (or a fixed unavailable marker). Keep at most the latest 64 records and expose the number evicted; state that restart clears this history. Store no message bodies, credentials, locators or private error prose. Cover existing admission, handler/deadline and post-handler authority branches without changing relay wire responses, uncertainty, ACK, retries, authentication or link authority.",
+    "Behaviour tests through the existing authenticated disposable relay fixture force a handler 5xx, read its real record through the existing diagnostics handler and correlate request id/operation/status while verifying unchanged response/client outcome. Controls prove successful and 4xx responses emit no 5xx record, secret-bearing error bodies do not enter diagnostics, and the 64-record bound/eviction count holds. Focused checks and a fresh Codex+Claude read-only review pair pass with no outstanding in-scope Medium or higher before READY to the integration owner; final exact-input full gate and landing follow the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "needs-triage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Shared CLI/MCP relay error path documented and bounded privacy-preserving receiving-host 5xx diagnostics delivered in dual-host gated Combo19 89427b15 on master/origin. Historical transient cause remains UNKNOWN. Self asserted; No acceptance evaluation exists.",
+    "completed_at": "2026-11-09T04:10:48.058520100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1ae18-d484-7103-9626-5dd45f1f0756",
+  "external_ref": null,
+  "title": "Committed-input reader ignores system/global core.longpaths, so a long-path submodule enabled only globally is refused",
+  "outcome": "On Windows, a clean checkout whose child paths exceed MAX_PATH, with core.longpaths=true set only in system or global Git config, is either admitted by the committed-input lane or refused with a reason that names the missing repository-local core.longpaths and the remedy. Today it fails closed with a dirt-like refusal.",
+  "acceptance": [
+    "Committed-input reader ignores system/global core.longpaths, so a long-path submodule enabled only globally is refused is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "source-revision",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

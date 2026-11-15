@@ -1,0 +1,28 @@
+{
+  "id": "01a133b5-43b0-7ed1-aa5c-36e6c48e33e5",
+  "external_ref": null,
+  "title": "Classify focused Node test intent when flags precede --test or an inner shell wraps tests",
+  "outcome": "Focused-launcher feedback gives unsupported-test guidance for known test intent that falls outside the bounded grammar, including preceding Node flags and supported inner shell wrappers, without admitting more verification.",
+  "acceptance": [
+    "Feedback identifies Node test intent when supported option forms precede --test and known test intent inside an inner shell, while script arguments or unrelated non-test commands remain classified as non-test.",
+    "Regressions cover node --import ./x.mjs --test f.test.mjs, node -r mod --test f.test.mjs, an inner pwsh wrapper around cargo test, and a non-test script control; recognition, envelope guards and credit remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-feedback",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

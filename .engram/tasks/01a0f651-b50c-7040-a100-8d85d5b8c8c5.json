@@ -1,0 +1,29 @@
+{
+  "id": "01a0f651-b50c-7040-a100-8d85d5b8c8c5",
+  "external_ref": null,
+  "title": "A holder's read-only sed range print outside the worktree refuses carried gate credit",
+  "outcome": "A holder's read-only sed range print outside the worktree refuses carried gate credit",
+  "acceptance": [
+    "A holder's read-only sed range print outside the worktree refuses carried gate credit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "field-report",
+    "read-only-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

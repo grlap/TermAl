@@ -1,0 +1,40 @@
+{
+  "id": "01a14c9f-3913-7341-98cf-9c89aa817dd0",
+  "external_ref": null,
+  "title": "Classify a null registration GET envelope as malformed response rather than transport loss",
+  "outcome": "Valid JSON with an invalid response shape receives a response-contract diagnostic while still refusing execution.",
+  "acceptance": [
+    "HTTP200 JSONnull and other invalid envelope controls produce response-shape/contract classification rather than transport_failure.",
+    "The controls preserve known status and no-execution guarantees; positive exact-query admission remains unchanged.",
+    "Relevant authorized tests pass with host-recorded evidence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "diagnostics",
+    "host-recording",
+    "registration",
+    "review-follow-up",
+    "test-launcher",
+    "test-run-registration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14278-d7bc-7553-bfce-8591ae50da25",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

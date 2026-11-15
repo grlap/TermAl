@@ -1,0 +1,31 @@
+{
+  "id": "01a1c131-9a7c-7d10-8a8a-f391128954ed",
+  "external_ref": null,
+  "title": "Integrate combo28 on 8f544b45: command briefs in delegated prompts, unsupported-stage diagnosis",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo28 on 8f544b45: command briefs in delegated prompts, unsupported-stage diagnosis is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No acceptance evaluation exists (evaluation is off for TermAl); closed self_asserted. Combo28 is on master as one commit, 4c377a63 (tree f8e71240), fast-forwarded from 8f544b45 and pushed at 17:46:52Z, with the remote verified.\n- Landing gate: Windows B FULL test-192bd6ae, PASS and eligible, the first qualifying FULL.\n- Linux confirmation: DL560 test-e812e019 on the fmt tree that contains combo28.\n- Review pair 17053/17054: no Medium or higher.\n- Installed on Central (d5023250) and DL560 (b7391605).\n- Test ref deleted. No UI change.",
+    "completed_at": "2026-11-09T20:02:47.693886500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

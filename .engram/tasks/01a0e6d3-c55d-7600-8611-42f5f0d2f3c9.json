@@ -1,0 +1,50 @@
+{
+  "id": "01a0e6d3-c55d-7600-8611-42f5f0d2f3c9",
+  "external_ref": "tm-lp9q",
+  "title": "Sessions persisted mid-turn load as Active with no runtime after a crash",
+  "outcome": "FOUND 2026-08-27 while reviewing the Engram host-adapter brief (read-only). TermAl persists each session's Session value (including status) into sessions.value_json. On load, PersistedSessionRecord::into_record (src/persisted_state.rs ~:360-418) keeps session.status verbatim and only resets runtime to SessionRuntime::None; no boot pass repairs sessions that were Active or Approval when the process died (persisted_state.rs:203-213 merely collects the NON-running ids for orchestrator normalization; app_boot.rs:776-790 runs review/mailbox/wait/orchestrator/orphan reconciles, none of which touch status). Graceful shutdown normally stops runtimes first, so this only shows after a crash or kill -9 / power loss.\n\nCONSEQUENCE: session_is_busy is STATUS-derived (src/turn_dispatch.rs:847: Active | Approval), so after such a restart every prompt to that session is queued behind a turn that no longer exists; mailbox wakes report queuedBehindActiveTurn; the UI shows the session as running with no process. Approval sessions additionally keep a pending interaction that no runtime will ever answer. Recovery today requires the user to Stop (409: not running - runtime is None) or kill the session, or send a message and notice it never dispatches.\n\nFIX: at load, for every session whose status is Active or Approval and whose runtime is None (always true after load): set status Idle, cancel pending interaction messages (reuse cancel_pending_interaction_messages / clear_all_pending_requests from the stop transition, src/session_lifecycle.rs:359-364), push a single assistant Text message 'Turn interrupted by a TermAl restart' (or reuse SESSION_STOPPED_BY_USER_MESSAGE semantics with a distinct constant), finish active-turn file-change tracking, and leave queued prompts intact but do NOT auto-dispatch them (respect orchestrator_auto_dispatch_blocked and the existing rule that user/mailbox queues stay dormant after restart). Do this in the load conversion or in a dedicated reconcile_interrupted_turns_after_boot step placed BEFORE reconcile_unread_mailbox_wakeups_after_boot. Remote-proxied sessions are excluded (their status mirrors the remote).\n\nTESTS: (1) persist a state with one Active and one Approval session (with a pending approval message), reload via AppState::new_with_paths -> both Idle, runtime None, pending requests cleared, interruption message present, queued prompts preserved; (2) a mailbox wake after such a reload dispatches (not queuedBehindActiveTurn) unless the latch is set; (3) a delegation child persisted Active does not resume its parent by itself. Related: the Engram host adapter brief (docs/features/engram-host-adapter.md) must not condition its restart procedure on TermAl status.",
+  "acceptance": [
+    "A crash-drill test writes a temporary termal.sqlite holding one local session stored as Active and one stored as Approval with a pending approval request and a queued prompt, without any shutdown step, boots it with AppState::new_with_paths, and shows that both sessions load with status Error, no runtime, the pending request marked Interrupted, exactly one TermAl-restarted notice each, and the queued prompt kept and not dispatched.",
+    "In the same test neither reloaded session counts as busy, so a later prompt or mailbox wake is not queued behind the interrupted turn.",
+    "If the test passes on unchanged product code, the item closes on that test with no product change; if it fails, a minimal fix makes it pass and the failing run is recorded first.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A crash-drill test proves boot already ends turns stored mid-flight. src/tests/crash_restart_drill.rs persists one Active and one Approval session (pending approval, queued prompt) with no shutdown step and boots it with AppState::new_with_paths. Both load as Error with no runtime, the approval is Interrupted, there is one restart notice each, the queued prompt is kept and not dispatched, and neither is busy. It passes on unchanged product code, and a mutation run with recovery disabled fails, so no product change was needed. Landed as 1cb6bf91 (test-only, fast-forward on 6cd915ed) with credited gate test-a9ee69c9 (record 5a85dcdc) on the exact input (diff 3f3a79fc), review pairs clean at Medium and above, and evaluation b5ec51a5 4/4. Follow-ups: w-bfb3f0715264, w-c0bfd2043f21.",
+    "completed_at": "2026-10-09T16:25:47.821184600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "01a1332a-ca0b-7691-983e-edfd8d76c6c0",
+  "external_ref": null,
+  "title": "Document the supported procedure for coordinators to create root coding sessions via POST /api/sessions, with its recorded contract",
+  "outcome": "Document the supported procedure for coordinators to create root coding sessions via POST /api/sessions, with its recorded contract",
+  "acceptance": [
+    "A docs/features page (cross-linked both ways with docs/features/agent-delegation-sessions.md and docs/architecture.md) formally documents the root-session API: POST /api/sessions request fields (name, workdir or projectId, agent, model, approvalPolicy, sandboxMode, reasoningEffort, and agent-specific modes), the success response (sessionId, revision, session), and its error and admission behaviour (status codes and bodies for a malformed body, an unknown agent or model, a workdir outside any project), each checked against the code with file:line.",
+    "The page states the required coordinator record for every created root: creator, project and cwd, explicit model, purpose or task item, and the creation receipt, written as a tracker note on that item; and the ownership limits: who may create roots, that roots match ready, disjoint packages and host capacity, never unbounded idle capacity; serial gates and landings unchanged; the Sol default and its recorded exceptions.",
+    "The page lists the supported routes for creating sessions (the TermAl UI, POST /api/sessions, child delegations via termal_spawn_session) and when to use each, and warns that the TermAl binary must never be run without a known subcommand (w-e5151bf4da18).",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "docs",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Documented and landed the root coding session POST /api/sessions contract, provenance and ownership rules, and supported UI/API/child-delegation routes. Full gate passed 5/5 on the exact committed tree; independent acceptance evaluation 2d2b714164b4457d91ba40d43511d7e5 passed 4/4. Opus2 verified origin/master at 536c17a16aaa1df6e5f6d6089bde4884b5d46280, fast-forward from a6e73617; docs-only, no install.",
+    "completed_at": "2026-10-13T16:06:21.554089100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

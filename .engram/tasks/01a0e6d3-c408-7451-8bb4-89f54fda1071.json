@@ -1,0 +1,36 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-89f54fda1071",
+  "external_ref": "tm-7cu.25",
+  "title": "Extract transcript resize and deferred bottom-restore policy",
+  "outcome": "The current scroll hardening adds pure resize-baseline policy to the oversized SessionPaneView.scroll.ts module and dedicated deferred-bottom timer plumbing to the oversized VirtualizedConversationMessageList.tsx component. Extract the pure resize policy into a focused SessionPaneView sibling module and encapsulate deferred bottom-restore scheduling/clearing beside the page-height and scroll-event coordination, preserving the explicit authority and cooldown invariants.",
+  "acceptance": [
+    "The pure resize-baseline policy lives in ui/src/SessionPaneView.resize-measurement.ts with its own unit tests, and SessionPaneView's scroll code consumes it.",
+    "Deferred bottom-restore scheduling and clearing are owned by ui/src/panels/virtualized-conversation-deferred-bottom-restore.ts with its own tests; the hook exposes only clear, isPending and scheduleLayoutVersion, never its mutable ref.",
+    "VirtualizedConversationMessageList consumes that hook instead of its own timer plumbing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verification-only closure. The resize-baseline policy and deferred bottom-restore ownership were extracted by 27691245 (an ancestor of master 1495e8d3). SessionPaneView.resize-measurement.ts and its tests are consumed by SessionPaneView.scroll.ts. The virtualized-conversation-deferred-bottom-restore hook, with its tests, exposes only clear, isPending and scheduleLayoutVersion (the Beads review note is resolved) and is consumed by VirtualizedConversationMessageList. Independent evaluation ac7e7b21 passed 3/3.",
+    "completed_at": "2026-10-15T15:32:45.106760800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

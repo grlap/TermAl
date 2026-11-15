@@ -1,0 +1,30 @@
+{
+  "id": "01a1d7f9-109e-7f12-8d90-485b5278637a",
+  "external_ref": null,
+  "title": "Assert adopted Claude unresolved-result routing in observed-outcome regressions",
+  "outcome": "Outcome tests distinguish unresolved adopted result routing from the ordinary runtime route.",
+  "acceptance": [
+    "Behavioral result-frame tests assert the unresolved route's notice and resulting session state, and the ordinary route's absence of that notice, while retaining outcome, durability and no-grant assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "execution-observability",
+    "review-low",
+    "review-medium",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6d8-c66c-7541-b4ce-3186172accdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

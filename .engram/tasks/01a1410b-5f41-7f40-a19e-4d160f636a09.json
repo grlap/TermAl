@@ -1,0 +1,44 @@
+{
+  "id": "01a1410b-5f41-7f40-a19e-4d160f636a09",
+  "external_ref": null,
+  "title": "Record the Stopped delegation hold reason for pre-preparation bind-retry Stop",
+  "outcome": "Record the Stopped delegation hold reason for pre-preparation bind-retry Stop",
+  "acceptance": [
+    "A user Stop of a bind retry still waiting for its backoff keeps the retained head queued and interrupted, records it as the stopped prompt, shows the stopped preview, and a held delegation reads it as Stopped, not DeliveryUnknown; src/tests/engram_bind_backoff_retry.rs stopping_a_waiting_bind_retry_records_the_stopped_head shows it.",
+    "With the stopped-prompt write in src/engram_abort_retry.rs removed, that test fails; a host-recorded run of it and its output are cited in a note.",
+    "The full five-stage launcher gate passes on a master tree that contains the test, cited by run directory and launcher fingerprint."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Train-2 package landed at 9c80a234; acceptance evaluation 2cc8811c91454475b0471ff38b35f0df passed 3/3.",
+    "completed_at": "2026-10-16T00:01:01.418855200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

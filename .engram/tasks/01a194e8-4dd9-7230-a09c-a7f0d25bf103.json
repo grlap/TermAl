@@ -1,0 +1,32 @@
+{
+  "id": "01a194e8-4dd9-7230-a09c-a7f0d25bf103",
+  "external_ref": null,
+  "title": "Source-root naming refused 'named-root binding requires an active host session' for a root session with a live native claim",
+  "outcome": "A root session holding a live claim under turn-gated control OFF can name its worktree even after its Engram control session was left exited. A named_root_binding_refused answer flags the session's still-held token for a re-bind, and naming again re-binds it and binds the named root. Any refusal a re-bind does not cure states which precondition failed and the supported remedy.",
+  "acceptance": [
+    "Which of the two refusal branches in Engram control_runtime.rs:107-113 failed for session-12325 is established from evidence (the control session phase, and the claim's actor session against the bind's session).",
+    "Under turn-gated control OFF, when Engram refuses named_root_bind with named_root_binding_refused while the session still holds the refused routing token, TermAl flags that token rebind_required in the same save; a test shows that naming the same root again then re-binds the session through the flagged-token naming bind and binds the named root.",
+    "Every named_root_binding_refused answer that this re-bind does not cure (turn-gated control ON, or a session that no longer holds the refused token) keeps today's state handling, and its 409 names the failed precondition and the supported remedy; a test covers such a refusal and its message.",
+    "Engram::Fable confirms from Engram's code, recorded on this item, that a session_bind made while the project's gated control is OFF cures both refusal branches and grants no gated authority.",
+    "The change is reviewed and gated under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

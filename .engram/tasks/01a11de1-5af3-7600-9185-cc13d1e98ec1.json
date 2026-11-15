@@ -1,0 +1,28 @@
+{
+  "id": "01a11de1-5af3-7600-9185-cc13d1e98ec1",
+  "external_ref": null,
+  "title": "causalFailure.attemptId carries received grant ids inside the Begin and restart-checkpoint idempotency keys",
+  "outcome": "causalFailure.attemptId carries received grant ids inside the Begin and restart-checkpoint idempotency keys",
+  "acceptance": [
+    "The coordinator's reading is recorded on this item: the idempotency key is a structural identifier, and the grant ids it embeds are identifiers already persisted in card.grantId, not secrets. Either the item closes on that reading, or a change shows a digest of the key in the persisted and rendered causal record while the exact key stays available to the attribution checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-diagnostics",
+    "low",
+    "privacy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

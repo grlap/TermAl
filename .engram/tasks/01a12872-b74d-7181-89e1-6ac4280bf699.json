@@ -1,0 +1,41 @@
+{
+  "id": "01a12872-b74d-7181-89e1-6ac4280bf699",
+  "external_ref": null,
+  "title": "Unadmitted receipt check: compare observed-check summaries in the order sent",
+  "outcome": "validate_unadmitted (src/engram_unadmitted_observation.rs) sorts the sent and recorded check ids before comparing them, so a reordered receipt passes. Engram builds the summaries in the order the host sent them (storage/unadmitted_observation.rs:83-91). The check compares them in order, and its test refuses a reordered receipt.",
+  "acceptance": [
+    "A receipt naming the request's checks in the sent order is accepted and one naming them reordered is refused; unit tests show both.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

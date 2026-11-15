@@ -1,0 +1,31 @@
+{
+  "id": "01a189c7-303d-75a2-8abe-ebeaebbeaead",
+  "external_ref": null,
+  "title": "Clarify or safely finalize a declined command card after its original owner changes",
+  "outcome": "A declined original command whose runtime, generation or current-check owner changes has truthful terminal presentation where safe, while stale events never mutate a successor transcript or check.",
+  "acceptance": [
+    "Clarify or safely finalize a declined command card after its original owner changes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-7",
+    "codex",
+    "host-recording",
+    "post-import",
+    "review-low",
+    "transcript"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-0ee9-7970-9657-3e6804fa2785",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

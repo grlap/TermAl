@@ -1,0 +1,27 @@
+{
+  "id": "01a0fcb3-e496-7903-8db7-05d7005a5d43",
+  "external_ref": null,
+  "title": "Test-run fan-in reports an already-recovered INTERRUPTED run as UNKNOWN (process gone)",
+  "outcome": "When a run has been settled by `recover`, so that its results.json records INTERRUPTED with an exit code, the termal_resume_after_test_runs fan-in reports that settled verdict and does not tell the caller to recover it again.",
+  "acceptance": [
+    "Test-run fan-in reports an already-recovered INTERRUPTED run as UNKNOWN (process gone) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "fan-in",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10007-5fbb-7cf1-a54b-27e72e84f791",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch 10f6b1ad; applied by Termal::Fable2): duplicate of w-27e72e84f791, whose three criteria include the recovered result and the unrecovered control. This item's occurrence chronology (notes 0ea8e4d1, 75510a04, 8fb890c1, 0bfab9a8) stays linked for the survivor's holder. This is a consolidation, not a tested fix.",
+  "completion": null
+}

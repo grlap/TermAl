@@ -1,0 +1,59 @@
+{
+  "id": "01a11463-f508-75f2-8a06-8dac507af677",
+  "external_ref": null,
+  "title": "Return a useful safely redacted refusal in the original rejected MCP call's response.",
+  "outcome": "A host-rejected MCP invocation returns its actual safely disclosed reason or error class and actionable remedy/retry guidance to the requester in that same invocation's response. Existing authorization, read-only enforcement and harness-independent role rules remain intact.",
+  "acceptance": [
+    "A host-refused MCP request in the affected delegated read-only path receives a structured safely redacted error/rejection in the SAME call's response, with a stable reason/error class, concise explanation and safe correction or retry prerequisite. Unknown and non-disclosable causes are explicit; no cause is invented. Parent logs, lookup APIs, separate notifications or other side channels do not satisfy this criterion.",
+    "The implementation names the actual supported requester adapter/protocol version and the existing request-completion path changed. It preserves request correlation, authorization, read-only enforcement, Stop/runtime fences and existing retry semantics; it introduces no harness-based reviewer/evaluator eligibility rule. It neither executes a denied operation nor advises bypass or replay after unknown execution. No new lookup API, durable decision storage, queue, deduplication or proxy infrastructure is added unless a specific demonstrated protocol constraint makes that element strictly necessary for the same response and the minimal change is independently concurred before implementation.",
+    "Focused tests demonstrate the actual affected adapter delivers the structured refusal/remedy as the original MCP tool result, the denied upstream operation does not execute, and secret/hostile argument values are not exposed. Controls cover invalid input, explicit policy refusal, unknown/non-disclosable cause and transport failure without falsely claiming receipt. Mock-only host output is not proof of actual adapter mapping. Transport loss remains reported as such and cannot promise an undelivered response. The historical child11265 incident remains unclassified without original evidence.",
+    "The maintained full gate passes on the exact independently reviewed input; the run directory and input fingerprint are recorded. Documentation describes the implemented same-response behavior and any precise unsupported transport limitation. An unsupported same-response path is incomplete work, not a substituted channel or a passing evaluation."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "design-pending",
+    "diagnostics",
+    "engram-interop",
+    "kimi",
+    "mcp",
+    "read-only-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f335-e0b1-7560-bea5-a776ab739655",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

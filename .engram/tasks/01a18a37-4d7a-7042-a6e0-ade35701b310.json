@@ -1,0 +1,30 @@
+{
+  "id": "01a18a37-4d7a-7042-a6e0-ade35701b310",
+  "external_ref": null,
+  "title": "Test Runs UI is slow: every test-run list request and every state snapshot projects all 8,186 retained runs under the global state lock",
+  "outcome": "Opening and refreshing the Test Runs view stays responsive as retained runs grow: a test-run list page costs work proportional to the page, not to every retained run; the list is not projected twice per request; the global state lock is not held for the projection on the async executor; and the full state snapshot no longer carries every retained run summary. Before/after measurements on the same host are recorded.",
+  "acceptance": [
+    "Test Runs UI is slow: every test-run list request and every state snapshot projects all 8,186 retained runs under the global state lock is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

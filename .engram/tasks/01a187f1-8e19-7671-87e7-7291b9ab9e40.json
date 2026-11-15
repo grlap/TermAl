@@ -1,0 +1,27 @@
+{
+  "id": "01a187f1-8e19-7671-87e7-7291b9ab9e40",
+  "external_ref": null,
+  "title": "Behavioural test: source-root naming cannot replace a retained non-admission bind, and consider proactive recovery",
+  "outcome": "A test with a base-only session that has no routing token leaves a non-admission session_bind unresolved, then attempts source-root naming. It asserts a conflict, zero competing SessionBind calls, and an unchanged retained request and key. After the retained bind is settled, naming proceeds. The item also decides, with the coordinator, whether a naming request should trigger recovery of the retained original instead of waiting for the session's next bind.",
+  "acceptance": [
+    "Behavioural test: source-root naming cannot replace a retained non-admission bind, and consider proactive recovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

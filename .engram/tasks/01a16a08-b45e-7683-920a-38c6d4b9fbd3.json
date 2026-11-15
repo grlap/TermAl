@@ -1,0 +1,27 @@
+{
+  "id": "01a16a08-b45e-7683-920a-38c6d4b9fbd3",
+  "external_ref": null,
+  "title": "Check Git Bash quoted-pipe behavior for Windows batch shims",
+  "outcome": "Quoted-pipe recognition cannot misrepresent a command re-parsed by cmd.exe.",
+  "acceptance": [
+    "A focused investigation establishes whether a quoted-pipe command invoking a .cmd or .bat shim is re-parsed by cmd.exe and documents the result or makes that form ineligible."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16827-bfc6-7af3-948f-ba7f38f569aa",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

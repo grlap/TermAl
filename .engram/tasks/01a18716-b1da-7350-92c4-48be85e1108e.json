@@ -1,0 +1,30 @@
+{
+  "id": "01a18716-b1da-7350-92c4-48be85e1108e",
+  "external_ref": null,
+  "title": "Reduce extra contradiction notes for common clean severity summaries",
+  "outcome": "Consider narrowly reducing non-actionable false-positive contradiction notes for common clean/resolved severity summaries while retaining the default-visible policy and never widening suppression across another item. This follow-up is optional for the parent: extra notes are the coordinator-approved error direction, and any reduction must preserve visible real severities.",
+  "acceptance": [
+    "Selected common clean/resolved summary phrasings have explicit packet-level visibility or suppression controls, with the intended conservative behavior documented.",
+    "Any suppression refinement retains the parent parser's default-visible attached severity, highest-severity selection, empty structured findings for Findings None, and open/mixed-scope regression controls."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "parser-diagnostics",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c509-74e2-815c-752a2a221fc3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a10496-61d9-7650-af43-c532fba7888d",
+  "external_ref": null,
+  "title": "Full gate's temp guard failed again on __PSScriptPolicyTest_* probe files in the test run root, after the Engram fixture children were redirected; a PowerShell child outside those launch paths is suspected",
+  "outcome": "The gate's temp guard stays green because no test leaves PowerShell's startup policy probe files in the shared run root. Each test that launches a PowerShell child, wherever that child is terminated, gives it a TEMP that the test's own temp root removes. The guard is not widened and production launches are unchanged.",
+  "acceptance": [
+    "Fail-first. On unmodified 38b659b, a deterministic witness shows that a test-launched PowerShell child gets the shared run-root TEMP: the terminal shell run through run_terminal_shell_command_with_timeout prints its $env:TEMP, which equals the test process's TEMP and lies outside the test's own temp root. The probe-window measurement (.tmp/diag-ps, hashes in the note) is cited for the leak mechanism. The failed run is kept and cited.",
+    "Every test-reachable PowerShell child that can be terminated during startup gets, under cfg(test) only, a TEMP and TMP inside its test's own temp root, which that root removes. That covers the terminal shell when its workdir lies in a test temp root, the Start-Process grandchildren through it, and the review_freeze deadline fixture. A note gives an inventory, at 38b659b, of every PowerShell/pwsh launch reachable from tests, each classified as redirected, normal-exit-only, or late-terminated. A test per launch path shows the child's TEMP is inside its test temp root. The launcher's temp guard is not widened, and production launches are unchanged.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-blocker",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Test-launched PowerShell children no longer leave the __PSScriptPolicyTest_* startup probe in the shared test run root. The fix landed on master as a plain fast-forward to 0789c6cc022cb6c5e5d8319cefb217dded1b9c68 (tree 43376160), verified on origin.\n- Diagnosis H2: Windows PowerShell writes the probe at every start, and a kill inside the roughly 75 ms window leaks it.\n- Fix, cfg(test) only: the terminal shell and its children get TEMP/TMP in <test root>/child-temp, links are refused, and the review_freeze deadline fixture gets its own child-temp. Production and the temp guard are unchanged.\n- Fail-first: through the gate's run-root wrapper, test-f306abb0 FAILED.\n- Gate test-1b575c84 PASS (credited d4431623); review round 4 clean; evaluation b9bfe3da 3/3.\n- Test-only: no install or restart. Follow-ups filed: w-771bedcfe208 and w-b45e809bb82b.",
+    "completed_at": "2026-10-04T03:37:00.942817600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

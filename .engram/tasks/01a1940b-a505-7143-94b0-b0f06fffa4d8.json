@@ -1,0 +1,30 @@
+{
+  "id": "01a1940b-a505-7143-94b0-b0f06fffa4d8",
+  "external_ref": null,
+  "title": "After a TermAl restart, a session's named source root is gone: evaluation refused \"TermAl has no named source root (it reads the session's workdir)\"",
+  "outcome": "An evaluation requested after a host restart either finds the session's existing named source root, if naming is meant to persist, or refuses with a typed remedy that names the supported recovery (re-name in a claim-focused turn, then evaluate on the next turn), instead of a generic \"request again once the root has settled\".",
+  "acceptance": [
+    "Whether a session's source-root naming is meant to survive a host restart is decided and documented.",
+    "If it should persist: a test restarts the host with a named root and shows that an evaluation finds the same root and generation. If it should not: the refusal names the exact recovery steps, and a test pins that text.",
+    "The existing named-root binding and sighting rules are otherwise unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "named-roots",
+    "restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

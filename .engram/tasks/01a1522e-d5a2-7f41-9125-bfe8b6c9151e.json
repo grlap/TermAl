@@ -1,0 +1,43 @@
+{
+  "id": "01a1522e-d5a2-7f41-9125-bfe8b6c9151e",
+  "external_ref": null,
+  "title": "Test bounded stdin cleanup with blocked writers and early child exit",
+  "outcome": "Direct Windows and Unix tests pin bounded stdin writer release and child/tree cleanup on deadline and early exit.",
+  "acceptance": [
+    "Direct Windows and Unix tests pin bounded stdin writer release and child/tree cleanup on deadline and early exit.",
+    "Focused verification appropriate to the change and the required independent review/exact-input full gate establish the final behavior without widening authority or increasing timeouts."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "beads-in-progress",
+    "beads-migrated",
+    "cross-project",
+    "greg-directed",
+    "host-platform",
+    "review",
+    "review-identity",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a150e9-cdc9-7a10-8ee9-f8169c6b1471",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

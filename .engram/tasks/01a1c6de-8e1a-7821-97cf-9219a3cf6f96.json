@@ -1,0 +1,35 @@
+{
+  "id": "01a1c6de-8e1a-7821-97cf-9219a3cf6f96",
+  "external_ref": null,
+  "title": "Integrate combo41 on 0b32ab57: edfd 47203f77 (w-b60a), 03d4 ef41b9da (w-a15b)",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit dab1d863274153236b403f6a894b1cb45b67d344 (tree 68144410d034a9f47730d90f07f4373259c5ef42) is on origin/master, where master was moved to it by a fast-forward from 0b32ab57da52e892018d275ba13efae21e639054, and its diff against that parent is exactly the union of the two reviewed parts edfd 47203f77 and 03d4 ef41b9da.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 68144410 passed every stage, with equal source ids before and after and an eligible clean input, and a review pair (one Codex, one Claude) on dab1d863 recorded no finding of Medium or higher.",
+    "The release binary built from tree 68144410 was installed at target/release/termal(.exe) on Central (sha256 9160ad73f7f614f2402e280fa2871cfe662b1e207045345826cf7defb10f3286) and DL560 (sha256 34132dc2f732dae6a37fd84ff9d15479b4b225809d6c768f61c7577891619f77), with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install may since have replaced it, in which case this binary is kept aside there."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo41 (edfd refused-evaluator view, 03d4 held-custody test controls) landed on master as dab1d863 by fast-forward from 0b32ab57. It was gated by DL560 FULL test-003f1792 (6/6 stages, Rust 7563/0, vitest 5091/0, eligible, equal source ids), with the composite pair clean. It was installed on Central (9160ad73) and DL560 (34132dc2) with the previous binaries kept aside and no restart; combo42's install has since replaced it and kept it aside. A fresh independent evaluation (Codex session-17289, delegation-81fc7f11) on revision 3 passed all 3 criteria.",
+    "completed_at": "2026-11-10T22:14:07.737757500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

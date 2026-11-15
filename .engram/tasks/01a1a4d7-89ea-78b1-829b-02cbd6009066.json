@@ -1,0 +1,32 @@
+{
+  "id": "01a1a4d7-89ea-78b1-829b-02cbd6009066",
+  "external_ref": null,
+  "title": "Named-root naming can deadlock: a pending transition must be retried first, but its exact retry is refused as stale",
+  "outcome": "A session whose earlier naming request went stale can always name a root again through a supported path, without a restart and without losing the journal's protection against an unsettled transition.",
+  "acceptance": [
+    "The failing sequence is reproduced by a deterministic test: a named-root transition pending for one root, its claim association going stale, then both the original request and a naming of another root",
+    "After the fix that sequence ends with a settled root by a supported call, the refusal text tells the caller what to do, and a transition that truly remains unsettled still can't be overtaken"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A pending name whose claim was recovered no longer blocks naming: a read showing a newer fence settles it, under either refusal code, and the next naming finishes. Refusal text says what to do, and anything without that proof stays pending. Remaining wall from a host-raised end is filed as w-40747b1f243d.",
+    "completed_at": "2026-11-04T13:46:17.281127600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

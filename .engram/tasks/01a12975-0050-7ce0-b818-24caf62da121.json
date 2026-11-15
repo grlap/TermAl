@@ -1,0 +1,29 @@
+{
+  "id": "01a12975-0050-7ce0-b818-24caf62da121",
+  "external_ref": null,
+  "title": "Opening or refocusing Find cancels pending navigation without selecting a result",
+  "outcome": "Opening an empty Find or refocusing it preserves in-flight End/tail navigation and reader restores; only actual search selection takes viewport authority. Ctrl+F uses the current pane/tab closure.",
+  "acceptance": [
+    "Opening empty Find or refocusing it does not abort pending tail navigation, minimap seeking, or reader restoration; query edits and Next/Previous still supersede older navigation.",
+    "Ctrl+F after a tab switch uses the current scrollStateKey; regression coverage verifies the authority boundary."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "search",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1dd13-60cf-7790-b40e-e449d7ca9b37",
+  "external_ref": null,
+  "title": "Remove Greg's quotes and conversation history from TermAl's CLAUDE.md and AGENTS.md; keep the rules, move provenance to tracker notes",
+  "outcome": "TermAl's CLAUDE.md and AGENTS.md state their rules concisely without Greg's quoted words or the history of how each rule was agreed; every removed quote and source is preserved verbatim in a tracker note, and no rule's authority, condition or scope changes.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md contain no quotations of Greg and no conversation or relay history (mailbox numbers, dates of his words, who relayed them); each affected rule keeps exactly its operational meaning: what is allowed, by whom, under which conditions.",
+    "Every removed quote and its source is recorded verbatim on this item's notes before landing, grouped by the rule it came from, so provenance stays auditable.",
+    "The authority-file rule is met: both coordinators concur on the exact diff (no widening, only clarifying), Greg is sent the change and its consequence, the final-diff audit passes; a normal candidate with a clean review pair and full gate; no test reads or pins the instruction files."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "authority-file",
+    "docs",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

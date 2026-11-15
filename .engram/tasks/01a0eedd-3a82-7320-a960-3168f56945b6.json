@@ -1,0 +1,29 @@
+{
+  "id": "01a0eedd-3a82-7320-a960-3168f56945b6",
+  "external_ref": null,
+  "title": "docs/features/engram-host-adapter.md says the evaluation's source fingerprint is both delivered and not delivered",
+  "outcome": "The host adapter's feature doc states once, and correctly, which parts of acceptance evaluation are delivered and which are not.",
+  "acceptance": [
+    "The 'Not delivered yet' paragraph of docs/features/engram-host-adapter.md agrees with the rest of the document and with the code at the commit that lands the change: each listed part is either not delivered, with the place in the code that shows it, or removed from the list.",
+    "What the host does with the source fingerprint at completion is stated, from the code."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "docs",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a14c7a-eb0a-78a2-906c-32cd18903483",
+  "external_ref": null,
+  "title": "Expose federation transport quarantine and explicit reconciliation",
+  "outcome": "Give operators a redacted view of runtime transport quarantine and a reconciliation path that never permits a replacement SSH child before exact prior cleanup is proven.",
+  "acceptance": [
+    "Expose federation transport quarantine and explicit reconciliation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a14bba-5237-7013-b829-8e1fd94e3924",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a14d7d-cc4d-7e42-89b3-9d0d6c4326ee",
+  "disposal_reason": "Continue independently after completed L1, batched with its other four Low follow-ups per Fable2 mailbox #117/message a45d0bce-d735-47c8-afe3-d1525b6823d8.",
+  "completion": null
+}

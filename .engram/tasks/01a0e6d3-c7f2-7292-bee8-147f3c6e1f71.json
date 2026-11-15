@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7f2-7292-bee8-147f3c6e1f71",
+  "external_ref": "tm-ya97",
+  "title": "Hoist orchestrator readiness probes outside the state mutex",
+  "outcome": "Follow-up dual review found that orchestrator template-session validation performs executable-discovery filesystem probes while the inner application-state mutex is held. Move the validation loop above the critical section, mirroring session creation, while preserving validation errors and adding focused coverage for the lock-scope refactor.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b re-check with marker, spot-checked by Termal::Fable2): CLOSE-DONE. Routing-authority changeset ec2786c (ancestor of master); readiness preflight in src/orchestrators.rs.",
+  "completion": null
+}

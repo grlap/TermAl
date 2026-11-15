@@ -1,0 +1,59 @@
+{
+  "id": "01a16897-a115-79b2-93d9-6de61b5d3b3f",
+  "external_ref": null,
+  "title": "Registration ACK does not wait on unrelated dirty-session collection (no-schema slice)",
+  "outcome": "A test-run registration's durable acknowledgement depends only on its own exact registration entry, not on collection of unrelated dirty sessions, on the existing primary2 format",
+  "acceptance": [
+    "The existing persistence worker and connection cache conditionally insert or update only the exact original registration entry in the current committed metadata JSON, using immutable identity and the exact expected predecessor or absence. The transaction preserves every unowned committed field, requires its durable project/session/binding dependencies, and completes only after COMMIT, existing integrity checks and exact committed-entry readback. The primary and coordination schemas, existing loader semantics and public registration contract are unchanged.",
+    "Every ordinary Delta, full save, retry and shutdown preserves committed registration authority against stale snapshots. Every legitimate registration mutation, including monitoring updates, credit admission and compaction/removal, uses an explicitly ordered conditional operation; removal and its matching compacted proof are atomic. Exact duplicate replay is idempotent, conflicting predecessors and compacted-identity reuse refuse, and missing or malformed metadata never becomes an empty-store fallback.",
+    "A scoped registration commit neither advances the general mutation watermark nor consumes unrelated dirty state/tombstones or resolves unrelated content fences. TestRunRegistration durability matches the committed full entry including credit_admission. Registration and credit-admission publication reconcile the original operation epoch and retain all existing artifact, owner, effective-root, work/claim/fence/generation and response-deadline checks; failures, timeouts and late completions remain conservative and cannot acknowledge a newer candidate.",
+    "Deterministic repository-local real-writer/SQLite regressions prove ACK isolation and exact reload, later persistence of untouched dirty state/tombstones/fences, stale Delta/retry/full-save/shutdown safety, concurrent registrations and admission races, duplicate/conflicting replay, atomic compaction/removal, missing dependencies and write/readback/integrity/timeout/late-epoch failures. Focused checks and the maintained full gate pass on the exact final input, with a fresh independent Codex/Claude whole-input pair free of outstanding Medium or higher. This child introduces no terminal no-start state or hazard clearing; the parent's durable no-start criterion and historical incident attribution remain open."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "durability",
+    "gate-load",
+    "host-recording",
+    "no-schema",
+    "registration",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14071-4dfa-78f1-9168-b37b4125dcb8",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

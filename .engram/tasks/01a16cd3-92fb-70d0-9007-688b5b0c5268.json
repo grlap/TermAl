@@ -1,0 +1,36 @@
+{
+  "id": "01a16cd3-92fb-70d0-9007-688b5b0c5268",
+  "external_ref": null,
+  "title": "Carry stack fix: quoted-pipe exemption must not credit Windows .cmd/.bat shims (cmd.exe reinterprets |)",
+  "outcome": "Carry stack fix: quoted-pipe exemption must not credit Windows .cmd/.bat shims (cmd.exe reinterprets |)",
+  "acceptance": [
+    "A command routed through a Windows batch shim (.cmd/.bat, including package-manager runner shims where they resolve to one) whose arguments contain a quoted pipe is not granted the quoted-pipe exemption, so it earns no credit; the real-executable quoted-pipe case keeps its current behaviour; RED-first regression tests cover both on tree 590ddac3.",
+    "The fix is delivered as a patch onto Merger's carry tree 590ddac3; focused tests pass on the patched input, and a fresh read-only Codex+Claude pair on the fix hunks has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "carried-checks",
+    "review-finding",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered quoted-pipe boundary repair as the frozen R2 patch onto Merger tree590ddac3 (final tree dc99396f/raw018a). Windows batch and package-manager shims lose the quoted-pipe exemption; native supported runners retain it. Corrected RED recorder demonstrated forged succeeded credit before the fix; qualified own quoted_pipe check passed46/0. Fresh Codex full8 plus Claude R1full/R2delta pair has no Medium+. Independent Sonnet14416 evaluation b834875cabdc4287978eaae419df75c2 passed2/2, fresh at completion.",
+    "completed_at": "2026-10-24T09:17:56.706065800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

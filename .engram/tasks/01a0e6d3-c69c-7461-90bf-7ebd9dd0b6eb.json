@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c69c-7461-90bf-7ebd9dd0b6eb",
+  "external_ref": "tm-pkyb",
+  "title": "Nothing binds a commit to the tree the reviewers actually read",
+  "outcome": "Tonight this gap let a real regression reach a staged, approval-ready changeset, and only an unrelated accident kept it out.\n\nWHAT HAPPENED: a reviewer pair read the Engram doctor candidate. Findings came back, I fixed them, and that fix introduced a behavioural regression - the expiry path joined pipe readers before returning the deadline error, so a partly failed terminate would have converted a bounded five-minute limit into an unbounded hang of the HTTP handle. The reviewed subject and the staged subject had diverged, and NOTHING IN THE PROCESS NOTICED. It was caught only because I asked a peer coordinator to read the diff, and it arrived in time only because the commit approval had not yet come. Both saves were unplanned as a pair: asking was a decision, arriving before the approval was luck.\n\nTHE GAP IS NOT MISSING REVIEWERS - we had them. It is that APPROVAL IS NOT BOUND TO THE SUBJECT THAT WAS REVIEWED. Nothing checks that what is about to be committed is what was read, so any post-review edit - including one made BECAUSE of the review - silently leaves the reviewed set.\n\nWE ALREADY HAVE THE IDENTIFIER AND DO NOT USE IT THIS WAY: scripts/review-freeze-fingerprint.mjs computes the five-field fingerprint of the review subject. Two pieces are missing.\n1. It only PRINTS. There is no compare-and-fail mode, so every comparison tonight was done by eye, which makes the check depend on someone remembering to make it - the same \"depends on noticing\" dependency this project keeps removing elsewhere.\n2. Nothing records the fingerprint AT REVIEW TIME and consults it AT APPROVAL TIME. The value exists in transcripts and issue comments, which is exactly where an automated step will not look.\n\nMINIMUM SHAPE: record the fingerprint when a review is requested, and have the commit-preparation path recompute it and refuse - or at least state loudly - when it differs, naming which of the five fields moved. A difference is not automatically wrong; a post-review fix SHOULD change it. The point is that the divergence becomes visible and deliberate instead of silent.\n\nNOTE ON A PROPERTY THAT LOOKS LIKE A BUG AND IS NOT: the fingerprint changes when files are merely staged, without any content change. Engram::Fable nearly filed that as a defect today and their implementer showed the test that pins it as intended. This issue is why it is intended - the tool identifies the REVIEW SUBJECT, which is the whole state a reviewer saw, not just file contents. Do not \"fix\" that.\n\nRaised by Engram::Fable, who has the equivalent check wired into their own commit path and ran it at 05:56 today before committing, precisely to know they were committing what was reviewed.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The binding exists: the review-freeze fingerprint plus the exact-tree commit rule (docs/features/review-freeze-verification.md; CLAUDE.md). Closed by evidence.",
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1092c-b32e-7ab3-a96c-6ef8a9378cde",
+  "external_ref": null,
+  "title": "Parent delegation card and status summary omit findings and notes, so a non-clean result can read clean",
+  "outcome": "Pre-existing and out of scope of w-a7c465026c6c. The parent card and the status projection show only compact_delegation_public_summary(result.summary): src/delegations.rs:3460-3486 (update_parent_delegation_card_locked with public_summary), :5096-5102 (delegation_result_summary), and ui/src/delegation-commands.ts:1097-1102. They have never carried findings or notes. A completed result whose summary begins clean-sounding, with a contradiction or a real finding appearing later, therefore reads clean on the card. The packet, the fan-in and termal_get_session_result do carry findings and the inconsistency note. Any change to what the card shows is user-facing and waits for Greg's input under his standing rule.",
+  "acceptance": [
+    "Parent delegation card and status summary omit findings and notes, so a non-clean result can read clean is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

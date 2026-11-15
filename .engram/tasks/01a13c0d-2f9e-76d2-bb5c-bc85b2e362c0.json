@@ -1,0 +1,29 @@
+{
+  "id": "01a13c0d-2f9e-76d2-bb5c-bc85b2e362c0",
+  "external_ref": null,
+  "title": "Clarify the pipe-refusal remedy when another compound operator also prevents credit",
+  "outcome": "The pipe-refusal guidance remains accurate for commands that also contain unsupported list or redirection operators, without widening recognition or credit eligibility.",
+  "acceptance": [
+    "Clarify the pipe-refusal remedy when another compound operator also prevents credit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-recognition",
+    "diagnostics",
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a139e0-b00c-7500-8334-b07cc4b2834b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

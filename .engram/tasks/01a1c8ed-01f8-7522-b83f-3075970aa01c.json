@@ -1,0 +1,33 @@
+{
+  "id": "01a1c8ed-01f8-7522-b83f-3075970aa01c",
+  "external_ref": null,
+  "title": "Integrate combo49 on 225a5335: c593 76b0afb4 byte-identical carry (w-7189, journal limit 1024)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 3e178a6d2d2faa3086bfe68638013837fc37013d (tree 752d6b6f4c5e7a5401b36d9faabb43893feaace1) is on origin/master, where master was moved to it by a fast-forward from 225a5335f937b41aec62fd4ca9da338b3a7d3b6a, and its raw no-renames diff against that parent is byte-identical to c593 76b0afb4's diff against b3d7dce1.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 752d6b6f passed every stage, with equal source ids before and after and an eligible clean input, and the adopted review pair of 76b0afb4 (Codex 17335, Claude 17336) recorded no finding of Medium or higher.",
+    "The release binary built from tree 752d6b6f was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo49 integrated. 3e178a6d (tree 752d6b6f, a byte-identical carry of c593 76b0afb4) is on origin/master by fast-forward from 225a5335. The DL560 FULL on the exact tree (test-96ea0011) passed every stage, and the adopted pair of 76b0afb4 had no Medium+ finding. Installed on Central (06:20:50Z) and on DL560 (07:54:46Z), with the previous binaries kept aside and no host restarted by the install. Independent evaluation delegation-d2df82fd recorded 3/3 pass at 09:08:26Z. The author-test ref for 3e178a6d was deleted at 06:15:29Z.",
+    "completed_at": "2026-11-11T09:09:35.848407100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

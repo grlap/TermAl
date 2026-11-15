@@ -1,0 +1,28 @@
+{
+  "id": "01a0f14a-0d69-7580-8e57-339ab89e5ba7",
+  "external_ref": null,
+  "title": "A 65th running command evicts the oldest one's write places, so the evicted command stops counting as a writer and an overlapping check can be credited",
+  "outcome": "src/engram_turn_checks.rs:456-460 and :570-571: a session keeps the write places of at most ENGRAM_RUNNING_COMMAND_LIMIT = 64 running commands in running_command_worktrees. At the limit, `running.remove(0)` forgets the oldest.\nA forgotten command whose end its runtime never reports then no longer marks overlap. Another session's check it overlaps can be credited.\nEvery other limit in this area errs toward \"unknown\". This one errs toward credit.\nReported by Termal::Opus2 (mailbox 8836ff24 #5, item 7), relayed by Termal::Architect1 (2a27fd51 #9). The eviction was confirmed in the source by Termal::Fable2.\nRare: it needs 64 commands in one turn whose ends are never reported.\nFix direction: on overflow, keep an \"unknown writer, anywhere\" marker for the session until its next turn, instead of dropping the evicted command's places. Overlap then errs toward refusal.",
+  "acceptance": [
+    "After a session exceeds the running-command limit, a check in another session that overlaps the evicted command's window is not credited (it records overlap or unknown); a test covers it.",
+    "Below the limit, behaviour is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

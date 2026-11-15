@@ -1,0 +1,27 @@
+{
+  "id": "01a168f5-c69f-7801-9aef-0ef2c9ce13ab",
+  "external_ref": null,
+  "title": "Return a retryable status for the review-input mailbox-unavailable refusal",
+  "outcome": "[identity-mailbox-unavailable], a transient refusal whose next step is to submit again, is returned as 429 (or 503) like the other transient identity refusals, not 409 Conflict.",
+  "acceptance": [
+    "A mailbox read failure during a read-only reviewer's submission returns a retryable status (429 or 503) with [identity-mailbox-unavailable]; the fault-injection test of w-4a214468978d asserts that status."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

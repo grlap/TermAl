@@ -1,0 +1,57 @@
+{
+  "id": "01a10316-2131-72c3-a3d3-d09ecf813874",
+  "external_ref": null,
+  "title": "A test-run wait registered seconds after a detached launch settles at once as \"UNKNOWN (no pid recorded)\" and offers `recover`, although the run is alive and RUNNING",
+  "outcome": "A wait registered on a run whose request or heartbeat exists but whose pid is not yet indexed stays pending until the run is indexed or settles, and never settles it as UNKNOWN or offers `recover` for a live run.",
+  "acceptance": [
+    "A test-run wait registered while a detached run has a request or heartbeat but no indexed pid remains pending until authoritative run evidence settles it; it does not report UNKNOWN or offer recover merely because indexing has not yet recorded a pid. A run whose launcher is proven gone without a terminal result still settles as UNKNOWN with recover, a run whose executor was never published cannot be proven gone, and its wait stays pending with that reason shown. The regression covers indexing followed by actual success and by failure, the proven-gone case, and once-only settlement.",
+    "Preserved fail-first evidence on the unchanged product reproduces the identified live-but-unindexed premature settlement. A note separates recovered incident facts, source-derived hypotheses and executed diagnosis, including the reported late wakes on already-settled runs.",
+    "A wait registered on an already-settled run queues its result once and delivers it at the parent's next eligible turn boundary under the existing admission rules. It needs no unrelated mailbox wake or later registration, and it is not deferred past later turns of that parent. Tests cover registration while the parent is active and while it is idle, with duplicate delivery prevented.",
+    "The full five-stage gate passes on the exact reviewed resulting tree; a note cites its run directory, fingerprint, host verification and the independent Codex and Claude review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "fan-in",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the indexed-liveness wait correction; independent acceptance 6facca571867411fb3dc62789d29c419 passed all four criteria on the exact gated/reviewed input. Author commit 0044eb1311023e5553e1a06f44ab3c23de51a0d7 landed unchanged in master 18d70848920959cc1826968706dda3e52dafdcc1, pushed and verified per integration owner mailbox-message-9001ed4d-b7ca-4c02-9f42-94d7b0e4f2e3. Train gate test-28a48a67-d892-4fe2-b7f6-9993a57ba912 and integration pair 3d0ca082/99b254a6 are attributed owner observations; the owner filed the remaining integration Low separately. Installation is pending the owner's gate-window sequencing; no installed-build or deployed-interaction claim.",
+    "completed_at": "2026-10-04T01:11:22.698543600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

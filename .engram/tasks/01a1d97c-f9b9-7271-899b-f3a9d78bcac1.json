@@ -1,0 +1,40 @@
+{
+  "id": "01a1d97c-f9b9-7271-899b-f3a9d78bcac1",
+  "external_ref": null,
+  "title": "Bound steady-state causal completion polling using existing destination settlement receipts",
+  "outcome": "Before production supervisor integration, settled original causal requests stop causing repeated federation reads through a receipt-aware termination or pruning condition owned by existing settlement machinery, without a second completion ledger.",
+  "acceptance": [
+    "Behavioral evidence shows an already settled original is skipped before another remote RPC while unresolved originals and disconnect recovery remain eligible.",
+    "Retained original operation/receipt replay, immutable facts, bounded paging and fairness remain preserved; no fabricated credit or parallel delivered registry is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "performance",
+    "pilot",
+    "remote",
+    "review-low",
+    "settlement",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d3bf-d356-70b1-985a-c82b845900a5",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

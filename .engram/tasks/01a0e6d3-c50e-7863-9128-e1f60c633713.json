@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c50e-7863-9128-e1f60c633713",
+  "external_ref": "tm-ghbq",
+  "title": "Scope delegation wait dispatch failures to the producing server",
+  "outcome": "Second server-scoped waits review found preexisting asymmetry: src/wire.rs DelegationWaitResumeDispatchFailed has no server_instance_id, unlike TestRunWaitResumeDispatchFailed. The UI cannot reject a late delegation dispatch failure from a retired server. Add compatible server identity to publisher and UI handling, preserve early unseen-instance outcomes deliberately, and test retired/current server ordering. Outside tm-ncc6.8.7-.8.9 implementation.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

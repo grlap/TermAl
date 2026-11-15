@@ -1,0 +1,36 @@
+{
+  "id": "01a1b598-c875-7d02-abab-59e712e2dd9e",
+  "external_ref": null,
+  "title": "Local-to-local native mailbox send refused with 409 \"federation authority changed; refresh enrollment and retry\"",
+  "outcome": "Local-to-local native mailbox send refused with 409 \"federation authority changed; refresh enrollment and retry\"",
+  "acceptance": [
+    "A termal_send_to_session from one local Central root session to another local Central root session is not refused with the federation stale-authority conflict when neither participant's binding is a federation/domain binding; the refusal path that fired for the reported sends is identified from the code and logs, and a regression test reproduces that path and shows the local send now succeeds (or, if the refusal is correct, the error names the actual stale binding and the documented recovery works without a host restart).",
+    "The cause is recorded on this item from measurement (logs, binding rows or code path), not inferred."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed central mailbox authority diagnostics and deterministic native-route recovery coverage. Exact committed-input focused PASS7, independent review pair no Medium+, eligible exact-tree DL560 FULL green. Historical request arguments/keys absent, so specific original guard remains unproven; measured reachable family and recovery accepted per Fable2857. No acceptance evaluation exists.",
+    "completed_at": "2026-11-07T23:31:08.465440400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

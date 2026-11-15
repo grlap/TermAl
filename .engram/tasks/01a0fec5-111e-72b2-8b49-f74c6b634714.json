@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-111e-72b2-8b49-f74c6b634714",
+  "external_ref": null,
+  "title": "Guard canonical completion republish against a closed or unrelated recorder stream",
+  "outcome": "Guard canonical completion republish against a closed or unrelated recorder stream",
+  "acceptance": [
+    "Guard canonical completion republish against a closed or unrelated recorder stream with regression or contract evidence reviewed independently."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "low",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

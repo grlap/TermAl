@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c438-76b0-b4db-6e8d6e9821ca",
+  "external_ref": "tm-9tbr",
+  "title": "Consume waits at the archive transition, not at the next refresh",
+  "outcome": "From the changeset-3 (run waits) dual review, Codex /review-code finding (Medium).\n\nA pending run wait whose session becomes an archived Codex thread is consumed by the next refresh (after a rescan, within seconds: sessionUnavailable). Delegation waits behave the same way (delegation_wait_parent_eligibility_locked, sampled at refresh). If the thread is archived and unarchived between two refreshes, the wait survives and later resumes the session.\n\nRoot-session archive transitions to hook (they set CodexThreadState::Archived): codex_thread_actions.rs archive (~367) and archive reconciliation (~260), codex_events.rs thread-state events (~405), codex_discovery.rs (~536). codex_delegation_release.rs covers children only, and those cannot hold run waits. Consume the session's run waits (and decide for delegation waits) inside each transition's commit, publish testRunWaitConsumed with reason sessionUnavailable after it, and add an archive, then unarchive, with no intervening refresh regression.\n\nLow impact: the user unarchived the session, so a later resume is plausible. The docs state the refresh-time window until this lands.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

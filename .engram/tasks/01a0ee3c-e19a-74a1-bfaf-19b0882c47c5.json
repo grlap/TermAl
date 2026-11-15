@@ -1,0 +1,65 @@
+{
+  "id": "01a0ee3c-e19a-74a1-bfaf-19b0882c47c5",
+  "external_ref": "engram:w-d353c681b9ac#E3",
+  "title": "After a confirmed resubmit refusal, re-read the task and its evidence and hand the new check evidence to the evaluator",
+  "outcome": "When Engram refuses an evaluator's submission with acceptance_evaluation_resubmit and the refusal is confirmed, the host reads the task and its evidence again and gives the evaluator the new cut and the new check evidence, said openly; it never re-injects the old cut and never advances the cut silently.",
+  "acceptance": [
+    "An uncertain earlier submission is settled first by reading its exact record or resending the stored key and payload unchanged, before refreshing the task target or minting a new key. A later refusal alone does not settle an earlier unknown send. Tests preserve the original arguments and refuse target replacement while uncertainty remains.",
+    "After a confirmed typed acceptance_evaluation_resubmit refusal, the host rereads the task, canonical identity, cut, check evidence, policy, pin, source, carried failure and open obligations; persists and acknowledges the new target; and presents the old and new cuts and newly recorded check evidence in a host-authored brief under a fresh ordinal-bearing key. Changes are presentation only: the evaluator freshly judges every criterion against all evidence through the new cut, and the host supplies no verdict. Tests show the fresh brief and no old-cut reinjection.",
+    "TermAl's specification of the host's acceptance-evaluation procedure describes this path and links Engram's section 'Evaluation unit and re-evaluation'.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The host never submits verdicts with a cut the evaluator was not shown, and never resubmits the earlier verdicts without a fresh judgment by the evaluator; a test shows that the old cut is not re-injected and the cut is not advanced silently.",
+    "Only a confirmed typed acceptance_evaluation_resubmit refusal starts this refresh path. Unknown outcomes, other refusals, and source/root changes preserve their existing distinct dispositions. Engram's already-passed-check exception for the declared source revision remains effective; a late append alone does not force resubmission. Tests discriminate these cases."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance",
+    "engram-host",
+    "paired-engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed in origin/master as c083c33d8cfd978b5dc72512de67a6c2d76c4f0e (train37, tree9492fb34f79449268edd73bb08b110d2bfd6145b), carrying author842dade exact reviewed/gated merge. Fresh independent acceptance consumed; author full97cc9260/livec11f5fb3 and review pair retained. Integration fullbb953baa PASS Rust3862/0/24,Vitest4566/0,fingerprint2f6f6077 equal; clean Codexd2af1882/Claude34a61253 integration pair and owner remote verification quoted in holder note. Deferred Lows filed separately. Installation pending owner combined batch; preserve/archive artifacts before worktree removal.",
+    "completed_at": "2026-10-04T08:15:23.327556Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

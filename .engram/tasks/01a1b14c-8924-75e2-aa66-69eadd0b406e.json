@@ -1,0 +1,31 @@
+{
+  "id": "01a1b14c-8924-75e2-aa66-69eadd0b406e",
+  "external_ref": null,
+  "title": "Separate native run output events from source-change fencing without weakening authority",
+  "outcome": "Separate native run output events from source-change fencing without weakening authority",
+  "acceptance": [
+    "Separate native run output events from source-change fencing without weakening authority is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "greg-directed",
+    "native-declared-credit",
+    "review-finding",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1af47-2661-7340-b4ef-24a72c898d6d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Greg's before/after-only scope supersedes native watcher classification/fencing. Fable2722 and own parent concurrence79300ed99f2443abbaaad56c93bc40f4 explicitly withdraw H3/native watcher contract; not a runtime fix. Historical review provenance retained in notes.",
+  "completion": null
+}

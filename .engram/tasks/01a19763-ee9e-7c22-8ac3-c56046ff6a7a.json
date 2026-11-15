@@ -1,0 +1,29 @@
+{
+  "id": "01a19763-ee9e-7c22-8ac3-c56046ff6a7a",
+  "external_ref": null,
+  "title": "Should the import-hold fence-owner proof consult ResponsibilityEntry records and the fence owner's coverage, not only enrolled Exact bindings?",
+  "outcome": "The import-reconciliation design owner decides whether engram_import_fence_owner_is_another must also consult ResponsibilityEntry records, which carry their own owner_id and original_binding (for example HistoricOwner or RetainedHead), and/or the fence owner's coverage and association, when proving that an owner-scoped fence does not cover a candidate. If it should, a follow-up implements it.",
+  "acceptance": [
+    "The import-reconciliation design owner records a decision on this item: either owner-record bindings suffice as proof, or which ResponsibilityEntry kinds and which owner coverage or association states must also be consulted",
+    "if the decision requires a change, a follow-up item is filed and linked here"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "design-question",
+    "found-by-review",
+    "import-reconciliation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

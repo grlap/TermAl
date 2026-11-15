@@ -1,0 +1,29 @@
+{
+  "id": "01a0fec5-5745-7e83-8787-a61a1d388c34",
+  "external_ref": null,
+  "title": "Fence React session-list mirror against restoring transport-loss bodies",
+  "outcome": "A pre-loss React transition commit cannot overwrite the evicted current ref/list with unverified resident bodies.",
+  "acceptance": [
+    "A public regression commits an already-issued pre-loss transition after loss eviction but before the scheduled publication, and verifies ref/store/list authority remains consistent until a covering read."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

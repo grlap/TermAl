@@ -1,0 +1,28 @@
+{
+  "id": "01a19345-3249-71e3-8b12-85a5f9521739",
+  "external_ref": null,
+  "title": "Don't record a complete=false output-size band crossing for a single-frame body that ends in the same poll",
+  "outcome": "Don't record a complete=false output-size band crossing for a single-frame body that ends in the same poll",
+  "acceptance": [
+    "A single-frame response body of 16 MiB or more records only its complete observation, not an extra complete=false band-crossing observation, so it no longer appears in the incomplete slot",
+    "A deterministic test covers a large single-frame body and a genuinely truncated multi-frame body"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-stability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

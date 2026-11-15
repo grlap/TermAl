@@ -1,0 +1,28 @@
+{
+  "id": "01a100ba-8726-77d1-890e-cd31d9f7f451",
+  "external_ref": null,
+  "title": "Readiness test seam silently falls back to the raw path when a home cannot be canonicalized, so a misregistered home reintroduces the real-launch race",
+  "outcome": "test_engram_readiness_seam_key (src/engram_readiness_test_seam.rs) fails at once when a home passed to registration cannot be canonicalized, instead of silently using the raw path, so a test that registers a home before it exists, or spells it differently, cannot fall back to a real readiness launch under the 20 s budget unnoticed. Optionally, tests cover the registry invariants: a double registration panics, and dropping the guard frees the home.",
+  "acceptance": [
+    "Registering a home that does not exist fails the test immediately with a message naming the home; existing seam users still pass.",
+    "A test shows that a double registration panics without poisoning the registry, and that a dropped guard frees the home for re-registration."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

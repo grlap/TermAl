@@ -1,0 +1,31 @@
+{
+  "id": "01a16cf8-5e5b-7662-84c3-1b7c7996ca02",
+  "external_ref": null,
+  "title": "Extend reclamation snapshot reader parity to missing ancestry shapes",
+  "outcome": "The snapshot reader resolver is regression-tested against the full target for cycles, multi-hop projectless ancestors, own-project children and orphan child markers.",
+  "acceptance": [
+    "Reader-parity cases cover delegation cycles, a multi-hop chain through a projectless parent, a child with its own project_id, a child-shaped session with no delegation row and a projectless session with a delegation; compare the snapshot reader to the existing full-target/narrow-view oracle.",
+    "Relevant focused reclamation eligibility tests pass on the changed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-low",
+    "state-lock",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16cac-987f-70f0-8369-c75f102fcb10",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

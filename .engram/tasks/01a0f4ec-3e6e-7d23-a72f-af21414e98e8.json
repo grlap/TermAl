@@ -1,0 +1,28 @@
+{
+  "id": "01a0f4ec-3e6e-7d23-a72f-af21414e98e8",
+  "external_ref": null,
+  "title": "First-extraction fixture test: pin the content revision or correct the stated reason for replacing it",
+  "outcome": "First-extraction fixture test: pin the content revision or correct the stated reason for replacing it",
+  "acceptance": [
+    "src/tests/engram_first_extraction.rs either keeps the literal content revision in its fixture, shown equal on Windows and on the CI platform, or keeps the placeholder with a reason that is true (the test, its header and docs/features/host-architecture.md section 9.5 and the section 12 risk line agree); the section 12 risk line says 'byte for byte after placeholders'; a review pair without a Medium or higher on the change"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "engram-host-adapter",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fixed elsewhere: the first extraction's commit d63659f (w-8597a0e17af3) fixes this Low. It landed on master in train 7, acea4c7, pushed 2026-10-01 about 02:16Z. Recorded in Termal::Architect1's hand-off note 0d8eb764 on w-8597a0e17af3. Closed by Termal::Fable2.",
+  "completion": null
+}

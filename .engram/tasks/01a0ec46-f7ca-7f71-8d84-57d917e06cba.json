@@ -1,0 +1,26 @@
+{
+  "id": "01a0ec46-f7ca-7f71-8d84-57d917e06cba",
+  "external_ref": null,
+  "title": "The \"recognised test gets no credit\" host line does not name the command it is about",
+  "outcome": "Reported by Engram::Opus in mailbox-37bcca97 #85 (2026-09-29 08:26Z). After a turn whose credited-form run `pushd \"C:\\github\\Personal\\Engram\\.worktrees\\landing-record\" && cargo test landing` passed (10 tests, foreground, a later turn than the edits), the next prompt said: \"A recognised test gets no credit: TermAl cannot confirm it ran in …landing-record … because TermAl cannot tell where its shell is … Run it in one call as `pushd \"DIR\" && …`\". Opus concluded that the pushd run was refused after an earlier `cd /c/…` lost the shell.\nCode reading at 515a90c (Termal::Opus2) says otherwise. That reason (EngramUnconfirmedReason::ShellUnknown, engram_one_call.rs about line 356) is chosen only for a recognised test with no directory on its line (check.directory None) in a lost shell. A one-call line carries its directory and is credited to it regardless of the shell's history (engram_check_worktree_from, engram_check_paths.rs:749). My own one-call runs from a lost shell were recorded (w-9ebadc01e428 note 7f9bdb13). So the line most likely referred to another test-bearing call in that turn, e.g. a `cd /c/… && cargo test …` in a separate call. The line does not name the command it refers to, so the agent retried the wrong call.\nFix direction: name the refused command, or its first words and key, in the host line, and say when the same turn has a credited one-call run.",
+  "acceptance": [
+    "The host line for a recognised test that gets no credit names that test's command (or a recognisable prefix of it), so an agent can tell which call it refers to; a test covers a turn with one credited one-call run and one uncredited run, and the line names the uncredited one"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

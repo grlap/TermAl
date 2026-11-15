@@ -1,0 +1,28 @@
+{
+  "id": "01a10785-a7d3-70d2-916d-24a00b540256",
+  "external_ref": null,
+  "title": "The test-run index thread's first retry tick runs before boot raises the Engram readiness fence, so a rebuilt due retry can race the eager boot recovery",
+  "outcome": "The test-run index thread's first retry tick runs before boot raises the Engram readiness fence, so a rebuilt due retry can race the eager boot recovery",
+  "acceptance": [
+    "The test-run index thread's first retry tick runs before boot raises the Engram readiness fence, so a rebuilt due retry can race the eager boot recovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "boot-recovery",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

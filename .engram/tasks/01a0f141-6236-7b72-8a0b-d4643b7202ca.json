@@ -1,0 +1,37 @@
+{
+  "id": "01a0f141-6236-7b72-8a0b-d4643b7202ca",
+  "external_ref": null,
+  "title": "Architecture brief: host event stream, Engram adapter split, per-feature state, process supervision, execution record",
+  "outcome": "A design brief in docs/features/, linked both ways with the briefs it touches, for the TermAl architecture stop (memory termal-architecture-stop-2026-09-30).\nIt covers:\n- (a) One host event stream: stable ids, ordering per execution and per turn, an overflow and replay policy, idempotent consumers, dispatch outside the state and launch locks. Lock versus publish ordering. The broadcaster's silent drop at 256. Authority transitions (root assignment, admission, persistence confirmation, job close) stay direct, fenced operations.\n- (b) Split src/engram_host_adapter.rs (about 7,000 lines) by ownership: transport and dispatch, turn admission, source-root binding, verification and checkpoint reporting, persistence and recovery. Engram::Fable concurs on the Engram-facing contract.\n- (c) Per-feature state behind one handle each, instead of fields on EngramSessionState and AppState.\n- (d) One process launch and supervision owner: the launch guard, launch specs, retained identities, the sole job lease, cancellation and deadlines, pipe drains. Separate lifetime policies for bounded reads, terminals and long-lived runtimes.\n- (e) One execution record: an immutable execution id and a typed started, completed or interrupted result, published once and recoverable.\nThe brief also names the first extraction: command completion → execution record → credited check, through a narrow EngramHost facade. It names the order of later steps, and the tests that constrain each.\nNo product code under this item.",
+  "acceptance": [
+    "A review pair (Codex and Claude) has no outstanding finding of Medium or higher on the brief, and Engram::Fable has concurred on the Engram-facing adapter contract, recorded on this item.",
+    "Termal::Fable2, as coordinator, has recorded the brief as agreed on this item.",
+    "The brief names the first end-to-end extraction and the sequence of later steps, each with the existing tests and the new end-to-end proof that constrain it.",
+    "docs/features/<brief>.md exists, linked both ways with the feature briefs it changes, and covers (a) to (e) with component boundaries, ownership of state and locks, and the fenced authority operations."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "architecture-stop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "docs/features/host-architecture.md, the design brief for the TermAl architecture stop: (a) one in-process host event stream with typed two-phase admission, a total order per epoch, bounded retention with typed gaps, idempotent consumers, and the drain-seal-cut before a checkpoint composes; (b) the Engram host adapter split by ownership into seven components behind the EngramHost facade, with the contract with Engram stated as guarantees and a conformance table against Engram commit b5db8054 (amendment concurred by both projects' coordinators); (c) owned per-feature state as real modules with private fields, every field of EngramSessionState assigned an owner, and one lock order; (d) one process launch and supervision owner; (e) one execution record with outcome and credit as separate records (sections 7 and 8 by Termal::Architect2, who co-signed section 9). Section 9 names the first extraction (command completion to execution record to credited check through EngramHost, behaviour-preserving with a byte-for-byte report fixture); section 10 the twelve later steps with their existing tests and new proof; section 11 the fenced authority operations; section 12 rejected alternatives, risks and open questions; section 13 related work. Linked both ways with nine documents. No product code. Four review rounds; the last had no Medium or higher, its two Lows filed as w-6c29665de51f and w-52e8a0959a47. Committed 6ab70dca16514ad99e7a552ab265d3025cfad885 on architect1/host-architecture, landed on master by Termal::Opus2 in train 2 as merge fab262372c9c1531664640d4fd0459ba49ceb251 (train gate test-ad293b36 PASS, train pair clean). Independent evaluation 7cdff6e643964be8936a91049d66ec69 passed all four criteria. Follow-up text change for the landed per-session scoping of unplaced commands: w-b2e05f2dd5af.",
+    "completed_at": "2026-09-30T20:32:46.029987500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

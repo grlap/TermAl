@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c80c-7002-b04e-a5b2356bf831",
+  "external_ref": "tm-zqlx",
+  "title": "Recover Codex threads whose writer lease survives a TermAl restart",
+  "outcome": "After a TermAl reboot during a durable delegation fan-in, two manual resume attempts on the restored parent session failed with \thread <id> already has an active writer. The pre-restart turn/writer or automatic recovery still owned the shared Codex app-server thread while TermAl admitted a second writer. The same recovery window caused the delegated Codex reviewer to time out, while Claude and mailbox state survived. Diagnose the writer ownership lifecycle across restart, automatic resume, and manual resume; avoid duplicate writer admission without losing durable queued work.",
+  "acceptance": [
+    "A restart during an active or waiting Codex turn reconciles the old writer before admitting recovery; automatic fan-in resume and a concurrent/manual resume are serialized or return a typed retryable state instead of a raw active-writer failure; no prompt is duplicated or lost; deterministic restart/recovery coverage reproduces the original race."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

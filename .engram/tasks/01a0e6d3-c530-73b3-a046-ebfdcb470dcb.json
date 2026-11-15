@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c530-73b3-a046-ebfdcb470dcb",
+  "external_ref": "tm-ijim",
+  "title": "Skip overlap marking for a duplicate or abandoned command finish",
+  "outcome": "From tm-winf round-12 review (Claude, Low). note_engram_command_finished always marks other sessions' open checks overlapped (engram_mark_checks_overlapped_by), even for a duplicate finish (the Codex legacy item_completed mirror after the typed v2 completion) or a finish after an abandon (declined Codex command). Neither writes anything new; the only effect is extra pessimism (another session's test becomes unknown). Note running_command_keys is only populated in mediated sessions, so 'key not running' cannot be the test for an unmediated writer; a per-session set of finished/abandoned keys (or a finish-dedup) would be needed.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

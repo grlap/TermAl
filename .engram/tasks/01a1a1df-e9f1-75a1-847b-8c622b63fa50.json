@@ -1,0 +1,28 @@
+{
+  "id": "01a1a1df-e9f1-75a1-847b-8c622b63fa50",
+  "external_ref": null,
+  "title": "termal_list_sessions occasionally returns a plain \"TermAl del…\" error text instead of the JSON session list",
+  "outcome": "termal_list_sessions either returns the JSON session list or a structured error, and a transient failure carries a stable error code and the HTTP status, so callers can tell a transient host error from a malformed reply.",
+  "acceptance": [
+    "The plain-text 'TermAl delegation API returned …' path of termal_list_sessions is identified, with the HTTP status or condition that produced it.",
+    "The tool returns a structured error object (code, status, message) for that path, and a test covers it; the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation-mcp",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

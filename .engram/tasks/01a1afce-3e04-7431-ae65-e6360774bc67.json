@@ -1,0 +1,28 @@
+{
+  "id": "01a1afce-3e04-7431-ae65-e6360774bc67",
+  "external_ref": null,
+  "title": "Investigate successful Git reads with stderr in the existing review-identity runner",
+  "outcome": "Determine whether ReviewIdentityGit can admit a partial successful Git read with stderr, and record a concrete reproduction or a justified refusal policy in its existing owner.",
+  "acceptance": [
+    "Trace the existing ReviewIdentityGit success path and use a bounded discriminating diagnostic to establish whether an exit-zero partial read with stderr can affect identity; document the outcome and any necessary follow-up without adding a second reader."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "review-identity",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

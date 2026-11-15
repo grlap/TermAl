@@ -1,0 +1,28 @@
+{
+  "id": "01a11f0b-fc7d-7af2-9caf-c0bfd2043f21",
+  "external_ref": null,
+  "title": "The doc comment on recover_interrupted_sessions says boot moves sessions to Idle and drains queued prompts; it sets Error and keeps them",
+  "outcome": "The doc comment on StateInner::recover_interrupted_sessions (src/state_boot.rs) and the matching line in the src/app_boot.rs header describe what boot does: local Active, Approval and Stopping sessions become Error, pending interactions are marked Interrupted, running commands fail, one restart notice is added, and queued prompts are kept and not dispatched.",
+  "acceptance": [
+    "The doc comment on recover_interrupted_sessions says boot moves sessions to Idle and drains queued prompts; it sets Error and keeps them is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "host-boot",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

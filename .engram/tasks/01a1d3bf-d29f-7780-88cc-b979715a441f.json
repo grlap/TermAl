@@ -1,0 +1,46 @@
+{
+  "id": "01a1d3bf-d29f-7780-88cc-b979715a441f",
+  "external_ref": null,
+  "title": "K3 slice 2: deliver original causal native completion automatically with recovery",
+  "outcome": "The existing authenticated mailbox/federation and settlement owners carry genuine native completion from the original typed request automatically and recover delivery without another model/import turn or duplicate test.",
+  "acceptance": [
+    "Behavioral tests drive genuine retained native terminal completion from the original S2b typed request and immutable registration custody through the existing authenticated mailbox/federation owners, preserving origin facts separately from each destination association; no observer-only reply is adopted as causal custody, no new transport or second run registry is created, and no caller-provided proof manufactures authority.",
+    "Behavioral recovery tests cover missed, duplicate, late and reordered delivery, restart, Unknown/pending followed by authoritative terminal, failed/interrupted terminals and conflicting authoritative results. Identical retries retain the original intent/key/receipt; exact replay checks routing then returns the original receipt before renewed live-association validation, while new reuse validates current authority. No automatic import turn, retest, remote-path probe or manual capture is required."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "large",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a1d3bf-d356-70b1-985a-c82b845900a5"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Original causal completion provider and automatic destination settlement recovery are delivered on landed b9186b44. Fresh independent evaluation525fa8e08d95408399b0c07bf0d80976 passed both unchanged criteria at revision5, clean b918/4113, superseding prior C2FAIL92035154 only through newly landed behavior. Full verdicts read and fresh source verified. No manual author links; evaluator citations carry the judged evidence.",
+    "completed_at": "2026-11-14T22:30:12.529699Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c7ea-74c1-b11b-b16425204ba9",
+  "external_ref": "tm-xz96",
+  "title": "Match Engram idempotency and unknown-grant semantics in doubles",
+  "outcome": "The fake and PowerShell/bash fixtures lack bind/checkpoint idempotency receipt tables, key begin intent only by grant_id instead of delivery tokens, do not persist turn_already_open refusals, and fabricate grant_scope_mismatch for unknown grants where the binary reports turn_grant_not_found. This can make recovery tests enshrine behavior that differs from the real Engram binary.",
+  "acceptance": [
+    "All Engram doubles independently mirror bind/checkpoint idempotency replay, token-scoped begin intent, persisted refusal replay, and real unknown-grant error shapes; a timed-out-applied checkpoint retry behaves like the real binary in focused tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

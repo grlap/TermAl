@@ -1,0 +1,36 @@
+{
+  "id": "01a1c30c-eb0f-7751-bdfd-9406bae4dbb7",
+  "external_ref": null,
+  "title": "Exercise final-path component containment with an existing sibling in the Windows fixture test",
+  "outcome": "The junction-temp fixture regression proves the final-path component boundary rather than passing because its sibling cannot be opened.",
+  "acceptance": [
+    "Create an existing, empty same-prefix sibling beside the physical termal/tests directory, invoke the real Windows control fixture with the aliased TEMP and that sibling as home, and assert exit4, the existing refusal message and no sibling writes. The case must fail if the final-path StartsWith component separator is removed; retain canonical/lexical positive controls and safe link-only cleanup."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "severity-low",
+    "test-fixture",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

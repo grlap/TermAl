@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c803-7342-8a71-aabc3b2aa5fb",
+  "external_ref": "tm-zg4i",
+  "title": "Read-only reviewer denial should name the rule that fired, and the reviewer commands should state the accepted Bash grammar",
+  "outcome": "FIELD EVIDENCE, 2026-09-11, three projects in one day: Engram reviewers had a `git hash-object` loop and PowerShell calls denied (recorded on tm-bcj); PhoenixCodeNav reviewer session-6696 (delegation-1b9b0643, ~20:11Z) had exactly two calls denied and gave up before the inventory: (1) one Bash call chaining five git commands with `;` and (2) the same set through the PowerShell tool. Both received the generic text \"TermAl denied this tool request because this Claude reviewer delegation is read-only.\" (src/claude.rs:450). The reviewer concluded that the policy denies every Bash and PowerShell call, which is false.\n\nWHAT ACTUALLY FIRED (source, claude_bash_command_is_read_only and claude_git_tokens_are_read_only in src/claude.rs): the Bash call was denied by the separator rule - any `;` in a command fails closed (except the literal `for ... do ...; done` shape); it never reached the git rules. The PowerShell call was denied wholesale by design (tm-bcj). Each of the five git commands would have passed on its own: `--no-optional-locks` and `--no-pager` are allowed leading global options; status/diff/ls-files/rev-parse are allowed subcommands; `--no-ext-diff`, `--no-textconv`, `--no-color`, `--name-only`, `--short`, `--binary` are not on the diff deny-list (only --output, --ext-diff, --textconv and their abbreviations are). `&&` and `|` chains are allowed; `;`, newlines, redirections, backticks and `$(` are not.\n\nASK: (a) make the denial message name the rule that fired (separator, redirection, unknown git option, PowerShell tool, loop shape, unknown command) so a reviewer can adapt in one step instead of abandoning the inventory; (b) state the accepted grammar in .claude/commands/review-code.md and in docs/features/agent-delegation-sessions.md (one command per call or `&&`; no `;`; the git subcommand and option allow-list); (c) optionally reconcile session-6676's report that hardened flags were rejected - the rules at HEAD accept them, so either that reviewer used other syntax or the running build differed; verify before changing anything. No widening of the read-only policy is requested.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

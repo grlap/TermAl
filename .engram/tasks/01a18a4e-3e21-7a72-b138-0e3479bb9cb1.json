@@ -1,0 +1,27 @@
+{
+  "id": "01a18a4e-3e21-7a72-b138-0e3479bb9cb1",
+  "external_ref": null,
+  "title": "Consider naming the remote gate's passed result in the evidence the integration owner records under \"Test refs for remote runs\"",
+  "outcome": "The coordinators decide, and if they amend it they do so under the authority-text procedure (a)-(c) with Greg's word, whether the list of what the integration owner records for a remote full gate (run id, host, commit, tree id, before and after fingerprints) should also name the run's passed result and per-stage counts, so that the item's lasting record shows the gate was green.",
+  "acceptance": [
+    "Consider naming the remote gate's passed result in the evidence the integration owner records under \"Test refs for remote runs\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "remote-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

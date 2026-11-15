@@ -1,0 +1,26 @@
+{
+  "id": "01a1a839-cfc7-7f83-8a69-7845681d60b4",
+  "external_ref": null,
+  "title": "Docs: state the one rule for a registered check, its limits, and turn reports as history",
+  "outcome": "TermAl's docs state the rule Greg approved on 2026-11-04 in one short place, so nobody reads the old barrier as current: a registered check counts only while the named root is clean at exactly its commit, read from Git at evaluation and at done, and turn reports are history.",
+  "acceptance": [
+    "docs/features/execution-observability.md and docs/features/source-identity.md state the one rule, its limits and turn reports as history, in wording checked against Engram::Fable's for w-633b5cacc42a, and no statement in TermAl's docs says a turn report refuses a registered check",
+    "The change is one docs-only candidate commit, held until Engram's change lands, and it lands with no further code change",
+    "A read-only list of what's removable on TermAl's side after the end-to-end run passes, by file and size, is recorded on this item, with nothing deleted"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

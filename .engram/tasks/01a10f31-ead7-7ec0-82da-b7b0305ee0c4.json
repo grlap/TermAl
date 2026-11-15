@@ -1,0 +1,70 @@
+{
+  "id": "01a10f31-ead7-7ec0-82da-b7b0305ee0c4",
+  "external_ref": null,
+  "title": "Dormant begin-recovery format, cancellation-proof and exact ACK contracts",
+  "outcome": "Independently tested dormant data/persistence prerequisites; no active recovery state or runtime behavior is introduced, and foundation/parent recovery remains incomplete.",
+  "acceptance": [
+    "This stage is a dormant prerequisite only. Production changes are limited to the isolated recovery format/validation/ACK module, its include and unused exact persistence fence support. It adds no live session recovery fields, persisted-record fields, serializer/loader integration, admission/Begin/delivery callers, containment policy or operator-cancel activation. Production constructs no new recovery fence target or recovery context and calls none of the new ACK methods. Static call-site review and regression tests demonstrate that ordinary production operations cannot enter a new held state or require an unimplemented cancel exit.",
+    "Pure typed contracts retain exact envelope identity/revision, authority, replay payload, phase and settlement, plus distinct local ACK/reply/owner failure kinds. Round-trip and identity controls preserve the original grant, delivery tokens, begin key, grant basis, retained head/dispatch identity and session/project/store/connection/settings/work-binding data without substitution. These tests establish data contracts only, not first-send ownership, replay or provider delivery.",
+    "The pure raw decoder preserves the original envelope, audit, markers, cancellation capture and cancellation audit when any recovery-only field is malformed or inconsistent. Tests cover valid data, missing fields, malformed envelope/audit/marker/tuple and surviving modern evidence; partial modern invalidity never becomes a legacy authorization or proves a terminal outcome by itself. An independently verified coherent local cancellation proof remains valid when only transport replay fields are invalid. The decoder neither mutates unrelated session/head data nor fabricates an envelope, key, pre-wire ACK, replay or admission authority. This stage does not connect the decoder to the production loader.",
+    "Pure cancellation validation requires a verified local identity/revision/head/text and applicable grant/key audit. Positive terminal proof requires the coherent matching cancellation capture/audit, the exact old head absent, and its full original text preserved in the identified cancellation message. Negative controls cover mismatched operation/revision/head/text/audit and a surviving old head; a successor cannot substitute for or be retired as the old head. Legacy local-cancel data does not fabricate a historical envelope, key or ACK. No operator action or production usable-exit claim is activated here.",
+    "The unused recovery ACK/fence contract compares the complete coherent recovery image by exact durable readback and reports failure/ambiguity/deadline instead of success when it cannot establish that image. Disposable persistence tests exercise matching readback, mismatch, failed/unknown ACK and budget expiry; no lock spans a persistence wait. Existing production fence variants and healthy persistence/admission/bind/abort/initial-delivery behavior remain covered and unchanged. Documentation identifies this as dormant support and leaves active foundation, automatic recovery and parent incident claims open.",
+    "The holder reports native production added/deleted lines against the exact authorized predecessor commit, counting cfg(test) seams, with every forecast measured from a complete candidate tree that passes `cargo fmt -- --check` in repository context, using native Git numstat against the stage's exact base. The stage stays at or below 400 ADDED production lines, forecasts before writing and recounts its final actual input; overrun stops for a new disposition without compression or safeguard removal. Its own named-root final exact input has a passed maintained full gate/host Test record, an independent read-only Codex/Claude pair without outstanding in-scope Medium+, filed remaining Lows and independent acceptance. The provisional failed root/logs remain preserved. This prerequisite claims none of foundation F1-F7 or its seven bindings."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "begin-recovery",
+    "dormant",
+    "stage-a"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10f63-d654-79a2-8122-18ed1010f1f5",
+  "disposal_reason": "Coordinator exact disposition 94fa32fe89664e1a9348ef720ae8f7c6 supersedes the capped400 implementation, not completion or waiver. CORE w-18ed1010f1f5 and second successor PROOF w-ca6971bb1f33 preserve ead18fac WITH de96d1c7 appends/all12 Test, original Medium/Low evidence and roots/logs/forecasts. Combined416 exceeds original400; neither smaller landing satisfies that old contract. Proof depends on actual landed core; foundation remains stopped until both land.",
+  "completion": null
+}

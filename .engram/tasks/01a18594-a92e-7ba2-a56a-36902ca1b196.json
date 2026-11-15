@@ -1,0 +1,28 @@
+{
+  "id": "01a18594-a92e-7ba2-a56a-36902ca1b196",
+  "external_ref": null,
+  "title": "Wait-repair retry: add hook-level negative tests (not adopted / adopted but not covering keeps the retry)",
+  "outcome": "A hook-level test in ui/src/app-live-state-test-runs.test.tsx shows that, after a failed wait repair arms the retry, an unrelated resync whose snapshot is NOT adopted, or is adopted but below a current-server wait watermark, keeps the armed retry, which still fetches. It thereby pins the transport's `adopted &&` guard and its use of `state.serverInstanceId`.",
+  "acceptance": [
+    "Wait-repair retry: add hook-level negative tests (not adopted / adopted but not covering keeps the retry) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-gap",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

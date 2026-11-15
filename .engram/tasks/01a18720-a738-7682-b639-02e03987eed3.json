@@ -1,0 +1,32 @@
+{
+  "id": "01a18720-a738-7682-b639-02e03987eed3",
+  "external_ref": null,
+  "title": "w-c205 slice C: a non-admission session_bind keeps its identity across a lost reply",
+  "outcome": "A session_bind sent outside queued admission (boot recovery, runtime-loss rebind, delegation binds and the other callers in the inventory) retains its idempotency key and request before send, instead of building a fresh UUID key on every attempt.",
+  "acceptance": [
+    "For every session_bind sent outside queued admission, retain the original session, idempotency key and complete request intent in process memory before send. Classify lost or invalid replies by dispatch evidence; timeout or cancellation alone never proves rollback. This retention is process-lifetime only: host crash or restart can lose the original, and restart/connection-change recovery remains an open, explicitly documented follow-up.",
+    "While an unresolved retained bind is eligible for same-connection recovery, preserve its exact producer-compared intent and prevent any competing path from replacing that session's bind before recovery. The next eligible bind replays that exact request and key only while no intervening replacement bind has occurred; a validated matching response and its current status are required before adopting its routing token or performing a new-focus rebind. Connection or settings changes are outside this improvement's guarantee, are disclosed, and must not leave the old retained request eligible for replay after another bind replaces it. Existing behavior on those excluded paths is documented as a remaining gap, not as resolved or proven safe.",
+    "Tests lose a non-admission bind reply after dispatch and show exact same-connection replay without a second bind mutation; a focus change first recovers the original then rebinds; competing bind paths cannot replace the row during eligible recovery; and a connection/settings change or intervening replacement cannot replay the stale retained request as historical readback. Test definitive rejection of the original request separately from a later recovery-attempt refusal, preserve unresolved outcomes, and claim no restart-safe recovery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "engram-interop",
+    "lost-reply",
+    "w-c205-slice"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18617-8de1-79e3-b1cb-c205c0fecb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

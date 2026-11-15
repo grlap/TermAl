@@ -1,0 +1,57 @@
+{
+  "id": "01a10589-a9a1-73e3-84b6-b2b3e15d9d23",
+  "external_ref": null,
+  "title": "A detached full gate launched alone, after its freeze returned, is refused carried credit as 'another command or another writable session was active in its worktree' while read-only reviewers run there; focused checks are refused likewise",
+  "outcome": "A check launched as the only command, with its freeze returned and only read-only delegation children active in the worktree, earns credit, as Greg's parallel gate-and-review workflow (2026-09-26) requires. A refusal names the actual interfering session, command or file write, so it can be diagnosed.",
+  "acceptance": [
+    "C1. Diagnostics: every refusal or withholding for overlap (carried launch engram_carried_checks.rs:1385, focused :483) names the condition that fired and its subject: own running command key; another writer's session id and name plus why it matched (its worktree, its named root, a command's worktree, or an UNRESOLVED worktree); late-name command; TermAl write path; later writer act and its writer.",
+    "C2. Fail-first reproduction (red at 2933a6a): a lone carried launch in worktree A, with an Active writable session whose workdir is in worktree B but was never resolved, plus an Active read-only delegation child running an unfinished command in A, is refused today; after the fix it is carried and unfenced. A control with B's session in A still refuses and names that session.",
+    "C3. Fix: the cause is removed at its source, by (a) resolving workdir_worktree on every path that makes a session Active/Approval/Stopping (restore, wake, delegation child, resume included), with an inventory note of those paths, or (b) resolving off the lock at launch for any unresolved candidate before counting it; 'unresolved counts everywhere' remains only for a workdir that cannot be resolved, and C1 names it. and for a remote proxy session (record.remote_id set), whose workdir this item does not resolve; C1 names it as such",
+    "C4. Characterisation (must stay green): a lone launch beside an Active read-only child with an unfinished `git diff` in the same worktree is carried; watcher changes under target/ and .tmp/ fence nothing.",
+    "C5. Full gate on the exact reviewed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Overlap refusals and withheld-check lines now name their cause (another session with id, name, why it matched and its act; own commands by a 12-hex digest of the key; late name; TermAl write; own edit). Unresolved local in-turn writers are resolved off the state lock before counting, so one unresolved session no longer refuses every check on the host. Remote proxies stay counted and are named. The Engram settings reset and the project removal keep workdir_worktree. Landed in train 40 as dccf38f, with 9 new tests in src/tests/engram_overlap_cause.rs.",
+    "completed_at": "2026-10-04T10:26:34.254225100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

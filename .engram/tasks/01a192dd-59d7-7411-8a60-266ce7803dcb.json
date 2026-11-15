@@ -1,0 +1,30 @@
+{
+  "id": "01a192dd-59d7-7411-8a60-266ce7803dcb",
+  "external_ref": null,
+  "title": "Pin the candidate-commits bullet, the landing preface and the review-changes candidate paragraph in agent_commands tests; fix the stale \"before any commit or push\" message",
+  "outcome": "Pin the candidate-commits bullet, the landing preface and the review-changes candidate paragraph in agent_commands tests; fix the stale \"before any commit or push\" message",
+  "acceptance": [
+    "src/tests/agent_commands.rs pins, with assert_command_contains in both CLAUDE.md and AGENTS.md, the candidate-commits bullet's rules (never on master and never pushed; not a landing; landing only by fast-forward; superseded, never amended, rebased or force-pushed) and the standing rule's landing preface, and pins the review-changes Step 1 candidate paragraph and the IMPORTANT clauses of review-changes.md and fix-bug.md",
+    "The Step 7 pin's failure message at agent_commands.rs:3060 says 'before any landing or push' instead of 'before any commit or push'",
+    "Exact-input focused tests and a clean review pair"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

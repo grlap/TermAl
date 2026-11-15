@@ -1,0 +1,29 @@
+{
+  "id": "01a1a887-c117-79f3-b3e1-8559aa4aa06c",
+  "external_ref": null,
+  "title": "Assert main and linked worktree rows in cleanup-report real-Git CLI coverage",
+  "outcome": "The cleanup-report real-Git fixture proves the Git-discovered main and linked worktree rows and their classifications, in addition to repository and snapshot resolution.",
+  "acceptance": [
+    "The real-Git CLI fixture asserts the main checkout row by canonical identity, its retain classification and main-checkout reason.",
+    "The same fixture asserts the linked worktree row, its HEAD and expected outside-repository representation; the assertions discriminate dropped rows or a main root incorrectly classified review across Windows and POSIX path spellings."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup-report",
+    "review-followup",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

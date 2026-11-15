@@ -1,0 +1,30 @@
+{
+  "id": "01a1a00f-5488-7870-b6f2-c03ce2f854e8",
+  "external_ref": null,
+  "title": "A remote sender's mailbox send fails with 409 \"federation link changed\" across a Central outage and has no supported sender-intent reconciliation",
+  "outcome": "A send from a satellite session that is interrupted by a link change or Central outage is either delivered exactly once automatically when the link returns, or its intent status can be read and reconciled through a supported interface, without manual identical-key retries guided only by local evidence.",
+  "acceptance": [
+    "The 409 'federation link changed; reconnect and reconcile the original operation' path is traced to its code, and the documented reconciliation for the sender is identified or found missing.",
+    "Either automatic exactly-once delivery after link recovery or a supported sender-intent status read exists, with a regression test that changes the link mid-send and asserts exactly one delivery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

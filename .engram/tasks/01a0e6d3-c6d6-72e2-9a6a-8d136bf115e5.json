@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6d6-72e2-9a6a-8d136bf115e5",
+  "external_ref": "tm-sxex",
+  "title": "Isolate Codex discovery schema failures per home",
+  "outcome": "Validated tm-7p9z.9 dual-review fan-in: Claude Medium at src/codex_discovery.rs:176 plus Low at :324/:385, merged into one actionable defect; Codex reported no findings. discover_codex_threads_from_homes propagates a per-home query failure with ?, discarding discovery results from otherwise valid homes (including results already collected). Pinning state_5.sqlite to required current columns makes a mismatched external home fail the entire boot discovery pass. Bare query errors omit database-path context. This is failure isolation and diagnostics, not permission to support old schemas, modify external stores, or prune existing sessions. Searched discovery/Codex/schema work: tm-vjr and tm-91c concern different re-import/suppression defects, not this failure path. Review delegation-d87dc74b-b063-4493-87bc-edcb433ac8c8; reviewed HEAD 7acacc1, staged hash 8c41bf5e.",
+  "acceptance": [
+    "Reject an incompatible home with a diagnostic naming its database and preserving the underlying cause; continue importing valid homes without changing current-schema requirements or existing ignore/subagent/delegation rules. Mixed valid/invalid home fixture tests both orderings, confirms valid threads survive and databases remain unchanged. Parent runs relevant Rust tests and required gates; never open the live store."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1d5b0-46f3-7062-8aa8-7a976492668e",
+  "external_ref": null,
+  "title": "Integrate combo93 on 5f65a032: 03d4 1bf874d9 (w-492e bounded output serializer, P0; Opus2 chain carry of 69fe932b onto K3)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 1bf874d9cafa90cecba51a1802b90c5b67c6c426 (tree d05798222c354e296d80b6cbc9271b49b7a54374) is on origin/master, where master was moved to it by a fast-forward from 5f65a0325b97f061ef3a8acfead5eda61a0da620.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is d0579822 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: Sol-03d4's fresh whole-57 review pair (Codex 17836, Claude 17837) on exactly 5f65a032..1bf874d9 found no Critical, High or Medium, with its Lows filed as their own items.",
+    "The release binary built from tree d0579822 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

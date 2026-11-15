@@ -1,0 +1,28 @@
+{
+  "id": "01a1b4a8-b14c-7a50-bbb6-a4cff6cd3def",
+  "external_ref": null,
+  "title": "termal_send_to_session surfaces the boot-window 423 'federation persistence is settling; retry' to agents, who must retry by hand",
+  "outcome": "A native send to a remote root during the peer's boot-window durability settling does not need a manual agent retry, or the documented agent recovery is shown in the tool result. Duplicate protection by idempotency key stays unchanged.",
+  "acceptance": [
+    "termal_send_to_session surfaces the boot-window 423 'federation persistence is settling; retry' to agents, who must retry by hand is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1b4aa-3d30-79a1-abd2-0e37ad3ca5ac",
+  "disposal_reason": "Duplicate. Opus2 filed the same Engram::Merger report (423 'federation persistence is settling' on a send to DL560 session-4, about 06:17Z) as w-0e37ad3ca5ac (P2) at the same time. That item is canonical, and my note here carries over as context.",
+  "completion": null
+}

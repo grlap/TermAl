@@ -1,0 +1,30 @@
+{
+  "id": "01a1aebf-9858-70f3-a02d-d271d1b1dd07",
+  "external_ref": null,
+  "title": "Align source identity documentation with recursive admission and one hidden-index unit test",
+  "outcome": "docs/features/source-identity.md describes recursive children and accurately limits hidden-index test evidence to the single root unit test.",
+  "acceptance": [
+    "The direct-children wording describes recursive children and agrees with the implemented admission predicate.",
+    "The hidden-index evidence wording names the single root unit test and separates that evidence from the general root/child Git-status visibility limitation; no excluded hidden-flag live rows are added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

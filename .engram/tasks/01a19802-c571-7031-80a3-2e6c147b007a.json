@@ -1,0 +1,29 @@
+{
+  "id": "01a19802-c571-7031-80a3-2e6c147b007a",
+  "external_ref": null,
+  "title": "Document and pin fatal checkpoint write-cut refusal when a transcript row is isolated",
+  "outcome": "The session-isolation contract explicitly preserves fatal checkpoint mirror and ledger validation and a regression pins their combined boundary.",
+  "acceptance": [
+    "A disposable regression combines a rejected transcript row retaining its last-good checkpoint mirror with changed global ledger data and proves the incoherent full cut is refused atomically.",
+    "Documentation states this boundary without promising every sibling write succeeds across a fatal ledger or mirror refusal; no checkpoint authority or integrity validation is weakened."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

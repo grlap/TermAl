@@ -1,0 +1,50 @@
+{
+  "id": "01a1693b-4964-7411-a60e-86897edd2083",
+  "external_ref": null,
+  "title": "Retain full-launch ambiguity when changed descriptions or repeated starts retire its check",
+  "outcome": "Retiring a full-launch check on a changed description or repeated start retains enough run association history to prevent later gates borrowing its run.",
+  "acceptance": [
+    "Preserve the original full launch root/start ambiguity marker when a changed command or place removes its open check, including repeated-start replacement.",
+    "Cover the ACP terminal describe-before-complete ordering and repeated-start change through later carry and settlement, with matched positive controls.",
+    "Focused validation, final full gate and independent review cover the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acp",
+    "association",
+    "host-recording",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

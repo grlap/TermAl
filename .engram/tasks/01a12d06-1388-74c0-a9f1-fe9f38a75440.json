@@ -1,0 +1,36 @@
+{
+  "id": "01a12d06-1388-74c0-a9f1-fe9f38a75440",
+  "external_ref": null,
+  "title": "Expand Work item details inline beneath the selected task header",
+  "outcome": "On Greg's direct request, replace the Work panel side drawer with inline task expansion that uses available width in narrow and wide panels; preserve existing filters, views, data reads and detail content. Prepare on master for Greg's visual assessment before check-in.",
+  "acceptance": [
+    "Selecting a task expands its details immediately beneath that task's header within the list, in both narrow and wide panels, without a separate side column.",
+    "Work views, filters, sorting, refresh, detail note pagination and keyboard closing remain functional; repeated label/tree occurrences render only the selected occurrence's details.",
+    "Greg can assess the changed layout on the main checkout before check-in; focused UI checks pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "ui",
+    "work-visualizer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Inline Work item details delivered in commit d530abf82ca484573eea196724204d8e7bc4550b. Independent acceptance evaluation c50873b7d0a24da69ca10fe5073a2735 passed all three criteria; the launcher full gate passed on the exact frozen input, with its host credit refusal documented as the known w-8678684da0c4 recording defect.",
+    "completed_at": "2026-10-12T04:13:01.569137Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

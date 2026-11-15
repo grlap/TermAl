@@ -1,0 +1,26 @@
+{
+  "id": "01a19f9b-6d43-7502-beaf-d784873f61ce",
+  "external_ref": null,
+  "title": "Host console log: keep the call site in lock-timing kinds and flush pending summaries at shutdown",
+  "outcome": "The host console's rate limiter no longer hides a severe stall behind a minor one: lock-timing kinds include the call site, or a much longer hold than the one printed is never suppressed. Named-root reclamation outcomes other than deferred are not merged into one kind. Pending suppressed-line summaries are flushed when the host shuts down, and each summary names the end of its window.",
+  "acceptance": [
+    "Host console log: keep the call site in lock-timing kinds and flush pending summaries at shutdown is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-console"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

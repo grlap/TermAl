@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-569af23422a7",
+  "external_ref": "tm-m6r1.7",
+  "title": "Work details: focus and reveal the drawer on open",
+  "outcome": "Round-1 Claude Low, WorkItemDetails.tsx:60: opening leaves focus on the row, so aside-only Escape is unreachable without tabbing; details below a long table may be offscreen without announcement. Focus a suitable drawer control/heading, reveal it, and restore row focus on close. Existing test dispatches Escape directly to aside and does not model actual focus.",
+  "acceptance": [
+    "Keyboard activation places focus in visible details; Escape from the focused control closes and restores the triggering row; cover long table and missing trigger cases without stealing later user focus."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

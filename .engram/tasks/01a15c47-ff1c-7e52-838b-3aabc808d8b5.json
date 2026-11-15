@@ -1,0 +1,28 @@
+{
+  "id": "01a15c47-ff1c-7e52-838b-3aabc808d8b5",
+  "external_ref": null,
+  "title": "After a reload, a pending Codex archive whose origin process died stays fenced until manual research; add an exact process-exit proof so it can settle NotArchived",
+  "outcome": "After a reload, a pending Codex archive whose origin process died stays fenced until manual research; add an exact process-exit proof so it can settle NotArchived",
+  "acceptance": [
+    "After a reload, a pending Codex archive whose origin process died stays fenced until manual research; add an exact process-exit proof so it can settle NotArchived is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "archive",
+    "codex",
+    "recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

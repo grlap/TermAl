@@ -1,0 +1,29 @@
+{
+  "id": "01a12d49-9251-7133-a2cd-dd0eaad057e8",
+  "external_ref": null,
+  "title": "Keep Work sort/filter control focus when an expanded tree item is reparented",
+  "outcome": "Preserve keyboard focus on the sort or filter control when an expanded Work tree item remounts at a different tree path.",
+  "acceptance": [
+    "Changing sort or a loaded-row filter while an expanded item changes tree path leaves focus on the control used.",
+    "A regression test exercises a multi-parent Dependencies item reparenting while its details are open."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "accessibility",
+    "ui",
+    "work-visualizer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12d06-1388-74c0-a9f1-fe9f38a75440",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

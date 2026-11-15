@@ -1,0 +1,37 @@
+{
+  "id": "01a0f4f8-03a3-7623-aef4-2eaa3e063faa",
+  "external_ref": null,
+  "title": "The reader's place survives a loss repair beyond the P0's eight-page bound",
+  "outcome": "The P0 w-1b692f268123, under its option C, restores after a loss the window that was resident before it, so the reader's place is kept for a lost range of up to eight pages. This item holds the remainder: a lost range longer than eight pages is restored only in part (nearest the tail when attached, its first eight pages when detached), and there the reader's place is still a guess. After a loss repair, a reader who was not following the tail sees the same message at the same place in the viewport whatever the length of the resident range, and a reader who was following the tail sees the newest message. To be designed after the P0 lands, when it can be seen how often the bound is reached.",
+  "acceptance": [
+    "A pane-level regression with layout-backed geometry shows, for a resident range longer than eight pages, attached and detached, the reader's selected message in view at its place after each of three losses; it fails on the P0 as landed.",
+    "How often the eight-page bound is reached in use is recorded on this item before the design is chosen, and the design note says whether the answer is a larger or unbounded exact re-read, the pane reporting its place to the body owner, or leaving the bound as it is with the reason.",
+    "The exact corrected input passes the full five-stage gate and an independent Codex and Claude review with no outstanding in-scope finding of Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "transcript-follow"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

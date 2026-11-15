@@ -1,0 +1,28 @@
+{
+  "id": "01a186f5-1b8e-7280-9336-474d1a8a63e7",
+  "external_ref": null,
+  "title": "A Begin whose control process fails to spawn is kept possibly begun with no exact replay; the host-adapter doc overstates the transport-unsent replay policy",
+  "outcome": "A turn_begin whose control-process spawn fails (spawn_failed, process_never_started) before the request is handed over either keeps an exact-replay path, through the begin-replay predicate or a distinct persisted marker, or keeps a documented hold. docs/features/engram-host-adapter.md \"Begin-unknown replay\" states the spawn-failure case exactly. A test covers the chosen behaviour, and a containment-Resume test pins the transport_unsent admission.",
+  "acceptance": [
+    "A Begin whose control process fails to spawn is kept possibly begun with no exact replay; the host-adapter doc overstates the transport-unsent replay policy is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "lost-reply",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

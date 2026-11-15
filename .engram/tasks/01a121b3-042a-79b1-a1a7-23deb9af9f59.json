@@ -1,0 +1,28 @@
+{
+  "id": "01a121b3-042a-79b1-a1a7-23deb9af9f59",
+  "external_ref": null,
+  "title": "Bound the retryable \"authority still being confirmed\" refusal of an acceptance submission when settlement can never succeed",
+  "outcome": "An evaluator's submission that meets an unconfirmed naming authority is told to submit again only while a resubmission can still settle it. When settlement fails for a structural reason (no authority owner, no authorized reader in the store, a stopped persist writer), or after a bounded number of attempts, it gets a terminal refusal the parent can act on.",
+  "acceptance": [
+    "Bound the retryable \"authority still being confirmed\" refusal of an acceptance submission when settlement can never succeed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "named-root",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — The old submit-time settle-authority/three-unsettled-submission mechanism no longer exists. Current maintenance InFlight uses a different typed 503 path. Source: src/engram_source_roots.rs:916; src/acceptance_evaluation_api.rs. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

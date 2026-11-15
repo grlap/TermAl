@@ -1,0 +1,29 @@
+{
+  "id": "01a14ae3-a38d-7220-b11b-05241d64d745",
+  "external_ref": null,
+  "title": "Qualify disk-space documentation by launcher mode",
+  "outcome": "docs/test.md accurately distinguishes root/artifact checks in every mode from Cargo-output checks performed only for full/live requests with needsCargo.",
+  "acceptance": [
+    "The disk-space section states that automatic Cargo-output filesystem selection is limited to full/live modes.",
+    "Focused Cargo commands and category runs are documented as requiring separate coordinator output-volume planning.",
+    "The documented 100 GiB warning and full-only 50 GiB/unknown-capacity refusal remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

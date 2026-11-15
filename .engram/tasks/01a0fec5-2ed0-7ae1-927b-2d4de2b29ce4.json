@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-2ed0-7ae1-927b-2d4de2b29ce4",
+  "external_ref": null,
+  "title": "Extend final-message repair coverage for loaded, hidden and unstreamed paths",
+  "outcome": "Extend final-message repair coverage for loaded, hidden and unstreamed paths",
+  "acceptance": [
+    "Extend final-message repair coverage for loaded, hidden and unstreamed paths with regression or contract evidence reviewed independently."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "low",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

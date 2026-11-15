@@ -1,0 +1,31 @@
+{
+  "id": "01a1cb6e-7c36-7213-97b4-c42c842efef9",
+  "external_ref": null,
+  "title": "Preserve confirmed not-applied results when an Engram lock retry cannot be funded",
+  "outcome": "Preserve confirmed not-applied results when an Engram lock retry cannot be funded",
+  "acceptance": [
+    "A confirmed locked-store first attempt remains definitively not applied when its shared absolute window cannot admit the retry, without issuing another command.",
+    "Evaluation-submit and policy-write callers retain the safe retry classification in a scripted-clock behavioral test; unconfirmed outcomes remain unknown."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "engram-adapter",
+    "greg-directed",
+    "limits",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1c96f-bc45-74b2-8059-18a1ae323de4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1cd87-dad9-70d3-a86e-d216d596d7c2",
+  "disposal_reason": "Continue as independent work after parent w-18a1ae323de4 completed with fresh evaluation54361853705e4aa8b1f5c2ed8c9c21d1/seal562a2011587c49b8893bd3ece04b97e4. Optional Low remains open; no fix or verification claimed.",
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a15643-8b03-7260-aba9-137237444ff7",
+  "external_ref": null,
+  "title": "Cover federation journal refusal envelopes and stale scan observation boundaries",
+  "outcome": "Focused journal regressions cover refusal code/restart/role fields, identity-unavailable503, cursor domain changes, incomplete scan prefixes, replaced/deleted cached obligations and bounded metadata branches.",
+  "acceptance": [
+    "Cover federation journal refusal envelopes and stale scan observation boundaries is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "remote-mailbox",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a155b0-3275-70b0-b91d-8ce3c3f56a92",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1584b-0079-79b0-9ed7-3f69ea932f7e",
+  "disposal_reason": "Fable2 mailbox #866 assigns this optional coverage follow-up as independent successor work after journal parent completion, combined with operations-snapshot optimization in one owned batch.",
+  "completion": null
+}

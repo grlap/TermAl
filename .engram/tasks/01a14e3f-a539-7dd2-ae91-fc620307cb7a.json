@@ -1,0 +1,51 @@
+{
+  "id": "01a14e3f-a539-7dd2-ae91-fc620307cb7a",
+  "external_ref": null,
+  "title": "Provision an attested proxy → native principal association so the agent facade can resolve a remote root's proxy id",
+  "outcome": "Provision an attested proxy → native principal association so the agent facade can resolve a remote root's proxy id",
+  "acceptance": [
+    "A production provisioning or refresh operation establishes a host-local association from a specific local UI proxy record to an eligible native root session's current central mailbox principal. Evidence comes through the authenticated enrolled-host/central-placement path and binds the proxy/configuration identity, native host/session/creation identity, central authority epoch, enrollment/configuration freshness and placement generation. Matching names, endpoint text, raw session ids or RemoteConfig.id strings alone cannot establish it. The proxy remains a proxy and gains neither native participant binding nor sender authority; unrelated standalone sessions are not adopted.",
+    "Through the ordinary termal_send_to_session facade, a valid associated local proxy handle resolves to the same current canonical participant and central mailbox as the directory's domain-session id, with the ordinary API receiving that canonical id. The federated HTTP API continues to reject unresolved raw proxy/native ids; standalone API behavior and central ACL/self/root-session checks remain intact. Success creates no second participant or mailbox, and assignment/report/reply authority continues to flow through C.",
+    "Missing, ambiguous, stale or conflicting association, revoked enrollment, changed authority/placement/configuration identity, removed/recreated proxy or native session, and collisions of raw session ids across hosts cannot resolve to the wrong participant or silently retarget a stale reference. Central unavailability fails visibly without local mailbox fallback or treating cached association as current authority. After restart/reconnect, the association is used only after current validation or explicit authenticated re-establishment; an old idempotent intent is never rewritten to a successor principal.",
+    "Deterministic tests establish the association through production provisioning/refresh behavior, then invoke the actual MCP facade and ordinary HTTP path. They cover canonical/proxy equivalence, raw-proxy HTTP refusal, absence of the association, cross-host raw-id collisions, recreation/stale authority and central outage/recovery. Fixture-only string equality or injected fake native bindings are not positive evidence. M5's final one-C/two-S integration includes the associated-proxy tool path while preserving the required canonical path and reports deferred or simulated coverage honestly.",
+    "Exact-input focused tests and the full five-stage gate pass, and the independent read-only review pair has no outstanding in-scope Medium-or-higher finding. Evidence records the accepted dependency revisions and the actual identity/provisioning path used; loopback evidence is not reported as live Mac/O1 readiness."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-d1c2-7610-8c8e-8c0a4f62bbc0",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a14bba-abb8-7110-a31d-c593b94cf600"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

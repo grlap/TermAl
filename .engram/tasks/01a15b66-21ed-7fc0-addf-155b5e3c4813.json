@@ -1,0 +1,30 @@
+{
+  "id": "01a15b66-21ed-7fc0-addf-155b5e3c4813",
+  "external_ref": null,
+  "title": "Disk headroom: confirm and clean inactive build caches under .tmp worktrees and the main checkout's target/",
+  "outcome": "Inactive build caches are removed only after their owners confirm: the tier-2 .tmp worktree target/ dirs that are kept only by open-item mentions, and the main checkout's non-release target/ subdirectories, Opus2's. Tier 1 is already done (2026-10-20). Each deletion is recorded with path, size and time, and no live named root, queued gate, COPY source or open item's root loses its worktree.",
+  "acceptance": [
+    "For each tier-2 dir in the 2026-10-20 inventory, the owning session or the coordinator records keep or delete; only confirmed target/ dirs are deleted, after a fresh named-root, test-run and inside-.tmp path check.",
+    "Opus2 records keep or delete for each non-release subdirectory of the main checkout's target/ (target/debug included); target/release is never touched.",
+    "The resulting deletions and C: free space before and after are recorded on this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "disk",
+    "worktrees"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

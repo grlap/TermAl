@@ -1,0 +1,33 @@
+{
+  "id": "01a199b4-3c09-7381-a590-55e1499c1c1b",
+  "external_ref": null,
+  "title": "w-3fe8 slice B: delete turn admission, begin, bind-retry and causal-failure gating code and its tests",
+  "outcome": "w-3fe8 slice B: delete turn admission, begin, bind-retry and causal-failure gating code and its tests",
+  "acceptance": [
+    "The admission, begin-preparation and replay, bind-retention and retry, queued and ordinary admission, and causal-failure gating code in this slice's paths is deleted, not disabled, and no TermAl path in it calls turn_evaluate, turn_begin, turn_grant_read, turn_checkpoint, session_bind or session_status",
+    "Tests that only exercised the deleted gating are deleted; tests that cover ordinary dispatch, exact delivery or queued user content are kept or migrated",
+    "The slice compiles and its focused tests pass on the integrator's base, as a host-recorded focused run",
+    "The slice is handed to the w-3fe8 integrator (Sol-03d4) as one reviewed-ready diff against the agreed base"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "zero-legacy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the w-3fe8 integrator's split: admission and bind are now in required child w-f7dbe7cef863 (Sol-1cee, dispatch and admission), and Sol-8e1f moved to w-14df8701db1f (recovery). Its frozen root .tmp/wt-delete-gating-b-55e1-8e1f, with the bind_retention and begin_replay deletions, is kept as evidence.",
+  "completion": null
+}

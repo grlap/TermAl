@@ -1,0 +1,30 @@
+{
+  "id": "01a183bd-bc07-7840-beae-3cea5e7e6bb4",
+  "external_ref": null,
+  "title": "Launcher abnormalRustExit attaches the Rust panic-journal summary to non-Rust or launcher-killed crashes",
+  "outcome": "Launcher abnormalRustExit attaches the Rust panic-journal summary to non-Rust or launcher-killed crashes",
+  "acceptance": [
+    "scripts/test-launcher.mjs attaches the panic-journal summary only to a stage that ran a Rust test binary (cargo or a termal test binary), and never to a non-Rust command that crashed or to a stage the launcher itself terminated (cancel or timeout), even when the run's journal exists; exit decisions are unchanged.",
+    "A launcher test covers a crashed non-Rust stage and a launcher-killed cargo stage with a journal present, and the review pair finds no Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "panic-journal",
+    "review-low",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

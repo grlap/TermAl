@@ -1,0 +1,44 @@
+{
+  "id": "01a1c3f1-645e-76b0-b3bc-29715644f996",
+  "external_ref": null,
+  "title": "Preserve unreadable-session handling in direct-prompt reader-floor admission",
+  "outcome": "Preserve unreadable-session handling in direct-prompt reader-floor admission",
+  "acceptance": [
+    "The direct-prompt reader-floor upgrade handles non-text or invalid-text session rows according to the existing supported quarantine/refusal contract, preserves raw rows without silent normalization, and supplies reset guidance for an intentional startup refusal; disposable behavior controls cover both predecessor lineages."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "review-low",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the stated behavior with independent review and passing focused/full evidence; retained in origin/master 0b32ab57. No acceptance evaluation exists.",
+    "completed_at": "2026-11-10T18:28:58.527509600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

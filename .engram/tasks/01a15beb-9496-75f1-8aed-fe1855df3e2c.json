@@ -1,0 +1,27 @@
+{
+  "id": "01a15beb-9496-75f1-8aed-fe1855df3e2c",
+  "external_ref": null,
+  "title": "Federation probe diagnostic redaction matches the probe directory case-sensitively, so a differently spelled Windows path can reach stderr",
+  "outcome": "federation_probe_redacted_detail never prints the probe directory on Windows, whatever case, drive-letter, 8.3 short-name or canonical spelling the OS error text uses. The alternative is that the limit is stated where the function is defined.",
+  "acceptance": [
+    "Federation probe diagnostic redaction matches the probe directory case-sensitively, so a differently spelled Windows path can reach stderr is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

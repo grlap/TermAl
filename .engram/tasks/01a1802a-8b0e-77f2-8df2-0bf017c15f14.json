@@ -1,0 +1,29 @@
+{
+  "id": "01a1802a-8b0e-77f2-8df2-0bf017c15f14",
+  "external_ref": null,
+  "title": "Windows owner trace should locate scratch bootstrap evidence before archival",
+  "outcome": "A retained run trace names the existing compilerScratch and bootstrapPath before PowerShell starts, so in-progress or guardian-death diagnostics can locate the shell/native breadcrumb file without scanning scratch directories.",
+  "acceptance": [
+    "The guardian's own pre-PowerShell trace entry includes the exact owned compilerScratch and bootstrapPath; it does not expose the private command environment or create a second evidence owner.",
+    "A focused existing owner/launcher regression verifies the trace points to the actual per-owner scratch bootstrap while successful archival and strict cleanup behavior remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

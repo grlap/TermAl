@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4d0-7e31-a889-5b7c33a4bcef",
+  "external_ref": "tm-cnsv.7",
+  "title": "Correct shared diagnostic names and preserve Full Audit exit status in parse errors",
+  "outcome": "Final Claude7093 Low diagnostics follow-up. Shared transport still emits doctor/enablement wording on readiness failures; rename audit timeout and interpolate diagnostic consistently. Full Audit parse errors omit nonzero child exit status: include it alongside bounded parse/stderr evidence. Do NOT reject all nonzero exits before parsing: unhealthy doctor reports must still be retained as documented. Tighten exact timeout/error assertions and cover invalid JSON plus nonzero exit. Distinct from malformed readiness-field advice tm-cnsv.2.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c4cb-75d2-b163-b711849dc8d8",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

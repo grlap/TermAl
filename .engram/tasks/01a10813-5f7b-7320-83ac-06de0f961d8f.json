@@ -1,0 +1,28 @@
+{
+  "id": "01a10813-5f7b-7320-83ac-06de0f961d8f",
+  "external_ref": null,
+  "title": "The eager boot-recovery slot test should observe the retry slot held while the eager worker runs, not only before and after",
+  "outcome": "The eager boot-recovery slot test should observe the retry slot held while the eager worker runs, not only before and after",
+  "acceptance": [
+    "The eager boot-recovery slot test should observe the retry slot held while the eager worker runs, not only before and after is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host-adapter",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a71e3b4440d",
+  "external_ref": "tm-7cu.33",
+  "title": "Do not cancel virtualized bottom-restore authority on every movable input",
+  "outcome": "The repaired virtualized scroll input path calls cancelPostActivationBottomRestore for every input that can move the viewport. This clears shouldKeepBottomAfterLayoutRef and churns bottom-boundary DOM/state even when no post-activation or boundary restore is pending; a downward touch move that stops inside the sticky band can therefore leave pane and virtualizer attachment state disagreeing. Gate cancellation on actual pending restore authority while still synchronously clearing a pending boundary seek before React publishes measuring state.",
+  "acceptance": [
+    "Movable input cancels bottom restore only when post-activation measurement or a pending bottom-boundary seek is active; downward input inside the sticky band does not manufacture pane/virtualizer disagreement; repeated wheel/touch ticks do not perform unnecessary restore-state churn; focused regressions plus TypeScript and full Vitest pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

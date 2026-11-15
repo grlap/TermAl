@@ -1,0 +1,32 @@
+{
+  "id": "01a1684b-b66a-76c2-9b9b-279354294119",
+  "external_ref": null,
+  "title": "Classify a concurrent credit-admission winner during artifact reads as retryable",
+  "outcome": "When another initial credit admission updates the exact registration during off-lock artifact I/O, return a retryable admission-unavailable result that reconciles the winner's nonce, while preserving true immutable request mismatch refusals.",
+  "acceptance": [
+    "An exact-row change caused by a concurrent admission between the first and second lock returns admission_unavailable rather than request_mismatch, without replacing the winner's admission identity.",
+    "A deterministic phase-controlled regression distinguishes that race from an actual immutable request mismatch, and existing admission durability/idempotence controls pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "concurrency",
+    "gate-load",
+    "host-capability",
+    "launcher",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16742-3d70-74e2-8a89-273596743af6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

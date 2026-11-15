@@ -1,0 +1,31 @@
+{
+  "id": "01a17bc6-0876-75c1-aad4-f8b6179166d8",
+  "external_ref": null,
+  "title": "Windows B full gate on d998353c: fingerprint helper reports \"worktree changed while fingerprinting <new untracked file>\" in two helper tests",
+  "outcome": "Windows B full gate on d998353c: fingerprint helper reports \"worktree changed while fingerprinting <new untracked file>\" in two helper tests",
+  "acceptance": [
+    "The cause of both failures in Windows B gate test-35683d12 (scripts/review-freeze-fingerprint.test.mjs:231/235 'fingerprint is path-safe for file names with spaces' and scripts/test-launcher.test.mjs:946/966 'stage cwd controls the real child directory and relative file lookup', both 'worktree changed while fingerprinting <untracked file>; rerun') is classified as product, test/runner, or environment with discriminating evidence recorded here.",
+    "If test/runner: fixed without weakening the stability guard, without retries or timeout changes; if environment: the minimal host change is presented to Greg and applied only on his word.",
+    "A full gate on Windows B passes the fingerprint-tests stage on an input containing any fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "fingerprint",
+    "gate-failure",
+    "tests",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

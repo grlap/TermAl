@@ -1,0 +1,30 @@
+{
+  "id": "01a156ae-57be-7171-a722-7b3a0940065a",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance has no field for bounded holder guidance (run ids, verbatim-refusal rule) in the evaluator brief",
+  "outcome": "termal_evaluate_acceptance has no field for bounded holder guidance (run ids, verbatim-refusal rule) in the evaluator brief",
+  "acceptance": [
+    "termal_evaluate_acceptance has no field for bounded holder guidance (run ids, verbatim-refusal rule) in the evaluator brief is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated",
+    "design-pending"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c668-7032-a387-eb4b41f2d431",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,45 @@
+{
+  "id": "01a1741f-92e2-7ba2-921c-e1b088ba9d33",
+  "external_ref": null,
+  "title": "Direct remote prompt, part 2: durable operator grant, receiver consent, references, authenticated proof/receive/status/revocation routes and capability limits",
+  "outcome": "Direct remote prompt, part 2: durable operator grant, receiver consent, references, authenticated proof/receive/status/revocation routes and capability limits",
+  "acceptance": [
+    "Implements w-a8af3a34d80a criteria 2 and 4 (authority, consent, references, revocation and fail-closed fences) within the interface DRAFT v1 recorded on w-a8af, with signatures confirmed by Termal::Coder (the lead) before cross-lane code",
+    "Delivered as a reviewed-ready patch on the lead's carried base to Termal::Coder, who integrates it into the single w-a8af package. Its relevant T-tests (per the draft's T1-T12 split) pass in focused runs. There is no separate READY to Merger2"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "greg-reported",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a161d4-c882-7b71-b84c-a8af3a34d80a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Stage A foundation landed in combo25 fa26ee07; reviewed composite and Windows/DL560 FULL gates green. Delivery stages remain separate.",
+    "completed_at": "2026-11-09T09:42:25.772975600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

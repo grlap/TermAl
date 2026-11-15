@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c792-7f61-9255-b6a209f9077f",
+  "external_ref": "tm-v34z",
+  "title": "Add copy action to quoted response blocks",
+  "outcome": "Add a copy affordance directly to rendered Markdown blockquotes in assistant responses. Copy only the quote's rendered text, excluding the surrounding response and Markdown quote marker, with transient success feedback and regression coverage.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

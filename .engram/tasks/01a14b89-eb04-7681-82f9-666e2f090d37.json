@@ -1,0 +1,49 @@
+{
+  "id": "01a14b89-eb04-7681-82f9-666e2f090d37",
+  "external_ref": null,
+  "title": "Full-state snapshot carries delegation links only for live or retained children and bounded session previews; terminal delegation history pages per parent",
+  "outcome": "GET /api/state and full broadcasts stop sending all 9,731 historical delegation links (4,029 of which name a child that no longer exists) and stop sending unbounded session preview strings (3.19 MB). Links are sent only when the child is in the live projection or the delegation is active or pending. Terminal delegation history is paged per parent through a cursor on the existing parent delegation listing. Previews are capped at a documented length, with full text via the existing routes. Durable records are unchanged.",
+  "acceptance": [
+    "The snapshot's delegation links include every active/pending delegation and every link whose child is in the live projection, and omit terminal links whose child is out of projection or no longer exists; regressions cover each case including a dangling child id.",
+    "A parent's terminal delegation history is reachable page by page through a cursor on the parent delegation listing (stable order, nextCursor, bounded limit), and the UI uses it where it showed history; session previews in the snapshot are capped at a documented length without changing durable data. The paged parent history also lists terminal links whose child session no longer exists, marked child-detail-unavailable; such links are never recreated and never dropped from counts.",
+    "The measured /api/state size before and after is recorded here, the docs state both rules, and the full gate passes on the exact committed tree with a clean independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "state-flood"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a147c0-22a0-7983-8bb2-b17b985f5dbc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

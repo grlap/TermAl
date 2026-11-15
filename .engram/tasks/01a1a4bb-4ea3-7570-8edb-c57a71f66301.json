@@ -1,0 +1,25 @@
+{
+  "id": "01a1a4bb-4ea3-7570-8edb-c57a71f66301",
+  "external_ref": null,
+  "title": "Read-only Claude children are refused Engram `show` with `observations: true`, a read",
+  "outcome": "A read-only child can read every window that Engram's `show` offers, while tracker writes stay refused.",
+  "acceptance": [
+    "A read-only Claude delegation's `show` with `observations: true` succeeds, and a test covers each current `show` read mode (notes, gates, note, full, history, evaluations, evaluation, criterion_links, observations, after) against the admission list",
+    "Writes and undeclared arguments stay refused, with a test, and the list's coverage is checked against Engram's current schema so a new read mode doesn't silently fail"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

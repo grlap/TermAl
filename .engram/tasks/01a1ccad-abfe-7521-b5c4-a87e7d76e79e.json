@@ -1,0 +1,28 @@
+{
+  "id": "01a1ccad-abfe-7521-b5c4-a87e7d76e79e",
+  "external_ref": null,
+  "title": "Update the Work visualizer brief for the standalone Urgent view",
+  "outcome": "The feature brief describes the standalone Urgent view rather than the removed embedded strip.",
+  "acceptance": [
+    "The Urgent section documents its view-button position, urgency rule, inline details and empty state without claiming a strip collapse toggle or capped height."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "review-low",
+    "work-panel"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

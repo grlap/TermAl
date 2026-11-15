@@ -1,0 +1,29 @@
+{
+  "id": "01a1bf1a-0e8d-7cf2-8408-1812e35edd2d",
+  "external_ref": null,
+  "title": "Sibling satellites have no native mailbox route: decide whether Windows B to Mac must work or be refused with clear guidance",
+  "outcome": "It is decided, and the product shows, whether a root on one satellite can natively mail a root on a sibling satellite. A sender isn't left with a generic 409 that reads like a transient authority loss.",
+  "acceptance": [
+    "The contract for sibling-satellite mail is stated, confirmed against Greg's rule that ordinary roots on enrolled hosts message each other like local sessions, with the two coordinators' concurrence.",
+    "Listing and send behaviour match it: either the route works through the existing owner with no new mechanism, or a satellite isn't shown a routable qualified locator for a sibling and the refusal names the limit and what to do, with focused behaviour tests, a review pair with no Medium or higher and the normal gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

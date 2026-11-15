@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c696-7001-8358-7a8aa9ad5818",
+  "external_ref": "tm-pgp",
+  "title": "termal_followup_session bypasses the four-active-delegation cap when re-arming a terminal child",
+  "outcome": "Found by the Codex reviewer 2026-07-16 (Medium). Distinct from the tm-ds1 re-arm race and from tm-px5's stale-result-packet bug.\n\nDelegation creation enforces a four-active-delegation cap per parent via active_delegation_count_for_parent (src/delegations.rs:483 and :538). followup_delegation re-arms a TERMINAL child back to Running (src/delegations.rs:1073, rearm_terminal_delegation_for_followup_locked) WITHOUT consulting that cap.\n\nEffect: a parent already at four active delegations can resume any number of previously-completed children via termal_followup_session, so the concurrency limit the creation path enforces is unbounded in practice. Each resumed child spawns/attaches a real agent runtime, so this is a resource limit, not a cosmetic one.\n\nFix: enforce the same cap inside the re-arm, under the same lock that performs the Completed/Failed -> Running gate (so the check and the transition stay atomic — see tm-ds1 for why that lock boundary matters). Return the same 409-shaped ApiError the creation path uses when at capacity.\n\nTest: a parent at the cap must have termal_followup_session on a completed child rejected; below the cap it must succeed. Neuter-verify (remove the check, watch the test fail).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

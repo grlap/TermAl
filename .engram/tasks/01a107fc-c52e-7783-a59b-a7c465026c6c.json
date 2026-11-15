@@ -1,0 +1,63 @@
+{
+  "id": "01a107fc-c52e-7783-a59b-a7c465026c6c",
+  "external_ref": null,
+  "title": "Delegation result fallback invents an 'Unspecified' actionable finding from a summary that reports none (acceptance evaluator: both criteria pass, Findings: None)",
+  "outcome": "Delegation result fallback invents an 'Unspecified' actionable finding from a summary that reports none (acceptance evaluator: both criteria pass, Findings: None)",
+  "acceptance": [
+    "At base 8cf80039, a test feeding the exact captured full output of acceptance delegation-68ca84a2 (Findings: None, both criteria pass) through parse_delegation_result_packet yields a synthesized 'Unspecified' finding; a holder note cites the host-recorded failing run, its log path and sha256.",
+    "After the change, that same test, using the same fixture bytes cited by sha256, yields no actionable finding.",
+    "With an explicit 'Findings: None', summary wording alone never yields an actionable finding. Each earlier case is covered by a test: '0 failures', '0 failed', 'no gaps remain', and the counterexamples from pair rounds 1 to 3.",
+    "When an explicit 'Findings: None' meets a summary that the heuristic reads as reporting findings (for example 'Found one High-severity issue'), the packet carries a visible, non-actionable note that names the contradiction and tells the reader to read the full output, and it has no actionable finding other than structured findings recovered from the reviewer's preamble, as before. When the Findings section is absent or non-empty, parsing is unchanged and its existing tests pass unchanged.",
+    "No change to structured-result parsing: the diff touches only the fallback path and its helpers in src/delegation_result_parser.rs, the note's rendering through the packet's existing notes, and tests. No existing test expectation changes, except those listed with their old and new lines in a provenance note.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "With an explicit \"Findings: None\", summary wording alone no longer yields an actionable finding; the invented \"Unspecified\" finding is gone. Preamble findings are still recovered by the base count rule (AsBefore). A summary that appears to report findings adds a visible, non-actionable \"Inconsistent result packet\" note, decided clause by clause (ForNote), with the summary excerpt capped at 300 characters. Branch commits 238db43b and 27e6165d. Gate test-e35cd61a; pair Codex 9ca2aedb + Claude 7c14fa5f, clean; evaluation 29089d34, 6/6. Landed by integration owner Termal::Opus2 as train 42: merge commit 2ad5332aa017433f2c2cb64f5f3f22a323507445 on origin/master; train gate test-88927587 passed; integration pair Codex 2f21f070 + Claude 8fcecf3e, clean of Medium or higher. pushed_at is the time of Opus2's landing report, an upper bound. Lows are filed: w-4e8756444a62, w-c863cc5d4139, w-89afa57353b7.",
+    "completed_at": "2026-10-05T02:32:08.342620900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

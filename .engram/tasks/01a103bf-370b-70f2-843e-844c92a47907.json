@@ -1,0 +1,28 @@
+{
+  "id": "01a103bf-370b-70f2-843e-844c92a47907",
+  "external_ref": null,
+  "title": "Stamp the remaining budget fields in root_fixture tests from the scripted clock, not Instant::now()",
+  "outcome": "After B4a (w-f607a5f78af2), root_fixture runs on the state's scripted Engram budget clock. A few root_fixture callers still stamp budget fields from real time:\n- admission_started_at = Instant::now() at src/tests/engram_root_recovery_corrections.rs:465 and :1112;\n- EngramPendingDispatch.started_at = Instant::now() at src/tests/engram_abort_retry.rs:692 and src/tests/engram_retained_disposition.rs:844.\nA real stamp taken after the scripted clock's creation reads as zero elapsed (saturating), so these cannot lapse under load and behave as before. But they mix two clocks, and setup wall time becomes extra logical budget.\nWanted: stamp them from state.engram_budget_clock().now(), read before taking the state lock, so every budget field in those fixtures lives on the one scripted clock. No assertion changes.",
+  "acceptance": [
+    "Stamp the remaining budget fields in root_fixture tests from the scripted clock, not Instant::now() is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "budget-clock",
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6cb-78b2-8e8a-26b1933d2f40",
+  "external_ref": "tm-s2ce",
+  "title": "Doctor pipes are never drained while waiting: a large report deadlocks and is reported as a timeout",
+  "outcome": "run_engram_doctor_result spawns the doctor with stdout AND stderr piped, then polls try_wait until the child EXITS, and only afterwards calls wait_with_output to read those pipes. Nothing drains them while the process runs. If the doctor writes more than the pipe buffer holds, it blocks on its own write, never exits, the poll never sees an exit, and the call ends at the deadline with \"Engram doctor exceeded the N second enablement deadline\" - a DEADLOCK WE CAUSED, reported as the doctor being slow.\n\nRaised by Engram::Codex from a read-only inspection and correctly tiered by him as a STATIC RISK, not a reproduction: he did not observe it. Verified here by reading the same path - the ordering is exactly as described, and both streams are Stdio::piped().\n\nWHY IT IS URGENT NOW, and this is the part neither the Advisor nor I named while preparing the deadline fix: raising the enablement deadline from 5 s to 300 s MULTIPLIES THE EXPOSURE OF THIS DEFECT BY SIXTY. A pipe-blocked doctor used to be killed after five seconds; under the prepared fix it would hold a blocking worker thread for five minutes before the same misleading message. The deadline change does not introduce this, but it makes its consequence far worse, and the two should be considered together even though they stay separate issues.\n\nWHAT WOULD SETTLE WHETHER IT IS REAL: the actual size of `engram doctor --json` output on the migrated store. That is first-person knowledge on the Engram side (their binary, their store); the code side is ours. A report comfortably under the platform pipe buffer makes this theoretical for now; anything near it makes it live.\n\nMINIMUM SHAPE IF TAKEN UP: read the streams concurrently with the wait (threads or a reader that drains while polling) instead of after it. The same restructuring also fixes the unbounded post-kill wait tracked separately, so whoever takes one should look at both.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-DONE. Pipes are drained; its own note says fixed, landed in 0e7ab55 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

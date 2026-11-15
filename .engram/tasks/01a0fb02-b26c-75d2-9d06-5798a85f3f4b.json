@@ -1,0 +1,27 @@
+{
+  "id": "01a0fb02-b26c-75d2-9d06-5798a85f3f4b",
+  "external_ref": null,
+  "title": "Host self-spawns resolve the mutable target/release/termal.exe path: an install leaves review checks and MCP spawns failing (os error 2) or running a newer binary",
+  "outcome": "No host self-spawn (review freeze checker, delegation MCP servers) fails or silently runs a different binary because an install replaced target/release/termal.exe; and the install procedure never leaves that path empty.",
+  "acceptance": [
+    "Host self-spawns resolve the mutable target/release/termal.exe path: an install leaves review checks and MCP spawns failing (os error 2) or running a newer binary is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "install",
+    "review-freeze"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a14071-5afd-74f3-9dfb-815d23546deb",
+  "external_ref": null,
+  "title": "Align test-run HTTP route documentation with bounded pagination",
+  "outcome": "Update the per-route feature contract and architecture endpoint row to match the bounded test-run listing already implemented.",
+  "acceptance": [
+    "The Slice 1 HTTP bullet in docs/features/test-runs.md and the GET /api/test-runs endpoint row in docs/architecture.md describe the default 100/max 200 cap, limit/after parameters, limit/nextCursor response and applicable 400 cases, or link directly to the authoritative pagination contract without claiming all indexed runs are returned in one response.",
+    "Existing exact-ID detail/log behavior and live snapshot/delta documentation remain accurate; the documentation change is independently reviewed under the project landing process."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "api",
+    "coordination-cost",
+    "docs",
+    "host-recording",
+    "performance",
+    "restart-safety",
+    "review-follow-up",
+    "test-launcher",
+    "test-run-visibility",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a13d33-5083-7181-91cb-749b8dcc62c5",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a142e2-424e-70f3-813c-a6f03168abb1",
+  "disposal_reason": "Parent w-749b8dcc62c5 landed (d8fdd2dc); continue as independent work, queued unassigned until a slot frees (Fable2, mailbox-7a23805b #100).",
+  "completion": null
+}

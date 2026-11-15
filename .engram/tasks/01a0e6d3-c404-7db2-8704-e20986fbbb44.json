@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c404-7db2-8704-e20986fbbb44",
+  "external_ref": "tm-70lr",
+  "title": "Cancel a pending wait from an idle session (run waits and delegation waits)",
+  "outcome": "From the changeset-3 (run waits) dual review, Codex /review-code finding (Medium).\n\nA session registers a wait (termal_resume_after_test_runs or termal_resume_after_delegations) and ends its turn, as the tool tells it to. It is then idle. Stop only acts on an active turn: begin_requested_stop_session (src/session_lifecycle.rs ~533) and stop_local_session_with_options return 409 SESSION_NOT_RUNNING for Idle/Error. So the user cannot cancel the wait; it resumes when the runs or children settle. Waits are consumed on Stop only when Stop ends an active turn (for example the user talking to the session while it waits). The UI also shows no Stop for an idle session.\n\nThis is a product decision (Greg), not a bug fix. Options:\n(1) Stop on an idle session with pending waits consumes them durably (reason sessionStopped) instead of 409. A 409 stays when there is nothing to consume.\n(2) A dedicated cancel: DELETE /api/sessions/{id}/test-run-waits/{waitId} and the delegation equivalent, behind a cancel control on the waiting indicator (tm-ncc6.8).\n(3) Leave as is and document it; the user can archive the session or delete it.\n\nAcceptance: the chosen path is tested through the public route: register, turn ends, cancel/Stop, run settles, no resume. docs/features/test-runs.md and agent-delegation-sessions.md say it.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d3-c682-78d3-ab0c-f917452faa71",
+  "disposal_reason": "Option (1) of this item (Stop on an idle session with pending waits consumes them durably instead of answering 409, with 409 kept when there is nothing to consume) was delivered by w-f917452faa71 and landed as 6cd915ed on origin/master. It covers both run waits and delegation waits, through the public route, with route-level tests (register, turn ends, Stop, wait settles, no resume). docs/features/test-runs.md and agent-delegation-sessions.md describe it, and w-a0d79d61757d adds the UI Stop. Option (2), a per-wait cancel, is not carried forward; it gets its own item if anyone asks (coordinator Termal::Fable2, TermAl mailbox df007e37 #15).",
+  "completion": null
+}

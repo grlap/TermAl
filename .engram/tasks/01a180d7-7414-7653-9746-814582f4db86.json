@@ -1,0 +1,32 @@
+{
+  "id": "01a180d7-7414-7653-9746-814582f4db86",
+  "external_ref": null,
+  "title": "Qualify the exact registration trace clock origins in its limitations text",
+  "outcome": "The exact registration trace names the separate phase and StateInner observer clock origins so consumers do not compare their microsecond offsets directly.",
+  "acceptance": [
+    "The in-band exact-trace limitations text accurately distinguishes phase-ring monotonic offsets from the process-wide StateInner observer offsets; it does not claim a shared origin.",
+    "A source review confirms the wording matches the actual clock owners and leaves registration decisions unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "gate-load",
+    "host-persistence",
+    "review-low",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a167dd-6506-7a42-8668-ccfc6536a372",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

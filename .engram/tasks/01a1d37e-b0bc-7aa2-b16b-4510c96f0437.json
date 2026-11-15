@@ -1,0 +1,31 @@
+{
+  "id": "01a1d37e-b0bc-7aa2-b16b-4510c96f0437",
+  "external_ref": null,
+  "title": "Add retention-level native-pending selection coverage with finished observations",
+  "outcome": "Add retention-level native-pending selection coverage with finished observations",
+  "acceptance": [
+    "A deterministic retention-level regression selects a pending native registration when all associated observations are already finished, and preserves exact native identity and completion behavior.",
+    "At history sizes 1 and 65, measured candidate-selection counters demonstrate that unrelated completed history adds no candidate visits; settlement work remains reported separately."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-followup",
+    "state-lock",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a174e7-5ac8-7712-82c0-eca76d70bca9",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

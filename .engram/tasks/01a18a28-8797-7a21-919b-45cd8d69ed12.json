@@ -1,0 +1,28 @@
+{
+  "id": "01a18a28-8797-7a21-919b-45cd8d69ed12",
+  "external_ref": null,
+  "title": "Unchanged unpromotable reset activation can consume a retry slot every tick indefinitely",
+  "outcome": "Exact-head activation preserves liveness and fairness while avoiding repeated slot-consuming no-op service for unchanged holds.",
+  "acceptance": [
+    "A regression with an unchanged hold outside the collection prefilter demonstrates bounded or backed-off no-op service while eligible later heads remain served.",
+    "Owner replacement, pause, recovery and retained debt guards still prevent promotion and do not lose necessary future activation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

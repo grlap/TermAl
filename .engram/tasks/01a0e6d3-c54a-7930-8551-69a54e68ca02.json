@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c54a-7930-8551-69a54e68ca02",
+  "external_ref": "tm-knct",
+  "title": "Delegation waits from a delegation child: its turn ends, it reads as finished to its parent",
+  "outcome": "Found by Termal::Fable in the changeset-3 (run waits) contract read (mailbox #37), confirmed read-only by Termal::Opus.\n\nDelegation children can spawn delegations: MAX_DELEGATION_DEPTH = 3 in src/delegations.rs (checks at ~585 and ~640), exercised by tests/delegations.rs removing_delegation_parent_cascades_to_nested_delegation_children. termal_resume_after_delegations is not in tool_requires_root_session (src/delegation_mcp.rs), and delegation_wait_parent_eligibility_locked admits any visible local session. So a child can register a delegation wait and end its turn. The delegation machinery treats that turn end as the child finishing, so the parent reads a result before the grandchildren are done. The later resume then starts a new turn in a delegation already reported complete.\n\nRun waits (changeset 3, tm-ncc6.5.x) were made root-only for exactly this reason: backend 400 using the mailbox conjunctive child rule, and the tool hidden and rejected in the MCP bridge.\n\nDecision needed, not a mirror: a child coordinating grandchildren still needs fan-in. Options: (1) root-only resume waits, so children fan in with the blocking termal_wait_delegations; (2) keep children eligible but hold the child's delegation open while it has a pending wait, so completion is taken only after the resume turn; (3) document the limitation. Acceptance: the chosen rule is enforced in the backend and the MCP list/gate (if (1)), or the completion hold is tested (if (2)), and docs/features/agent-delegation-sessions.md states it.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

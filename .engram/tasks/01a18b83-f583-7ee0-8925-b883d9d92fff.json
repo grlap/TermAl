@@ -1,0 +1,38 @@
+{
+  "id": "01a18b83-f583-7ee0-8925-b883d9d92fff",
+  "external_ref": null,
+  "title": "Make the failed-acknowledgement Candidate recovery control discriminate an attempted recovery",
+  "outcome": "The existing request-boundary failed-acknowledgement regression distinguishes attempted-and-refused Candidate recovery from merely skipping recovery and returning InFlight, without changing product authority or adding a proof campaign.",
+  "acceptance": [
+    "The existing unconfirmed-Candidate request test detects omission of request-side recovery by asserting its specific recovery failure or an existing appropriate recovery-attempt boundary, while retaining no-evaluator and same-Candidate custody assertions."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "check-credit",
+    "control-plane",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18b2f-32ed-7a12-8c16-c7e091c65727",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

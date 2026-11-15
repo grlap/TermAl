@@ -1,0 +1,27 @@
+{
+  "id": "01a1c648-26ec-78b2-8a32-a7863fb6ae81",
+  "external_ref": null,
+  "title": "Let confirmed evaluation refusals settle even if presentation history reaches its cap",
+  "outcome": "Presentation-history capacity cannot veto a confirmed terminal refusal: the refusal and submission disposition settle durably while an unavailable presentation entry is skipped or explicitly flagged.",
+  "acceptance": [
+    "With an injected full view collection or per-key presentation cap, a confirmed refusal still settles durably and resets its open write instead of becoming Unconfirmed on the next submit; ordinary refusal history and unknown-outcome controls retain their distinctions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

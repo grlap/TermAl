@@ -1,0 +1,28 @@
+{
+  "id": "01a1d1cd-de11-7193-a88b-9063431ff027",
+  "external_ref": null,
+  "title": "Integrate combo74 on 42851443: d50d 1412077d (w-968c UTC clock in sidebar footer, byte-identical carry of 16a682ed)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 1412077ddfa6c6c6cdace74d6335a76c6efea6ab (tree 135bc59376dcfffe5c4145ffc8f9cc09f9775aba) is on origin/master, where master was moved to it by a fast-forward from 428514430668bb7ec8808b5339a2d66a8059b3de.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 135bc593 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 42851443 is byte-identical (same 7 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 16a682ed's contribution against 73f0fe27, which the R1 pair Codex session 17671 and Claude session 17672 reviewed with no Medium or higher finding (its Lows filed), and the candidate adopts that pair.",
+    "The release binary built from tree 135bc593 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d266-71ba-71f0-a684-22759368c8eb",
+  "disposal_reason": "combo74 failed its DL560 FULL (test-68087550: three clock tests depended on the host time zone, because Vitest fake timers wrap Intl). Sol-d50d repaired it as a236d731, validated on Pacific and UTC, and that repair was carried byte-identically as a5b01576. That carry landed as combo78 (w-22759368c8eb) on master at 01:35:15Z on 2026-11-13, after its FULL test-d241def8 passed on UTC (SidebarClockBar 7/7, App.control-panel 9/9). This carrier's input 1412077d is superseded and never landed. The test ref was deleted earlier; the original FULL run record test-68087550 stays on DL560 under Codex 6's retention.",
+  "completion": null
+}

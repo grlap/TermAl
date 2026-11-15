@@ -1,0 +1,38 @@
+{
+  "id": "01a10091-938d-7ec0-bfff-6be89942d2a3",
+  "external_ref": null,
+  "title": "Budget-clock FINAL: reject an undeclared Real clock in fixtures and flip the shared default to scripted",
+  "outcome": "Once every caller is classified and migrated (B1-B5), this item switches on the global rejection of an undeclared Real budget clock in test fixtures and flips the shared fixture default to the scripted clock. The rejection gets its own fail-first, which proves that it reaches the owning test and not only stderr. Caller coverage must be complete at the integrated revision: every transitive caller, not only the direct-call counts or line ranges listed at 593c783. No temporary bypass for unenrolled tests, no second clock engine, no auto-generated Real opt-outs, and no production timeout or expiry change. The decomposition is note 7c38dafc37c5410391ab42881615461a on the parent, with f842da36050949b3ba884f5884c64766. Criteria are to be agreed before this item starts.",
+  "acceptance": [
+    "Budget-clock FINAL: reject an undeclared Real clock in fixtures and flip the shared default to scripted is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10069-95fe-7623-a4e5-8f9988de4cb3",
+  "child_requirement": "optional",
+  "prerequisites": [
+    "01a10091-44db-7cd2-aaa4-3a652f162f00",
+    "01a102f1-cd7a-71c2-a725-d0853206c00a",
+    "01a102f1-d193-71b3-8bf4-4d491d22b9a6",
+    "01a102f1-d5e2-7cb1-aeba-34c2438275b8",
+    "01a102f1-da34-7b71-a82c-c3cb873dd97d",
+    "01a102f2-15c6-7132-96aa-f607a5f78af2",
+    "01a102f3-27ce-76a3-9b8c-8fb4c2131717"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a12278-feff-7db3-bfd2-0cacbdc03919",
+  "external_ref": null,
+  "title": "Reviewer-MCP tests: replace the module-local await_event with the shared phase_sync::receive",
+  "outcome": "The reviewer-MCP test files wait through the shared fixture helper (tests::phase_sync::receive / receive_before_cleanup) instead of a second module-local helper, so the fixtures keep one liveness-guard convention. Timeout panics report the waiting call site (no ineffective #[track_caller]), and the doc comments say the waits are bounded by the shared 60 s TEST_PHASE_DEADLOCK_GUARD.",
+  "acceptance": [
+    "Reviewer-MCP tests: replace the module-local await_event with the shared phase_sync::receive is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "codex-reviewer-mcp",
+    "review-low",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

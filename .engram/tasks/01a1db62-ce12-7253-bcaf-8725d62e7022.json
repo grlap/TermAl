@@ -1,0 +1,27 @@
+{
+  "id": "01a1db62-ce12-7253-bcaf-8725d62e7022",
+  "external_ref": null,
+  "title": "A foreign connection's commit drops all transcript baselines (persist.rs:1922), so the next tick rewrites every changed session in full",
+  "outcome": "A commit by another connection to the state store no longer discards the persist writer's transcript baselines for rows that connection did not touch, so ordinary deltas stay differential.",
+  "acceptance": [
+    "A foreign connection's commit drops all transcript baselines (persist.rs:1922), so the next tick rewrites every changed session in full is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-persistence",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

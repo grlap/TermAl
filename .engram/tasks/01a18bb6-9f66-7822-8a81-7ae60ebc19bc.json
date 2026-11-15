@@ -1,0 +1,35 @@
+{
+  "id": "01a18bb6-9f66-7822-8a81-7ae60ebc19bc",
+  "external_ref": null,
+  "title": "Add host-utilization endpoints to the architecture route tables",
+  "outcome": "The architecture route inventory matches the implemented local, Central aggregate and authenticated pair utilization endpoints and their error outcomes.",
+  "acceptance": [
+    "List GET /api/host-utilization, GET /api/federation/host-utilization and GET /federation/v1/host-utilization in the appropriate architecture route tables.",
+    "Describe the applicable 409 and 503 outcomes consistently with the implementation and feature brief.",
+    "Source review confirms documentation consistency without inventing execution, health or transport authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "api",
+    "cross-machine",
+    "documentation",
+    "federation",
+    "greg-directed",
+    "host-utilization",
+    "observability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18ac3-0c9b-7e60-9738-24c75af616ab",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a1838f-8b0c-7ef2-b1e0-6534aa749334",
+  "external_ref": null,
+  "title": "B16 original-checkpoint recovery progress and conditional latency witnesses",
+  "outcome": "B16 original-checkpoint recovery progress and conditional latency witnesses",
+  "acceptance": [
+    "Actual automatic tick scheduling leads to exact original checkpoint recovery success and actual SQLite Accepted/Confirmed settlement with released original exclusion under a clearly stated healthy-authority/no-owner-drift condition, recording scripted elapsed trigger-to-settlement.",
+    "Busy or transport-failed recovery uses a bounded fast retry series followed by a documented slower cadence through the existing shared retry scheduler, with bounded per-tick work and concurrency, fair service of other eligible operations, and restart behavior that does not renew the fast allowance. Read-only probe failures do not consume send attempts; durable send-boundary uncertainty is preserved. Accepted results can finish local accounting without another network send or exhaustion of the network-send allowance. Scripted tests cover exhaustion of the fast series, a later successful automatic orphan retry, restart during cooldown, concurrent triggers, probe failures and explicit capacity backpressure. No recovery path sends extra Bind/Evaluate/Begin or provider prompts, clears unrelated duties, or fabricates completion. Report the concrete cadence and conditional progress bound; no unconditional two-minute completion is claimed.",
+    "An independent healthy root remains dispatchable while the first root's Unknown recovery is held. Original-checkpoint recovery itself sends no SessionBind, Evaluate or Begin and no new provider prompt; while the original obligation remains unsettled, those mediated admission operations remain excluded. After exact original durable Accepted/Confirmed settlement, completed local ACK and release of only its matching original exclusion, a separately requested next turn may use the existing transport-rebind reconciliation path before Evaluate and Begin. Under healthy authority, successful current-owner reconciliation and no independent blocking duty, that turn delivers exactly one new provider prompt. Failed reconciliation, owner drift or an independent unresolved duty still prevents dispatch; settlement neither clears the generic rebind flag nor authorizes clearing unrelated duties."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "control-plane",
+    "engram-control",
+    "gated-control"
+  ],
+  "assigned_to": "session-11466",
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete gated-control path deleted by87f49ed0 and absent on649d77d5; Automatic original-checkpoint replay cadence/retry slots/boot recovery no longer exist; src/engram_checkpoint_result_recovery.rs and replay/retry runtime owners were deleted. Current progress fixture header and cases cover passive history and ordinary root progress instead. Conditional gated recovery latency/probe/send-boundary criteria no longer target runtime behavior; old progress source/run evidence remains historical. Fable2#1347 and sweep5954218a provenance recorded. Withdrawn as obsolete, not fixed/tested or newly credited.",
+  "completion": null
+}

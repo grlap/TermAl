@@ -1,0 +1,42 @@
+{
+  "id": "01a18073-bc4d-7e21-8d46-a81c8a3f5351",
+  "external_ref": null,
+  "title": "Identify the Windows write sink that panics above u32::MAX and chunk writes there without refusing or truncating output",
+  "outcome": "The exact write path where a single buffer larger than u32::MAX reaches a Windows vectored write and triggers the repr_windows/IoSlice assertion is identified. Writes on that path are chunked below the limit, so the host no longer panics there, and every response stays byte-identical and complete, with no refusal.",
+  "acceptance": [
+    "A note on this item identifies, from source at the current master and the incident evidence on the parent, the exact sink: the crate, function and file:line where a buffer longer than u32::MAX is handed to a Windows vectored or WSABUF write and asserts. It states which TermAl response paths can reach it, and distinguishes what is proven from what is inferred.",
+    "On that path, TermAl splits any single outgoing buffer into chunks at or below a limit under u32::MAX BEFORE constructing the length-constrained IoSlice/WSABUF representation or invoking the identified failing operation. It preserves byte order, exact content and completeness, existing backpressure, partial-write progress and error propagation; retries never duplicate or skip bytes. Nothing is refused or truncated because of response size. Output semantics, headers and status are unchanged, apart from transfer framing that the protocol already permits.",
+    "Tests with an injected small chunk limit exercise the actual adapter used on the identified path and show byte-identical output across chunk boundaries, including exact-boundary, one-over and partial-write cases, and preserved pending/backpressure and error behaviour, with no multi-GiB allocation. The full five-stage gate passes on the exact committed tree with an independent review pair and no outstanding in-scope Medium-or-higher finding.",
+    "Before an already-encoded response body or SSE frame whose encoded size is at least 1,073,741,824 bytes is published for writing, the producer makes one nonblocking structured diagnostic emission through the shared size-telemetry owner. With the diagnostic sink available, one record identifies the producer or route template, session or revision when known, exact encoded size and measurement stage, never content. Unknown-length bodies emit once on crossing that band with observed bytes explicitly marked as a lower bound, without collecting or pre-scanning the body. This reuses the observation-only telemetry's bounded format and coalescing policy, with no duplicate per-chunk emission; sink failure or saturation does not wait, fail or alter delivery. Responses remain complete and unchanged.",
+    "The existing host-lifecycle hook enriches panic records with the context active on the panicking task: capped route/producer and session identifiers or explicit unknown, never stale context from another task. Relevant context is scoped across body/write polling and propagated into spawned writers. The record includes a best-effort bounded backtrace using an identified capture mechanism with bounded work and storage; full capture/formatting followed only by truncation does not satisfy that bound. When capture is unavailable, it records that fact and capped sanitized location context; location alone is not labeled a backtrace or evidence that stack capture works. Existing hook chaining, try_append and its contention-skip behavior remain, with no added state locks, blocking queues or awaits. Diagnostic failures never introduce a second panic or change delivery/control behavior; payload contents and absolute source paths remain excluded.",
+    "Tests use small injected reporting/chunk bounds without multi-GiB allocation. They show C4's single emission at the exact band and above it, byte-identical complete delivery, and unaffected delivery when diagnostics are unavailable. An injected test-task panic exercises C5's present context, missing context as unknown, propagation into a spawned writer, and isolation/restoration between task scopes. Tests verify bounded trace output or explicitly marked capture unavailability, and preservation of the existing hook/try_append behavior. These are ordinary regression tests under C3's existing gate and review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1803c-a572-74e0-8240-fd84f21f9a4b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Main listener write framing and bounded diagnostics landed on 649d77d5 with independent reviews and exact-tree Linux/Windows FULL PASS. No acceptance evaluation exists. Install/restart and historical incident attribution are not claimed.",
+    "completed_at": "2026-11-09T01:16:15.836336300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

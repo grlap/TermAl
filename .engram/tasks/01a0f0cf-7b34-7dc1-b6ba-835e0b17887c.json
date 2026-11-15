@@ -1,0 +1,26 @@
+{
+  "id": "01a0f0cf-7b34-7dc1-b6ba-835e0b17887c",
+  "external_ref": null,
+  "title": "Pin that fix-bug.md no longer carries the old \"Medium or Low → present to the user\" bullet",
+  "outcome": "A Low from review delegation-9a8eea44 on w-2f9eeafd38d9. The test commit_rule_pins_which_review_findings_block_a_landing (src/tests/agent_commands.rs) excludes the old \"Low and Note included\" wording from AGENTS.md and CLAUDE.md, but only checks that the new bullets are present in fix-bug.md. Add an assert_command_excludes for the old bullet \"**Medium or Low findings** → present to the user; proceed if they accept\".",
+  "acceptance": [
+    "The test asserts, with whitespace normalisation, that .claude/commands/fix-bug.md does not contain the old Medium-or-Low bullet, and the agent-command tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,57 @@
+{
+  "id": "01a1468e-c497-7d22-9c36-33b594e9a64f",
+  "external_ref": null,
+  "title": "Session status shows \"Working (0)\" while a detached test run or gate is live, so the control plane looks idle during active work",
+  "outcome": "Session status shows \"Working (0)\" while a detached test run or gate is live, so the control plane looks idle during active work",
+  "acceptance": [
+    "The docked and standalone session lists label the working filter \"Working sessions (N)\" and explain: \"Active or stopping top-level sessions in the selected project scope. Background test runs are counted separately in Test Runs.\"",
+    "The working count and filter retain their existing semantics: active and stopping top-level sessions in the selected project scope count once; test runs do not change the session count.",
+    "With zero working sessions and a running detached test, the UI shows \"Working sessions (0)\" while the existing Test Runs flask badge reports the active run; terminal runs do not inflate that badge and its existing navigation remains available.",
+    "The change is limited to the session-filter wording and its regression coverage, without changing Work items, workspace layout, test-run state or introducing another global test-status chip."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "status",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered Working sessions (N) wording and scope explanation in docked and standalone session lists, with regression coverage for project scoping, delegated child exclusion and separate detached Test Runs status/navigation. Landed and pushed as 8bc612304e942712fbe7a5b987faf4bd1b1f3a69 by Opus2; full gate passed 5/5 and independent acceptance passed 4/4. UI bundle rebuild is queued with the integration owner for the next no-gate window; no binary install or host restart.",
+    "completed_at": "2026-10-17T03:25:21.283848800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

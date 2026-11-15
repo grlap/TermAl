@@ -1,0 +1,30 @@
+{
+  "id": "01a0f9ec-ffbe-7f42-b9d4-5dae8178b905",
+  "external_ref": null,
+  "title": "Per-session body sequence for remote sessions: an epoch the server orders, and a proxy freshness model",
+  "outcome": "A proxied (remote) session gets the same protection against a missed body delta that a local session gets from the per-session body sequence, without the client having to order opaque epochs it hears of over channels of different freshness.",
+  "acceptance": [
+    "A remote session whose upstream sends no ordered epoch behaves as on master; a test pins that parity.",
+    "The design states which of a proxy's channels (republished deltas, the mirror's tail, pages fetched from the upstream) may be ahead of which, and the client rule for a remote session is derived from that statement; a test covers an upstream that restarts twice while the proxy lags, with a page of the newest epoch arriving before the mirror's frames of the middle one.",
+    "The epoch that travels with a session's body sequence is ordered by the server that owns the counter (for example a persisted boot ordinal beside the instance id), so a client can tell an older epoch from a newer one whatever order it hears of them in; a server test shows the ordinal grows across restarts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "conversation-view",
+    "remote",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

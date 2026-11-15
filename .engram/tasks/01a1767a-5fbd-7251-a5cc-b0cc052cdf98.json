@@ -1,0 +1,33 @@
+{
+  "id": "01a1767a-5fbd-7251-a5cc-b0cc052cdf98",
+  "external_ref": null,
+  "title": "Cover Base-only naming bind owner, rollback and eligibility race guards",
+  "outcome": "Focused regression witnesses isolate the new Base-only naming binding owner, synchronous rollback and unchanged gated eligibility branches.",
+  "acceptance": [
+    "Deterministic tests cover fresh-bind owner/reset or successor ownership, settings/connection change before reply adoption, synchronous-fallback persistence rollback of token/work_binding/rebind_required, and a gated tokenless naming request issuing no grant-free SessionBind.",
+    "Cover the missing idle-state exclusions and a Base-only Current-route reclamation case, preserving canonical proof, no-turn-operation and existing path/identity oracles; do not treat the existing Unfocused fixture as Current coverage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "greg-reported",
+    "host-recording",
+    "review-low",
+    "source-root",
+    "source-root-naming",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1708c-a60a-7781-b45a-c7b546116c5a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

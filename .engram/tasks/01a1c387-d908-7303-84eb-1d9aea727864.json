@@ -1,0 +1,31 @@
+{
+  "id": "01a1c387-d908-7303-84eb-1d9aea727864",
+  "external_ref": null,
+  "title": "Windows B: rustc 1.99.1 crashes with STATUS_ACCESS_VIOLATION during cargo check (second occurrence); find the likely cause without system changes",
+  "outcome": "The most likely cause of Windows B's repeated rustc access-violation crashes is named with read-only evidence (hardware or memory, a damaged toolchain file, security software, or resource exhaustion), and any reinstall, restart or configuration change it needs is presented to Greg as a concrete proposal, so Windows B can return to the gate pool or stay out for a stated reason.",
+  "acceptance": [
+    "The evidence from Windows B is collected read-only and preserved under .evidence on that host. It covers the Application and System event logs for the crash times (Application Error and WER entries for rustc.exe, WHEA-Logger, disk and memory-diagnostic events), Windows Defender operational events, the WER report archive entries, and the state of both crash targets (test-3104849c and the earlier 1098a838-a).",
+    "The toolchain on Windows B is compared with Central's identical rustc 1.99.1 (58cf8f9c3): rustc -vV, plus sha256 of rustc.exe and rustc_driver-58995fd3f1c8ecc6.dll (Central: BA03E3BA…AA72 and 49372CE0…D495, 206004736 bytes); a mismatch or a match is recorded.",
+    "The item names the most likely cause, or says it remains unknown, with the evidence that supports it. Any reinstall, restart, memory test or configuration change is a written proposal for Greg; none is performed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "environment",
+    "gate-host",
+    "toolchain",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

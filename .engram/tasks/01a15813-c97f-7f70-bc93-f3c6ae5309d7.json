@@ -1,0 +1,28 @@
+{
+  "id": "01a15813-c97f-7f70-bc93-f3c6ae5309d7",
+  "external_ref": null,
+  "title": "Investigate Windows Codex foreground interruption returning while its focused launcher remains alive",
+  "outcome": "Determine and document how a foreground Codex command on Windows can be safely cancelled when sending Ctrl-C returns an exit for the execution wrapper while its focused launcher and owned command tree remain alive; identify the responsible boundary and a supported cancellation path without claiming that stdin bytes necessarily deliver a console signal.",
+  "acceptance": [
+    "Investigate Windows Codex foreground interruption returning while its focused launcher remains alive is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "codex-runtime",
+    "process-ownership"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

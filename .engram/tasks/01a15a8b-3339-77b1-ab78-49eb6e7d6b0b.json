@@ -1,0 +1,49 @@
+{
+  "id": "01a15a8b-3339-77b1-ab78-49eb6e7d6b0b",
+  "external_ref": null,
+  "title": "Suppress redundant unreported-turn close notices in unbound or non-Engram sessions",
+  "outcome": "Unbound adopted turns retain the truthful adoption notice without an extra close-time message repeating that nothing is reported; newly lost scope still has a visible explanation.",
+  "acceptance": [
+    "No-Engram and no-claimed-binding producer-boundary tests assert no send and the exact intended transcript notice count.",
+    "A binding or configured scope lost after adoption still produces a visible unreported reason, published through the normal state/delta path.",
+    "The maintained full gate passes on the exact input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

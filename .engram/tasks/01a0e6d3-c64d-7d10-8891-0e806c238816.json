@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c64d-7d10-8891-0e806c238816",
+  "external_ref": "tm-n8o0",
+  "title": "Sparse-tail bottom alignment is gated behind :has(), which the codebase deliberately avoids for load-bearing rules",
+  "outcome": "The bottom-alignment rule shipped for the cold-activation fix is written as .message-stack:has(.session-conversation-page.is-active.has-incomplete-live-tail) in ui/src/styles.css around line 4739. A browser without :has() support drops the whole selector at parse time, so the stack silently keeps its base align-content of start and the fix does nothing - the failure mode is no bottom alignment rather than a degraded one, and the jsdom assertion cannot detect it because it only echoes the authored value. This matters because the file already documents the exact convention this rule breaks: the neighbouring .message-stack.is-tail-following rule carries the comment \"Keep this plain selector independent from :has() so older P0 browsers do not discard it\" and uses a plain class for its load-bearing property for that reason. Supporting evidence from a read-only survey by Termal::Scroll: the project declares no minimum browser or version anywhere - not in the READMEs, the docs, ui/package.json, and there is no browserslist file - and ui/vite.config.ts sets neither build.target nor cssTarget, so the effective compiler target is the installed Vite default of chrome107, edge107, firefox104 and safari16. Against that target, :has() support begins at Chrome 105, Edge 105, Safari 15.4 and Firefox 121, so Firefox 104 to 120 sits inside the build target and outside :has() support. That gap is independent of the safe keyword. A correction worth keeping about safe itself: the widely quoted Chrome 115 and Safari 17.6 minimums are the FLEX-specific safe_unsafe subfeature and WebKit release notes say Flexbox explicitly, whereas .message-stack is a grid, so that table cannot be used to claim the grid declaration is dropped on Safari 16; grid content alignment in WebKit is far older, but safe-end semantics were not validated per engine, so the floor is not certified either way. Fix direction, smallest first: the pane already computes the incomplete-live-tail condition, so put that marker class directly on the .message-stack element and drop the :has() wrapper, exactly as is-tail-following does; that removes the parse-time cliff without changing the mechanism. A larger alternative from the same survey, only if safe proves unreliable on a supported engine: render the sparse case as a vertical flex stack with the active page flex 0 0 auto and margin-block-start auto, so a positive viewport deficit becomes the top margin while an overflowing transcript resolves the auto margin to zero and keeps the beginning reachable - and specifically do NOT add a bare align-content of end as a fallback, which can make the start of an overflowing transcript unreachable. Separately worth deciding as its own question: this product has no declared browser floor at all, so every such judgement is currently made against an accidental compiler default.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b re-check, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. The :has() selector it names is absent from ui/src/styles.css on master f7db2c58.",
+  "completion": null
+}

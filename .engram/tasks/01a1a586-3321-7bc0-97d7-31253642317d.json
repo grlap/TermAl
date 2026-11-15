@@ -1,0 +1,31 @@
+{
+  "id": "01a1a586-3321-7bc0-97d7-31253642317d",
+  "external_ref": null,
+  "title": "Resolve test-only committed-source helper dead-code warnings",
+  "outcome": "verify_source and source_revision_dirty_paths use the project's explicit test-only or documented allow convention so non-test builds do not gain dead-code warnings.",
+  "acceptance": [
+    "Resolve test-only committed-source helper dead-code warnings is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "commit-input",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a18935-988d-7851-a4b3-b52dcd98b516",
+  "external_ref": null,
+  "title": "Engram authority/store transition: a failed revoke plus a failed shared Codex detach can leave a previously issued MCP capability usable",
+  "outcome": "Every Engram authority or store transition either invalidates or contains previously issued MCP capabilities, or durably records an Unknown partial outcome with supported recovery. A failed revoke combined with a failed shared-runtime detach never silently leaves an old capability usable.",
+  "acceptance": [
+    "A design ruling records how the authority owner invalidates or contains issued capabilities across a store/authority transition when revoke or detach fails, including durable Unknown/partial-outcome recovery, with file:line.",
+    "Deterministic tests cover failed revoke combined with failed detach, and show the old capability cannot be used afterwards, or the outcome is durably recorded as Unknown with supported recovery; successful-rotation behaviour is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "authority",
+    "engram-host-adapter",
+    "security-boundary"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

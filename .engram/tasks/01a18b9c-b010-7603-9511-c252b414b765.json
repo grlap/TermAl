@@ -1,0 +1,32 @@
+{
+  "id": "01a18b9c-b010-7603-9511-c252b414b765",
+  "external_ref": null,
+  "title": "Isolate disposable enable-timing samples from pending work in a failed sample's Tokio runtime",
+  "outcome": "A failed timing sample's async or blocking work cannot silently overlap a later size's measurement window.",
+  "acceptance": [
+    "Each disposable enable-timing sample either owns a separately drained runtime that is retired before the next sample, or explicitly marks later measurements as potentially contaminated after failure.",
+    "Review and focused failure-path evidence cover the chosen isolation or disclosure behavior without retrying failed samples, changing product deadlines, or touching live data."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-interop",
+    "evidence",
+    "performance",
+    "review-low",
+    "test-harness",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14d15-05fe-7661-9a62-6792e94b090d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

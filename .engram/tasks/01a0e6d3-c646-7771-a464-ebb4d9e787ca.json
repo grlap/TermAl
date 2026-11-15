@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c646-7771-a464-ebb4d9e787ca",
+  "external_ref": "tm-moao",
+  "title": "Sent prompt renders twice during send-response race on bounded-tail sessions",
+  "outcome": "Symptom (Greg, 2026-08-25): sending a prompt shows it twice for a moment - the optimistic pending-prompt card plus the persisted user message - then the second copy disappears (flicker).\n\nRoot cause: an inconsistent state commit produced by the summary-session reconcile path. reconcileSession routes any summary-shaped payload (next.messagesLoaded === false) to reconcileSummarySession regardless of local hydration. There, shouldAdoptPartialMessages (ui/src/session-reconcile.ts:309-315) can become true WITHOUT options.adoptPartialMessages (stamp or count change on a session whose local messagesLoaded !== true, i.e. exactly the long bounded-tail transcripts a reader views), so the bounded message tail INCLUDING the freshly persisted user message is adopted (line 316-318) while pendingPrompts keeps the previous list INCLUDING the localOnly optimistic prompt (line 291-294, option-gated). That single commit renders the prompt twice. The duplicate survives until the SSE messageCreated delta text-match (app-utils.ts removePendingPromptForCreatedMessage) or a targeted hydration with adoptPartialMessages removes the optimistic entry. Race-dependent: only when the POST /api/send response (app-session-actions.ts adoptState at ~line 564) or a summary snapshot beats the SSE messageCreated delta - hence intermittent flicker.\n\nAtomic paths that are already correct: applyMessageCreatedDeltaToRetainedTranscript (live-updates.ts:478-563, appends message + removes prompt in one object), full reconcileSession pendingPrompts swap, targeted hydration with adoptPartialMessages (app-live-state.ts:1000-1006). The pane-level filter (AgentSessionPanel.tsx:643-657) only drops pending prompts whose id equals a visible message id, so it does not catch the localOnly text duplicate.\n\nInvariant: no single committed session state may contain both a persisted user text message and a localOnly optimistic pending prompt for the same send - adopting a transcript that contains the persisted prompt must atomically consume the matching optimistic entry, while metadata-only adoption (no messages adopted) must keep the optimistic prompt to preserve the blank-frame fix noted in app-session-actions.ts:565-569.\n\nSuggested fix (smallest safe): in reconcileSummarySession, when shouldAdoptPartialMessages adopts messages without options.adoptPartialMessages, run the existing removePendingPromptForCreatedMessage consumption over previous.pendingPrompts for each user text message newly present in the adopted tail (id match first, then localOnly text match), instead of copying previous.pendingPrompts verbatim.\n\nRegression matrix: (1) unit session-reconcile.test.ts - previous bounded-tail session (messagesLoaded false) with localOnly optimistic prompt; next summary payload with advanced stamp and tail containing the persisted user message; expect adopted messages AND optimistic prompt consumed in the same reconcile result. (2) same but the persisted message id equals a server queue entry id - only that entry consumed. (3) metadata-only summary (no messages adopted) - optimistic prompt retained (guards the blank-frame regression). (4) app-level race test - deliver the send response before the SSE delta on a bounded-tail session and assert the prompt text renders exactly once in every commit (pendingPrompts + messages combined).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

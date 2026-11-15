@@ -1,0 +1,28 @@
+{
+  "id": "01a0ee38-ffa4-76d0-b770-fe68acf37f65",
+  "external_ref": null,
+  "title": "Pin CLAUDE.md's and AGENTS.md's Commit and push rule text against each other in a test",
+  "outcome": "Pin CLAUDE.md's and AGENTS.md's Commit and push rule text against each other in a test",
+  "acceptance": [
+    "A test reads both files and fails when the Commit and push rule's conditions differ between CLAUDE.md and AGENTS.md, apart from differences the test names explicitly",
+    "The full five-stage gate passes on the exact reviewed tree"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "authority-text",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

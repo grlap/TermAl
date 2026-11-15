@@ -1,0 +1,30 @@
+{
+  "id": "01a13c7b-9b70-7890-aa64-81a16cb90b96",
+  "external_ref": null,
+  "title": "Repair the stale own-verdict focused-launcher test so it exercises a readable outer record",
+  "outcome": "Repair the stale own-verdict focused-launcher test so it exercises a readable outer record",
+  "acceptance": [
+    "The own-verdict/nested-summary test has a real readable outer artifact and accurately documents first-summary selection; its expected outcome still proves another run cannot lend counts.",
+    "Focused regression and maintained full gate pass on the exact reviewed input before completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-follow-up",
+    "test-launcher",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1399b-302a-7b82-9dbf-79dc48b36f27",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

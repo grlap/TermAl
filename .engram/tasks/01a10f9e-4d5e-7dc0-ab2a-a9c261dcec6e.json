@@ -1,0 +1,27 @@
+{
+  "id": "01a10f9e-4d5e-7dc0-ab2a-a9c261dcec6e",
+  "external_ref": null,
+  "title": "Review freeze check refuses a concurrent pair reviewer with 429 instead of a short bounded wait for the verification permit",
+  "outcome": "Review freeze check refuses a concurrent pair reviewer with 429 instead of a short bounded wait for the verification permit",
+  "acceptance": [
+    "Review freeze check refuses a concurrent pair reviewer with 429 instead of a short bounded wait for the verification permit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "freeze-check",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

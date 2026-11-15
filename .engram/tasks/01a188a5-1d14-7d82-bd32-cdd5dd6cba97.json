@@ -1,0 +1,31 @@
+{
+  "id": "01a188a5-1d14-7d82-bd32-cdd5dd6cba97",
+  "external_ref": null,
+  "title": "Align cross-turn Ambient completion notices with exact original-command correlation",
+  "outcome": "A uniquely correlated Ambient command completion after a turn advance receives truthful original-occurrence diagnostic attribution, without claiming that its known start is absent or changing verification authority.",
+  "acceptance": [
+    "Align cross-turn Ambient completion notices with exact original-command correlation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-7",
+    "acceptance-needed",
+    "host-recording",
+    "post-import",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-0ee9-7970-9657-3e6804fa2785",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

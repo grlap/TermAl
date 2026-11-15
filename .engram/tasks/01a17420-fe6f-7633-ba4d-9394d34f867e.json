@@ -1,0 +1,37 @@
+{
+  "id": "01a17420-fe6f-7633-ba4d-9394d34f867e",
+  "external_ref": null,
+  "title": "Concurrent same-key reference publication returns 500 when inspecting a contender's SQLite -wal file hits Access is denied on Windows",
+  "outcome": "Concurrent same-key reference publication returns 500 when inspecting a contender's SQLite -wal file hits Access is denied on Windows",
+  "acceptance": [
+    "Concurrent same-key reference publication on Windows completes through transient SQLite -wal/-shm inspection contention without an unresolved 500; all successful contenders resolve to one descriptor and one publication marker.",
+    "Any retry or avoidance of transient sidecar inspection failures is bounded and preserves existing state-path redirection/symlink refusal, non-transient access failures, and SQLite publication/durability checks.",
+    "An assertion-first deterministic regression reproduces the reported Windows sidecar contention failure before the fix and passes after it; the existing concurrent same-key publication test and affected path-safety/publication guards pass without weakening their oracles."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "test-infra",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 5b10b2a3; deterministic sidecar-contention controls, clean pair/FULL9dcc68b2, install; closure only. Original native OS cause remains unproved; not a reason to rerun.",
+    "completed_at": "2026-11-08T19:21:43.700398200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

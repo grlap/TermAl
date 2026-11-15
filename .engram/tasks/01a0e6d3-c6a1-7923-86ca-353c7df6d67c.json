@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6a1-7923-86ca-353c7df6d67c",
+  "external_ref": "tm-ps26",
+  "title": "Make Rust test wrapper resolve Cargo in non-login WSL",
+  "outcome": "On Windows, invoking \bash scripts/test-rust.sh from PowerShell enters non-login WSL where Cargo is absent from PATH, so the required review gate fails at line 60 with \u001bxec: cargo: not found even though native Cargo is installed and login WSL resolves /home/greg/.cargo/bin/cargo. Document/use a login-shell invocation or make the wrapper resolve the standard Cargo location without depending on interactive profile setup. Evidence: fd soft limit=10240, test threads=4, then cargo not found.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. The gate never enters WSL; it uses Git for Windows bash by explicit path (scripts/test-launcher.mjs:150-159).",
+  "completion": null
+}

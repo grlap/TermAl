@@ -1,0 +1,35 @@
+{
+  "id": "01a1cbdb-2d08-78c2-aa2c-c0a61970bce9",
+  "external_ref": null,
+  "title": "Integrate combo61 (publication) on 4f6bb130: 8e1f ddfcf786 (w-56cd bounded publication wait carry), direct child of combo60-history",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit ddfcf786e96204d52dec785b0996a00dac3fcf44 (tree 2dceb9fb1eb1a3d5077195d676e55724fa13d114) is on origin/master, where master was moved to it by a fast-forward from 4f6bb130566b7fb00f7032add5395ac2ab73a674.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 2dceb9fb passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 4f6bb130 is byte-identical (same two paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 9481eca9's contribution against e6b8d2f7, which the WHOLE-2 pair (Codex session 17514, Claude session 17515) reviewed with no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree 2dceb9fb was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo61 ddfcf786 (tree 2dceb9fb) is a byte-identical carry of 8e1f's publication slice 9481eca9 and adopts the WHOLE-2 pair 17514/17515. It landed on master by fast-forward from 4f6bb130 and was pushed at about 19:09:19Z. It is gated by DL560 FULL test-05e1ca85, PASS (rust 7661/0/114, vitest 5095, all 48 references:: tests), on test ref d752fc3e, which has been deleted. Installed on Central (9a78faff; the previous binary is kept as termal-before-ddfcf786-f23fd63d.exe) and DL560 (dbe72e8f; the previous binary is kept as termal.62b1f5ad.bak). Neither host was restarted. The independent evaluation (session 17523) passed all 3 criteria.",
+    "completed_at": "2026-11-11T19:22:46.217410700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "id": "01a14b99-03b1-7902-9040-d8eb48ba8844",
+  "external_ref": null,
+  "title": "Cross-host coordination design: a first-class remote mailbox for full normal coordination between TermAl hosts, with the boundary to Engram's separate Git sync",
+  "outcome": "One reviewed design, on this item, that lets a session on any enrolled TermAl host coordinate with a session or coordinator on another host through the ordinary mailbox contract — list, send, read, acknowledge, wake, recovery — with one durable owner per mailbox, authenticated host and session identity, exactly-once delivery under an immutable sender key, defined offline and recovery behaviour, host-qualified membership and routing, observability, failure and ABA rules, and a staged rollout into narrow implementable slices; the Engram task sync stays a separate Engram-owned design with an agreed boundary.",
+  "acceptance": [
+    "Each of Greg's nine sections (topology; durable owner/replication or protocol; identity/authority; exactly-once/idempotency; offline/recovery; membership/routing; observability; failure/ABA; staged rollout) has a decision, the alternatives rejected, its invariants and its open questions with defaults, authored by Architect1 (sections 1-4) and Architect2 (5-9) and reconciled into one joint note that both concur on.",
+    "The boundary to Engram's sync is agreed with Engram::Architect1 and recorded verbatim.",
+    "The slice list names fail-first tests that run on one machine and the pilot gating for each slice.",
+    "The design is reported to Greg through the Advisor with locators, and his decisions on the open questions are recorded verbatim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14b98-032e-7f70-922a-93105e5592c0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Joint cross-host coordination design delivered and concurred: .evidence/cross-host-design/joint-v7.md (v7.1), sha256 e33143edafc361baac4867fe667776c5383eddf435d31a4bb3894263797a98c4, 47,943 bytes — one central TermAl host per coordination domain as the authority for sessions and the home of every mailbox, N satellite hosts over direct OpenSSH (hub-and-spoke, no mesh, no storage replication), the TermAl HTTP API as the application protocol, one canonical mailbox store with a retry-only sender outbox (P-5 + metadata clause), host-qualified identity with enrollment/authority epochs and pair capability, sender intent registry + dedup at C, bounded offline continuation, satellite registry with membership/capacity model, observability with three TermAl receipts, failure/ABA fences, and the rollout D0/M1/L1/O1/M2–M5/platform lanes/M6 matching the ten slices filed under w-93105e5592c0. Engram boundary: common sentence \"TermAl mailboxes carry ordinary coordination only; they carry no task-sync protocol.\" and Engram's D2.4 quoted and concurred by hash (9d8f9f00…/606da065…). Concurred by exact hash: Termal::Architect2 (#569, note f85caf6f), Engram::Architect1 (#53), Engram::SyncArchitect (#23 on §§0/10/11); round closed by Fable2 #750. Greg's decisions recorded verbatim: #1070, #1072 (ACCEPT, Q6 YES, central TermAl, decentralized Engram, mailbox ≠ task sync), #1075 (OpenSSH machine-to-machine, hub-and-spoke N satellites, registry/onboarding), #1080 \"Ok. To kodujemy.\" Independent evaluation bd2594ea: 4/4 pass. Design artefacts retained under .evidence/cross-host-design/ until w-286a7d095776 closes; no source changed.",
+    "completed_at": "2026-10-17T23:37:36.575146600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

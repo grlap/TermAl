@@ -1,0 +1,36 @@
+{
+  "id": "01a150ee-3301-74d0-8add-c18061b4662f",
+  "external_ref": null,
+  "title": "Cover federation proof timeout, satellite install errors and invalid-timeout warnings",
+  "outcome": "Cover federation proof timeout, satellite install errors and invalid-timeout warnings",
+  "acceptance": [
+    "Tests pin S2 proof timeout as attestExpired/409 with a crypto count while startup/EOF transport failures remain uncounted.",
+    "Tests pin satellite-side proofRefused, linkDownBeforeProof, localInstallFailed preserving typed status and tagWriteExpired.",
+    "Tests verify a single redacted warning and default fallback for invalid or non-UTF-8 timeout configuration; production bounds are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low",
+    "security",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14d7d-ccb4-79f3-a4dd-06dfdd4ab87e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

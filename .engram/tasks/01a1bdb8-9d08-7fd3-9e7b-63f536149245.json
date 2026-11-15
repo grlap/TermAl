@@ -1,0 +1,30 @@
+{
+  "id": "01a1bdb8-9d08-7fd3-9e7b-63f536149245",
+  "external_ref": null,
+  "title": "Cover refused replay counters in native relay failure diagnostics",
+  "outcome": "A regression in mapping an authenticated replay-counter refusal to the native relay failure history is caught by a behavioural fixture.",
+  "acceptance": [
+    "Through the existing authenticated disposable relay fixture, redeliver an already-reserved counter and observe the unchanged 503 outcome plus a correlated home diagnostic record with stage replayCounter through the existing diagnostics handler.",
+    "The case discriminates missing or misattributed recording, preserves unknown-outcome/security/receipt behaviour and privacy, uses controlled fixture transitions without real timeout sleeps, and carries relevant focused checks and normal review/gate evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

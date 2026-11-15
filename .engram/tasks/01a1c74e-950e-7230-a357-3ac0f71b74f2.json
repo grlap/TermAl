@@ -1,0 +1,30 @@
+{
+  "id": "01a1c74e-950e-7230-a357-3ac0f71b74f2",
+  "external_ref": null,
+  "title": "Engram's full gate never gets a verification record: its clippy and docs stages are unclassified, so the record stays pending (unclassified_stages)",
+  "outcome": "Engram's full gate never gets a verification record: its clippy and docs stages are unclassified, so the record stays pending (unclassified_stages)",
+  "acceptance": [
+    "Engram's full-gate clippy and docs stages are classified by their exact actual argv (agreed with Engram: for example clippy's exact cargo clippy argv with its deny-warnings flags as Lint, and the docs stage's exact command as Lint or Build), with no wrapper, extra argument or write form admitted; a test drives an Engram-shaped full results file with those stages and shows a verification record is built (passed or failed as the stages say) instead of pending unclassified_stages.",
+    "An unknown stage still leaves the run pending with unclassified_stages, never silently dropped; a test shows it.",
+    "A run already left pending before this change can be settled by the existing recovery path once its stages classify, without editing its original results or record state; a test or a documented recovery step shows it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1b226-d790-7510-bae9-17ccaf22d28e",
+  "external_ref": null,
+  "title": "Refuse a clean source envelope whose full source_id contains local changes",
+  "outcome": "The source-command adapter consistently rejects an internally incoherent clean envelope with root or submodule changes, preserving producer-owned judgment and whole-object identity semantics.",
+  "acceptance": [
+    "After producer-owner agreement on envelope coherence, status clean with nonempty root changes or any submodule changes is unavailable; coherent clean and not_clean measurements keep the agreed full value without local Git judgment.",
+    "Focused parser coverage independently discriminates root and child incoherence, with coherent positive controls; no source_id projection, fallback or consumer policy change is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "review-follow-up",
+    "schema",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a10e3c-4a8e-7a11-9f15-5ece5c82d94c",
+  "external_ref": null,
+  "title": "Acceptance evaluation refuses long-history items on a busy project: notes continuation requires a frozen global project_position, but Engram returns a fresh read cut per page",
+  "outcome": "Acceptance evaluation refuses long-history items on a busy project: notes continuation requires a frozen global project_position, but Engram returns a fresh read cut per page",
+  "acceptance": [
+    "acceptance_compact_notes_carrier (src/acceptance_evidence_selection.rs) no longer requires read_cut.project_position to be equal across notes+gates continuation pages, which matches Engram's work_record_window contract: a fresh read cut per call, with the selected index total and the immutable boundary validated. It still refuses a change of canonical work identity, of task or evidence basis, of notes_window.total, a newer offset that is not previous newer+shown, an empty page, and a repeated cursor.",
+    "A test drives a multi-page canonical discovery in which a write elsewhere in the project advances project_position between pages. The evaluation request is accepted, and the brief contains the paged evidence. A test where total changes between pages is still refused with the existing 409.",
+    "A test shows how a long note history (hundreds of notes, small pages) is handled within the discovery budget: either it pages within the time budget, or it stops paging with a recorded paging_stop and still evaluates. It must not fail with a 502 or a 409."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "acceptance_compact_notes_carrier no longer requires an equal read_cut.project_position across notes+gates pages; the identity, basis, total, offset, empty-page and cursor guards are kept. Optional notes paging now stops before each page with \"time_budget\" unless that page and every mandatory read after it still fit before discovery_deadline. The mandatory reads are held, full, the distinct selected records plus revalidation, and every binding page: div_ceil(listed + acceptance_omitted, 8), clamped to 1..=16, with all 16 reserved when the list is absent. A page that actually fails stays fatal.\n\nLanded as a fast-forward (Greg's option b): master = origin/master = 673bfa0aeb6fc1ea938efa6bf011c0089d08f0df, tree 3fec1e15, parent a3af3519. The item gate test-d1e83e1d (record 3f9938d4) is also the landing gate.\n\nReview: pair 3 is clean (Codex 07faf959, Claude 2ce489bd). Pair 1's M1 and pair 2's M2 were fixed in freezes 2 and 3. L2 is filed as w-19af8dbdc400.\n\nEvaluation: d7b29ed8 passed 3/3 (receipt fca80845), with the requesting turn held open. The earlier refusal is recorded on w-539ea7e8b506.\n\nInstalled target/release/termal.exe sha256 8719feae923cf8d506bfd163e1bf2f6a21321cb0c4788a568fc9ad6b0bad2a7a (Opus2, mailbox f852105e #131). Running sessions need the build for long-history evaluations; the restart is at the coordinators' moment.",
+    "completed_at": "2026-10-06T03:22:57.253668300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

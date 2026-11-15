@@ -1,0 +1,27 @@
+{
+  "id": "01a18f98-f42f-72b1-b9e9-87e777c12507",
+  "external_ref": null,
+  "title": "Unadmitted observation jobs and reports (runtime turns and source-root captures) are never pruned from the session row",
+  "outcome": "Settled unadmitted observation reports and terminal closing jobs (runtime-started turns and explicit source-root captures) are pruned from the session record under a bounded retention rule, without losing a report whose delivery is still pending or uncertain, so the session row (re-read in full on each durability check) stops growing without limit.",
+  "acceptance": [
+    "Unadmitted observation jobs and reports (runtime turns and source-root captures) are never pruned from the session row is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

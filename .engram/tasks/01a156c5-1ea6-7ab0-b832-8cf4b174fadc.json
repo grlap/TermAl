@@ -1,0 +1,31 @@
+{
+  "id": "01a156c5-1ea6-7ab0-b832-8cf4b174fadc",
+  "external_ref": null,
+  "title": "Mac full Rust gate reports OS 35 resource exhaustion in 782 tests; investigate process/thread limits",
+  "outcome": "Determine and correct the measured cause of the Mac full-suite process/resource failures, accounting separately for unrelated assertion failures, while keeping maintained gate bounds and product semantics intact.",
+  "acceptance": [
+    "Preserve the original full-gate logs and exact failure inventory; distinguish the 782 explicit OS 35/resource-unavailable bodies from the two sampled pre-existing fixture classes and 35 other bodies, recording every remaining uncertainty.",
+    "Use a bounded reproducer or measured native limits/process/thread evidence to distinguish the actual resource cause from alternatives such as per-user process limits, fixture leaks, concurrency, or host load; an isolated passing test alone is insufficient.",
+    "Validate the confirmed correction with relevant focused checks and the maintained Mac full gate under unchanged timeouts/thread policy, or record separately any unrelated remaining failures and their owners. Any global configuration, service or host restart action requires its existing authorization."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "environment",
+    "gate-failure",
+    "macos",
+    "resource"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

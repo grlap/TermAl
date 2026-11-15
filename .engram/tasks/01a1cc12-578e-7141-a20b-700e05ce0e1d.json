@@ -1,0 +1,35 @@
+{
+  "id": "01a1cc12-578e-7141-a20b-700e05ce0e1d",
+  "external_ref": null,
+  "title": "Integrate combo62 on ddfcf786: c593 b1e8769a (w-fc17 preserve automatic Codex archive origin across restart), direct child of combo61",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit b1e8769a5ff6e72ccd6436e36b5e12d9901d69de (tree 5161cfbc59af12aff1abeeacfbd0bfb5b9f1d565) is on origin/master, where master was moved to it by a fast-forward from ddfcf786e96204d52dec785b0996a00dac3fcf44.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 5161cfbc passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against ddfcf786 is byte-identical (same ten paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to f6999b3e's contribution against e6b8d2f7, which the WHOLE-10 pair (Codex session 17512, Claude session 17513) reviewed with no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree 5161cfbc was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo62 landed: c593 fc17 b1e8769a (tree 5161cfbc) fast-forwarded master from ddfcf786 and was pushed at 20:09:22Z, with origin verified. The FULL gate DL560 test-9244ed15 passed all six stages. It adopts the WHOLE-10 pair 17512/17513 under a byte-identical carry. Installed on Central (a2c668ec) and DL560 (5fcf30b4) with no restart. The test ref is deleted. Independent evaluation delegation-477071b1: all 3 criteria passed.",
+    "completed_at": "2026-11-11T20:17:47.722487900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

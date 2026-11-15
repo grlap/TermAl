@@ -1,0 +1,30 @@
+{
+  "id": "01a10daa-918d-7a32-a070-4067a6197589",
+  "external_ref": null,
+  "title": "Bounded, authenticated strict-UTF-8 source-read tool for read-only delegated children, independent of the PowerShell output pipeline",
+  "outcome": "Bounded, authenticated strict-UTF-8 source-read tool for read-only delegated children, independent of the PowerShell output pipeline",
+  "acceptance": [
+    "A delegated read-only child can read a working-tree file or an explicitly selected Git blob through a host tool. The tool returns strict UTF-8 text together with a hash of the bytes actually read. It derives session and root from authenticated host identity, respects the child's read scope, refuses path and reparse escapes, bounds input and output, and reports truncation.",
+    "Causal witnesses on a real constrained Codex child cover Polish, CJK, emoji and ellipsis text, invalid UTF-8, escaped paths, and a failed encoding prelude, while read-only writes stay refused.",
+    "Read-only containment (ReadOnly, approval Never, the separate runtime profile) and ConstrainedLanguage are not relaxed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "codex-runtime",
+    "read-only-review",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

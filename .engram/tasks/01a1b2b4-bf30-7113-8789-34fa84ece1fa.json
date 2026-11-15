@@ -1,0 +1,31 @@
+{
+  "id": "01a1b2b4-bf30-7113-8789-34fa84ece1fa",
+  "external_ref": null,
+  "title": "Preserve receive shutdown joining after a poisoned federation receive counter",
+  "outcome": "A poisoned receive counter cannot make shutdown finish before its outstanding receives, while admission remains fenced.",
+  "acceptance": [
+    "join_receives handles counter poison consistently with receive-job teardown and continues waiting for outstanding receives to reach zero; supervisor cleanup and join-before-persistence ordering remain intact.",
+    "A controlled poison regression retains at least one receive during shutdown and proves joins stay pending until release, then complete before persistence; no admission is granted after stopping.",
+    "The change preserves exact receive accounting and states any assumptions about poison sources rather than treating arbitrary corrupted accounting as safely recoverable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "hardening",
+    "review-low",
+    "shutdown"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

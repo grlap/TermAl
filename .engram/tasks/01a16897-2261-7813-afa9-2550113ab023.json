@@ -1,0 +1,28 @@
+{
+  "id": "01a16897-2261-7813-afa9-2550113ab023",
+  "external_ref": null,
+  "title": "Clarify the comment above ROWS in App.cold-load-paint.test.tsx (which pane is active)",
+  "outcome": "The comment above the ROWS selector in ui/src/App.cold-load-paint.test.tsx accurately says why the selector is not scoped to `.workspace-pane.active`, or it is removed.",
+  "acceptance": [
+    "Clarify the comment above ROWS in App.cold-load-paint.test.tsx (which pane is active) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "frontend",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

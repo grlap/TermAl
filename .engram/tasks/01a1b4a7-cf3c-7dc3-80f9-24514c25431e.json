@@ -1,0 +1,28 @@
+{
+  "id": "01a1b4a7-cf3c-7dc3-80f9-24514c25431e",
+  "external_ref": null,
+  "title": "Classify pre-spawn UI setup and toolchain capacity refusals accurately",
+  "outcome": "A command refused for result-record capacity before spawn retains an unrun/refused observation and input-unverified reason instead of a real npm-ci or toolchain execution failure.",
+  "acceptance": [
+    "Classify pre-spawn UI setup and toolchain capacity refusals accurately is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae54-d2e6-7803-9e56-8f4c5e2e071c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

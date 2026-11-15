@@ -1,0 +1,38 @@
+{
+  "id": "01a0fec5-c2ab-7b62-a2fa-1bb52bfc0f6a",
+  "external_ref": null,
+  "title": "Preserve master fully-loaded transcript behavior on excluded forced partial-tail adoption",
+  "outcome": "Preserve master fully-loaded transcript behavior on excluded forced partial-tail adoption",
+  "acceptance": [
+    "Excluded remote, foreign-epoch and unpaired forced partial-tail adoption over a fully loaded transcript has exactly master's behavior; eligible local paired tail adoption still uses the owner's D6 suffix replacement.",
+    "Focused parity tests discriminate excluded master behavior from eligible D6 suffix restoration and pass on the corrected source."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

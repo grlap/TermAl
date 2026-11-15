@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4e2-79b1-a899-da714e229439",
+  "external_ref": "tm-d9gl.2",
+  "title": "Engram identity slice 2: surface installed vs serving identity and staleness in state, Settings, session status, CLI and the context nudge",
+  "outcome": "Slice 2: make the identity triple and any mismatch visible where someone can act. State: a host-level Engram runtime summary (installed identity, number of sessions launched with an older identity) and per session engram.runtimeIdentity {installed, controlLaunchedWith, mcpLaunchedWith, lastContextObserved, stale}. UI: Settings > Engram host status shows installed build and the stale-session count with a refresh control (slice 3); the session shows one compact status line when stale (for example: Engram MCP child launched with build f234d5b2, installed 65b2b11c, refresh available). CLI: the sessions listing carries the stale flag and both short fingerprints. Agent-facing: one line appended to the next Engram context nudge for a stale session (installed vs launched-with, and how to request refresh) - never added to mailbox wakes, which stay metadata-only. Acceptance: the Phoenix case (installed 65b2b11c vs MCP launched with f234d5b2) renders in all three surfaces from a fixture; a fresh session shows nothing extra; tests pin the state shape and the nudge line.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram",
+    "lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c4e0-7e22-943a-82aa6d83139a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a189f4-d7a0-73f1-825c-443aa976e18a",
+  "external_ref": null,
+  "title": "A durable original checkpoint that Engram keeps answering with the same uncertified error is bounded only by 65,536 attempts (~455 days); it needs a typed terminal unresolved hold after a practical cap, without dropping the report",
+  "outcome": "An original closing checkpoint whose exact replay keeps getting the same uncertified Engram error reaches, after a practical cap, a typed terminal unresolved hold that is visible to the operator. The report and the original request stay in custody and are never dropped silently.",
+  "acceptance": [
+    "A durable original checkpoint that Engram keeps answering with the same uncertified error is bounded only by 65,536 attempts (~455 days); it needs a typed terminal unresolved hold after a practical cap, without dropping the report is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

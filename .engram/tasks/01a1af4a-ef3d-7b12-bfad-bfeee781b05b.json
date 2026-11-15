@@ -1,0 +1,42 @@
+{
+  "id": "01a1af4a-ef3d-7b12-bfad-bfeee781b05b",
+  "external_ref": null,
+  "title": "EO smoke: an ordinary item closed by done on a registered committed-input run of an existing test at master 6a0bc8c5, with evaluations off and no code change",
+  "outcome": "EO smoke: an ordinary item closed by done on a registered committed-input run of an existing test at master 6a0bc8c5, with evaluations off and no code change",
+  "acceptance": [
+    "An existing TermAl test, the Node launcher commit-input tests (`node --test scripts/test-launcher-commit-input.test.mjs`), run through `node scripts/test-launcher.mjs focused --input commit -- <that command>` from a clean named root at master 6a0bc8c5, passes and produces a registered committed-input verification that the host reports RECEIVED with source git-commit:6a0bc8c5…",
+    "Bound `done` on this item is accepted and sealed with that verification and no evaluation record (store policy allowed_modes=[], unchanged), and the seal names the record and the commit."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "EO smoke on the installed path. A clean named root target/eo-smoke-8111 at master 6a0bc8c55835f11ec29416419e3879a99d10ea73 (tree 58dd0665, generation 2902). One run of `node scripts/test-launcher.mjs focused --input commit -- node --test scripts/test-launcher-commit-input.test.mjs`: run test-35a779e7-5f28-4bc2-b615-9ec668846574, TRACKED, PASS exit 0, 51 passed, 0 failed, 0 ignored, input commit 6a0bc8c5 clean and eligible. The host delivered verification record 6a81c6c9764d4fb794119d9c8dfe90d1 (05:26:52Z; check_kind test, result passed, source git-commit:6a0bc8c5…, workspace the named root). No code change and no landing.",
+    "completed_at": "2026-11-06T05:27:14.943791500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

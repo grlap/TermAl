@@ -1,0 +1,27 @@
+{
+  "id": "01a1ad2b-592c-7a20-a8e4-d23d08f3750a",
+  "external_ref": null,
+  "title": "Committed-input admission refuses a clean Windows checkout made with system core.autocrlf=true",
+  "outcome": "A worktree checked out on a Windows host whose system Git config sets core.autocrlf=true is either admitted as clean by the launcher's committed-input check when its content equals the commit, or refused with a message that names line-ending conversion and the supported checkout setting. It is never refused as an unexplained dirty checkout.",
+  "acceptance": [
+    "Committed-input admission refuses a clean Windows checkout made with system core.autocrlf=true is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

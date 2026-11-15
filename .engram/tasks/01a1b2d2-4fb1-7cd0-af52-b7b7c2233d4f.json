@@ -1,0 +1,33 @@
+{
+  "id": "01a1b2d2-4fb1-7cd0-af52-b7b7c2233d4f",
+  "external_ref": null,
+  "title": "Show native declared-run lifecycle accurately in the test-runs index",
+  "outcome": "The test-runs list distinguishes live native executions and settled Claude reported-success outcomes from Unknown without weakening launcher evidence.",
+  "acceptance": [
+    "For native registrations, derive display state from the exact host-owned reservation/terminal lifecycle, including Claude ReportedSuccess with no invented OS exit code.",
+    "Cover a running native execution and a settled reported-success native execution, preserving existing generic launcher integer-exit, responsible-process and heartbeat requirements."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "declared-tests",
+    "greg-directed",
+    "host-recording",
+    "review-low",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1af47-2661-7340-b4ef-24a72c898d6d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

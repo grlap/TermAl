@@ -1,0 +1,27 @@
+{
+  "id": "01a103e8-1ff2-7fb1-b09b-d6d8c6a14580",
+  "external_ref": null,
+  "title": "Explain and correct late delivery of already-settled test-run wait resumes",
+  "outcome": "A queued settled-run wait result reaches the parent's first FIFO-head eligible turn boundary without an unrelated wake; preserved incident artifacts distinguish runtime, Stop and admission ownership from registration and queueing.",
+  "acceptance": [
+    "Explain and correct late delivery of already-settled test-run wait resumes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

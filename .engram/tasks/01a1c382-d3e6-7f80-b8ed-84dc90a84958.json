@@ -1,0 +1,29 @@
+{
+  "id": "01a1c382-d3e6-7f80-b8ed-84dc90a84958",
+  "external_ref": null,
+  "title": "Native acceptance can blame a stale dirty run when the current source cannot be measured",
+  "outcome": "A refused native acceptance request names the run and source condition that actually decides the refusal, without offering a commit-and-rerun remedy for a stale dirty registration.",
+  "acceptance": [
+    "A behavior regression covers an older dirty native registration alongside a newer selecting run, and an unavailable owner capture; neither case blames the stale native run.",
+    "NativeLocalChanges is returned only when the deciding native candidate and a measured dirty current source justify it; all source and admission fences remain effective."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "declared-commands",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

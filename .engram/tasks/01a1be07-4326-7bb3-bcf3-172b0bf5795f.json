@@ -1,0 +1,32 @@
+{
+  "id": "01a1be07-4326-7bb3-bcf3-172b0bf5795f",
+  "external_ref": null,
+  "title": "Strengthen and qualify the release-gate fixture's pre-release assertion",
+  "outcome": "The release-gate behavioral fixture distinguishes an initially open gate deterministically and describes the limits of its instantaneous worker-completion observation without adding sleeps or timeout waits.",
+  "acceptance": [
+    "The existing behavioral explicit-release scenario also rejects an initially open gate before release; successful release and both worker completions remain checked.",
+    "The test's name and explanation do not claim a schedule-independent proof that a worker is parked from pre-wait readiness or one try_recv observation; unwind/poison/original-panic behavior and existing guard limits remain covered without real sleeps or expiry tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "fixture-lifecycle",
+    "greg-directed",
+    "review-followup",
+    "test-quality",
+    "test-runner",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19966-7593-7290-af23-39635af851d8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

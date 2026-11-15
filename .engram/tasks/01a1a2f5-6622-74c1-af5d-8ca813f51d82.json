@@ -1,0 +1,37 @@
+{
+  "id": "01a1a2f5-6622-74c1-af5d-8ca813f51d82",
+  "external_ref": null,
+  "title": "UI performance profiling after the keyboard fix: measure typing, tab switch, scroll and state-update cost on a representative state, then fix the largest proven causes",
+  "outcome": "A recorded baseline of UI interaction cost on master, with cd79424e's keyboard fix, against a representative state. The largest measured causes are identified with evidence, and the worthwhile fixes are either landed or filed with their cost and impact.",
+  "acceptance": [
+    "A baseline is recorded before any change. It uses the existing app-latency harness, or an equivalent reproducible setup, with a representative state: many sessions, long transcripts, active test runs and mailbox traffic. It reports numbers for typing latency, tab or session switch, transcript scroll, and incoming state-update and SSE handling. Each number comes with its method and environment, and no number is extrapolated.",
+    "The top causes are identified with profiler evidence: main-thread time split into script, layout and render, the component or function responsible, and correlation with backend payload size where that is relevant, for example the existing large-snapshot item w-919a18aecf19. Each cause carries an estimated cost to fix and an expected impact.",
+    "Every proven fix is either landed through the normal pair and FULL with a before/after measurement on the same setup, or filed as its own item with its numbers. No speculative optimisation lands without a measured improvement, and existing UI behaviour stays the same."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the pre-change baseline, private-trace root-cause analysis and 14-cell rich-state dev/production baseline with raw profiles, source mapping and explicit limits. The original 350.814 ms quadratic hidden-tail scan was fixed through the normal pair and exact FULL on w7245. Remaining measured run-history cost is filed as w-0fab7204fcff, secondary publication research as w-25ac4c50dc78, and payload evidence added to existing w919. No speculative product optimization was made.",
+    "completed_at": "2026-11-04T05:08:26.097428900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

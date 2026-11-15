@@ -1,0 +1,37 @@
+{
+  "id": "01a1711f-eab5-7671-a7e1-559787f77f80",
+  "external_ref": null,
+  "title": "Routine cross-host send rejects a known Mac root as local-only",
+  "outcome": "Restore supported durable routine messaging to an identity-bound known remote root without manual proxying, while preserving authorization and truthful delivery outcomes.",
+  "acceptance": [
+    "The reported known remote root can receive a routine message through the supported cross-host path, or the caller receives a precise actionable refusal for a genuine capability, identity or transport limitation rather than the incorrect local-only rejection.",
+    "Regression controls cover remote root routing, local root compatibility, invalid/non-root targets, authorization and idempotent retry without duplicate delivery.",
+    "The repaired package includes focused test results and the required independent review pair; integration retains the maintained exact-tree full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-host",
+    "greg-reported",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Already-landed native cross-host routine relay recovered and closed on current masterbf7ff309. Original cde926c4 delivery, focused checks, independent review pair and exact-tree integration FULL retained; current explicit native routing and regression coverage confirmed read-only. No new patch, tests or live Mac proof asserted.",
+    "completed_at": "2026-11-08T19:06:57.505468200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a19f1d-d162-7243-a6ff-b8217dbd2c54",
+  "external_ref": null,
+  "title": "Codex worker delegations in isolated worktrees fail immediately: local terminal execution unavailable",
+  "outcome": "A Codex worker delegation with an isolatedWorktree write policy can start a terminal or shell in its worktree and run commands. When it cannot, the parent is told at once by a delegation failure that names the cause, not by a silent end. Proven by a delegation that runs a trivial command in its worktree on the running host.",
+  "acceptance": [
+    "Codex worker delegations in isolated worktrees fail immediately: local terminal execution unavailable is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "delegation",
+    "host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

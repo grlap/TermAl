@@ -1,0 +1,31 @@
+{
+  "id": "01a1a586-328a-7483-a713-b3e8bea70a25",
+  "external_ref": null,
+  "title": "Preserve original committed-input refusal details without a failing fallback HEAD read",
+  "outcome": "An unavailable Node capture preserves its original named refusal without requiring another Git operation after budget exhaustion, and root-only failures do not label healthy child pins as ineligible.",
+  "acceptance": [
+    "Preserve original committed-input refusal details without a failing fallback HEAD read is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "commit-input",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

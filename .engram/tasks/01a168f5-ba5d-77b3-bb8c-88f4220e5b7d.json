@@ -1,0 +1,27 @@
+{
+  "id": "01a168f5-ba5d-77b3-bb8c-88f4220e5b7d",
+  "external_ref": null,
+  "title": "A freeze check that exits early after it started stays Pending and tells the reviewer to wait forever",
+  "outcome": "A recorded freeze check that exits after begin_review_input_check without running to an outcome (the current_exe() failure, or the post-run authority re-check failing on an unchanged attempt) records Unavailable for its sequence, so the reviewer is told to repeat the check rather than to wait for one that will never finish.",
+  "acceptance": [
+    "Both early exits in verify_review_freeze_with_commands after begin_review_input_check record Unavailable for that check's sequence when the attempt is unchanged; a regression test shows the refusal is [identity-checker-unavailable] (repeat the same check), not [identity-check-pending]."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

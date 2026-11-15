@@ -1,0 +1,38 @@
+{
+  "id": "01a0fa6a-e33e-7761-bf46-f587318c2381",
+  "external_ref": null,
+  "title": "Preserve master fully-loaded transcript behavior on excluded forced partial-tail adoption",
+  "outcome": "Preserve master fully-loaded transcript behavior on excluded forced partial-tail adoption",
+  "acceptance": [
+    "Excluded remote, foreign-epoch and unpaired forced partial-tail adoption over a fully loaded transcript has exactly master's behavior; eligible local paired tail adoption still uses the owner's D6 suffix replacement.",
+    "Focused parity tests discriminate excluded master behavior from eligible D6 suffix restoration and pass on the corrected source."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-c2ab-7b62-a2fa-1bb52bfc0f6a",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1cdb9-c03c-7023-9023-1aa0832eda78",
+  "external_ref": null,
+  "title": "Clarify bounded metadata version windows versus request-tail funding",
+  "outcome": "Source-owner contract documentation distinguishes the62s version process cap from unchanged request funding and explicitly retains the slow-source-stage tail limitation.",
+  "acceptance": [
+    "Host-adapter documentation and the matching acceptance budget comment describe a separately bounded version process, distinguish it from the unchanged request admission budget, and explicitly disclose that an unchanged slow source stage can still consume the mandatory tail.",
+    "Wording is checked against actual owner/phase/request code by review; no source deadline behavior is altered and no Markdown phrase or instruction-content test is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "engram-adapter",
+    "follow-up",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a19e92-3c8f-7693-9460-6bb54cae56aa",
+  "external_ref": null,
+  "title": "Two EO fixture tests leave their test-state directories behind (temp-cleanup guard)",
+  "outcome": "A full gate on master passes the test-temp cleanup guard: the source_root_naming and outstanding_work fixture tests no longer leave termal-test-state directories in their run root, and the guard stays as strict as it is today.",
+  "acceptance": [
+    "both single tests pass with the standard wrapper and leave no entries",
+    "the two modules plus recovery_lock:: and the c050 temp-leak tests are green",
+    "--no-run compiles"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "execution-observability",
+    "temp-leak",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed fixture/root lifetime cleanup in master47fdba2f. Both strict single regressions and full modules/recovery/temp-leak coverage pass; final five-stage gate compiles and passes6817 Rust tests with zero cleanup leftovers.",
+    "completed_at": "2026-11-03T06:22:05.099619500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

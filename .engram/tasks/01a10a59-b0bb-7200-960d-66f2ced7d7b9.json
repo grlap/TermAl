@@ -1,0 +1,28 @@
+{
+  "id": "01a10a59-b0bb-7200-960d-66f2ced7d7b9",
+  "external_ref": null,
+  "title": "A mailbox-woken turn that fails at the provider (crash, runtime error, revoked token) pauses the queue until a manual Resume; retry it automatically on the common recovery schedule, with a bound",
+  "outcome": "When a turn woken by a mailbox notification fails after delivery, the restored wake is retried automatically on the common recovery schedule (the delays, jitter, tick, per-head guard and host-wide cap that w-7224e6317e55 extracted), so a transient provider failure needs no Resume. After a bounded number of consecutive failures of the same head, the queue holds as it does today. That hold says it is a repeated provider failure and names the head and its last error. The sender's disposition names the hold instead of queuedBehindActiveTurn.",
+  "acceptance": [
+    "A mailbox-woken turn that fails at the provider (crash, runtime error, revoked token) pauses the queue until a manual Resume; retry it automatically on the common recovery schedule, with a bound is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "autonomy",
+    "mailbox",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

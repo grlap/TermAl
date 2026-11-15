@@ -1,0 +1,26 @@
+{
+  "id": "01a11f0a-80f0-7131-b150-0c891724ef6f",
+  "external_ref": null,
+  "title": "Declared test commands can't express a negative test filter (`!=`), because `!` is outside the line allow-list",
+  "outcome": "A declared dotnet test command can carry a negative filter such as --filter 'TestCategory!=Slow' inside a single-quoted word, judged safe for both bash and pwsh, or the docs keep stating the limitation with the supported alternatives (a positive filter or a runsettings file).",
+  "acceptance": [
+    "Declared test commands can't express a negative test filter (`!=`), because `!` is outside the line allow-list is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "declared-tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

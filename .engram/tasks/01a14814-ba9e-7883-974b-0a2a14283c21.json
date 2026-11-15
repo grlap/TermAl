@@ -1,0 +1,36 @@
+{
+  "id": "01a14814-ba9e-7883-974b-0a2a14283c21",
+  "external_ref": null,
+  "title": "doctor_deadline tests start their 5 s diagnostic deadline before two PowerShell startups, so under load they fail after 60 s waits",
+  "outcome": "The doctor_deadline tests measure only the doctor's deadline behaviour, not PowerShell startup latency. Their readiness phase can't be starved by a deadline that started before the fixture was ready, and a failure prints the worker's real error.",
+  "acceptance": [
+    "The diagnostic deadline under test starts only after the fixture's descendant-ready and process-probe handshake completes (or the test otherwise excludes fixture startup from the measured budget), without increasing any timeout value; a test or deterministic hook shows that a slow fixture startup no longer causes the deadline to kill the doctor before the handshake.",
+    "When the readiness phase fails, the test output includes the worker's actual error (not only 'timed out waiting on channel'), covered by a test of the failure path.",
+    "Both doctor_deadline tests pass in a full five-stage gate on the exact final input, and an independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The doctor_deadline readiness/probe handshake is excluded from its diagnostic deadline, readiness failures preserve the worker error, and the exact integrated input passed the five-stage full gate with a clean worktree. Independent evaluation f9aa3e8b6eb047fd968c32ed2b185b03 passed all three criteria.",
+    "completed_at": "2026-10-17T21:40:18.380151200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

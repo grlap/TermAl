@@ -1,0 +1,32 @@
+{
+  "id": "01a1b428-fa9f-7982-87b2-0fe835eab8f5",
+  "external_ref": null,
+  "title": "Publish the native END artifact verdict atomically and preserve it when the turn is no longer current",
+  "outcome": "A native observation cannot persist or publish an exit-derived Passed before its actual declared artifact verdict, and an exactly matched original END retains that display verdict even when the originating turn no longer admits credit. Keep credit fail-closed and generic launcher rules unchanged.",
+  "acceptance": [
+    "Publish the native END artifact verdict atomically and preserve it when the turn is no longer current is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "declared-tests",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1af47-2661-7340-b4ef-24a72c898d6d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

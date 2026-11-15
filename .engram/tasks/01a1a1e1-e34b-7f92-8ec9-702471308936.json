@@ -1,0 +1,29 @@
+{
+  "id": "01a1a1e1-e34b-7f92-8ec9-702471308936",
+  "external_ref": null,
+  "title": "Reading the result of a failed review attempt returns 409 review_result_unvalidated instead of the failure and its refusal text",
+  "outcome": "termal_get_session_result for a review attempt that failed before submitting (for example a model usage-limit refusal) returns a readable failed state with the native refusal text, so an integration owner can verify the refusal from the source instead of relying on the author's note.",
+  "acceptance": [
+    "The 409 'review_result_unvalidated: original structured submission is missing or quarantined' path is distinguished from a genuinely failed attempt that never submitted: the latter returns status failed with the bounded native failure text and attempt identity.",
+    "A quarantined or invalid submission still returns the 409 as today; a regression test covers both cases, and the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation-mcp",
+    "diagnostics",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

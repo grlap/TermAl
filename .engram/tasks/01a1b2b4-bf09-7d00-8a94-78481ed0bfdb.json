@@ -1,0 +1,29 @@
+{
+  "id": "01a1b2b4-bf09-7d00-8a94-78481ed0bfdb",
+  "external_ref": null,
+  "title": "Require positive child execution evidence in federation unwind regressions",
+  "outcome": "Federation unwind parents reject a child that exits successfully without executing the selected teardown case.",
+  "acceptance": [
+    "The parent requires a per-mode completion marker after the child's final assertions, or equivalent positive evidence; a zero-test child invocation cannot pass solely by exit status.",
+    "A discriminating control with a nonmatching exact filter or absent marker fails while every real unwind mode still passes; timeouts and existing teardown assertions are preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-low",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

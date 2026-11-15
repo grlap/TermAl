@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3b4-79e2-8440-0bbfeb0a66a6",
+  "external_ref": "tm-15tu",
+  "title": "Restore floating Ctrl+F session search and remove Find tab",
+  "outcome": "Greg requests Find in session as a floating overlay opened with Ctrl/Cmd+F, not a tab/inline toolbar. Keep conversation and tab-row geometry stable, preserve match navigation, close via Escape from overlay controls. Main checkout only; do not touch unrelated changes or run tests/build/tsc under standing stop.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-DONE. Floating Find was restored in bff17fb (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

@@ -1,0 +1,41 @@
+{
+  "id": "01a17609-8413-7681-9feb-eb0b139bbf79",
+  "external_ref": null,
+  "title": "Name federation fixture diagnostic fence age and loop wall time according to their actual boundaries",
+  "outcome": "Fixture diagnostic keys distinguish construction-to-accept fence age and observation-loop wall time from exact channel residence and summed persistence phase time.",
+  "acceptance": [
+    "The fixture log labels accurately describe new_fence_age_max_us as construction-to-accept age and loop_wall_us as observation-loop wall time; they do not imply exact channel queue wait or PersistTickTimings::total.",
+    "Update or validate any diagnostic parsers and focused observer controls using the existing numeric telemetry, with no deadline, scheduling or runtime policy change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cause-unresolved",
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "macos",
+    "operator-ui-works",
+    "persistence",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "review-followup",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17537-1ca6-7602-8267-779340bdd05d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

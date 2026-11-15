@@ -1,0 +1,29 @@
+{
+  "id": "01a19802-c5b5-7dc3-979d-255160ed83cf",
+  "external_ref": null,
+  "title": "Pin convergence after a synchronous follow-up saves delegation metadata but rejects the child session row",
+  "outcome": "The follow-up owner explicitly documents and tests how durable delegation re-arm converges after its child session's row is rejected and memory is rolled back.",
+  "acceptance": [
+    "A disposable follow-up regression with Some(previous) rejects the child's transcript row and inspects both durable delegation and child rows plus the existing memory rollback.",
+    "Document or repair convergence without falsely acknowledging the child row, losing follow-up custody or making an unrelated session or metadata commit fail."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

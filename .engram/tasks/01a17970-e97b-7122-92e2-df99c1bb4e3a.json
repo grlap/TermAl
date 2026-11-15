@@ -1,0 +1,37 @@
+{
+  "id": "01a17970-e97b-7122-92e2-df99c1bb4e3a",
+  "external_ref": null,
+  "title": "Ordinary cross-host communication must not depend on a build/hash requalification ceremony (Greg direct, 2026-10-26)",
+  "outcome": "After an ordinary restart or upgrade of either host, cross-host mailbox routing works as soon as the existing secure transport and pair identity are established, with no requalification report, manual verify or activate, and with no weaker security boundary and no duplicated identity state.",
+  "acceptance": [
+    "A design note, concurred by both coordinators before any code, names every existing owner that gates ordinary cross-host mailbox routing on requalification or Active restoration, states the remaining security boundary (OpenSSH pinned host key and login, pair HMAC proof bound to enrollment and link incarnation, per-message MAC and replay window, enrollment identity), and specifies the minimal removal or simplification with no new mechanism and no duplicated identity state.",
+    "After implementation, an ordinary restart or upgrade of either host followed by the two-way remote check (central to Mac, Mac to central, host-qualified, plus a bare local control) succeeds without any verify or activate call or requalification report, with deterministic tests and a clean review pair; re-enrollment, key or pin changes, identity mismatch and quarantine still refuse."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "architecture",
+    "cross-machine",
+    "federation",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Self-asserted completion: design agreed before implementation, existing security fences retained, deterministic tests and clean pair/full gate/landing recorded, and post-restart CentralWindows↔Mac C1/C2 plus bare-local L1 observed.",
+    "completed_at": "2026-11-09T07:11:00.884703800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

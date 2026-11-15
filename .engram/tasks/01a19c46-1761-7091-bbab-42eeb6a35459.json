@@ -1,0 +1,39 @@
+{
+  "id": "01a19c46-1761-7091-bbab-42eeb6a35459",
+  "external_ref": null,
+  "title": "Restore ordinary queue behavior before dedicated runtime reset preparation",
+  "outcome": "Remove the introduced early project-resource-reset refusal while preserving ordinary runtime and queue ownership behavior; exact runtime_process_tree-only source return, no Cargo.",
+  "acceptance": [
+    "Record Sol-03d4's read-only answer identifying the production slice and reason for the added resource-reset bails; explain the minimal chosen fix against master5dd913d2 ordinary behavior.",
+    "In a fresh named root on tree0c00cea3, after naming and a next-turn wake, modify only src/runtime_process_tree.rs; preserve turn_dispatch queue semantics and all actual runtime/Stop/owner checks.",
+    "Return frozen tree, exact before/after blobs, rationale and the expected affected test names to Sol-03d4 and Fable2; preserve FULL test-8e9b2da2 failure, with no Cargo/retry or execution credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-investigation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered and coordinator-accepted exact one-file source fix: tree15efe09933f6b8ef45e728c4f434c08ad6505b11 removes two premature resource-reset refusals (+0/-8). Required owner provenance and13 expected tests recorded. No Cargo/retry; tests and full gate UNRUN on return, integration remains parent-owned.",
+    "completed_at": "2026-11-02T12:48:17.067865100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

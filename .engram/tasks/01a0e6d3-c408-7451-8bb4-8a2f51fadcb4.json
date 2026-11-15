@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a2f51fadcb4",
+  "external_ref": "tm-7cu.28",
+  "title": "Restore settled live follow after near-bottom prompt send",
+  "outcome": "A deterministic UI regression in committed HEAD c3397e8 leaves a near-bottom attached transcript without follow-up scroll after prompt send. followLatestMessageForPromptSend performs only the synchronous repin while the old multi-frame follower was removed; if scrollHeight grows after the click, no controller observes it. The focused test keeps a growing near-bottom send inside one live follow fails with followedTops.length=0 both in the current worktree and a clean HEAD worktree.",
+  "acceptance": [
+    "Keep the pre-paint repin, restore bounded settled bottom-follow across later geometry growth, return/cancel its controller correctly, preserve user-detach authority, make the focused regression pass, and restore the full Vitest suite to green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

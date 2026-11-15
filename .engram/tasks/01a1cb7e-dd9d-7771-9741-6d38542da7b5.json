@@ -1,0 +1,32 @@
+{
+  "id": "01a1cb7e-dd9d-7771-9741-6d38542da7b5",
+  "external_ref": null,
+  "title": "Exercise production history reader busy-zero wiring and wrapped BUSY retries",
+  "outcome": "Behavioral coverage protects the production history snapshot opener's nonblocking SQLite policy and retry recognition when BUSY is wrapped in context, so regression to a blocking pin under StateInner is detected.",
+  "acceptance": [
+    "A behavioral test exercises the opener actually used by production history capture and verifies that SQLite contention cannot wait on the pin while StateInner is held.",
+    "A deterministic test exercises a context-wrapped DatabaseBusy opening failure and proves bounded retry, warning ownership and eventual success or existing deadline failure without real waits."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "history",
+    "limits",
+    "review-low",
+    "sqlite",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

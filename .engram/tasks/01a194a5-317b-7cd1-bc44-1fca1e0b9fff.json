@@ -1,0 +1,28 @@
+{
+  "id": "01a194a5-317b-7cd1-bc44-1fca1e0b9fff",
+  "external_ref": null,
+  "title": "Remote native session's MCP termal_send_to_session fails with 423 \"authenticated native mailbox relay refused\" while its CLI route works",
+  "outcome": "A remote native root session (for example S3 Mac session-6201) can send to existing native peers through the MCP termal_send_to_session tool whenever its CLI mailbox route with the same original identity succeeds, or the refusal names a specific, actionable cause.",
+  "acceptance": [
+    "Remote native session's MCP termal_send_to_session fails with 423 \"authenticated native mailbox relay refused\" while its CLI route works is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "relay",
+    "remote-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a19428-3b03-72c0-9f54-3bddbf73af2a",
+  "disposal_reason": "Duplicate of an existing item. The S3 Mac runner 6201's 423 Locked \"authenticated native mailbox relay refused\" on MCP termal_send_to_session between 01:04:11Z and 01:05:34Z (the CLI route worked) is already recorded on w-3bddbf73af2a, the relay 423/503 refusals item, with the exact text, keys and times (Termal::Fable2's note, ~01:07Z). Superseded by the TermAl coordinator under the agreed filing rule (the coordinator files runner findings and the integration owner adds notes).",
+  "completion": null
+}

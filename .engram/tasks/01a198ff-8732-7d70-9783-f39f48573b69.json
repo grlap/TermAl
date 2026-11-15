@@ -1,0 +1,29 @@
+{
+  "id": "01a198ff-8732-7d70-9783-f39f48573b69",
+  "external_ref": null,
+  "title": "Preserve ordinary OFF recovery semantics when restoring a failed queue promotion",
+  "outcome": "Failed ordinary OFF promotion restores the selected envelope in place without inventing a control-authorization pause, retaining exact original control evidence and normal failure recovery.",
+  "acceptance": [
+    "Preserve ordinary OFF recovery semantics when restoring a failed queue promotion is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1981d-73dd-7db2-bef1-ba8d28acb0fd",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete, not fixed or tested by this audit. Per coordinator Fable2720/message1e98f4de-258c-404c-bff1-c9d91e06b20d, the specific preserve_prepared_engram_operation OFF rollback path was removed by landed87f49ed0; current ordinary-owner selection also no longer snapshots .front(). Original report33625357993b43129915cb98f55a35f0 and read-only provenance ebd2d6e154a04d19ab815797d4a03e5c remain. No new source change, test run, live observation or general rollback correctness certification.",
+  "completion": null
+}

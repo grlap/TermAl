@@ -1,0 +1,29 @@
+{
+  "id": "01a1a246-57b1-78b0-8350-dce9d5a2c835",
+  "external_ref": null,
+  "title": "Assess explicit root-wide source capture admission hardening without changing content-v1 compatibility implicitly",
+  "outcome": "A separate evidence-backed proposal for any future no-gitlink root admission tightening, with exact compatibility consequences and consumer migration; no change is smuggled into pinned-submodule support.",
+  "acceptance": [
+    "The assessment identifies current admission and guarantee limits for sparse/partial roots, hidden index flags, conflicts, and changes between capture reads, with source evidence.",
+    "Any proposed tightening states formerly admitted states that would refuse, compatibility and consumer migration consequences, and an explicit coordinator disposition before implementation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "architecture",
+    "design-pending",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

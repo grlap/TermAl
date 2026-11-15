@@ -1,0 +1,29 @@
+{
+  "id": "01a1a62a-55fd-7c51-b53e-cd15c3e3e6f6",
+  "external_ref": null,
+  "title": "Keep the registered-launcher live fixture within Windows path and scratch-ignore limits",
+  "outcome": "The registered-launcher live fixture works under representative long Windows user-temp paths and treats its owned compiler scratch consistently with the repository, without weakening real check or source-cleanliness assertions.",
+  "acceptance": [
+    "Shorten the recovered-root fixture layout so the Windows owner's repository-local compiler scratch stays within its 200-character bound under a representative long user-temp path; preserve original clean-check, source-change and native receipt assertions.",
+    "Ignore only the fixture's owned .tmp compiler scratch as the repository does, and verify retained scratch does not turn an otherwise valid inner check into debris_pending_disposition."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "test-fixture",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

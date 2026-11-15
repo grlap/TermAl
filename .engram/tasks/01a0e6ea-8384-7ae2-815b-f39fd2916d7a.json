@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6ea-8384-7ae2-815b-f39fd2916d7a",
+  "external_ref": null,
+  "title": "Test launcher: preflight a fresh worktree's missing ui/node_modules and name the junction remedy instead of failing the first stage with ENOENT",
+  "outcome": "Test launcher: preflight a fresh worktree's missing ui/node_modules and name the junction remedy instead of failing the first stage with ENOENT",
+  "acceptance": [
+    "Test launcher: preflight a fresh worktree's missing ui/node_modules and name the junction remedy instead of failing the first stage with ENOENT is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "PI-33",
+    "post-import",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1ccaf-18d3-75f0-b4f5-8c3c4731a953",
+  "external_ref": null,
+  "title": "Improve small-text contrast in website board and artifact previews",
+  "outcome": "Improve small-text contrast in website board and artifact previews",
+  "acceptance": [
+    "The mini-board metadata and surface-list trailing labels have at least 4.5:1 contrast against their rendered backgrounds while retaining the existing layout."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "website"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

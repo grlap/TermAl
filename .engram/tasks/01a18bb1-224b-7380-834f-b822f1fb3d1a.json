@@ -1,0 +1,30 @@
+{
+  "id": "01a18bb1-224b-7380-834f-b822f1fb3d1a",
+  "external_ref": null,
+  "title": "Test launcher focused mode on Windows B loses shell-child stdout/stderr (0-byte logs for bash-wrapped commands)",
+  "outcome": "Test launcher focused mode on Windows B loses shell-child stdout/stderr (0-byte logs for bash-wrapped commands)",
+  "acceptance": [
+    "A bash-wrapped focused launcher command on Windows B captures its stdout and stderr (including xtrace) in the run's logs, shown by a smoke that echoes a sentinel to both streams.",
+    "The cause is identified with discriminating evidence, and a regression test covers shell-child output capture on Windows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "runner",
+    "test-launcher",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

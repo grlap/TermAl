@@ -1,0 +1,28 @@
+{
+  "id": "01a1c865-3588-76f1-9abf-54cb84863a3c",
+  "external_ref": null,
+  "title": "Cover startup recovery deadline rollover with the scripted budget clock",
+  "outcome": "Deterministic behavioral coverage proves that a bounded startup recovery pass leaves work it never reached for a later tick when its deadline expires.",
+  "acceptance": [
+    "A scripted-clock behavioral test makes an actual owner read consume the recovery budget, verifies that a subsequent work remains owed and is attempted on a later tick, and verifies startup completion only after the tail is reached; the test does not sleep, pin implementation text or loosen time budgets."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "named-root",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

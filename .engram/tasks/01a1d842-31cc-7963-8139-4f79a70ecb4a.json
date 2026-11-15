@@ -1,0 +1,31 @@
+{
+  "id": "01a1d842-31cc-7963-8139-4f79a70ecb4a",
+  "external_ref": null,
+  "title": "Document the remote snapshot decoding boundary to prevent generic bypasses",
+  "outcome": "Make the remote response decoder contract explicit at the typed snapshot wrappers and generic JSON request helpers, so future peer endpoints carrying direct or nested state snapshots use remote_summary_compat and preserve strict canonical decoding.",
+  "acceptance": [
+    "Contract comments at the typed state/project/orchestrator response wrappers and generic lease-aware JSON helpers state that inbound peer snapshots, including nested snapshots, use the remote-only compatibility decoders.",
+    "The clarification preserves current decoding, lease and authority behavior; it introduces no Markdown or source-phrase pinning tests. Any structural guard is separately justified and behaviorally verified."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "maintainability",
+    "remote-sync",
+    "review-low",
+    "review-medium",
+    "wire-compatibility"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1d6f6-b654-7632-aa40-96c9afec3aa6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d937-2141-7d22-a7c3-99d63c264a8b",
+  "disposal_reason": "Parent w-96c9afec3aa6 completed with fresh independent acceptance; retain this optional follow-up as independent work with its recorded raw-evidence retention, rather than leave it blocked by the completed parent.",
+  "completion": null
+}

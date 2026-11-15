@@ -1,0 +1,30 @@
+{
+  "id": "01a0f625-e6ee-7740-a27d-1201b5e2cc51",
+  "external_ref": null,
+  "title": "Avoid overblocking historical evaluation fences on confirmed-generation Ended cleanup",
+  "outcome": "Avoid overblocking historical evaluation fences on confirmed-generation Ended cleanup",
+  "acceptance": [
+    "Avoid overblocking historical evaluation fences on confirmed-generation Ended cleanup is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

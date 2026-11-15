@@ -1,0 +1,30 @@
+{
+  "id": "01a17eb1-0d0b-7991-af83-02c2fc69a085",
+  "external_ref": null,
+  "title": "Establish supported predecessor extra-table inventory before widening reader-floor migration",
+  "outcome": "Record whether any supported predecessor store contains harmless tables outside the explicitly known obsolete mailbox triplet, and an independently reviewed compatibility decision that preserves fail-closed custody.",
+  "acceptance": [
+    "Establish supported historical table inventory from reproducible fixtures or authorized evidence, explicitly distinguishing an actual compatibility defect from unverified hypothetical leftover tables.",
+    "Before any migration change, record a reviewed allowance/repair decision; any implementation retains refusal of unknown custody and covers the supported historical case through the existing schema owner."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "inventory",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12858-a1c2-7f71-8e92-e12abe9f8cbe",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

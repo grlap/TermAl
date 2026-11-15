@@ -1,0 +1,27 @@
+{
+  "id": "01a10f9b-e567-72e3-8611-54b31236feca",
+  "external_ref": null,
+  "title": "Codex delegation follow-up or reuse fails with 500 \"timed out waiting for Codex app-server response to thread/unarchive\"",
+  "outcome": "Acceptance evaluation with reuseDelegationId fails with 500 \"timed out waiting for Codex app-server response to thread/unarchive\"",
+  "acceptance": [
+    "Acceptance evaluation with reuseDelegationId fails with 500 \"timed out waiting for Codex app-server response to thread/unarchive\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "codex"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a179b2-a4bb-7101-ba46-d383c82bdeeb",
+  "disposal_reason": "Fable2 mailbox1920/message4e6f3ebd-96a5-414c-ac67-d5546a59e021 explicitly designates d383 canonical for Codex thread/unarchive timeout and asks superseding this historical issue. Current occurrence evidence copied to d383 note66de9f98eeb649a58f0109ff47f0d1f0; earlier historical notes remain here and are linked from canonical. This consolidates tracking, not a product fix or cause diagnosis.",
+  "completion": null
+}

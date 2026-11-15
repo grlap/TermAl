@@ -1,0 +1,24 @@
+{
+  "id": "01a1c375-b46b-7aa1-ae1a-df5e8c360cd8",
+  "external_ref": null,
+  "title": "Terminal delegation follow-up bypasses the per-parent active delegation cap",
+  "outcome": "Re-arming a terminal delegation for a follow-up checks the per-parent active capacity atomically, under the same lock as the state change, so a parent can never hold more active children than its limit. A test covers a follow-up racing concurrent spawns at the cap and shows the follow-up is refused with the truthful capacity message.",
+  "acceptance": [
+    "Terminal delegation follow-up bypasses the per-parent active delegation cap is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

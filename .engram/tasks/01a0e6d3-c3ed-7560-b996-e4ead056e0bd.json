@@ -1,0 +1,49 @@
+{
+  "id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "external_ref": "tm-5fsy",
+  "title": "Read-only Claude reviewers inherit project/user allow rules that bypass the host read-only checker",
+  "outcome": "FOUND 2026-09-11 23:15Z by the coordinator after Engram::Fable observed that Claude read-only reviewers ran node scripts/review-freeze-fingerprint.mjs --check and node -e ... with status success although the host checker has no node allowance. MECHANISM: src/claude_args.rs:61 spawns every Claude child with --setting-sources user,project,local; ClaudeApprovalMode::ReadOnlyAutoApprove passes no --permission-mode (src/wire.rs:885, CLI default). Claude Code resolves permissions.allow rules from those settings files BEFORE sending a can_use_tool control request, so the host read-only checker (src/claude.rs:458 claude_tool_permission_request_is_read_only) only ever sees commands that no allow rule matched. EVIDENCE: TermAl/.claude/settings.json:17-36 allows Bash(cargo:*), Bash(rustc:*), Bash(npm:*), Bash(npx:*), Bash(node:*), Bash(git add:*), Bash(git stash:*), Bash(git remote:*), Bash(git branch:*), ls/find/grep/wc/tail/head/cat; the user-level ~/.claude/settings.json additionally allows e.g. Bash(perl:*), Bash(xxd:*), Bash(git revert:*). Engram/.claude/settings.json:6 allows Bash(node:*) - matches the Engram observation. The host was reached today only for commands outside the rules (e.g. the reviewer's git diff --cached > file was denied by the host). IMPACT: a delegation with writePolicy readOnly can stage (git add), stash, revert, and run arbitrary code (node -e, npm, npx, perl, cargo run) without the host having any say; every exec-sink the checker carefully blocks (git -C, --textconv, hash-object, PowerShell) is trivially reachable through node -e or perl. The review integrity boundary (freeze fingerprint) still detects index/worktree mutation after the fact, but the write policy is not enforced by the host for Claude reviewers, and the guarantee changes with whatever the reviewed repo or the user has in settings.json. FIX DIRECTION (verify against current Claude Code semantics): for ReadOnlyAutoApprove children pass a spawn-time settings override that routes every Bash/Write/Edit/NotebookEdit/PowerShell decision to the host - permissions.ask rules take precedence over allow rules (deny > ask > allow), so --settings with permissions.ask [Bash, PowerShell, Write, Edit, MultiEdit, NotebookEdit] (or an equivalent --disallowedTools/deny set if ask is unavailable) makes the host checker authoritative again without dropping project commands/skills; add a test that a Bash command matching a project allow rule still reaches classify_claude_control_request in read-only mode. Related: tm-bcj (PowerShell checker) and tm-zg4i (denial message).",
+  "acceptance": [
+    "A ReadOnlyAutoApprove Claude child's spawn arguments carry the process-only overlay --settings {\"permissions\":{\"ask\":[\"*\"]},\"sandbox\":{\"autoAllowBashIfSandboxed\":false},\"disableAllHooks\":true} while keeping --setting-sources user,project,local, and ordinary sessions carry no overlay. Pinned by claude_read_only_spawn_overrides_inherited_permission_shortcuts.",
+    "The host classifier refuses read-only Claude tool requests that typical project or user allow rules would have admitted (node -e, cargo, git add, git stash, git revert, PowerShell, Write, Edit, NotebookEdit, Agent, unknown MCP tools) and admits read-only inspection. Pinned by claude_read_only_host_checks_commands_even_if_cli_settings_allow_them and claude_read_only_allows_skill_loading_without_granting_write_permissions.",
+    "Live, on the installed Claude CLI (version recorded): a read-only Claude delegation in a workspace whose project settings allow a write-capable command (for example Bash(git add:*) or Bash(node:*)) attempts that command, and the host classifier refuses it. The delegation's recorded commands and the worktree status show the refusal and no mutation.",
+    "Focused verification of src/tests/claude_permission_boundary.rs passes on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

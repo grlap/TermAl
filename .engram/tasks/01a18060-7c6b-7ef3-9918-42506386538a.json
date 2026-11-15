@@ -1,0 +1,34 @@
+{
+  "id": "01a18060-7c6b-7ef3-9918-42506386538a",
+  "external_ref": null,
+  "title": "Page metadata catalogs and bound nested records across workspace, orchestration and federation APIs",
+  "outcome": "Remaining host-owned catalogs have explicit page budgets and bounded detail projections instead of whole-store responses.",
+  "acceptance": [
+    "Inventory and bound list/detail responses for workspaces, orchestrator templates/instances, session markers and overview markers, handoffs/named roots, mailbox catalogs/references/participants/directory, federation peers/journal/executor views, Codex MCP/model data and agent readiness.",
+    "Pagination occurs before collecting whole stores where feasible, and detail records have byte/depth/item budgets or bounded subresource pages; count-only limits are not presented as byte limits.",
+    "Existing route owners, authorities and cursor patterns are reused; clients retain referenced-but-not-loaded entities, exact lookup and truthful totals. No persistent history is deleted to shrink responses.",
+    "Tests validate budgets and continuation with small fixtures, including512 overview buckets plus many markers and nested Codex metadata; independent review and full gate pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "design-pending",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "panic",
+    "response-size"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18052-8b84-7e10-8213-9af00ebbaa71",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

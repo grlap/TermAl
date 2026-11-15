@@ -1,0 +1,39 @@
+{
+  "id": "01a19c51-bc8e-7c31-93b4-3ea6a9126250",
+  "external_ref": null,
+  "title": "Verify EO deletion, naming, closing-attribution and Resume audit suspects",
+  "outcome": "Read-only owner-contract and EO-intent assessment of audit suspects H6/M7/M8/L8 on master5dd913d2 versus tree0c00cea3.",
+  "acceptance": [
+    "Trace each of H6/M7/M8/L8 through current and master owners with exact file:line and a concrete reachable scenario or refutation.",
+    "Read the relevant Execution Observability, observation-removal and naming design records; classify each suspect as intended behavior with cited design, regression with user-visible scenario, or refuted.",
+    "Mail Fable2 the four-verdict table and evidence within the assigned source-only scope; make no edits or Cargo/test/retry."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered source-only H6/M7/M8/L8 verdict table: H6 empty-custody unconditional Delete ACK is a regression; M7 live naming interlock and M8 reload-safe pinned scope are intended with exact owner proofs; L8 panic premise refuted. No edits or execution; product-fix routing stays with coordinator.",
+    "completed_at": "2026-11-02T13:02:55.093847600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

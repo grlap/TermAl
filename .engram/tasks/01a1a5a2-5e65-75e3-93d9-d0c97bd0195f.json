@@ -1,0 +1,27 @@
+{
+  "id": "01a1a5a2-5e65-75e3-93d9-d0c97bd0195f",
+  "external_ref": null,
+  "title": "A delegation wait set after a refused follow-up can report the earlier completed attempt under the new title",
+  "outcome": "After a follow-up to a delegation is refused, a wait on that delegation can't be mistaken for a result of the refused prompt.",
+  "acceptance": [
+    "A delegation wait set after a refused follow-up can report the earlier completed attempt under the new title is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "after-execution-observability",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

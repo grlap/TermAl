@@ -1,0 +1,30 @@
+{
+  "id": "01a175a9-89a8-76a3-a9e5-457813791551",
+  "external_ref": null,
+  "title": "Add a cross-host native-id negative control for the mailbox read argument diagnostic",
+  "outcome": "A caller's mistaken bare native session id cannot select a diagnostic pair belonging to a target on another host; the host filter has a discriminating regression control.",
+  "acceptance": [
+    "A disposable authenticated satellite test gives the caller an existing pair with a central-host target and submits that target's native id as mailboxId; the error says none for this same-host lookup and excludes that pair id.",
+    "The control fails if the production same-host filter is removed, while existing own-host pair/none and privacy controls pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "review-low",
+    "testing",
+    "usability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17500-d81b-77d2-afc3-5e74fca28c0d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

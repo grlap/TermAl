@@ -1,0 +1,36 @@
+{
+  "id": "01a12d76-f61d-73f2-8748-50089436bb17",
+  "external_ref": null,
+  "title": "The pending-finish source-capture test waits out the real 40 s closing-settlement budget on every cargo test run",
+  "outcome": "silent_check_outcome_source_captures_are_reported_or_explained covers its pending-finish case without spending the production REVIEW_FREEZE_TIMEOUT (40 s). Either a deadline already in the past is driven through engram_resolve_turn_checks_with_notices, or a cfg(test) settlement budget is used. The coverage stays deterministic.",
+  "acceptance": [
+    "The pending-finish case still proves that a capture still pending at the settlement deadline yields the holder line \"finish source snapshot was still pending\", and that a capture arriving later is not lost to a cached empty report.",
+    "The test no longer waits the real 40 s settlement budget: its run time is bounded by the test's own scripted or past deadline, with no sleep or synthetic load.",
+    "The focused test passes on a host-recorded run."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

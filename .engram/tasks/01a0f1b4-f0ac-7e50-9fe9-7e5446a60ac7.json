@@ -1,0 +1,28 @@
+{
+  "id": "01a0f1b4-f0ac-7e50-9fe9-7e5446a60ac7",
+  "external_ref": null,
+  "title": "Carried-check watcher counts writes under .tmp/ as source changes, although CLAUDE.md sends all agent scratch there",
+  "outcome": "Found by the review pair on containment's integration onto 76236ec (Termal::Codex, 53085a5b #180, 09:45Z).\nThe carried-check watcher that landed with w-f6b5832f2141 ignores target/, .git and node_modules, but not .tmp/. CLAUDE.md and AGENTS.md tell every agent to put scratch files, throwaway stores, test homes and logs under .tmp/.\nSo any scratch write in a worktree during a carried full gate fences or invalidates that gate: a test fixture, a probe or a log. The input fingerprint excludes ignored files, so those writes cannot change the gated input.\nCodex works around it for his own fixtures by moving them to target/. The general case remains, for other tests and for agents' own scratch.\nFix: the watcher ignores the repository's scratch directory, .tmp/ at the worktree root. It may ignore git-ignored paths in general, if that can be shown not to hide a real input change. A regression covers a write under .tmp/ during a carried gate.",
+  "acceptance": [
+    "A write to a tracked source file during the same window still does; a test covers it.",
+    "A write under the worktree's .tmp/ during a carried full gate does not fence or invalidate it; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch a640e340, spot-checked by Termal::Fable2): CLOSE-DONE. The own-worktree scratch exclusion and a negative source-write regression landed in 204b95b8 (ancestor of master); src/engram_carried_checks.rs:2078-2084 and src/tests/engram_carried_checks.rs:3206. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

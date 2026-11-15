@@ -1,0 +1,38 @@
+{
+  "id": "01a15cb8-da1c-79c3-994d-62605c4d61e7",
+  "external_ref": null,
+  "title": "Federation SSH operations recover automatically after cleanup without a host restart",
+  "outcome": "Federation SSH operations recover automatically after cleanup without a host restart",
+  "acceptance": [
+    "On the next supervisor cycle after an owned SSH operation fails or exceeds its reporting deadline, the federation runtime automatically checks that same operation and child. If the owned start proves no child was created, or the exact child has been reaped, it clears the recovery hold and reconnects using the existing backoff; otherwise it continues cleanup of that owned child, terminating it if still alive and reaping it before reconnecting. Recovery needs no host restart, operator API, configuration toggle or re-enrollment.",
+    "At most one live SSH child owns a peer's forwarding ports. The runtime retains ownership of an outstanding start or cleanup operation and consumes its eventual result, including a late child, instead of abandoning it or starting a replacement alongside it. Recovery continues automatically while that ownership settles, including across supervisor cycles and configuration changes; existing authentication, current-basis and stale-incarnation checks remain effective.",
+    "The existing read-only federation observation shows the current recovery stage and fixed reason, and changes when cleanup settles and reconnection succeeds. It exposes no secrets or raw SSH stderr and introduces no new operator action or permanent recovery block. Credential reads retain their existing single-owner delayed-result handling.",
+    "Deterministic behavioral regressions first fail on the old runtime and then demonstrate recovery after late SSH start, late successful reap, an exited but unreaped child, and an owned live child requiring termination. They cover unresolved kill or wait followed by eventual cleanup, including late original-thread completion, without overlapping children, double reap or stale-result adoption. Focused regressions, the exact-input full gate and the required independent read-only review pair pass before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "macos",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Federation SSH cleanup now retains and settles the exact owned operation/child, then automatically reconnects through existing backoff without a host restart. Landed fdd8d035, clean independent source pair and two same-tree prelanding FULLs; own registered landed-source B check PASS8 with native verification18f08bd21c174190a6bd623836a55260.",
+    "completed_at": "2026-11-08T02:17:51.295401500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a16dd6-61ce-72a0-a691-450d1644479c",
+  "external_ref": null,
+  "title": "Distinguish federation attestation expiry from an authentication refusal in diagnostics",
+  "outcome": "A holder can distinguish an expired attestation budget from invalid authentication without weakening authentication, changing deadlines, or exposing sensitive proof material.",
+  "acceptance": [
+    "Distinguish federation attestation expiry from an authentication refusal in diagnostics is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "follow-up",
+    "greg-reported",
+    "mac",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

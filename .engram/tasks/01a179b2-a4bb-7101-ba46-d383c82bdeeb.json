@@ -1,0 +1,29 @@
+{
+  "id": "01a179b2-a4bb-7101-ba46-d383c82bdeeb",
+  "external_ref": null,
+  "title": "Resuming a completed Codex review delegation fails with a 500 thread/unarchive timeout",
+  "outcome": "A follow-up to a completed Codex reviewer delegation resumes its thread, or fails with a clear cause, instead of a 500 unarchive timeout that forces a fresh full review.",
+  "acceptance": [
+    "The cause of the 500 unarchive timeout (and the 400 'no archived rollout') for a completed Codex delegation follow-up is identified from source or logs.",
+    "A minimal fix lets a follow-up resume a completed Codex reviewer thread, or returns an explicit actionable refusal, with one deterministic test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

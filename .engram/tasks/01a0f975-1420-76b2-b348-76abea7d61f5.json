@@ -1,0 +1,27 @@
+{
+  "id": "01a0f975-1420-76b2-b348-76abea7d61f5",
+  "external_ref": null,
+  "title": "rustc 1.99 deprecates AtomicUsize::fetch_update (renamed try_update): three warnings in cargo check on master",
+  "outcome": "cargo check and cargo check --tests are warning-free again on rustc 1.99",
+  "acceptance": [
+    "rustc 1.99 deprecates AtomicUsize::fetch_update (renamed try_update): three warnings in cargo check on master is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "toolchain",
+    "warnings"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f981-f979-7503-bb83-171535f1669a",
+  "disposal_reason": "Duplicate: the same three rustc 1.99 fetch_update deprecation warnings were filed by Termal::Fable2 as w-171535f1669a (P2), which carries the work in train 11.",
+  "completion": null
+}

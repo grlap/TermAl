@@ -1,0 +1,36 @@
+{
+  "id": "01a111bb-f337-7a12-81f8-5bc0bc7922b4",
+  "external_ref": null,
+  "title": "Adopt Greg's raw-artifact direction on TermAl: Git-ignored .logs/ and .evidence/, removal on task close, instruction wording",
+  "outcome": "TermAl keeps raw run logs and evidence only in Git-ignored .logs/ and .evidence/ at the repository root, removes them when the associated task closes unless a concrete need is recorded on an item, and its instructions say so in wording concurred with Engram.",
+  "acceptance": [
+    ".gitignore ignores /.logs/ and /.evidence/ at the repository root, and `git check-ignore` confirms both.",
+    "CLAUDE.md and AGENTS.md (which carries the same section) replace the first bullet of \"Work only in the repository folder\" with exactly the two bullets concurred in note d0e09f62, identical after whitespace normalisation, landed on master under the authority-file rule: (a) both coordinators' recorded concurrence, (b) Greg sent the exact wording and its corrected consequence, (c) the final-diff audit recorded on this item; and .gitignore ignores /.logs/ and /.evidence/."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "cross-project",
+    "evidence-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Greg's raw-artifact direction is adopted in TermAl's instructions: CLAUDE.md and AGENTS.md replace the first bullet of \"Work only in the repository folder\" with the two bullets both coordinators concurred on (d0e09f62; byte-equal after whitespace normalisation): scratch under .tmp/, logs an agent keeps under .logs/, raw evidence that must outlive a worktree under .evidence/, all at the main checkout's root and Git-ignored; Greg's rule (2026-10-06, relayed by Engram::Advisor) that a file there is removed once every task it serves has closed unless an open task records a concrete need, with the removal procedure and Engram as the lasting record. .gitignore ignores /.logs/ and /.evidence/. Landed under the authority-file rule: (a) concurrence d0e09f62, (b) the exact wording and corrected consequence sent to Greg, (c) Engram::Fable's final-diff audit PASS on patch fingerprint 391a1bf2 tied to gate input 177b59c3 with the coordinator's hash check; review pair clean (Codex 7fb0b188, Claude 977b091a; one out-of-scope Low filed as w-6eef834fe8f9); full gate test-7826d533 PASS with host credit; no objection from Greg. Commit e35a31d2 (parent 0488bed2) fast-forwarded onto master by Termal::Opus2 on 2026-10-06 15:55Z. The consequence — the classified migration of .tmp/review-runs-archive/ to .evidence/ — was done by the required child w-300e42c8f565 (seal 7005f216), with memory machine-safety-and-git-gotchas at rev 7.",
+    "completed_at": "2026-10-08T14:23:53.532876100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

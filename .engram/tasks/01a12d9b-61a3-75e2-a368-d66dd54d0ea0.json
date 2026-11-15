@@ -1,0 +1,28 @@
+{
+  "id": "01a12d9b-61a3-75e2-a368-d66dd54d0ea0",
+  "external_ref": null,
+  "title": "Delivery receipts: match the Claude attempt uuid, and cover the Engram branch gate and overtaking paths with tests",
+  "outcome": "Delivery receipts: match the Claude attempt uuid, and cover the Engram branch gate and overtaking paths with tests",
+  "acceptance": [
+    "Delivery receipts: match the Claude attempt uuid, and cover the Engram branch gate and overtaking paths with tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "delivery",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

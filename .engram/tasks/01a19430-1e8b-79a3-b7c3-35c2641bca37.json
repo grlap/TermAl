@@ -1,0 +1,24 @@
+{
+  "id": "01a19430-1e8b-79a3-b7c3-35c2641bca37",
+  "external_ref": null,
+  "title": "Verification record carries a run.command rebuilt from the mode, which is wrong for category and live runs",
+  "outcome": "A verification record's run.command is the launcher invocation that actually ran. A category run is recorded as category NAME, not as a focused run. A live run keeps its --engram-binary and --engram-sha256 pins and its named tests. Today the launcher does not record its own argv, and src/engram_verification_record.rs (around line 711) rebuilds the command from the mode alone. Fix direction: createRun records the launcher argv in request.json, which engram_verification_record_recorded_command already prefers; alternatively, build the command from scope.kind and the liveEngram fields. Source: Low from the Claude review (delegation 0c70316c) of committed-input candidate 637616e6.",
+  "acceptance": [
+    "Verification record carries a run.command rebuilt from the mode, which is wrong for category and live runs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

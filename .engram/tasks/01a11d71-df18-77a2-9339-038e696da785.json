@@ -1,0 +1,29 @@
+{
+  "id": "01a11d71-df18-77a2-9339-038e696da785",
+  "external_ref": null,
+  "title": "Keep dispatch causal publication acknowledgement from delaying the retained-prompt park",
+  "outcome": "Avoid waiting for a redundant dispatch-card causal acknowledgement before the Rejected-to-park transition, while retaining exact durable-only causal publication and existing authorization decisions.",
+  "acceptance": [
+    "Keep dispatch causal publication acknowledgement from delaying the retained-prompt park is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "diagnostics",
+    "engram-host-adapter",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

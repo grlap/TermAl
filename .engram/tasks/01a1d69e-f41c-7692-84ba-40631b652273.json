@@ -1,0 +1,29 @@
+{
+  "id": "01a1d69e-f41c-7692-84ba-40631b652273",
+  "external_ref": null,
+  "title": "Strengthen causal persistence witness with exact evidence and both live-view isolation checks",
+  "outcome": "The causal projection regression witness detects altered persisted evidence and verifies live/public isolation after both SQLite and full JSON serialization.",
+  "acceptance": [
+    "The witness compares normalized SQL and full JSON causalFailure data with the original expected serialized cause fields, so altered or empty causal evidence fails.",
+    "After full JSON serialization, the original live cause remains pending and its public serialization still omits causalFailure; existing SQLite, unrelated-tick and reload checks remain meaningful."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-aac9-75c0-bad2-5eb87348b16a",
+  "external_ref": null,
+  "title": "Seed tail-repair fixtures through owner admission instead of mutating resident sessions",
+  "outcome": "Seed tail-repair fixtures through owner admission instead of mutating resident sessions",
+  "acceptance": [
+    "Seed tail-repair fixtures through owner admission instead of mutating resident sessions is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

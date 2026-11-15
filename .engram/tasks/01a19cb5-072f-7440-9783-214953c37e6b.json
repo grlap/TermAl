@@ -1,0 +1,40 @@
+{
+  "id": "01a19cb5-072f-7440-9783-214953c37e6b",
+  "external_ref": null,
+  "title": "Classify twelve C2 root_dispatch and project_containment residual failures",
+  "outcome": "Read-only diagnosis of the five root_dispatch and seven project_containment failures from C2 diagnostic5f8ebb30/tree92a1830d, first panic each and K/T/P table returned to Fable2.",
+  "acceptance": [
+    "All twelve assigned C2 failures are inventoried individually by first meaningful panic and classified K, T or P, with a compact table returned to Fable2.",
+    "K cites the matching pending source repair; T includes source/master discriminator; every P is reported with both sides and without a product edit.",
+    "Original run artifacts are preserved; no source edit, test rerun, Cargo/compiler or command in peer roots is performed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "failed-gate-diagnosis",
+    "gated-control",
+    "greg-directed",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only diagnosis complete: all12 C2 first panics individually inventoried, K7/T4/P1, compact table and native baseline/master provenance returned to Fable2072. Pending K source coverage and T discriminators recorded; provisional P immediate-drain/Stop HTTP500 exposure reported both sides with minimal proposal and reachability limit. No source edits, runs, compiler or peer-root commands; original artifacts preserved.",
+    "completed_at": "2026-11-02T14:50:22.123101400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

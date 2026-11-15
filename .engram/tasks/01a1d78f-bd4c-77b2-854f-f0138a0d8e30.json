@@ -1,0 +1,28 @@
+{
+  "id": "01a1d78f-bd4c-77b2-854f-f0138a0d8e30",
+  "external_ref": null,
+  "title": "Give non-polling fenced or ambiguous launcher carries an explicit retirement policy",
+  "outcome": "A finished launcher carry that stopped polling because of fencing or ambiguity does not linger with misleading capacity-eviction rerun advice.",
+  "acceptance": [
+    "Decide and implement retirement with preserved reservation, or accurate lifecycle/drop disclosure, for fenced and ambiguous ordinary launcher carries that no longer poll.",
+    "Behavioral controls cover capacity pressure and nearby unmatched-launch ambiguity while preserving running-source interference refusals and native verification ownership."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

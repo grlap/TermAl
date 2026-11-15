@@ -1,0 +1,26 @@
+{
+  "id": "01a18b11-bf89-7ab3-b443-f533b81ce60d",
+  "external_ref": null,
+  "title": "Recovery progress test: the work_bindings>=8 assertion's message no longer matches what it proves",
+  "outcome": "Recovery progress test: the work_bindings>=8 assertion's message no longer matches what it proves",
+  "acceptance": [
+    "Recovery progress test: the work_bindings>=8 assertion's message no longer matches what it proves is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

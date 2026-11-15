@@ -1,0 +1,30 @@
+{
+  "id": "01a1cba7-4f23-7ed3-bfdf-09271b04cfe3",
+  "external_ref": null,
+  "title": "Document the bounded publication contention wait and unknown-commit handling",
+  "outcome": "The mailbox-reference feature brief explains publication's original60s budget and non-aborting10s warning, custody release and revalidation, and exact-marker-only handling of unknown commits.",
+  "acceptance": [
+    "docs/features/federation-mailbox-references.md explains that retryable contention uses one original60s budget with one non-aborting10s warning and returns the existing503 on expiry.",
+    "The same contract documents custody release during waits, authority revalidation and no automatic replay for unknown commit outcomes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "documentation",
+    "greg-directed",
+    "limits",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

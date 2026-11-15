@@ -1,0 +1,44 @@
+{
+  "id": "01a0f2d2-0c6c-7590-93e9-78f1b409aeca",
+  "external_ref": null,
+  "title": "Remove the Beads reader from the Work view",
+  "outcome": "The Work view and the work memories read Engram only: the Beads reader, its types, its tests and fixtures, and the UI paths that show or merge a Beads snapshot are gone, and a project with no Engram binding shows the view's empty state rather than Beads data.",
+  "acceptance": [
+    "A project with no .engram-project binding shows the Work view's empty state with a line saying no tracker is bound; a test covers it.",
+    "The Work view lists, sorts, filters and shows details for Engram items as before the change; the existing Engram Work-view tests pass unchanged except where they asserted Beads behaviour, and each such change is listed in this item's notes.",
+    "The full five-stage gate passes, in this item's named root, on a master tree that contains the landed change",
+    "docs/features/work-visualizer.md describes the Engram-only view.",
+    "src/work_visualizer_beads.rs, src/tests/work_visualizer_beads.rs and src/tests/fixtures/beads-reader.ps1 and .sh no longer exist, and no Rust or TypeScript source spawns bd or reads a .beads path."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-removal"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0f2d1-a84f-7ce1-a23b-dc1892c39e24",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Removed the Beads Work reader, types, tests and fixtures, leaving the Work view and memories Engram-only. Fresh independent acceptance evaluation df34a7917f864ba5ab892063857bc410 passed all five criteria, including the full five-stage gate on the landed master tree.",
+    "completed_at": "2026-10-16T23:07:28.426397500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a184ee-4d3b-7220-93f4-0f4f953dc857",
+  "external_ref": null,
+  "title": "Strict read-only checker accepts a `\\&` escaped outside quotes; unexamined for non-bash executors (Kimi)",
+  "outcome": "Decide and enforce the strict read-only command checker's verdict for separators escaped outside quotes (for example `grep a\\&\\&b f`) for callers whose executor shell is not proven to be bash. Kimi's read-only gate (kimi_read_only.rs:418) and engram_command_reads_only run the strict path, and Kimi's Windows shell is undocumented. Either prove the strict callers' executors treat `\\&` as escaped, or make the strict path refuse it, with the semantics change for Kimi and Engram stated and reviewed.",
+  "acceptance": [
+    "Strict read-only checker accepts a `\\&` escaped outside quotes; unexamined for non-bash executors (Kimi) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "pre-existing",
+    "read-only-gate",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

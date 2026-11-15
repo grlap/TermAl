@@ -1,0 +1,28 @@
+{
+  "id": "01a0f1e2-f9f6-7153-a5f7-413f25141785",
+  "external_ref": null,
+  "title": "Long-running sessions keep a stale snapshot of AGENTS.md/CLAUDE.md after the rules change on master",
+  "outcome": "An agent session receives the repository's instruction file as context when it starts. That's a user-role AGENTS.md message for Codex, and CLAUDE.md for Claude.\nWhen the rules change on master later, a long-running session keeps the old text as an explicit instruction and can rightly refuse to follow the newer on-disk rule.\nCase: Termal::Codex (session-8582), 2026-09-30 about 10:36Z (mailbox 53085a5b #188). His snapshot still says every Low and Note blocks a landing. bf216ee changed that at 05:52Z, but he held a reviewed and gated containment landing until Greg answers in his session. The coordinator's explanation could not replace an explicit session instruction.\nWanted: when an instruction file changes on the session's branch or master, the host tells running sessions that their instruction snapshot is stale. It either re-injects the new text on the next turn, or states which version governs. Any change stays visible to the agent; nothing replaces it silently.",
+  "acceptance": [
+    "A session started after the change receives the new text, as today.",
+    "After AGENTS.md or CLAUDE.md changes on master, each running session in that repository is told on its next turn that its instruction snapshot is outdated, with the new text or its commit, and a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "agent-runtime",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

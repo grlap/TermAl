@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c533-75c0-8a35-9e3719ea6278",
+  "external_ref": "tm-il8n.1",
+  "title": "Show activity markers on running command, parallel-agent and pending approval or input cards",
+  "outcome": "Extension of tm-il8n (squares at the end of the current answer) to other card types. Greg approved trying it (relayed by Termal::Scroll, mailbox #421, 03:05Z); the coordinator has not heard it directly.\n\nPLANNED BY SCROLL, not implemented or verified yet:\n- Animate only Command cards whose status is running, and parallel-agent entries that are initializing or running.\n- Show a static \"Waiting for you\" on actionable pending approval and input cards.\n- Settled and queued items stay inactive.\n- Thinking, FileChanges and Diff cards have no local execution state, so no activity is inferred for them from the global session status.\n- The existing text-end squares stay unchanged.\n\nPATHS, as planned: ui/src/message-cards.tsx, ui/src/message-input-request-cards.tsx, ui/src/parallel-agents-card.tsx, ui/src/styles.css, a new ui/src/message-activity-status.tsx with tests, and possibly ui/src/MessageCard.test.tsx.\n\nCOORDINATION NOTES:\n- message-cards.tsx, styles.css and MessageCard.test.tsx already carry uncommitted tm-il8n text-square changes. Committing the two separately would need hunk-level staging, so the handoff must state which hunks belong to this extension.\n- ui/src/app-utils.ts:57 already returns \"Awaiting approval\". The label wording must not produce two names for the same state.\n- ui/src/parallel-agents-card.test.tsx exists. There is no dedicated test file for message-input-request-cards.tsx.\n\nOWNER: Termal::Scroll. The work happens in the main checkout, with no staging, tests, build or deploy until coordinated.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c531-7e61-8d0d-009bff3451d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Per-card markers were removed on Greg's choice of one trailing indicator (note 01a09335).",
+  "completion": null
+}

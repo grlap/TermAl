@@ -1,0 +1,28 @@
+{
+  "id": "01a19eab-4e63-7141-86e0-1a41c9c09759",
+  "external_ref": null,
+  "title": "Engram transport: process handoff returned before request enqueue has no atomic retirement fence (timeout/config/shutdown can retire the child between acquire and send)",
+  "outcome": "A request that has acquired an Engram child process either is enqueued on that child before any retirement can take effect, or is cleanly refused and re-acquires a live child. A concurrent background timeout, configuration change or shutdown can no longer retire the child between the Arc handoff and the actual send. This is proven by a deterministic barrier test, not by timing. The exact pending key and unknown outcome are preserved, with no blind write retry.",
+  "acceptance": [
+    "Engram transport: process handoff returned before request enqueue has no atomic retirement fence (timeout/config/shutdown can retire the child between acquire and send) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "concurrency",
+    "cross-project",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

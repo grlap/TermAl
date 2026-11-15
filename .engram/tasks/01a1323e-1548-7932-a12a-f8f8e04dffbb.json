@@ -1,0 +1,57 @@
+{
+  "id": "01a1323e-1548-7932-a12a-f8f8e04dffbb",
+  "external_ref": null,
+  "title": "Evaluator brief presents a bound criterion's obligation-closing record from another worktree (same revision) as citable, and an evaluator stops after a refusal that names citable alternatives",
+  "outcome": "For a bound criterion, the evaluator brief marks any verification record that is not from the judged workspace, including the obligation's original closure projection, as context only and not citable, naming both workspaces. The fix in w-152d0052d59b covers only off-revision records. When Engram's off-source refusal lists citable alternatives (Engram w-c43bfbff9833), the evaluator may re-submit once citing them, instead of stopping as the brief rule now requires (acceptance_evaluation.rs about 1794). This lets w-152d0052d59b itself be evaluated and completed.",
+  "acceptance": [
+    "In the evaluator brief, a verification record whose source workspace differs from the judged workspace (including the obligation's original-closure projection in the criterion index) is marked context only and not citable for a bound criterion, naming both workspaces; a record whose workspace is unknown is left unmarked.",
+    "A fail-first test builds a brief with a bound test criterion whose closure record is a same-revision record from another workspace and a current same-workspace record, and shows only the current record presented as citable, in the evidence list and the criterion index.",
+    "When a submission is refused with an off-source refusal that names citable alternative records, the evaluator may re-submit once citing only those, and a test shows that path; any other refusal still ends the attempt.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed and landed on origin/master as 648194e2ca089efa069b45cac26ff95bc04c69e8.",
+    "completed_at": "2026-10-13T08:16:50.585994100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

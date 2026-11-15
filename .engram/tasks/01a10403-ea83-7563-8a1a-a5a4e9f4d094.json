@@ -1,0 +1,27 @@
+{
+  "id": "01a10403-ea83-7563-8a1a-a5a4e9f4d094",
+  "external_ref": null,
+  "title": "Validate the acceptance rationale length including its host attempt prefix",
+  "outcome": "Validate the acceptance rationale length including its host attempt prefix",
+  "acceptance": [
+    "Validate the acceptance rationale length including its host attempt prefix is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "deferred-review-low",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

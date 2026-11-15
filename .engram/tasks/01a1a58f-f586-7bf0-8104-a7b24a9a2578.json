@@ -1,0 +1,24 @@
+{
+  "id": "01a1a58f-f586-7bf0-8104-a7b24a9a2578",
+  "external_ref": null,
+  "title": "Helper test fixture removal's wait leaves no trace of attempts or elapsed time",
+  "outcome": "removeFixture in scripts/test-fixture-cleanup.mjs sets attempts and elapsed time on the error it reports at its budget and writes one stderr line naming the path, attempts and elapsed time when a wait succeeds, so growth in holds is visible as the review export's publish wait already is. Low from the review pair on the export wait change (delegation-3bdedc5a). Optional alongside it: whether the three bounded wait loops (test-launcher save, export publish, fixture removal) should share one helper.",
+  "acceptance": [
+    "Helper test fixture removal's wait leaves no trace of attempts or elapsed time is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

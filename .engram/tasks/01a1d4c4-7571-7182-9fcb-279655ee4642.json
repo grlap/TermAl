@@ -1,0 +1,27 @@
+{
+  "id": "01a1d4c4-7571-7182-9fcb-279655ee4642",
+  "external_ref": null,
+  "title": "Integrate combo91 on ab787fa2: Opus3 2a873f3b (docs w-7845 one rule for a registered check + w-1474 source_id anchors; byte-identical carry of 760e262f)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, and pushed.",
+  "acceptance": [
+    "Commit 2a873f3bfd160cd2aded3cdbdd6610631c656f11 (tree d93f3efec9caf802869ee576048f389e2f8a8a32) is on origin/master, where master was moved to it by a fast-forward from ab787fa290623e97934e2e500824cf4b46d868f1.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is d93f3efe passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against ab787fa2 is byte-identical (same 3 docs paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 760e262f's contribution against 600568fe, whose R2 review pair found no Medium or higher, and the candidate adopts that pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

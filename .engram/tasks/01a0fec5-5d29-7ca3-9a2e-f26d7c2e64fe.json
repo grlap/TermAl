@@ -1,0 +1,31 @@
+{
+  "id": "01a0fec5-5d29-7ca3-9a2e-f26d7c2e64fe",
+  "external_ref": null,
+  "title": "Decide navigation-preserving loss repair for attached scrolled-up readers",
+  "outcome": "Coordinator explicitly decides whether attached-but-scrolled-up demand requires the same bounded selected-window repair exception as detached history.",
+  "acceptance": [
+    "A public position/ID regression pins the approved loss recovery behavior; preserving raw pixel scroll alone is insufficient evidence.",
+    "Record the coordinator's scope decision for resident900..999 reading910 with hasNewerHistory=false."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-low",
+    "scope-decision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

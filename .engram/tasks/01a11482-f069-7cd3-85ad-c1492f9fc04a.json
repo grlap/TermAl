@@ -1,0 +1,44 @@
+{
+  "id": "01a11482-f069-7cd3-85ad-c1492f9fc04a",
+  "external_ref": "engram:w-a18b2a42c5ac",
+  "title": "Remove TermAl's temporary evaluation hash fallback after Engram removes the alias",
+  "outcome": "After Engram's final evaluation-id projection has landed, TermAl reads evaluation record IDs only from evaluation and removes its temporary live-reader hash fallback without rewriting stored history or changing genuine fingerprint fields.",
+  "acceptance": [
+    "The holder records Engram's landed hash-alias removal (w-a18b2a42c5ac), its commit/build and producer confirmation, before this fallback-removal implementation starts; the preceding TermAl evaluation-preferring reader has already landed and run after Greg's restart.",
+    "The live Engram evaluation-ID reader and receipt extraction use evaluation only. Focused tests show evaluation-only receipts retain the exact record ID, hash-only live receipts cannot supply it, and supersedes/carried record references and genuine content/source fingerprints are unchanged. Stored historical records are not rewritten.",
+    "The exact input passes the maintained full gate and required independent review; documentation removes the temporary live-protocol fallback and records the final supported producer contract."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "design-pending",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a10193-76ab-7e32-ab34-db79f9d58072",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a11bf3-0115-73e3-ad76-50f55993ea3c",
+  "disposal_reason": "Continue as independent work: the parent w-db79f9d58072 is completed, and the Engram prerequisite has landed.",
+  "completion": null
+}

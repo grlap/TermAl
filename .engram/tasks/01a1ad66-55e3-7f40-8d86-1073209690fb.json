@@ -1,0 +1,31 @@
+{
+  "id": "01a1ad66-55e3-7f40-8d86-1073209690fb",
+  "external_ref": "engram:w-baaa7e91749a",
+  "title": "A root session starts a detached launcher run, ends its turn and is resumed in its own session on the run's real result, with no relay session and no polling",
+  "outcome": "A session such as Engram::Merger runs the launcher detached for its own run and ends its turn. The host then resumes that same session once with the run's terminal verdict (pass, fail or unknown with reason). No second session relays the result, and no agent polls status or tails logs. The launcher no longer turns the session away with 'self-send is not supported'. Instead it offers this route, or names the exact reason it cannot be used for this run. The mailbox rule that a native mailbox cannot send to itself stays: the resume goes through the host's test-run wait, not a self-addressed mailbox.",
+  "acceptance": [
+    "The launcher accepts a detached run whose completion goes to the launching session itself. It registers a host test-run wait for that session and run at launch, or prints the one command that does. It no longer refuses with 'self-send is not supported'. It still refuses impersonation (a TERMAL_SESSION_ID other than the inherited one), and the ban on direct mailbox self-send stays.",
+    "A run whose host registration answers source 'registration' (durably registered, not yet indexed) is accepted by the host test-run wait, and the waiting session is resumed on its terminal verdict instead of getting 404 'not indexed'. Automated tests in TermAl cover both the indexed and the registration-only case.",
+    "Skills and instructions describe this route as the supported way for a session to wait on its own run: start the test run, end the turn, and be resumed by the host. They keep the ban on direct self-send and on foreground wait loops, and keep --notify to a different session for real worker-to-coordinator handoffs. This covers docs/test.md, the Shared test launcher text in CLAUDE.md and AGENTS.md, and .claude/commands/review-changes.md (lines 119-127 today). Any wording change to CLAUDE.md or AGENTS.md follows their own change rules.",
+    "Split-out live criterion, verified after a restart onto the landed build: an Engram session on Central starts a detached full or focused run, ends its turn, and is resumed exactly once with the verdict, with no other session acting in between and no status polling."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

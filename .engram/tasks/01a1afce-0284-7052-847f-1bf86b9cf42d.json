@@ -1,0 +1,30 @@
+{
+  "id": "01a1afce-0284-7052-847f-1bf86b9cf42d",
+  "external_ref": null,
+  "title": "Remove or assert the print-only status matrix in the long-child regression",
+  "outcome": "The long-child regression performs only useful verification reads and preserves independently discriminating clean, dirty, untracked, configuration and zero-exit-error coverage.",
+  "acceptance": [
+    "Remove the original print-only root/child false/true matrix or give it meaningful assertions; keep the independently asserted different-size matrix and original clean/dirty/untracked/config immutability witnesses."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low",
+    "source-revision",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1af65-1815-71b3-8f6b-43ba19db0403",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

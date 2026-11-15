@@ -1,0 +1,36 @@
+{
+  "id": "01a11e50-81df-7a33-93d9-a0d79d61757d",
+  "external_ref": null,
+  "title": "Offer Stop in the session view for an Idle session that has a pending delegation or test-run wait",
+  "outcome": "A colleague can press Stop on a parent session that is waiting for delegations or test runs; today the view shows only a \"waiting for delegations\" indicator, and Stop appears only for active, approval or stopping sessions.",
+  "acceptance": [
+    "The session view offers Stop for an Idle session with a pending delegation wait or test-run wait, and pressing it calls the Stop route (vitest).",
+    "Idle sessions with no pending wait show no Stop button, as today."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "needs-greg-decision",
+    "pilot",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The session view offers Stop for an Idle session with its own pending delegation wait or test-run wait, in the composer and in the delegated-child footer; pressing it calls the Stop route. Idle sessions with no own pending wait show no Stop. Test-run wait membership comes from a context memoized on waits only. Landed with the backend brake (w-f917452faa71) in 6cd915ed; evaluation 74f59d5d passed 2/2.",
+    "completed_at": "2026-10-09T06:18:15.754977500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

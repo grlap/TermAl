@@ -1,0 +1,28 @@
+{
+  "id": "01a18ba2-3e45-7b60-a7a0-53f0b3b83238",
+  "external_ref": null,
+  "title": "A fenced-off control_startup_refused hold on a live session lasts until restart with no visible cause",
+  "outcome": "A fenced-off control_startup_refused hold on a live session lasts until restart with no visible cause",
+  "acceptance": [
+    "A fenced-off control_startup_refused hold on a live session lasts until restart with no visible cause is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "from-review",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

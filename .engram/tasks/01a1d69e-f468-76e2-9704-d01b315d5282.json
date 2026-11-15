@@ -1,0 +1,27 @@
+{
+  "id": "01a1d69e-f468-76e2-9704-d01b315d5282",
+  "external_ref": null,
+  "title": "Explain why the durable session projection mutates messages by index",
+  "outcome": "The persisted-session projection documents the copy-on-write reason for indexed mutation so routine iteration refactoring does not detach every retained body.",
+  "acceptance": [
+    "A concise source comment beside serialize_persisted_session_view's indexed loop explains that iter_mut would detach every retained message body whereas indexed mutation copies only pending causal-control messages; no product behavior changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

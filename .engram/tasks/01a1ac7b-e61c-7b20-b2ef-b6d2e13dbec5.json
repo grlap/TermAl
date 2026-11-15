@@ -1,0 +1,29 @@
+{
+  "id": "01a1ac7b-e61c-7b20-b2ef-b6d2e13dbec5",
+  "external_ref": null,
+  "title": "Protect marker header icon geometry in the maintained UI gate",
+  "outcome": "The maintained gate catches a recurrence of the marker header padding cascade that collapses the previous, next and hide icons.",
+  "acceptance": [
+    "A maintained UI regression check fails if marker header controls again inherit generic ghost-button horizontal padding that squeezes their icons, while preserving legitimate theme and control styling.",
+    "The check passes on the repaired input, and validation states whether it observes browser geometry or asserts source structure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "review-followup",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

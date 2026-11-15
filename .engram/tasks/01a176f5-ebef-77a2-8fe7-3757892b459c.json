@@ -1,0 +1,29 @@
+{
+  "id": "01a176f5-ebef-77a2-8fe7-3757892b459c",
+  "external_ref": null,
+  "title": "Remove all Rust compiler warnings from the termal build (dead code and an unread field), without breaking in-flight changes",
+  "outcome": "cargo check --bin termal and the test build of the termal binary compile with zero warnings, and no warning-suppression attribute hides a real warning.",
+  "acceptance": [
+    "For each warning, a note records whether the item is truly dead on current master AND in every queued READY patch, or is used by one of them; truly dead code is removed, and code needed by a queued patch is left for that patch (its warning disappears when the patch lands) or is wired correctly.",
+    "cargo check --bin termal and the termal test build report zero warnings on the exact final input; no blanket allow(dead_code) or other suppression is added to hide them.",
+    "The independent review pair finds no Medium or higher, and the maintained full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "greg-directive"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

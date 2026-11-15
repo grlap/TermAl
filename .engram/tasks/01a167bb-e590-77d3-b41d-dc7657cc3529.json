@@ -1,0 +1,51 @@
+{
+  "id": "01a167bb-e590-77d3-b41d-dc7657cc3529",
+  "external_ref": null,
+  "title": "A Claude delegation in explorer mode with writePolicy readOnly is not read-only: its tools are auto-approved and it can stage and write files",
+  "outcome": "Every delegation that TermAl accepts with writePolicy readOnly is enforced as read-only by the host, whatever its mode. A Claude child spawned in explorer mode with readOnly is either answered by the host read-only classifier (ReadOnlyAutoApprove with its permission overlay), or the spawn is refused with a typed error that names the supported mode. It never runs with tool approval it was not given.",
+  "acceptance": [
+    "A Claude delegation spawned in explorer mode with writePolicy readOnly runs under ClaudeApprovalMode::ReadOnlyAutoApprove: its spawn arguments carry the read-only overlay (--settings with permissions.ask [\"*\"], sandbox.autoAllowBashIfSandboxed false, disableAllHooks true), and the host read-only classifier answers its tool requests. A deterministic test shows that configure_delegation_child_prompt_settings gives a Claude explorer+readOnly child ReadOnlyAutoApprove, and that its Bash `git add .` and `node -e …` requests are refused while `git status --short` is admitted.",
+    "A test enumerates every (agent, mode) combination that delegation creation accepts with writePolicy readOnly. It asserts that each child is configured with an enforced read-only setting (Claude ReadOnlyAutoApprove, a Codex read-only sandbox with approval never, Cursor or Gemini Plan, Kimi Ask in default mode, or the agent's equivalent), or that the spawn is refused with a typed error before any child starts. No accepted readOnly combination runs with auto-approval.",
+    "docs/features/agent-delegation-sessions.md states that writePolicy readOnly is host-enforced for every accepted agent and mode, including Claude explorers, and names any combination that is refused.",
+    "Focused verification and the maintained gate pass on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "claude",
+    "delegations",
+    "read-only",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

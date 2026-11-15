@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4f6-70e0-989d-cceda9a421af",
+  "external_ref": "tm-e5lj",
+  "title": "Claude-side Engram nudge may be redundant with the harness instruction re-read, and it costs a delivery page",
+  "outcome": "TWO INDEPENDENT MECHANISMS MAY TARGET THE SAME CLAUDE COMPACTION BOUNDARY, AND\nNOBODY HAS MEASURED WHETHER OURS CONTRIBUTES ANYTHING.\n\nWHAT WE KNOW, from source and from a peer's field observation:\n\n1. TermAl has its own post-compaction mechanism. claude_spawn.rs:884-885 marks\n   an Engram context nudge when a Claude event signals compaction;\n   turn_dispatch.rs consumes it at the next dispatch by running, through\n   engram_mcp_config.rs:402, a REAL command:\n     `engram --project-file <..> --home <..> work --actor-id <..>\n      --session-id <..> next --context-generation termal-<gen>`\n   That is the ADVANCING read (`next`), not `--peek`. EVERY POST-COMPACTION\n   DISPATCH THEREFORE CONSUMES A DELIVERY PAGE.\n\n2. The Claude Code harness has its OWN mechanism. A peer observed, in a real\n   session, a host block reading \"Instruction files were re-read after the\n   conversation was compacted; these differ from their earlier copies - each\n   replaces its earlier copy\", followed by the recovery behaviour. That is the\n   model host re-reading instruction files. IT IS NOT OUR NUDGE.\n\nTHE PROBLEM IS EVIDENTIAL BEFORE IT IS FUNCTIONAL: if both fire at the same\nboundary, then \"context came back after compaction\" is equally consistent with\nours alone, theirs alone, or both. Any measurement of our nudge's effectiveness\non the Claude family measures the SUM unless the two are separated first. This\nis the same confound that invalidated a behavioural test earlier today, one\nlevel up: confounded MECHANISMS rather than confounded stimuli.\n\nWHY IT MATTERS BEYOND METHOD: our mechanism is not free. It spawns a process\nand consumes an Engram delivery page on every post-compaction dispatch. If the\nharness's file re-read already restores what the agent needs on the Claude side,\nwe may be paying that cost for no added recovery - and nobody would notice,\nbecause the outcome looks identical either way. The failure mode here is not an\nerror; it is a cost with an unmeasured benefit.\n\nWHAT WOULD SETTLE IT, stated as a design note rather than a plan: the two must\nbe distinguishable at the boundary. Either our injected context carries a marker\nthat the harness's re-read cannot produce, or a session runs with our nudge\ndisabled to see whether recovery still occurs. A positive observation without\nthat separation cannot be credited to us.\n\nNOT AN ASSERTION THAT THE NUDGE IS USELESS. It may be doing essential work,\nespecially where instruction files do not contain current Engram state at all -\nand note the asymmetry: on the CODEX side the file route provably does NOT\nrefresh across compaction (measured, see tm-rxhl), so there the nudge has no\ncompetitor and is very likely load-bearing. The open question is specifically\nthe CLAUDE side, where a second mechanism demonstrably exists.\n\nCredit: the two-mechanism observation came from Engram::Fable, who noticed that\nhis own positive proof identified the harness's re-read and not our nudge.\nRelated: tm-rxhl carries the Codex-side measurements.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in c9336a2 (ancestor of master).",
+  "completion": null
+}

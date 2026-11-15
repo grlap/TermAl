@@ -1,0 +1,30 @@
+{
+  "id": "01a10735-2f35-78d1-9479-7fbfb84b148d",
+  "external_ref": null,
+  "title": "Recover or explain a failed host-wake handoff reservation without requiring a silent restart",
+  "outcome": "A failed durable handoff reservation remains visible and recoverable without original replay; either in-process recovery safely disposes it or status explicitly explains the required restart.",
+  "acceptance": [
+    "Recover or explain a failed host-wake handoff reservation without requiring a silent restart is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-follow-up",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

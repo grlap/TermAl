@@ -1,0 +1,29 @@
+{
+  "id": "01a171f6-354c-7ca1-93d9-775b374ccb1f",
+  "external_ref": null,
+  "title": "Reviewer follow-up: \"call termal_submit_review_result exactly once per review\" lets a resumed reviewer skip the new attempt's structured result, so the host fails the follow-up",
+  "outcome": "Reviewer follow-up: \"call termal_submit_review_result exactly once per review\" lets a resumed reviewer skip the new attempt's structured result, so the host fails the follow-up",
+  "acceptance": [
+    "The reviewer instructions and the termal_submit_review_result tool description say a structured result is required once per host-issued submission attempt, and that a follow-up on the same reviewer opens a new attempt that needs its own submission",
+    "A focused test or fixture shows that a follow-up reviewer turn with a new reviewResultSubmissionAttempt is told it must submit for that attempt, and that the original attempt's stored result stays intact"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "agent-workflow",
+    "delegation",
+    "review-result"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

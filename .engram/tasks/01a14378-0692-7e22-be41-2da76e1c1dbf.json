@@ -1,0 +1,69 @@
+{
+  "id": "01a14378-0692-7e22-be41-2da76e1c1dbf",
+  "external_ref": null,
+  "title": "Launcher live mode can't run one pinned live test: the live stage hardcodes the whole root_recovery_live suite and rejects filters",
+  "outcome": "Launcher live mode can't run one pinned live test: the live stage hardcodes the whole root_recovery_live suite and rejects filters",
+  "acceptance": [
+    "`node scripts/test-launcher.mjs live --engram-binary ABSOLUTE --engram-sha256 SHA256 -- NAME [NAME ...]` runs EXACTLY the named ignored tests of the root_recovery_live suite (the module mounted from src/tests/engram_root_recovery_live.rs, including its submodules). Each NAME is the test's FULL libtest path as `--list` reports it, matched with --exact, still --ignored and --test-threads=1, with the same binary-path, SHA-256, executable-probe, native Cargo and Git Bash verification before the stage as whole-suite mode. A pin mismatch is a terminal failed run with the stage unrun.",
+    "A filtered live run can never report success unless every named test ran: a syntactically invalid or duplicate name is refused before any run directory exists; a well-formed name that matches no test, or a libtest result whose passed+failed count differs from the number of names, ends as a terminal FAILED run that names the missing tests; a filter never silently runs zero tests.",
+    "Whole-suite mode (`live` with no names) is unchanged: the same stage command and arguments, prerequisite files, verification and result semantics; its existing launcher tests pass unchanged.",
+    "A filtered live run registers and records like any launcher run (RUN, TRACKED, results.json, summary), with the selected names in its request, results and summary; docs/test.md documents the filtered form and its zero-match rule next to the existing live command, and `usage` names it; credit follows the existing host rules for launcher runs in a named root, and this item changes no host credit logic.",
+    "The maintained full gate passes on the exact landed input, with an independent review pair clean on it."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "live-suite",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The launcher's pinned live mode can now run named live tests: `node scripts/test-launcher.mjs live --engram-binary ABS --engram-sha256 SHA -- NAME…`.\n- It runs only the named ignored tests of the root_recovery_live suite, each by its full libtest path, with --exact under the same pin verification.\n- Malformed, outside-the-suite or repeated names are refused before any run directory exists.\n- The stage fails, naming the missing tests, unless every named test has a libtest result line and the counts cover exactly the names.\n- The names are recorded in the request, results and summary, and docs/test.md documents the form. Whole-suite mode is unchanged, and no host logic changed.\n- Committed as 7ac1a1be21ab496ba8b5561fddb3976eb2226092 on master 41a3f25e in .tmp/wt-own-overlap-9474. The push is Opus2's.\nEvidence:\n- review pair Codex 6b80276b and Claude a417d9be, clean on freeze f452f1d9, carried byte-exact to 6cd1d621;\n- credited GREEN e2cc6df5 (118/0) and full gate test-a4dfa671, record 0221fb2c;\n- RED in scratch;\n- independent evaluation a8defd3c, all 5 criteria pass.",
+    "completed_at": "2026-10-16T18:47:05.089978600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

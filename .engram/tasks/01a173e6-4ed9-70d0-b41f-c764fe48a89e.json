@@ -1,0 +1,31 @@
+{
+  "id": "01a173e6-4ed9-70d0-b41f-c764fe48a89e",
+  "external_ref": null,
+  "title": "Use short compiler scratch and preserve startup errors in the Windows cleanup probe",
+  "outcome": "The Windows release-order probe follows the guardian's short repository-local compiler scratch convention and preserves an original process-start failure.",
+  "acceptance": [
+    "Allocate compiler scratch under the short guarded repository-local layout rather than the deep fixture Git-admin path, with owned cleanup and a representative long-root witness.",
+    "Guard probe finalization with a successful-start flag so a failed Process.Start retains its original error."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gate-blocker",
+    "launcher",
+    "review-low",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173cf-2c9e-7c23-b688-616edd0409b9",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1b227-3940-7870-9f22-48267bfd1c58",
+  "external_ref": null,
+  "title": "Reject duplicate source_id change keys and stray question-mark statuses",
+  "outcome": "The closed source_id adapter accepts the owner's canonical distinct change records and refuses exact duplicates or non-porcelain uses of question marks without sorting, deduplicating or reimplementing Git judgment.",
+  "acceptance": [
+    "After producer-owner agreement, exactly repeated (path,status,origin) keys and statuses containing question marks other than ?? are unavailable; distinct same-path records such as ?? followed by D-space remain preserved.",
+    "Focused strict-parser negative tests discriminate duplicate keys and stray-question-mark forms, with ordered same-path positive controls and full-object comparison unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "review-follow-up",
+    "schema",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1a8fc-fc62-79f3-bc30-b11000c4a757",
+  "external_ref": null,
+  "title": "Resolve retained legacy cleanup holds and evidence custody",
+  "outcome": "The explicitly retained legacy roots and cleanup evidence have accountable custody and release conditions; verified disposable material leaves through the existing safe cleanup route.",
+  "acceptance": [
+    "Resolve or explicitly assign custody for the six held Central roots: install-src-d6ea73c, install-src-f7db2c58, install-src-train54, ui-build-10ec5e7, ui-build-1d66ad9 and ui-src-d0f33aca. Preserve shared ui/node_modules and all unique or active work; any eventual removal uses fresh reference/live-use/content/path checks and never deletes through a junction.",
+    "Review the minimal final inventory, source reports, removal journals and retained run archives from the initial cleanup census. For each remaining retention, name its still-active citing item or owner and ending event; remove unneeded raw material once its last need ends, keeping decision facts in Engram.",
+    "Record the resulting REMOVE/RETAIN dispositions and completed removals. No live-store access, stored-result changes, force deletion or new cleanup automation is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup-followup",
+    "housekeeping",
+    "retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

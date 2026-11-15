@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c538-7442-9119-e070cc2df0d3",
+  "external_ref": "tm-j50y",
+  "title": "Follow-ups from the open-in-new-tab review: test isolation, action-column CSS, row control naming",
+  "outcome": "Deferred from the review of the open-in-new-tab links so the landing changeset stays small; none is a correctness defect. (1) TEST ISOLATION, ui/src/workspace-links.test.tsx around line 62: an it.each case registers a document-level listener with once true that unconditionally prevents default. If the dispatched event ever fails to reach the document - an earlier assertion throwing inside the same case, a future portal or bubbling change, a non-bubbling event variant - the listener is never consumed and survives into the NEXT case, where it fires first, writes into the previous case closure and suppresses that case event. The failure then appears as a confusing cascade in an unrelated case rather than at its source. Fix: capture the handler and remove it in a try/finally or an afterEach so each case owns exactly one listener regardless of outcome. (2) ACTION COLUMN CSS, ui/src/styles.css around line 1539: the container width and the children min-width are both set to the same value, which is redundant, and at the current font size and padding the label Open in new tab has roughly 52 pixels of content width so it wraps to two lines. Cosmetic only, since the grid rows stretch correctly. Options: a shorter label such as New tab, or let the column size to content and drop the redundant min-width. Note this was deliberately stacked rather than placed side by side so the action column takes no additional width from a long workspace label, which is a separate tracked defect - keep that property. (3) ROW CONTROL NAMING: the link names its row by label-or-id while the sibling Delete names it by id, so two saved workspaces sharing a label produce two links with identical accessible names while their Delete buttons stay unique. Consider naming both by the same identity or always including the id.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

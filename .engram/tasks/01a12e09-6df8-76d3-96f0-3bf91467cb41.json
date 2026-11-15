@@ -1,0 +1,27 @@
+{
+  "id": "01a12e09-6df8-76d3-96f0-3bf91467cb41",
+  "external_ref": null,
+  "title": "Resume retry after a durability hold also fires for a head acknowledged before the Resume",
+  "outcome": "Resume retry after a durability hold also fires for a head acknowledged before the Resume",
+  "acceptance": [
+    "unstarted_resume_step retries a Resume's drain only when the new head's durability acknowledgement landed during that Resume (the head was unacknowledged at the Resume's first check), and a test shows that an earlier-acknowledged head exposed by a Cancel keeps the drain's ordinary outcome"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "delivery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1b68e-c6b2-7003-8951-7e09cc1cef28",
+  "external_ref": null,
+  "title": "Native declared-run opening refuses (opening_unavailable) after a claim lapse, host restart, re-claim and re-name of the same item",
+  "outcome": "Native declared-run opening refuses (opening_unavailable) after a claim lapse, host restart, re-claim and re-name of the same item",
+  "acceptance": [
+    "A focused test reproduces the observed sequence through existing seams: claim, name (generation 1), claim lapse, host restart retiring generation 1, re-claim of the same item with a new claim id and fence, re-name as generation 2, then a native declared-run opening. On the current code the test fails with the refusal seen live, and the failing check in declared_run_opening_authority_locked is named.",
+    "After the fix, the same sequence opens natively and S0 is captured. The fix aligns the native opening precheck with the binding refresh the launcher registration already performs after same-root naming; it adds no new condition and nothing outside the agreed credit definition.",
+    "The cause is recorded on this item from the test, not inferred."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-credit",
+    "execution-observability"
+  ],
+  "assigned_to": "Termal::Sol-03d4",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

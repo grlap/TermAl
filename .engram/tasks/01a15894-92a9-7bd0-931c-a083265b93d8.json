@@ -1,0 +1,31 @@
+{
+  "id": "01a15894-92a9-7bd0-931c-a083265b93d8",
+  "external_ref": null,
+  "title": "Federation reference concurrent same-key publication intermittently returns 500 (gate test-917ea3ef)",
+  "outcome": "Diagnose and correct the intermittent concurrent same-key reference-publication failure on the existing master implementation, independently of NOFILE. Preserve exact intent/descriptor/marker authority and classify product, test or environmental cause from captured evidence.",
+  "acceptance": [
+    "The original failed gate and exact source bases are preserved, and a bounded stop-on-first-failure reproduction captures contender status/body plus the underlying error, stage and SQLite code sufficiently to classify the cause; absence of reproduction is reported as inconclusive, not a passing diagnosis.",
+    "A cause-specific fix or disposition is independently reviewed without weakening publication authority, existing assertions, retry policy or timing budgets; any product behavior change receives the required scope decision before implementation.",
+    "A deterministic regression for the identified mechanism and the maintained full gate pass on the exact final input; diagnostic stress iterations are not reported as quality-gate PASS."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "concurrency",
+    "diagnosis-required",
+    "federation",
+    "gate-blocker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

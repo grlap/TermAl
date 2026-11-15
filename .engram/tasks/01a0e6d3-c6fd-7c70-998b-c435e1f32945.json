@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6fd-7c70-998b-c435e1f32945",
+  "external_ref": "tm-ncc6.2.1",
+  "title": "TestRunRecord + persistence + state snapshot + live delta",
+  "outcome": "src/test_runs.rs (new include! module) with TestRunRecord and results.json serde mirror; StateInner.test_runs (state.rs ~1439/1498 next to delegation_waits); persisted_state.rs snapshot/restore (mirror delegation_waits at ~47/91/135/185); wire.rs StateResponse.test_runs summaries (~2383/2412); live delta 'testRunChanged' (live-updates.ts:124; app-live-state.ts:576). No process code here.\n\nREVIEW FIXES (F8, F13, F18): full results.json field list with Option + serde(default) and the launcher's terminal predicate; DeltaEvent variant and exhaustive matches: src/wire.rs:3038-3052, src/remote_sync.rs:38, src/remote_routes.rs:810, src/remote_delta_apply.rs:1443, ui/src/types.ts:1237, ui/src/app-live-state-delta-events.ts; optional executedTests per stage (tm-orxu) as a later addition.",
+  "acceptance": [
+    "- Record round-trips through persist/reload, including canceled/unknown host verdicts.\n- Minimal and killed results.json fixtures parse; terminal predicate matches summarize's.\n- StateResponse carries bounded summaries only; a testRunChanged delta updates UI state in the existing harness; all exhaustive DeltaEvent matches updated (compiles)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a3e1a6a9f43",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

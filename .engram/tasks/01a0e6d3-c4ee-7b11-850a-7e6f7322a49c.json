@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4ee-7b11-850a-7e6f7322a49c",
+  "external_ref": "tm-dq4o",
+  "title": "Race in opencode_combined_model_and_effort_update test: assertions read writer output before the write is established",
+  "outcome": "DIAGNOSED TO ROOT CAUSE, not labelled flaky. Found by Engram::Advisor while\ngating an unrelated change; the ordering was then verified independently in\nsource by the coordinator.\n\nTHE TEST: tests::opencode_config::opencode_combined_model_and_effort_update_waits_for_model_specific_options\nat src/tests/opencode_config.rs:1823, assertion \"effort request should be\nwritten from refreshed options\".\n\nTHE CAUSE, in src/acp.rs start_acp_json_rpc_request: the function INSERTS the\nrequest into pending_requests BEFORE it calls write_acp_json_rpc_message.\nVerified by reading the function - the insert and the write are in that order,\nwith the write's failure path removing the entry again.\n\nConsequently take_pending_acp_request can return as soon as the insert lands,\nwhile the write has not happened yet. The test reads writer.contents BEFORE the\nack and the join, SO THERE IS NO HAPPENS-BEFORE RELATION FOR THE EFFORT WRITE.\nThe assertion is racing the writer thread.\n\nWHY NOBODY SAW IT UNTIL NOW: the race only loses under load. Two full-suite runs\nby the coordinator at this HEAD (2155 tests) passed, twice, and the test also\npasses in isolation in 0.05s. It failed in a run of 2164 tests. THE DEFECT IS\nPRESENT AT HEAD - it is not caused by the change that exposed it. A heavier or\ndifferently scheduled suite is enough to reveal it, which means it will surface\nagain on anyone's machine as the suite grows.\n\nFIX DIRECTION: move the content and ordering assertions AFTER the ack and the\njoin, so the test observes the writer's output only once the write is\nestablished. That is a test-synchronisation fix; the OpenCode product behaviour\nis not at issue.\n\nMETHOD NOTE WORTH KEEPING: the coordinator proposed a discriminating experiment\n- rerun the failing suite with the nine new tests filtered out, to separate\n\"suite size\" from \"the changed code\". The implementer correctly pointed out that\nA PASS AFTER FILTERING WOULD NOT HAVE PROVEN ANY PARTICULAR CAUSE; it would only\nhave narrowed a family. Reading the source named the mechanism instead. The\nexperiment was a valid discriminator between hypothesis families and still the\nweaker instrument here.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d3-c4c3-7592-8f9d-5d6bc9705542",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DUP. Its own notes say it duplicates w-5d6bc9705542.",
+  "completion": null
+}

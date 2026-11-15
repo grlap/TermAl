@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c63f-7460-8023-6a096af4360a",
+  "external_ref": "tm-me4",
+  "title": "Extract Telegram prompt-target forwarding tests",
+  "outcome": "Move the delegated/error/unknown prompt-target resolution cluster out of src/tests/telegram_forwarding.rs before that file crosses the active size threshold.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

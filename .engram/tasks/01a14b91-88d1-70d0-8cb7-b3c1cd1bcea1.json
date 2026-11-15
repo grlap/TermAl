@@ -1,0 +1,49 @@
+{
+  "id": "01a14b91-88d1-70d0-8cb7-b3c1cd1bcea1",
+  "external_ref": null,
+  "title": "Boot loads live-projection sessions eagerly and terminal session history lazily",
+  "outcome": "Boot no longer loads every persisted session with its tails (src/persist_sqlite_transcript_read.rs:14-75) before serving; live-projection members load eagerly and terminal history loads on demand from the archive index, so boot time and memory are bounded by live membership, with no durable change.",
+  "acceptance": [
+    "A boot over a store with more than N terminal sessions serves /api/state before any terminal session's transcript tail is read, proven by a test with an instrumented reader.",
+    "Every archive and per-id history read after boot returns the same content as before this change, covered by tests on a real temporary SQLite store with roots, live children, terminal children and dangling links.",
+    "The measured boot duration and resident memory before and after are recorded on the item; the full gate passes on the exact committed tree with a clean independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "boot",
+    "performance",
+    "state-flood"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a147c0-22a0-7983-8bb2-b17b985f5dbc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

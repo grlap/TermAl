@@ -1,0 +1,30 @@
+{
+  "id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "external_ref": null,
+  "title": "Idle host holds the state lock up to ~1.2 s (review-result probe, test-run compaction, test-run index rescan and others), stalling mailbox, watcher and federation workers",
+  "outcome": "Review-result recovery probe and test-run compaction step hold the state lock ~330 ms each, stalling mailbox, watcher and federation workers",
+  "acceptance": [
+    "record_delegation_review_recovery_probe (src/delegation_review_results.rs) no longer holds the main state lock across commit_locked persistence, or a focused test shows that a repeated, unchanged probe takes no lock-held persistence and returns before commit",
+    "step_test_run_compaction (src/test_run_compaction.rs) does no per-tick work under the state lock when nothing is pending, and finishes pending compactions without a multi-hundred-millisecond lock hold",
+    "Focused tests cover both paths; the existing lock-hold diagnostics show no hold of 100 ms or more from these two call sites in a post-fix runtime observation"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

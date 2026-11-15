@@ -1,0 +1,30 @@
+{
+  "id": "01a192e3-2798-7b41-9c70-e2833c8c13b4",
+  "external_ref": null,
+  "title": "A remote native runner keeps reporting a completed test run as active until someone relays a recovery prompt",
+  "outcome": "When a test run on a remote native runner has reached a saved terminal result, the runner reports it as ended. It sends its END once, on its own, and stops treating the run as occupying capacity, without a coordinator having to relay a recovery prompt.",
+  "acceptance": [
+    "A regression shows that a runner whose run has a saved terminal results.json reports that run as ended and delivers its END once without an external prompt, including after the runner's turn was interrupted between the run finishing and the END being sent.",
+    "A completed run no longer blocks new named GO assignments to that runner; an unknown or still-running run still does.",
+    "Recovery reads the existing saved result exactly once and never relaunches or repeats the run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "remote-runner",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a105ac-21e3-7ee2-bd06-34beb97f0112",
+  "external_ref": null,
+  "title": "Remote proxy sessions and check overlap: when a proxy may stop counting as an overlapping writer, and a transient-write control for focused checks",
+  "outcome": "It is decided, with evidence, under which identity and coverage conditions a remote proxy session may stop counting as a writer that overlaps a check: a distinct backend on the same machine, a same-process loopback, a genuinely remote equal path, or network-shared storage. Focused checks gain a control against transient writes, because today they get no watcher fence. Until then, proxies keep counting conservatively.",
+  "acceptance": [
+    "Remote proxy sessions and check overlap: when a proxy may stop counting as an overlapping writer, and a transient-write control for focused checks is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

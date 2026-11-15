@@ -1,0 +1,51 @@
+{
+  "id": "01a10056-1877-74c1-adb2-904fddc5961a",
+  "external_ref": null,
+  "title": "Authority total-deadline test expects publication after a scheduler-sensitive 250 ms Prepared ACK",
+  "outcome": "The total-deadline authority witness must deterministically reach Prepared acknowledgement, canonical read and Candidate publication before explicitly expiring the ORIGINAL shared operation budget. Scheduler delay alone must not trip its required-fence assertion. Production budget and exact durability/owner/read assertions stay unchanged. Preserve the observed gate failure and demonstrate a controlled pre-publication scheduling delay on the old real-time witness; a later pass alone is not diagnosis.",
+  "acceptance": [
+    "A controlled delayed-worker diagnostic, without machine load, first fails the original total-deadline test’s second-fence assertion on unchanged production code and labels which operation phase expired; the original failed full-gate run is retained.",
+    "The authority total-deadline test uses one existing shared scripted budget clock installed before target capture and all operations, retains the original operation budget across Prepared acknowledgement, canonical read and Candidate publication, and charges part of the original budget before Prepared acknowledgement and expires it only after the Candidate fence is observed. Its unadvanced positive control requires successful publication; its expired control requires failure, retained unresolved Candidate authority, unconfirmed root capture and exactly one canonical read. No production code, timeout increase or retry is introduced.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "gate-blocker",
+    "load-sensitive",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Deterministic authority total-budget witness uses existing shared scripted clock, paired publication/expiry controls and original Candidate deadline assertion; unchanged production/budget. Genuine controlled pre-fix Prepared-expiry RED and original failed gate preserved. Exact b003 fullgate host551ff750 PASS, same independent vendor pair no Medium+ (one diagnostic Note accepted), independent evaluation24cd233a all3 PASS. Post-evaluation four separate Git checks match HEADf7a/index5f397/empty working+untracked. Maintained fingerprint helper b5de65 reproduces both tracked diff hashes3aec and saved statusced9818c; evaluator raw-shell e9e4 patch hash is not the maintained-config hash. Task complete on author input; commit/integration handoff follows, no push/install claimed.",
+    "completed_at": "2026-10-03T08:28:16.186407Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1d8f8-b8b1-70c0-8402-65770aec56c4",
+  "external_ref": null,
+  "title": "No way to release an idle session's agent runtime without deleting the session",
+  "outcome": "An operator or agent can release the agent runtime (CLI process) of an idle session to free host memory while keeping the session, its transcript and its settings. The next prompt starts or resumes the runtime as usual.",
+  "acceptance": [
+    "An idle session's agent runtime can be released through a TermAl control (API and UI) that does not delete the session, its transcript, mailbox or settings; the control refuses or waits while a turn is active or a prompt is in flight.",
+    "After release, the next prompt to that session starts or resumes the runtime through the existing ordinary path, with the harness's normal resume/continuity behaviour, and the session's history is intact.",
+    "Tests cover release of an idle session, refusal during an active turn, and a prompt after release, for at least one ACP harness and Codex."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "memory",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

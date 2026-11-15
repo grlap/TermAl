@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c77e-7f62-b6ba-63db73373977",
+  "external_ref": "tm-uw7j.10",
+  "title": "Distinguish grantless busy sessions from Engram checkpoint-owner timeouts",
+  "outcome": "A reset checkpoint candidate with no active grant but bind/pending work can remain in the claim loop and be reported as waiting on another checkpoint owner. Strict mode may abort a reset and best-effort mode may write a misleading degraded card even though there was no grant to checkpoint.",
+  "acceptance": [
+    "Checkpoint arbitration distinguishes no active grant, bind/pending work, and another checkpoint owner; grantless sessions do not produce owner-timeout wording or spurious degraded cards; strict and best-effort deterministic tests cover each state."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

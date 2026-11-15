@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c500-76f0-8c8c-eaa536ed7a28",
+  "external_ref": "tm-f9wu",
+  "title": "Read-only delegation result lists files other processes wrote during its turn",
+  "outcome": "Reported by Engram::Opus (2026-09-25 ~04:37 UTC). A Codex independent_session evaluator (termal_evaluate_acceptance for Engram w-411275455c9f; delegation-564892ce, session-7604, cwd C:\\github\\Personal\\Engram, read-only, ran only git and cat) returned 'Changed files: C:\\github\\Personal\\Engram\\.engram-path-probe-12152-1790311035169643000.Probe'. That file is Engram's transient host path-identity probe, created and removed in the project root by Engram's path-bearing host commands (readiness, control-policy, control, doctor), likely TermAl's own policy/readiness read for the evaluation or a sibling evaluation's setup (three more started within seconds). child_changed_files (src/delegations.rs) lists every path in the session's FileChanges messages, which the workspace watcher records for any file that changes in the workdir during the turn, so concurrent writers are attributed to the child and a reader may take a read-only child to have written a file. Fix direction: for read-only children, do not report watcher-observed paths as the child's changes (or label them as observed, not written); at least exclude Engram's transient .engram-path-probe-*.Probe files; consider taking TermAl's own Engram reads before the child's turn starts. Engram offers to stop probing on that read path if told which command TermAl calls there.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d3-c55c-7bd1-95e5-606b3fa22764",
+  "disposal_reason": "Same defect: a read-only child's changedFiles lists files that other processes wrote in the workdir during its turn. w-606b3fa22764 (Termal::Architect2, committed b366f9e, independent evaluation 17d2d598 passed 4/4) fixes it the way this item's direction asks: read-only children report no changedFiles, and watcher paths go to observedWorkspaceChanges, labelled as not attributed. That covers the .engram-path-probe-*.Probe case reported here. Found by Termal::Architect2 (mailbox 3d06f738 #35).",
+  "completion": null
+}

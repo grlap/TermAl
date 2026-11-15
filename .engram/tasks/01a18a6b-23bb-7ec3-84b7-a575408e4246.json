@@ -1,0 +1,30 @@
+{
+  "id": "01a18a6b-23bb-7ec3-84b7-a575408e4246",
+  "external_ref": null,
+  "title": "Measure how often foreground Codex command events omit both item identity and native turn scope",
+  "outcome": "Quantify the observed frequency and supported producer versions of foreground Codex command events missing both an item id and native event-turn scope, distinguishing raw protocol evidence from transcript-derived estimates, so the coordinator can assess the explicit non-qualifying compatibility disposition.",
+  "acceptance": [
+    "A reproducible read-only census of retained raw provider/session evidence reports the sampled hosts/versions/time interval, denominator, both-missing event count and whether matching real start/end pairs can be established; missing raw evidence is reported as unknown rather than zero.",
+    "The report distinguishes ordinary foreground and late/legacy routes and documents known presentation/dedup biases; it changes no product behavior, user/global configuration or live tracing settings.",
+    "The measured coverage and remaining uncertainty are recorded for coordinator disposition, with provenance to the invocation-identity design and its explicit both-missing compatibility decision."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "compatibility",
+    "provider-identity",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

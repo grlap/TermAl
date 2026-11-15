@@ -1,0 +1,27 @@
+{
+  "id": "01a0ee48-ab30-7e93-8b59-84347bb27dbf",
+  "external_ref": null,
+  "title": "Keep Engram's refusal of an acceptance submission on the evaluator delegation and name its class in the result summary",
+  "outcome": "When Engram refuses an acceptance evaluator's submission (a void such as \"source changed after evidence basis N\", a resubmit such as \"a host check was recorded after evidence basis N\", or another refusal), termal_list_delegations shows no acceptanceEvaluation.submission for that delegation, and its result summary says only \"refused\". The 409 text survives only in the child's free-text Findings, readable through termal_get_session_result. So a parent or coordinator that counts or triages evaluator failures from delegation records sees unexplained refusals. Wanted: keep the last refusal on acceptanceEvaluation.submission as {state: refused, httpStatus, engramCode, class (resubmit | void | other), message, at}, and name the class in the result summary.",
+  "acceptance": [
+    "Keep Engram's refusal of an acceptance submission on the evaluator delegation and name its class in the result summary is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

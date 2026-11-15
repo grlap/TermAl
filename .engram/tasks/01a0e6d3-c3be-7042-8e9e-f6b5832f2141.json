@@ -1,0 +1,35 @@
+{
+  "id": "01a0e6d3-c3be-7042-8e9e-f6b5832f2141",
+  "external_ref": "tm-21yl",
+  "title": "A full gate that runs in the background never clears Engram's test obligation",
+  "outcome": "Reported by Engram::Fable (2026-09-27, mailbox-703fddd4 #2); Fable asks for this fix BEFORE TermAl's tasks move to Engram. Fable's item sealed with 7 source changes marked untested, the committed one included, although full gate test-c9712474-1b78-4d4b-b35c-b15522a46ad9 passed on that exact tree (state passed, exit 0, input fingerprint bdc038784b9dac7a474e459bdc5551ee8d487ea993e90147bec7efd59eace403, checked at completion). Cause, per Engram::Opus's note of TermAl's rules: a test run counts only in the foreground, but the Bash tool caps a call at 10 minutes and the full gate took 623 s and 652 s, so it can't run in the foreground, and a background run never counts. /review-changes itself tells the parent to run the gate in the background beside the reviewers, so following the procedure guarantees the untested mark. Wanted, either: accept the launcher's own record as evidence (results.json holds state, exit code, per-stage results and the input fingerprint verified before and after), or count a background run that completes with exit 0 with no source edit after it. Related: tm-ncc6.14 (results.json heartbeat), engram_turn_checks recognition.",
+  "acceptance": [
+    "A Claude session, whose tool call is capped at 10 minutes, can obtain a host-recorded full gate for an item it holds by following CLAUDE.md as written; the instructions name the form.",
+    "A check whose command ended successfully but which the host cannot record as passed, because it overlapped another writer or because its output shows no passing test, is not sent to the tracker as a verification; the host logs it with the reason and tells the holder at the next turn that it earned no credit and why. A check whose command failed is sent as before. A test shows each case.",
+    "A full gate that the holder of an item starts with the test launcher in the item's named root, in the background (the runtime's background mode) or detached (`--detach`), is recorded by the host as a passed test check for that item when all of the following hold: the host observed the launch; the run's terminal record shows state passed, exit code 0, every stage the run requested passed, among them at least one test stage the host recognises (TermAl's launcher requests five stages), and equal expected, before and after input fingerprints; the terminal record at settlement is the one the host first read as terminal; the host's source basis at settlement equals its basis at the launch; no write the host can observe reached the worktree between the launch and the run's end; and the same session still holds the claim with the same root generation. A failed run is recorded as failed. A foreground run keeps today's recording. The record attests only these observations, not that no write happened outside the host's sight, the run's directory included. Tests show a background run and a detached run credited.",
+    "A run is not credited when a write the host can observe reached its worktree between the launch and the run's end, when the terminal record changed after the host first read it as terminal, when the host's source basis at settlement differs from its basis at the launch, when the run's input fingerprint after the run differs from the one before, or when the claim or its root generation changed; a test shows each refusal.",
+    "A run whose terminal record says it was interrupted, or whose state is neither passed nor failed, and a run whose launcher ended without a terminal record, is neither credited nor sent as a failed check; carrying ends and the holder is told why at the next turn; a test shows each of the three cases.",
+    "The verification note names the run directory and the input fingerprint.",
+    "docs/features/engram-host-adapter.md and docs/test.md describe the behaviour and agree with each other."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "engram",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch a640e340, spot-checked by Termal::Fable2): CLOSE-DONE. The background full-gate implementation landed in 76236ec (ancestor of master; src/tests/engram_carried_gate_live.rs:333), with live host-recorded verification bf310480 (cited in f75b41fa). Closed by evidence.",
+  "completion": null
+}

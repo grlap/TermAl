@@ -1,0 +1,27 @@
+{
+  "id": "01a139a4-0afe-7843-9ed5-f7032c18ab55",
+  "external_ref": null,
+  "title": "Make the retained test-run stage-progress witness change actual artifact content",
+  "outcome": "The regression advances a real nonterminal stage fact, proves the live summary/detail version advances, and proves the minimal retained identity remains unchanged.",
+  "acceptance": [
+    "Make the retained test-run stage-progress witness change actual artifact content is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

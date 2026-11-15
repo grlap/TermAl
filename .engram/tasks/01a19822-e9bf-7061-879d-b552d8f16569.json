@@ -1,0 +1,28 @@
+{
+  "id": "01a19822-e9bf-7061-879d-b552d8f16569",
+  "external_ref": null,
+  "title": "Launcher full run on the Mac: terminal results saved passed/exit 0, but the outer process exited 1 nine milliseconds later with its output lost",
+  "outcome": "Launcher full run on the Mac: terminal results saved passed/exit 0, but the outer process exited 1 nine milliseconds later with its output lost",
+  "acceptance": [
+    "The path that set exit code 1 after a saved passed terminal result is identified with evidence. Candidates in scripts/test-launcher.mjs: the catch at :1933 (a runner error after the terminal result was saved), summarize() throwing into main().catch at :2179-2182, a stdout write failure such as EPIPE, or notifyRun at :1970-1976",
+    "The launcher records the cause durably in the run directory, so the reason for a non-zero outer exit is recoverable without the original stdout or stderr; a test covers the identified path"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "runner",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

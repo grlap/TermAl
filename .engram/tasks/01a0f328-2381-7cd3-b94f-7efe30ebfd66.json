@@ -1,0 +1,30 @@
+{
+  "id": "01a0f328-2381-7cd3-b94f-7efe30ebfd66",
+  "external_ref": null,
+  "title": "Update canonical completion and producer-overflow recovery contract documentation",
+  "outcome": "Update canonical completion and producer-overflow recovery contract documentation",
+  "acceptance": [
+    "Update canonical completion and producer-overflow recovery contract documentation with regression or contract evidence reviewed independently."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "low",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-28c0-7e92-83c9-139877b42f30",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1d5ad-f6af-7ac2-8b22-0750ef5ac5c9",
+  "external_ref": null,
+  "title": "Diagnose why public Delete lost an active changed child's trace in C1 (now passing without an isolated cause)",
+  "outcome": "The cause of the C1 failure of tests::engram_host_adapter::turn_observations::public_delete_keeps_an_actual_changed_child_until_its_ordinary_report_is_settled is identified from source and evidence: product race, test or fixture defect, or environment. Its current passing is explained by a specific landed change, or a remaining defect is fixed with a behavioural test. It is not assumed fixed.",
+  "acceptance": [
+    "Diagnose why public Delete lost an active changed child's trace in C1 (now passing without an isolated cause) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "diagnosis",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-directed",
+    "greg-reported",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Resolved by diagnosis, not a defect (Opus3, notes f685fb19/cbe6efec on w-79cb2894b78f). C1's failing assertion (:222) checked the trace AFTER load_state. Boot recovery deliberately moves an active trace into the \"host restarted\" recovery notice: persisted_state.rs:410 → :638 recover_interrupted_sessions → messages.rs:200 unadmitted_active_turn.take(). Master's port reads the durable sqlite row first (:494-510), then asserts is_none() plus the notice (:516). No trace was lost; the old test expectation was wrong, so the pass on master is explained. Cancelled by coordinator Termal::Fable2.",
+  "completion": null
+}

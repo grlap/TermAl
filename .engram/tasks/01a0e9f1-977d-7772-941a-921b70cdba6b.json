@@ -1,0 +1,28 @@
+{
+  "id": "01a0e9f1-977d-7772-941a-921b70cdba6b",
+  "external_ref": null,
+  "title": "PI-26b: record an overlap marker with its cause and say it in the checkpoint",
+  "outcome": "When TermAl marks an open check as overlapped, it records why: the marking session, its command and the reason (a lost shell's places, anywhere, a running command in the check's worktree, a turn start). It says so in the checkpoint's observation, in the evidence summary, and in a host line to the check's agent, so an unknown outcome names its cause.",
+  "acceptance": [
+    "An overlap marker is recorded with its cause (the marking session and command) and said in the checkpoint, so an unknown outcome names why."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "PI-26",
+    "host-recording",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-3a30-7603-a635-9ebadc01e428",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

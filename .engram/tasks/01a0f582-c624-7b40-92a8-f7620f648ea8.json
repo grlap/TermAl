@@ -1,0 +1,55 @@
+{
+  "id": "01a0f582-c624-7b40-92a8-f7620f648ea8",
+  "external_ref": null,
+  "title": "An evaluation after a criteria revision is refused (carried_failure_unacknowledged): TermAl never passes --supersedes or shows the evaluator the failed evaluation it acknowledges",
+  "outcome": "Found on w-a450af06e8bd, 2026-10-01.\n\nEvaluation 5bc7bccd9ef84c4f810696e190d65ce9 failed criterion 1. The holder then narrowed criterion 1 (revision 3), and the coordinator concurred on the wording. The fresh independent evaluation, Codex delegation-b4b07af5-824d-4398-ac96-fba10936ebdf, judged all three revised criteria as passing. Engram refused the submission with carried_failure_unacknowledged, and nothing was recorded.\n\nEngram's `work evaluate` takes `--supersedes RECORD_ID`: \"Record id of the carried failing evaluation this one acknowledges … required after the run's executor revised the criteria that evaluation failed, and then only from an evaluator that never held the run (never same-session)\". The evaluator reports that Engram wants the prior failed verdicts and the criteria and bindings before and after the revision acknowledged.\n\nTermAl's submission builds the CLI arguments in acceptance_evaluation_cli_args (src/acceptance_evaluation.rs) and never passes --supersedes. Its brief never tells the evaluator about the carried failing evaluation, the criteria it failed, or what the revision changed.\n\nSo any item whose criteria are revised after a failed evaluation can no longer be evaluated through TermAl, and so cannot complete. That blocks the evaluation loop.\n\nFix direction:\n- When requesting an evaluation, read the run's newest carried failing evaluation.\n- If the criteria were revised after it, put into the brief its record id, its failing verdicts with their rationales, and the criteria before and after.\n- Persist its id in the evaluation target, and pass --supersedes with it at submission. In the independent and sub-agent modes only; same-session is refused, with a plain reason.",
+  "acceptance": [
+    "A same-session evaluation in that state is refused by TermAl before submission with a plain reason; a test covers it.",
+    "After an executor revises criteria that a recorded evaluation failed, an independent evaluation requested through TermAl records successfully: its submission passes --supersedes with that evaluation's record id; a test covers the argument list and the request path.",
+    "The evaluator brief names the carried failing evaluation, its failing verdicts and rationales, and the criteria before and after the revision; a test covers it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "TermAl now acknowledges a carried failing evaluation. When the criteria were revised after a recorded failure, both evaluator briefs name that evaluation, its failing verdicts and rationales, and the criteria and bindings before and after. The evaluation target persists the failed evaluation's id, and the submission passes --supersedes with it. A same-session evaluation in that state is refused with a 409 that names the remedies, and the host default never selects same_session while the acknowledgement is required. Landed in train 10 as b6dbc91 (ca764d1 onto 2696e6f), gate test-fab0adab PASS with a clean pair; the branch gate was test-8e72ffe7 with three review rounds. Live on the host since Greg's restart onto 2869ea2 at about 15:00Z. Independent evaluation a70215ba8df641ac81539be52e0fba37 (Claude) passed all four criteria, after a Codex attempt failed at model capacity.",
+    "completed_at": "2026-10-01T15:08:09.517951300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

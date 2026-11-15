@@ -1,0 +1,40 @@
+{
+  "id": "01a1d6ce-fda7-7a50-9d48-a5e60c25a1c1",
+  "external_ref": null,
+  "title": "Empty-queue Resume clears the persisted pause without advancing the session mutation stamp",
+  "outcome": "A successful Resume of a paused session with no ordinary queued prompt remains unpaused after the background delta writer persists and SQLite is reloaded.",
+  "acceptance": [
+    "The empty-queue Resume branch advances the affected session mutation stamp before submitting its persistence delta, retaining the existing rollback behavior on commit failure.",
+    "A persist/reload regression test first advances the background writer watermark past the paused row, resumes the empty queue, and proves SQLite and the reloaded session are unpaused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-directed",
+    "mutation-stamp",
+    "persistence",
+    "source-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Empty-queue Resume stamps its session before persisting the unpause and retains rollback. SQLite/reload regression passes. Delivered in eb78d349; fresh independent evaluationa9700b42 passed both criteria.",
+    "completed_at": "2026-11-14T03:44:38.797272700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

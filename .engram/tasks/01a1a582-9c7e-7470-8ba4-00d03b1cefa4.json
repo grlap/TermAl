@@ -1,0 +1,27 @@
+{
+  "id": "01a1a582-9c7e-7470-8ba4-00d03b1cefa4",
+  "external_ref": null,
+  "title": "Use canonical committed revisions in sibling disposable live fixtures",
+  "outcome": "Legacy recovery and source-observation live fixtures use the same canonical git-commit revision as the registered producer and current consumer contract.",
+  "acceptance": [
+    "Use canonical committed revisions in sibling disposable live fixtures is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

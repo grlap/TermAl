@@ -1,0 +1,25 @@
+{
+  "id": "01a1a4d2-e81b-7510-8438-d9abd1166a9a",
+  "external_ref": null,
+  "title": "termal_list_sessions returns 409 'federation authority changed' with no data, while the CLI lists at the same moment",
+  "outcome": "During a federation-authority change, an MCP session listing either refreshes and succeeds or returns local sessions with a clear partial marker, so a session can still find an address, and the message names the supported next step.",
+  "acceptance": [
+    "The cause of the 04:27Z refusal is identified from host and federation records, including why the CLI listing succeeded at the same time, and classified",
+    "A regression test covers the MCP listing across an authority change; the listing recovers without a host restart or a manual refresh the caller can't perform, and authority checks are not weakened"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

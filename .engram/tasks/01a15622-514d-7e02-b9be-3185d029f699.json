@@ -1,0 +1,38 @@
+{
+  "id": "01a15622-514d-7e02-b9be-3185d029f699",
+  "external_ref": null,
+  "title": "Represent uncertain Unix reap outcomes conservatively before future reconciliation",
+  "outcome": "Prevent a future cleanup reconciliation from treating reaped=false after a wait error as proof that a numeric PID/group is still safe to signal.",
+  "acceptance": [
+    "Uncertain wait outcomes including ECHILD are represented or documented conservatively, with a regression or invariant preventing numeric-group signaling based solely on reaped=false."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "bounded-reads",
+    "cross-machine",
+    "design-pending",
+    "diagnosis",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "remote-mailbox",
+    "review-follow-up",
+    "s2",
+    "test-failure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a155b7-0ea1-7320-ac7a-867b51249f9a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1581a-3937-74d3-89eb-d7b338798276",
+  "disposal_reason": "Continue independently under Fable2 #433/#435 after completed parent; preserve R1 review provenance. Keep separate source root while first Low is frozen for review.",
+  "completion": null
+}

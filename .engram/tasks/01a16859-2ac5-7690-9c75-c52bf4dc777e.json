@@ -1,0 +1,29 @@
+{
+  "id": "01a16859-2ac5-7690-9c75-c52bf4dc777e",
+  "external_ref": null,
+  "title": "Preserve important StateInner holders until registration evidence is collected",
+  "outcome": "Bounded StateInner evidence can retain a relevant long holder until a pending registration reports it, despite many intervening short completed holds.",
+  "acceptance": [
+    "Independently concur on a bounded retention design before implementation, preserving nonblocking observer release and explicit unknown/loss semantics.",
+    "A deterministic fixture models a long overlapping hold followed by more than 256 short unrelated completions before evidence collection and verifies the retained evidence policy.",
+    "Existing bounds, pending identity, retry, durability, launcher decisions and mutex/poison behavior remain unchanged under credited focused verification and independent review."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

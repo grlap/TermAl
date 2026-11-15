@@ -1,0 +1,30 @@
+{
+  "id": "01a1ccad-ac29-74e1-b9e8-51639366fa21",
+  "external_ref": null,
+  "title": "Retain source-failure and search context in empty Urgent results",
+  "outcome": "An empty Urgent view retains the panel's incomplete-source and search-result context.",
+  "acceptance": [
+    "When readable rows are empty because a source failed, Urgent explicitly identifies the incomplete view.",
+    "When a search has no results, Urgent retains search-specific context while still showing its short empty state when rows exist but none are urgent.",
+    "Behavioral tests cover source failure and search no-match in Urgent."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "ui",
+    "work-panel"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

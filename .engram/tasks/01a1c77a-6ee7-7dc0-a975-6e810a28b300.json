@@ -1,0 +1,37 @@
+{
+  "id": "01a1c77a-6ee7-7dc0-a975-6e810a28b300",
+  "external_ref": null,
+  "title": "On Windows a registered focused Vitest run has no classified verification route, so UI-only changes cannot satisfy the committed-input evaluation precondition with their own tests",
+  "outcome": "A UI change's own Vitest tests, run as a registered `--input commit` focused run on Windows, produce a classified verification record. That lets the committed-input evaluation precondition be met with the change's own tests, not a substitute check.",
+  "acceptance": [
+    "On Windows, a registered focused `--input commit` run of named Vitest test files in ui/ (in a form the launcher accepts) produces a verification record classified as Test, and Engram acknowledges it.",
+    "A test covers that classification on the form used; it checks behaviour (the classified kind or the refusal), not source text.",
+    "The documented focused form for UI tests on Windows names the supported command."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "evaluation",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Registered Windows focused direct-Node Vitest runs now produce classified Test verification and actual Engram credit. Landed in 225a5335 after clean review adoption and exact-tree FULL; live named-file check passed21/21 with Test ACK d66a4cbd21cd4bc7a8e5542ec3a29f25. Fresh independent evaluation36581a59bae347f2baff770ab531b954 passed all3 criteria. Original unconfirmed evaluator17362 artifacts and root retained for open recovery bug w-71e95318ea03; no original-key replay or actor substitution performed.",
+    "completed_at": "2026-11-11T07:16:42.226471800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

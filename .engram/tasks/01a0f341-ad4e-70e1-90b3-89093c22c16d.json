@@ -1,0 +1,30 @@
+{
+  "id": "01a0f341-ad4e-70e1-90b3-89093c22c16d",
+  "external_ref": null,
+  "title": "Preserve native-launch test diagnostics when membership assertions fail under a job mutex",
+  "outcome": "Avoid a destructor double panic and whole-libtest abort when a Windows launch fixture's job membership assertion fails. Assert collected membership results after releasing the job mutex, or provide equivalently safe unwind ownership, preserving existing containment checks and cleanup.",
+  "acceptance": [
+    "Preserve native-launch test diagnostics when membership assertions fail under a job mutex is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "containment",
+    "gate",
+    "test-defect",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f307-0ba6-7831-baa4-013a843b7f24",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1cd87-db7f-7323-baf2-3c02c07b5b87",
+  "external_ref": null,
+  "title": "Exercise naming and evaluation bridge allowances against scripted server phase timing",
+  "outcome": "Exercise naming and evaluation bridge allowances against scripted server phase timing",
+  "acceptance": [
+    "Bridge boundary controls derive elapsed time from an actual naming or acceptance server path under a scripted clock rather than only restating allowance constants.",
+    "The controls preserve definitive success/refusal and no replay after admitted server overrun, and fail when the required client allowance is removed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance",
+    "engram-adapter",
+    "greg-directed",
+    "limits",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

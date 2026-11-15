@@ -1,0 +1,31 @@
+{
+  "id": "01a198ac-2184-72c0-8601-8c66e1695f1e",
+  "external_ref": null,
+  "title": "Preserve catalog pagination progress across cold delegation index repair",
+  "outcome": "Cold point-lookup repair in FederationCatalogChildren has an explicit preserved-or-completed cursor contract, with deterministic interleaved catalog-page/point-lookup coverage; warm production lookups remain indexed and introduce no new owner.",
+  "acceptance": [
+    "Preserve catalog pagination progress across cold delegation index repair is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "catalog",
+    "delegation",
+    "greg-reported",
+    "performance",
+    "review-followup",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a192eb-9e83-77c0-9b55-c17ed893adeb",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

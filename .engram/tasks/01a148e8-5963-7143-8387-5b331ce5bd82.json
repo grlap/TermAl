@@ -1,0 +1,31 @@
+{
+  "id": "01a148e8-5963-7143-8387-5b331ce5bd82",
+  "external_ref": null,
+  "title": "Count each failed retained checkpoint replay once for circuit and backoff accounting",
+  "outcome": "Count each failed retained checkpoint replay once for circuit and backoff accounting",
+  "acceptance": [
+    "A Deadline or Transport failure from a retained checkpoint replay increments consecutive transport failures and schedules bind backoff once for that invocation.",
+    "A regression drives ordinary admission replay followed by Deadline or Transport failure and asserts exact failure counter, circuit threshold and backoff behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "reliability",
+    "retry-accounting",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14882-9853-72f2-8565-339b57a1d89d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

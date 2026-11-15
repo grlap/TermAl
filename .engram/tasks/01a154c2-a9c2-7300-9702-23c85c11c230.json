@@ -1,0 +1,29 @@
+{
+  "id": "01a154c2-a9c2-7300-9702-23c85c11c230",
+  "external_ref": null,
+  "title": "Native launch logs \"atomic job creation refused\" for an ordinary CreateProcess failure and retries it through the fallback",
+  "outcome": "windows_launch distinguishes a refusal of the atomic job attribute from an ordinary CreateProcessW failure (for example ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND for an absent program). Only a genuine job-attribute refusal logs \"atomic job creation refused\" and takes the suspended-assignment fallback. Other errors are returned as they are, without a second launch attempt.",
+  "acceptance": [
+    "Launching an absent program through the native launcher returns its spawn error after one CreateProcessW attempt and logs no 'atomic job creation refused' line; a focused test covers it.",
+    "A genuine atomic-attribute refusal (the existing force_atomic_refusal seam) still takes the fresh-lease fallback, and its regression stays green.",
+    "The full gate is green and an independent review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "windows-launch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

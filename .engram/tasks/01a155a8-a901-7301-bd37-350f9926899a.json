@@ -1,0 +1,75 @@
+{
+  "id": "01a155a8-a901-7301-bd37-350f9926899a",
+  "external_ref": null,
+  "title": "S4b: operator/agent entrypoints for peer activation, placement reservation and satellite binding install",
+  "outcome": "On the serial path to the first native central↔Mac exchange (Architect1 ruling note be1e2ee7a31e44b28605ccecc386fea4 on w-e41b7112372a; gap found by Sol-d50d). transition_federation_peer, reserve_federation_placement and install_federation_mailbox_binding have test callers only, so there is no production path to ACTIVE, to a placement, or to a satellite root's binding. Depends only on landed M1, M2, L1 and O1, and runs in parallel with M4 increment 2. Scope:\n(1) ACTIVATION, central only: POST /api/federation/peers/{id}/membership {active|draining|revoked}, transitioning against the current snapshot read under the same lock; active only from VERIFIED with a current-basis report; authorization is the central host's local operator surface, as for enroll and verify; Greg's word for activation is a recorded process rule, as for M1b's enable.\n(2) PLACEMENT, central only: POST /api/federation/peers/{id}/placements {nativeSessionId, admissionKey}. It does a C→S prepare read, reserves on an ACTIVE peer with capacity (a duplicate key recovers the original), then a C→S install; the response returns the root's canonical participant id. This is an agent act.\n(3) BINDING INSTALL as a C→S command only: a new satellite route POST /federation/v1/mailbox/binding, allowlisted beside the onboarding routes and authenticated by link plus pair capability, with two operations. PREPARE {nativeSessionId} is read-only and returns the native creation id of an eligible unbound root. INSTALL {binding, expectedNativeCreationId} is idempotent on identical input and refuses different, stale or recreated roots. After a durable install, the satellite Registers over the S→C channel so the directory lists the root.\n(4) Fail-first tests: one machine, two processes, fake link; platform-neutral; the Windows gate lands it.\n(5) Out of scope: Start/Stop (M4 increment 3), w-fc62, UI.\nSol-d50d's authorization sketch (TermAl mailbox 10bdbf3a #51) informs the details.",
+  "acceptance": [
+    "ACTIVATION. POST /api/federation/peers/{id}/activate on the central host performs only Verified→Active, conditionally against the server-resolved current snapshot: it succeeds only for a VERIFIED peer whose verification report is bound to the current configuration and identity basis; an exact duplicate returns the committed state without a generation bump; a stale expectation, an unverified, draining, revoked or already-active peer with a different basis, and a non-central local role are refused with the fixed stale-authority refusal; an ambiguous original (persistence failure) is never reported committed. Greg's recorded word for the exact host, enrollment and verified build is a process precondition recorded on the item, not evaluated by code.",
+    "PLACEMENT. POST /api/federation/peers/{id}/placements {nativeSessionId, admissionKey} on the central host: for an ACTIVE peer with a current O1 report and capacity, C obtains the root's native creation token by a read-only PREPARE over the current link (an eligible, unbound root only), mints the domain creation id and placement generation, and reserves through reserve_federation_placement; a repeated admissionKey recovers the exact original reservation only after revalidation against current authority, epoch and link incarnation and never a second slot; a non-active peer, exhausted capacity, and a bound, non-root or absent native session are refused; the response names the canonical participant id once C3 has succeeded, otherwise the recoverable pending state with its operation key.",
+    "BINDING INSTALL. One authenticated central→satellite domain route POST /federation/v1/mailbox/binding, allowlisted in the satellite listener beside the onboarding routes and admitted only with the pair capability on the current link, with two operations: PREPARE (read-only, returns the native creation token for an eligible unbound root) and INSTALL (binding resolved from C's retained placement, expected native creation token) → install_federation_mailbox_binding; an identical repeat is idempotent; a different existing binding, a stale peer, a recreated session or a token mismatch is refused; the install intent is durable at C before the send and a lost response retries the same operation key across link incarnations without creating a second binding; success means the satellite's durable image, after which the satellite Registers over the S→C channel and the Directory lists the root.",
+    "BOUNDARY. Every mutation matches current authority beside it; no I/O under the state lock; the existing link→state lock order is kept; no new coordination SQLite schema object; the sender of a central command is never taken from the payload; no Start/Stop over the channel, no proxy→native association, no UI, no satellite-local API that installs a binding.",
+    "EVIDENCE. Fail-first tests on one machine with two TermAl processes and a fake link cover: active only from VERIFIED; stale snapshot; duplicate activation; ambiguous persistence; placement on enrolled/verified/draining/revoked/full; duplicate key recovery and its revalidation; PREPARE on bound, non-root, absent; INSTALL token mismatch, recreated session, identical repeat, lost response retry with the same key; listener refusal without the pair capability; operator routes refused when the local role is not central. Exact-input focused tests, the full five-stage gate and an independent read-only review pair with no outstanding in-scope Medium-or-higher finding; the evidence states that loopback proves the entrypoints, not live Mac or O1 readiness."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14bba-d1c2-7610-8c8e-8c0a4f62bbc0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented central activation and placement entrypoints plus authenticated satellite PREPARE/INSTALL with retained durable intents, exact session-row/native-token fencing, recovery and Directory registration. GREEN-7 tree 984bfc304be10230c228deb8ec4d0ddb36465c5e on a5cca6e7 passed the five-stage full gate and separate 40-test focused selection. Independent evaluation f768ac75af6d48c99920d8d20e8b9cf8 passed all five criteria; review chain has no outstanding in-scope Medium or higher finding. Exact payload ready for Merger; not yet committed, pushed, installed or activated on live Mac.",
+    "completed_at": "2026-10-20T01:39:35.438923400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

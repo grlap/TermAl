@@ -1,0 +1,28 @@
+{
+  "id": "01a1b1a0-04e1-7a52-8d32-076581880826",
+  "external_ref": null,
+  "title": "Claude read-only delegations refuse `git rev-list`, which Codex read-only reviewers can run",
+  "outcome": "Claude read-only delegations refuse `git rev-list`, which Codex read-only reviewers can run",
+  "acceptance": [
+    "A Claude read-only delegation can run `git rev-list` for read-only queries (for example `git rev-list --parents -n1 HEAD` and `git rev-list --count A..B`), with its option checking matching the existing read-only git subcommands: anything that writes a file, starts a pager or viewer, or cannot be checked is refused.",
+    "A test covers an allowed rev-list form and a refused rev-list option, and the PowerShell-tool refusal stays unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "parity",
+    "read-only-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

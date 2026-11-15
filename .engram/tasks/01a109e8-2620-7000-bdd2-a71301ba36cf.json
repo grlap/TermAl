@@ -1,0 +1,27 @@
+{
+  "id": "01a109e8-2620-7000-bdd2-a71301ba36cf",
+  "external_ref": null,
+  "title": "Obligation-assessment summary: render a mismatch row's stale_source detail (deciding record, position, workspace, revision)",
+  "outcome": "Obligation-assessment summary: render a mismatch row's stale_source detail (deciding record, position, workspace, revision)",
+  "acceptance": [
+    "Obligation-assessment summary: render a mismatch row's stale_source detail (deciding record, position, workspace, revision) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

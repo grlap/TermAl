@@ -1,0 +1,44 @@
+{
+  "id": "01a1c184-583e-76b0-9f2f-2333a945390e",
+  "external_ref": null,
+  "title": "Exercise both directions of retained prompt format separation",
+  "outcome": "Retained identity decoding refuses runnable stored-intent and receive-envelope inputs, with meaningful positive controls.",
+  "acceptance": [
+    "Stored-intent and receive-envelope bytes are refused as retained identities.",
+    "A reserialized valid retained identity remains decodable before corruption controls run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the stated behavior with independent review and passing focused/full evidence; retained in origin/master 0b32ab57. No acceptance evaluation exists.",
+    "completed_at": "2026-11-10T18:29:00.162870900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

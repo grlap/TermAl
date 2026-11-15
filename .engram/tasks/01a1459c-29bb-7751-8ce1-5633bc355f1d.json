@@ -1,0 +1,32 @@
+{
+  "id": "01a1459c-29bb-7751-8ce1-5633bc355f1d",
+  "external_ref": null,
+  "title": "Show the search match alongside typed error reasons with bounded session-row height",
+  "outcome": "Show the search match alongside typed error reasons with bounded session-row height",
+  "acceptance": [
+    "When a typed full error reason is available, an Error-filtered search result exposes both that reason and the matching search context without inferring a current error from historical transcript text.",
+    "Long or multiline typed reasons have bounded row presentation with a way to inspect the complete reason; regression coverage checks search context and long reasons."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "host-reliability",
+    "provider-refusal",
+    "review-followup",
+    "session-list",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14335-3445-73e1-ae82-95b5d8eba137",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

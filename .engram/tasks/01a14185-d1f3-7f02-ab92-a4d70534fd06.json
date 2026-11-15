@@ -1,0 +1,63 @@
+{
+  "id": "01a14185-d1f3-7f02-ab92-a4d70534fd06",
+  "external_ref": "engram:w-0623391b54ed",
+  "title": "Work view: Closed view, newest-closed first, paged through Engram's ls --closed",
+  "outcome": "The Work panel offers a visible Closed view next to open work. It lists completed, cancelled and superseded items newest-closed first, using Engram's durable close order from `ls --closed` (Engram w-0623391b54ed), not list position. It pages incrementally like open work and shows each row's close kind and time. Greg's direction (Advisor b9d13887 #824, plan approved #826): this starts only after Engram's (B) lands.",
+  "acceptance": [
+    "A visible Open/Closed switch selects the Closed view, which lists all terminal Engram work (completed, cancelled and superseded) from Engram `ls --closed` in ONE ordinary list, ordered by Engram's closed_at descending then stable id as Engram delivers it, each row showing its close time and close kind; the Open view is unchanged; UI tests show both.",
+    "The Closed view pages incrementally with the same mechanics as the open view (one request in flight, the Engram cursor and readerId guard, a visible 'list changed; reload' stop when the cursor is invalidated, distinct loading, end and error states with a single-request Retry); UI tests show them.",
+    "Records migrated during the old Beads cutover appear in the same list with no 'earlier history', 'inherited' or Beads label or section, and TermAl invents no ordering of its own; a test with such rows shows it.",
+    "`npx tsc --noEmit` is clean and the full five-stage gate passes on the exact landed input, against a pinned Engram build that implements `ls --closed`."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a14181-a00c-7792-87c1-270c4b1fa8bc"
+  ],
+  "blockers": [
+    {
+      "blocker_id": "01a14185-e07b-7521-a4f2-8b5df9807fb6",
+      "kind": "manual",
+      "detail": "Waits for Engram w-0623391b54ed (`ls --closed`) to land and for a pinned Engram build with it installed; Greg's direction is to start only after (B) lands. It should also build on w-270c4b1fa8bc's landed paging code.",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-15T21:44:15.212873300Z"
+    }
+  ],
+  "superseded_by": "01a14181-a00c-7792-87c1-270c4b1fa8bc",
+  "disposal_reason": "Superseded by Greg's simplification (Engram::Advisor, TermAl mailbox b9d13887 #833, 22:04Z): \"Do NOT build a new closed-specific Engram API or a separate Closed-order UI surface... use the existing lifecycle data/filter and Updated sort to show closed work.\" Closed work is now covered by w-270c4b1fa8bc rev 3, criterion 3: closed work reachable through the existing lifecycle filter and ordered by Updated, with the full set fetched through `ls --all`. Its Engram dependency, w-0623391b54ed, was cancelled by Engram::Fable as unneeded scope (ebe242f7 #2194). If the --all payload lacks a needed field, Engram will revive a minimal API under a new item. (Termal::Fable2, coordinator)",
+  "completion": null
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a1cbb4-0bcc-7f10-8aa3-220fdb91ebac",
+  "external_ref": null,
+  "title": "Integrate combo60 (history) on e6b8d2f7: 8e1f 4f6bb130 (w-56cd bounded history capture carry), direct child of combo59",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 4f6bb130566b7fb00f7032add5395ac2ab73a674 (tree 4f295c38f7803bc4d1af30f451a7fa89597c5651) is on origin/master, where master was moved to it by a fast-forward from e6b8d2f70609a85e815c4039d971ed2b963b6f4e.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 4f295c38 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against e6b8d2f7 is byte-identical (same three paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to d3cbfcb2's contribution against be3b6fd8, which the WHOLE-3 pair (Codex session 17508, Claude session 17509) reviewed with no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree 4f295c38 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo60-history 4f6bb130 (tree 4f295c38) is a byte-identical carry of 8e1f's history slice d3cbfcb2 and adopts the WHOLE-3 pair 17508/17509. It landed on master by fast-forward from e6b8d2f7 and was pushed at 18:22:04Z. It is gated by DL560 FULL test-09a82b67, PASS (rust 7652/0/114, vitest 5095, node 520), on test ref 32bc8b19, which has been deleted. Installed on Central (f23fd63d; the previous binary is kept as termal-before-4f6bb130-9f9684e6.exe) and DL560 (62b1f5ad; the previous binary is kept as termal.bbed9f6d.bak). Neither host was restarted. The independent evaluation (session 17522) passed all 3 criteria.",
+    "completed_at": "2026-11-11T18:30:04.145423600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

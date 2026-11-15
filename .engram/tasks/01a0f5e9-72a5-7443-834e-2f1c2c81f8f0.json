@@ -1,0 +1,27 @@
+{
+  "id": "01a0f5e9-72a5-7443-834e-2f1c2c81f8f0",
+  "external_ref": null,
+  "title": "Stale wording around bound-criterion refusals: the host pre-check's rationale and the `kind` comment no longer match Engram",
+  "outcome": "Low and Note from the Claude reviewer of w-51dab1c2faab, round 2 (delegation-1baa0871-deae-4599-89cc-90823ec063e9).\n\ndocs/features/engram-host-adapter.md (bound criteria paragraph) and the validate_bindings doc comment justify TermAl's pre-check by saying that Engram's own refusal names a citation as its cause. Engram fixed that in 7c4c694 (Engram w-43dde4cda5f6): basis_refused now carries an empty citation. The pre-check is still useful as an earlier, plainer refusal, but the rationale should say that, or say that older Engram builds named a citation.\n\nAlso, the doc comment on EngramShowNoteForEvaluation.family/kind still says kind \"reads `generic` for all of them\". Engram now emits verification, environment and status, and the parser depends on kind == \"verification\".",
+  "acceptance": [
+    "The rationale in engram-host-adapter.md and in validate_bindings states the pre-check's actual value (an earlier, plainer refusal) and names the Engram build in which the citation-blaming refusal was fixed; the EngramShowNoteForEvaluation kind comment names verification, environment and status."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

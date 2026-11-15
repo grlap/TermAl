@@ -1,0 +1,73 @@
+{
+  "id": "01a12185-b2c3-7131-ac6f-c4792b86b3b9",
+  "external_ref": null,
+  "title": "Boot reconstruction of a begin-unknown replay after a TermAl restart",
+  "outcome": "After a restart, a retained prompt whose begin outcome is unknown is reconciled by the exact begin replay, not closed by cold recovery, from durable or producer-verified state only, and is delivered once without Resume.",
+  "acceptance": [
+    "K1 (unbound fail-first): On the landing 1a+1b tree, the restart witnesses in src/tests/engram_begin_boot.rs fail first in a credited host run in this item's named root, except any that pass as guards, which the note names. A holder note preserves the failing check, input, log path and SHA-256, and distinguishes the failures from setup or runner errors.",
+    "K2: After a restart, a durable prepared begin with no durable begun_grant_id reaches the exact begin replay before any competing cold-recovery status check, restart checkpoint or rebind. No restart checkpoint closes its grant, and no 'unknown recovered grant state' error holds it. A saved, acknowledged begin_unknown retry is rebuilt with its attempt index, first-held time, due time and owner unchanged. New-format witnesses resolve an applied-begin case and an expired-unbegun case without Resume and deliver the original retained message exactly once. A head with a durable begun_grant_id keeps its conservative non-redelivery hold.",
+    "K3: A saved head whose prepared begin is Prepared, with no uncertain or open grant (a crash after preparation), is read on load as begin-unknown, and its exact replay is scheduled. A reconstructed record is acknowledged before any attempt, and its authority comes from the retained evaluate's project, connection and settings. The head is delivered once without Resume.",
+    "K4: A pre-fix hold (a retained evaluate and an uncertain grant, with no prepared begin) is recovered only from producer authority: its exact retained evaluate is replayed. When the stored answer names the uncertain grant, the begin is rebuilt from that answer (key derived from the evaluate key, tokens from the answer) and replayed. Witnesses resolve an applied-begin case and an expired-unbegun case without Resume and deliver once. When another grant answers, no begin is fabricated, and the head stays an explicit hold with its possibly begun grant.",
+    "K5: Healthy admission, bind, abort, Stop/Cancel, held mailbox and the landing 1a/1b begin-replay behaviour stay covered by their existing tests. docs/features/engram-host-adapter.md documents boot reconstruction and replaces the statement that cold recovery after a restart still closes a begun grant.",
+    "K6: The maintained five-stage full gate passes on the exact final input with this item's own passed host Test record. The independent read-only Codex/Claude pair has no outstanding in-scope Medium or higher, with all remaining Lows filed. An evaluator that never held the item evaluates these criteria independently."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "pilot",
+    "reliability",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a10c85-3888-7713-8bc7-58cf44d04f2c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Boot reconstruction of a begin-unknown replay after a TermAl restart. A boot pass reads saved heads before boot recovery:\n- a Prepared begin with nothing marking it possibly begun (a crash after preparation, even beside an ordinary retry) is read as begin unknown;\n- begin-unknown heads get the exact begin replay;\n- pre-fix heads (a retained evaluate plus an uncertain grant) get a reconstruction that replays the exact retained evaluate and begins again only the uncertain grant Engram returns, under the derived key;\n- another grant, a refusal or a Defer holds the head without fabricating a begin;\n- recovery runs only under the retained evaluate's authority;\n- cold restore and bind leave these heads to that recovery, while a durably begun head keeps the conservative cold checkpoint and hold.\nWitnesses cover new-format and pre-fix applied/expired, another grant, refused, deferred, and crash after preparation, with order assertions. Landed as a1f54018 (fast-forward on c6d6b04e), gate test-24069fe5 passed, the independent evaluation 886f0888 passed 6/6. Install is batched with w-ad17 into the next coordinator-chosen restart window.",
+    "completed_at": "2026-10-10T04:57:50.938097200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

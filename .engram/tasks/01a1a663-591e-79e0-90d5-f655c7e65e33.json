@@ -1,0 +1,29 @@
+{
+  "id": "01a1a663-591e-79e0-90d5-f655c7e65e33",
+  "external_ref": null,
+  "title": "Name clean identity drift in launcher pre-run refusal",
+  "outcome": "A HEAD/tree/pin change between committed-input status and fingerprint receives a precise named refusal rather than empty parentheses, with redundant unreachable v1 branches removed.",
+  "acceptance": [
+    "Name clean identity drift in launcher pre-run refusal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

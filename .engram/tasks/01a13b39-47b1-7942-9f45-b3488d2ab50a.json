@@ -1,0 +1,37 @@
+{
+  "id": "01a13b39-47b1-7942-9f45-b3488d2ab50a",
+  "external_ref": null,
+  "title": "Read-only Claude delegations refuse an informational `engram … --help`, so a reviewer cannot check a command's real CLI help",
+  "outcome": "A read-only Claude delegation may run the informational help of known project CLIs (at least the Engram CLI, e.g. `engram.exe <subcommand…> --help` or `help`), recognized narrowly so that only a help request with no other effect is admitted; every other invocation of those executables stays refused. The Codex and Claude read-only reviewers can then make the same runtime-help observation.",
+  "acceptance": [
+    "A read-only Claude delegation's Bash gate admits only a single informational Engram help invocation whose absolute executable identity matches the resolved host-controlled configured Engram binary path. It admits root --help/-h, supported literal subcommand paths ending in --help/-h, and the CLI's supported help-subcommand forms. Reviewer-controlled basename/PATH resolution never supplies the trusted identity; the allowed command is preserved unchanged and its help output can reach the reviewer.",
+    "Every other Engram invocation stays refused with the existing read-only message, including a command without help, help combined with other options or unproved extra arguments, an untrusted executable (including another file named engram.exe), relative/bare executable invocation, and help composed with shell chaining, pipes, redirection or wrappers. There is no general <any executable> --help allowance; existing read-only command behavior is unchanged.",
+    "Tests cover admitted and refused forms through the production host permission seam, including host configuration changes, quoted Windows absolute and Git Bash executable spellings, preserved permission input and existing read-only allowlist controls. The maintained full gate passes on the exact final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "read-only-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0f3d1-9e48-7f23-87b4-14f107774684",
+  "external_ref": null,
+  "title": "Host architecture brief: section 10 step 12 asks for revalidation that section 4.7's sealed cut excludes",
+  "outcome": "Host architecture brief: section 10 step 12 asks for revalidation that section 4.7's sealed cut excludes",
+  "acceptance": [
+    "docs/features/host-architecture.md section 10 step 12 limits any validation before composing to the admissions the seal included and the owner's frozen state, consistent with section 4.7 and step 10b; no sentence tells an implementer to revalidate arrivals after the seal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Duplicate of w-6c29665de51f, which Termal::Architect1 filed before the handoff from the same finding of his round-4 Codex reviewer (Architect1, mailbox #15). Filed by me from landing train 2's Codex review (delegation-d5dcb51a-def2-448b-91f3-d025a896b86a) before I knew of it.",
+  "completion": null
+}

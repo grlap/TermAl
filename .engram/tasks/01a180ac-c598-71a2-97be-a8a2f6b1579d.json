@@ -1,0 +1,32 @@
+{
+  "id": "01a180ac-c598-71a2-97be-a8a2f6b1579d",
+  "external_ref": null,
+  "title": "Clarify coalesced output-size maxima and deferred panic-time diagnostic loss",
+  "outcome": "Clarify coalesced output-size maxima and deferred panic-time diagnostic loss",
+  "acceptance": [
+    "Output-size diagnostic documentation makes independent maxima/coalescing and best-effort delayed journal persistence explicit, without presenting them as exact correlated per-response records or promising crash durability."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "deferred",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18073-bc4d-7e21-8d46-a81c8a3f5351",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

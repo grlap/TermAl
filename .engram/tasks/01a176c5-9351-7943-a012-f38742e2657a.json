@@ -1,0 +1,32 @@
+{
+  "id": "01a176c5-9351-7943-a012-f38742e2657a",
+  "external_ref": null,
+  "title": "Separate prepared-Begin fixture barrier wait from measured collection cost",
+  "outcome": "The fixture observer does not attribute the prepared-Begin barrier handshake to collector work.",
+  "acceptance": [
+    "Keep the existing collect-phase observation needed by the deterministic barrier control, but start measured collection after the barrier or expose the barrier wait explicitly as a separate bounded duration.",
+    "A phase control discriminates the barrier wait from completed collection timing without changing durable-content acknowledgement, real-clock fence deadlines or production persistence behavior.",
+    "Retain the original run and reviewer evidence; disclose the original sample's induced handshake inclusion and do not infer historical queued-deadline or grant-expiry causation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "admission",
+    "diagnostics",
+    "engram-control",
+    "review-followup",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16e82-b6f5-7d00-b947-285750b8b4e6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

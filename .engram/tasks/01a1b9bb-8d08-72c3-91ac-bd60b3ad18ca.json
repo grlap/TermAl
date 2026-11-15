@@ -1,0 +1,30 @@
+{
+  "id": "01a1b9bb-8d08-72c3-91ac-bd60b3ad18ca",
+  "external_ref": null,
+  "title": "Verify and bound Codex removed-environment-name overlays across thread resumes",
+  "outcome": "Codex project-environment removal semantics are verified against thread/resume and do not retain unnecessary empty-string overrides indefinitely.",
+  "acceptance": [
+    "Establish whether successful Codex thread resumes preserve prior shell_environment_policy.set values and document the supported removal behavior across providers.",
+    "Use existing thread setup owner to remove or bound stale configured-name overrides, preserving immutable active runtime selections and missing-value UNKNOWN behavior.",
+    "Behavioral fixtures cover configured, removed, subsequent resume and seeded/inherited-value interactions without a live service."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "low",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

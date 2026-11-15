@@ -1,0 +1,34 @@
+{
+  "id": "01a14dc6-31b7-71c2-9228-a342b6213ef3",
+  "external_ref": null,
+  "title": "Preserve mailbox mutation uncertainty through final facade and server validation cuts",
+  "outcome": "Preserve mailbox mutation uncertainty through final facade and server validation cuts",
+  "acceptance": [
+    "After a mailbox mutation starts, operation-envelope/value decoding and final local actor/binding or server authority failures preserve explicit unknown outcome and original-key guidance through the bridge.",
+    "Known pre-admission refusals remain known, and mutations never become automatically replayable.",
+    "Discriminating tests cover invalid operation value in a valid envelope and authority change after central commit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-9864-78b1-809a-1ceeda90644c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

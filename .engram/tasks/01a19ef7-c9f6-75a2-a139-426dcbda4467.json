@@ -1,0 +1,37 @@
+{
+  "id": "01a19ef7-c9f6-75a2-a139-426dcbda4467",
+  "external_ref": null,
+  "title": "After restart #2 a named source root stays 'unconfirmed' across turns (source/check/evaluation evidence withheld) despite a same-generation naming ACK",
+  "outcome": "Once a root session names its source root and the naming takes effect, the next ordinary turn's opening is confirmed. The host no longer reports \"source root is unconfirmed ... evidence withheld\" turn after turn for that same generation. If confirmation genuinely fails, the notice names the concrete reason.",
+  "acceptance": [
+    "Retained runs refused with ClaimNotCurrentForRun, OtherProject, or RunUnknown under verified session authority and a matching recorded store identity are retired as unresolvable with a durable recorded reason (and store identity for RunUnknown), no longer block turn confirmation, never earn credit, and remain readable for audit; OtherProject also emits a host-binding error log.",
+    "InvalidWorkProjection / contradictory canonical associations keep the run retained and raise a store-integrity alarm; session-authority, budget, timeout, I/O and service-termination failures keep the run retained and are retried by bounded reads at host startup and at turn opening for the opened work.",
+    "A naming reads the work's retained runs before reporting Confirmed; regression tests cover each refusal class, restart persistence, the startup/turn-opening reads, and the naming path, and the review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Retained runs Engram definitively refuses are retired with a durable reason and no longer block confirmation; damage raises the alarm and transient failures stay retained, retried by bounded reads at startup and turn opening; a naming reads retained runs before reporting Confirmed. Landed in C3, master 0bfbb90d72a513e52110ceaee6abab443db4435b. Not yet observed on a running host: needs checking after the restart.",
+    "completed_at": "2026-11-04T01:13:22.180664500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

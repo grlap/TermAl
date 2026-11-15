@@ -1,0 +1,29 @@
+{
+  "id": "01a18c43-a661-7380-b93f-2c4d136dd1c3",
+  "external_ref": null,
+  "title": "Exact cross-root review reads of legacy records without custody rows reveal 409 lifecycle state to foreign-project roots instead of 404",
+  "outcome": "Exact cross-root review reads of legacy records without custody rows reveal 409 lifecycle state to foreign-project roots instead of 404",
+  "acceptance": [
+    "Exact cross-root review reads of legacy records without custody rows reveal 409 lifecycle state to foreign-project roots instead of 404 is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "review-finding",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c643-73a1-b8c5-fb35d7e76d72",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

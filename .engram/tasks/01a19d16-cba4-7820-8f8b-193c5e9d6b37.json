@@ -1,0 +1,41 @@
+{
+  "id": "01a19d16-cba4-7820-8f8b-193c5e9d6b37",
+  "external_ref": null,
+  "title": "w-3fe8 C2 misc test-only corrections T1 T2 T3 T6 (50226370)",
+  "outcome": "After the five-case ff79 return, correct the four coordinator-classified C2 test-port cases T1, T2, T3 and T6 in one separate fresh named root on exact tree50226370; preserve production behavior and every relevant assertion, return one frozen test-only source patch and master-to-current assertion ledger without Cargo or an execution claim.",
+  "acceptance": [
+    "On exact50226370 in a fresh named root, correct only the four assigned failing test files: typed promoted-queue persistence error stage; canonical build_delegation_prompt envelope at held and released boundaries; truthful ordinary unknown-handoff/history fixture; actual durable transcript prefix/window before real commit.",
+    "Preserve later no-provider, terminal, wait, reload, idempotency, successor, fence, release, once-only, no-admission, opaque-payload, uncertainty, B-once and no-replay assertions; no production/loader/persist-invariant edits, offset reset, sleeps or budgets.",
+    "Return one frozen scoped patch/tree/full source and a master-to-current ledger per changed assertion to Sol-03d4 with copy to Fable2; no Cargo/compiler/test execution or pass/closure claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "fable1093",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "test-port"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 misc4 test corrections; exact4 tree6aca97b7/16-row ledger b9781037. Source-handoff accounting only, preserve unchanged product/history invariants.",
+    "completed_at": "2026-11-08T19:22:59.600670Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

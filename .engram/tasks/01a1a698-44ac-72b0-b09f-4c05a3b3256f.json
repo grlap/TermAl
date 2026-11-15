@@ -1,0 +1,29 @@
+{
+  "id": "01a1a698-44ac-72b0-b09f-4c05a3b3256f",
+  "external_ref": null,
+  "title": "Test Rust filter-attribute parsing and strict check-attr stderr refusal",
+  "outcome": "Negative controls prove the Rust attribute parser rejects incomplete, malformed, mismatched or extra records, and both producers refuse successful check-attr commands with warning stderr.",
+  "acceptance": [
+    "Test Rust filter-attribute parsing and strict check-attr stderr refusal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

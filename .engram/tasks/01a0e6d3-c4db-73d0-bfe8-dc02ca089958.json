@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4db-73d0-bfe8-dc02ca089958",
+  "external_ref": "tm-d1ba",
+  "title": "Deadlock guard cannot distinguish a deadlock from machine contention when it fires",
+  "outcome": "Filed after comparing our guard with Engram's equivalent, which has a second floor ours lacks (Fable, 2026-09-08).\n\nWHAT WE HAVE. src/tests/phase_sync.rs:262 asserts that a fixture published readiness within TEST_PHASE_DEADLOCK_GUARD, sixty seconds (src/session_lifecycle.rs:42), and fails with \"fixture phase `X` has not published readiness after ...\". It is a LIVENESS guard with a generous margin, not a performance assertion, and it is the only wall-clock assertion in our suites - everything else asserts on injected values or counters.\n\nTHE GAP, which only appears at the moment it fires. \"Something took too long\" describes a deadlock and describes a neighbour compiling on the same machine equally well, and by then the discriminating evidence is gone: the run has ended and the load has vanished. On a shared machine the two causes produce an IDENTICAL artifact, so the message cannot be read.\n\nThis matters more here than it would elsewhere because of a standing project rule: flakiness is a symptom to diagnose, never a reason to retry or to widen a timeout. A guard whose failure cannot be attributed makes that rule unfollowable exactly when it is needed.\n\nTHE FIX, cheap and borrowed from Engram's guard: add a SOFT threshold below the hard one - roughly a third - that does not fail but PRINTS the phase name, the measured time, the threshold, and whatever cheap background indicator is available. It does not change WHEN the test fails; it changes whether anyone can read WHY.\nReading afterwards becomes decidable: hard limit broken with soft warnings scattered through the whole run means systemic slowdown; no soft warnings and one phase jumping straight past the limit means a genuine deadlock or a single stall.\n\nThis is the same rule as the rest of the day, applied to a guard rather than a measurement: RECORD THE DISCRIMINATING FACT WHILE IT STILL EXISTS.\n\nCLASSIFICATION, per the distinction settled today: this is a DEFERRAL, not inventory, because it has a real trigger - the next time that guard fires, somebody will be standing in front of an unreadable failure, and that is the moment the work pays for itself. Doing it before then is optional; doing it then is nearly free and obviously worth it.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

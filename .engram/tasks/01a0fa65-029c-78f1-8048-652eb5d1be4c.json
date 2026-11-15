@@ -1,0 +1,34 @@
+{
+  "id": "01a0fa65-029c-78f1-8048-652eb5d1be4c",
+  "external_ref": null,
+  "title": "Duration report: an empty or wrong-shape Node event artifact reads as a measured zero-test report",
+  "outcome": "In scripts/test-durations.mjs the Node JSONL parser checks JSON syntax but not event shape or completeness. An empty artifact, or lines such as `{}`, is therefore reported as status \"measured\" with zero tests. A reporter that created its file and died before emitting events looks like a valid zero-test run. The fix validates the recognized event shapes and reports an empty or incomplete event stream as unreadable or incomplete, not as a measurement. It adds empty and wrong-shape Node artifact cases.",
+  "acceptance": [
+    "An empty, structurally invalid or incomplete Node duration artifact is reported as unreadable or incomplete rather than a measured zero-test report; tests cover the empty and wrong-shape cases."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "test-durations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

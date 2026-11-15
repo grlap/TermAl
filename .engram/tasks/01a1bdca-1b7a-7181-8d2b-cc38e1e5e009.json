@@ -1,0 +1,32 @@
+{
+  "id": "01a1bdca-1b7a-7181-8d2b-cc38e1e5e009",
+  "external_ref": null,
+  "title": "Ordinary Engram work-session transport: release startup reservation on unwind",
+  "outcome": "An unwinding control-process startup cannot leave a permanent occupied-None reservation or an indefinite legacy shutdown wait.",
+  "acceptance": [
+    "A startup unwind relinquishes only its own still-current cold-start reservation without removing a published or replacement process.",
+    "A discriminating regression covers unwind before publication and subsequent same-session startup/shutdown behavior while preserving concurrent-start serialization and exact cleanup custody."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "control-transport",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-reported",
+    "outage",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

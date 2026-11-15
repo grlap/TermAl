@@ -1,0 +1,28 @@
+{
+  "id": "01a10151-89ee-79c0-89bc-1a9c2b579ca4",
+  "external_ref": null,
+  "title": "Narrow delivered source-observation finalization projection to avoid queue-change stalls",
+  "outcome": "Narrow delivered source-observation finalization projection to avoid queue-change stalls",
+  "acceptance": [
+    "Delivered observation finalization acknowledges only its relevant handoff and owner state; a concurrent benign queue-head change cannot make its persistence fence wait until the full dispatch deadline.",
+    "A deterministic production-path control changes the queue between finalization publication and the SQLite write and verifies prompt completion proceeds while exact cleanup proof remains required."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

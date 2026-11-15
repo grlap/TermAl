@@ -1,0 +1,30 @@
+{
+  "id": "01a19760-8c03-77d3-9108-5a03f941cad6",
+  "external_ref": null,
+  "title": "Import-hold decision: cover same-owner multi-record coverage, association-insensitive matching and sibling-scope owner fences",
+  "outcome": "engram_import_hold_disposition's remaining stated branches have table tests. Also, its unused generic journal-error parameter and the candidate's host_incarnation field are documented or simplified.",
+  "acceptance": [
+    "Tests cover: a candidate resolving to the fence's own owner being held even when that owner's coverage is Unknown or its association is not admitted; one owner_id enrolled through several records for one binding with mixed coverage giving Unknown(OwnerCoverageUnknown); a fence of another association_id in the same store and project still holding; owner records in another store or project being ignored during resolution; and an owner-scoped fence in another store or project not making an unbound candidate unknown",
+    "engram_import_hold_disposition's journal-error parameter either takes a concrete type or Option, or documents why it is generic, and EngramImportDispatchCandidate::host_incarnation documents that it is the host's current incarnation",
+    "the change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "found-by-review",
+    "import-reconciliation",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

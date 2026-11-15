@@ -1,0 +1,29 @@
+{
+  "id": "01a0feaa-67fa-7bc3-80e0-a490c271ed2e",
+  "external_ref": null,
+  "title": "Master fails cargo fmt --check in 18 test files, and the full gate has no formatting stage",
+  "outcome": "Master fails cargo fmt --check in 18 test files, and the full gate has no formatting stage",
+  "acceptance": [
+    "`cargo fmt -- --check` exits 0 on master, by a formatting-only commit that changes no behaviour (no test or product logic edits).",
+    "The maintained full gate (scripts/test-launcher.mjs full), or another recorded standing check, runs `cargo fmt -- --check`, so new formatting drift fails the gate; or, if that is decided against, the decision and its reason are recorded on this item by the coordinator."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "formatting",
+    "gate",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

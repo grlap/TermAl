@@ -1,0 +1,32 @@
+{
+  "id": "01a18c81-4ecc-7bc2-b863-784e8efcbe62",
+  "external_ref": null,
+  "title": "Preserve backoff for containment Stop refusals unrelated to a reset fence",
+  "outcome": "Distinguish project-fence deferral from other no-claim Stop outcomes so an existing Stop owner or provider-capacity branch retains appropriate diagnostics and backoff.",
+  "acceptance": [
+    "A project-fence deferral preserves the pending Stop's attempts, due time and eligibility age.",
+    "A non-fence no-claim outcome retains typed refusal or bounded retry/backoff behavior, covered by a targeted test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "containment",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "outage",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a188dd-2eb5-7c30-b8b5-3af0aab58d4c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1bdc9-7acc-77e0-b0b2-2460c93f90e0",
+  "disposal_reason": "Fable2722 obsolete-feature sweep: completed parent w3af0 blocks claim; tracker-advertised independence is used only for removal-provenance disposition, not renewed gated-control implementation.",
+  "completion": null
+}

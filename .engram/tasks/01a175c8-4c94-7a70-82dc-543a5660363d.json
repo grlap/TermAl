@@ -1,0 +1,32 @@
+{
+  "id": "01a175c8-4c94-7a70-82dc-543a5660363d",
+  "external_ref": null,
+  "title": "Bound automatic mailbox admissions performed by one directory request",
+  "outcome": "A first directory/MCP read on a host with many roots performs bounded admission work and exposes incomplete inventory explicitly without weakening aliases.",
+  "acceptance": [
+    "One directory request has a documented bound on newly admitted roots or uses the existing lifecycle's incremental reconciliation, without a parallel session authority.",
+    "Large-inventory regression proves request progress and explicit incomplete-host reporting; global aliases refuse while incomplete and complete catalogs keep ordinary addressing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

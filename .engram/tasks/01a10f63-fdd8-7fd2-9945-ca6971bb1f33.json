@@ -1,0 +1,80 @@
+{
+  "id": "01a10f63-fdd8-7fd2-9945-ca6971bb1f33",
+  "external_ref": null,
+  "title": "Dormant Begin raw validation and exact local cancellation proof",
+  "outcome": "Tested unused raw-preserving decoder and coherent cancellation proof on the actually landed core prerequisite; no runtime activation.",
+  "acceptance": [
+    "Only unused validation/include, tests and dormant docs change against the actual landed core. Core contracts/fence remain unchanged; no live/persisted fields, loader/admission/Begin/delivery/operator routes or new held states.",
+    "Decode preserves all original raw envelope/audit/marker/capture evidence and diagnostic precedence under malformed or inconsistent fields. Historical uncertain_grant alone is not modern provenance; partial or malformed present modern transport evidence cannot gain legacy authorization. The decoder neither mutates unrelated session/head data nor fabricates an envelope, key, pre-wire ACK, replay or admission authority.",
+    "Valid-baseline single-field adversarial controls bind envelope, marker, authority session, grant/key, revision, immutable original head inputs and production intent fingerprint. Ordinary same-id text/expandedText/attachments/source changes and mailbox same-id text changes cannot substitute authority.",
+    "An independently coherent modern local cancellation proof survives corruption confined to replay transport. Legacy-labelled captures cannot bypass present modern envelope/format/audit evidence; legacy proof invents no historical envelope/key/ACK. Applicable uncertain-grant coherence is checked without reclassifying historical evidence as modern.",
+    "Preparation revision and current OperatorCancelled revision have an explicit checked transition bound to operation/audit, invalidating stale attempt ownership. Terminal proof requires coherent capture/audit, exact old head absent and identified message with full original text; successor never substitutes or retires. Positive prepare-to-cancel/readback and stale/cross-operation negatives cover this. Resident-tail absence cannot establish non-terminal durable truth; documented complete hydrated input or exact persisted lookup is required, without connecting production loader.",
+    "Native production count against actual landed core, including seams, stays at or below 370 ADDED (350 plus one coordinator-approved allowance of 20 solely for the pair-1 Medium cancellation-audit correction), with complete-context fmt forecast/final recount, no compression or further raise. Own named-root exact full gate/host Test credit, independent read-only Codex/Claude pair with every earlier Medium in this scope fixed/re-reviewed, filed residual Lows and independent acceptance are required. All P1-P6 Test-bound."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "begin-recovery",
+    "dormant",
+    "stage-a",
+    "stage-a-proof"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10f63-d654-79a2-8122-18ed1010f1f5"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Dormant raw-preserving Begin decoder and exact local cancellation proof landed in master407e420993e71f55ad416d6c27fe13592c81a47f; author d707fb2c/tree1a2b, own exact gate+host Test PASS, independent pair2 and fresh6/6 acceptance8d8c7779. All1226 source raw pins unchanged at completion. No runtime activation, replay, provider delivery or incident-resolution claim.",
+    "completed_at": "2026-10-06T11:54:49.352015800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

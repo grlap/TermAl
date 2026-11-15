@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8f5-8ef8-7850-acd4-e88c907d4bad",
+  "external_ref": null,
+  "title": "Recheck same-path retired-check eligibility against the fresh phase-two source",
+  "outcome": "A same-path predecessor that becomes admissible after a disposition note is written is refused for exclusion against the fresh source bracket, without granting or rewriting credit.",
+  "acceptance": [
+    "A behavioral race test changes the same named root back to the acknowledged predecessor's source between phases and proves that a now-admissible check is not excluded.",
+    "Different-path retired checks and genuinely root-rebound same-path predecessors retain their request-local audited behavior; no original run, acknowledgement or outcome is rewritten."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d595-9e1d-76d0-9955-2ecb0cb4d6e6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

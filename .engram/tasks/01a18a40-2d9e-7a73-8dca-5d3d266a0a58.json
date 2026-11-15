@@ -1,0 +1,26 @@
+{
+  "id": "01a18a40-2d9e-7a73-8dca-5d3d266a0a58",
+  "external_ref": null,
+  "title": "Reword the unresolved-report comment at the closing checkpoint and align the \"unresolved\" log exclusions between the closing and rebind-recovery paths",
+  "outcome": "The comment at the closing checkpoint's report drop in src/engram_host_adapter.rs says correctly that the cached report is kept and that the persisted checkpoint operation holds the exact request for original-checkpoint result recovery. Both call sites log \"unresolved\" only for answers that leave the outcome unresolved, excluding grant_not_begun and the fresh-bind codes alike.",
+  "acceptance": [
+    "Reword the unresolved-report comment at the closing checkpoint and align the \"unresolved\" log exclusions between the closing and rebind-recovery paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a15622-01dd-7451-8bb8-68d7fba8f280",
+  "external_ref": null,
+  "title": "Keep explicit cleanup ownership through invalid process-group conversion",
+  "outcome": "Address R1 Low: invalid-pgid conversion failures must not silently skip both cleanup and unresolved diagnostic retention; preserve the no-signal-after-reap contract.",
+  "acceptance": [
+    "A regression or documented unreachable invariant covers failure before cleanup admission so the child is not silently skipped by both cleanup and retention."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "bounded-reads",
+    "cross-machine",
+    "design-pending",
+    "diagnosis",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "remote-mailbox",
+    "review-follow-up",
+    "s2",
+    "test-failure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a155b7-0ea1-7320-ac7a-867b51249f9a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a15816-a61c-72c3-a44e-5e1d6303a647",
+  "disposal_reason": "Continue independently under Fable2 assignment #433 after parent w-867b51249f9a completed; preserve original parent/review provenance.",
+  "completion": null
+}

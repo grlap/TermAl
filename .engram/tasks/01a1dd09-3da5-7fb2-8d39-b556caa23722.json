@@ -1,0 +1,30 @@
+{
+  "id": "01a1dd09-3da5-7fb2-8d39-b556caa23722",
+  "external_ref": null,
+  "title": "A parent cannot deliver updated instructions to its running delegation child; a follow-up after cancel is refused, losing the child's session and worktree",
+  "outcome": "A parent session can get new conditions to a running delegation child without discarding its work. Either a message is queued and delivered to the child at its next turn, or a canceled (stopped) delegation can be resumed with a follow-up in its existing session and worktree.",
+  "acceptance": [
+    "A parent can queue a message for its own RUNNING delegation child; the child receives it at its next turn boundary (after the current turn ends, before or as the next follow-up) without the running turn being canceled, and the parent sees a durable receipt. Only the delegation's own parent can do this.",
+    "Alternatively or additionally: after the parent cancels a delegation's running turn, termal_followup_session on that delegation succeeds and continues in the same child session and worktree with the delivered text, instead of 409 'delegation was canceled and cannot be resumed'. The cancel's other effects stay as they are now.",
+    "Behavioural tests cover the chosen path(s): message to a running child delivered exactly once at the next boundary, non-parent refused, follow-up after cancel continuing in the same session/worktree; existing refusal of follow-up while running stays unchanged unless the queue path replaces it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "cross-project",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

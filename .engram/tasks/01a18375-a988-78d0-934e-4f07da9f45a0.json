@@ -1,0 +1,28 @@
+{
+  "id": "01a18375-a988-78d0-934e-4f07da9f45a0",
+  "external_ref": null,
+  "title": "Batch observation path discards the synchronous-save error of later per-row delta commits without logging or marking it",
+  "outcome": "Batch observation path discards the synchronous-save error of later per-row delta commits without logging or marking it",
+  "acceptance": [
+    "In persist_test_run_evidence_batch_with_compaction_locked, an Err from a later row's commit_delta_locked (stopped-worker synchronous save failure) is logged or recorded (e.g. that row marked failed or a dirty-retry marker), instead of a bare discard; revision allocation and publication stay as w-cee5 left them.",
+    "A regression shows the case where the first save succeeds and a later per-row save fails is visible to the operator; the review pair finds no Medium or higher and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

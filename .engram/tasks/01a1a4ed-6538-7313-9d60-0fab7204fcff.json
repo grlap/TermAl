@@ -1,0 +1,32 @@
+{
+  "id": "01a1a4ed-6538-7313-9d60-0fab7204fcff",
+  "external_ref": null,
+  "title": "Reduce historical test-run snapshot reconciliation cost measured at 17–19 ms per large update",
+  "outcome": "Use the recorded large-state profiling baseline to reduce unnecessary historical test-run reconciliation work while preserving summary identity, diagnostics invalidation and all wire-field changes.",
+  "acceptance": [
+    "The 9293-run rich-summary snapshot path is reproduced with deterministic work-count regression coverage and the existing synthetic profiling setup; the original cost is recorded before changes.",
+    "A measured improvement preserves test-run ordering, conservative legacy/detail invalidation and every relevant wire-field change; detailVersion alone is not assumed to certify the whole summary, and the same setup is measured before and after.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the exact candidate passes the full gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "profile-measured",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1a2f5-6622-74c1-af5d-8ca813f51d82",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1a4f5-c220-7ab2-a0c2-63e3841bac0b",
+  "disposal_reason": "Continue as independent measured performance work after profiling parent completed; retain provenance, existing criteria and baseline-artifact dependency.",
+  "completion": null
+}

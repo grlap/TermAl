@@ -1,0 +1,29 @@
+{
+  "id": "01a135ff-6fdb-7e40-8558-1041c4d8aa5c",
+  "external_ref": "engram:w-65fb79ead0c3",
+  "title": "Schedule a task-file import or export in the main checkout like a gate slot",
+  "outcome": "A task-sync import or export that changes files in TermAl's main checkout is scheduled by the TermAl coordinator like a gate slot. The coordinator announces it to any session rooted there and waits for that session's turn or gate to settle. The exchange then runs outside any install window, and the slot is released after it. The exchange changes content-v1 and fences a turn or carried gate rooted in the main checkout. In practice that covers sessions named on the main checkout and the integration owner's install build.",
+  "acceptance": [
+    "The rule is written in the TermAl repository's coordination documentation (docs/test.md or the feature doc that owns gate alternation), cross-linked both ways with Engram's task-sync documentation reference (git-task-sync.md, the local exchange boundary). It names who schedules, which sessions are affected, the install-window exclusion, and that the exchange is not a filesystem freeze.",
+    "Engram's coordinator concurs with the exact wording in a note on this item before it lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-project",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

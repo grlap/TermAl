@@ -1,0 +1,30 @@
+{
+  "id": "01a1bd29-b359-7e32-859e-20197e177035",
+  "external_ref": null,
+  "title": "Reconcile unreferenced immutable evaluation source files after restart",
+  "outcome": "A bounded startup reconciliation removes only host-owned evaluation source files that no persisted or in-flight attempt can still consume, preserving replay custody on uncertain outcomes.",
+  "acceptance": [
+    "Startup reconciliation preserves every file referenced by a persisted open evaluation write and every active consumer, including unknown or unacknowledged persistence outcomes.",
+    "Only validated host-owned UUID regular files inside canonical private evaluation storage are eligible for cleanup; crash-before-Pending and abandoned/unreferenced files are eventually removed without following external locators.",
+    "Behavioral crash/restart fixtures demonstrate preservation of referenced files and cleanup of unreferenced files; exact review and validation evidence is recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "cleanup",
+    "source-id"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

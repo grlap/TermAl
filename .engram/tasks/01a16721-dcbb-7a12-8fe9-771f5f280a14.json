@@ -1,0 +1,32 @@
+{
+  "id": "01a16721-dcbb-7a12-8fe9-771f5f280a14",
+  "external_ref": null,
+  "title": "Credit-required launcher preflight: refuse a credited run before any stage when the exact named root/claim/generation is not eligible",
+  "outcome": "A run launched for credit checks, before any stage, the existing effective turn-root and claim predicates against the exact run, root and generation, and revalidates them at stage start. An ineligible run runs zero stages and returns a typed refusal. An explicit diagnostic mode still runs uncredited. Slice 1 of Architect2's design note 510b3e9a0f174ac5a5f3eb7eb4cfde4e on w-47e49c222faf (Greg escalation #252). The ac230 wrong-root refusal was correct but discovered only after a full gate.",
+  "acceptance": [
+    "On a host providing child A's credit-admission capability, Within a TermAl host context, a normal launcher run intended for verification credit obtains an explicit host credit admission before any build/test stage or executable preflight probe. The host uses the actual canonical requested worktree, effective current-turn source root, matching live claim identity/fence and source-root generation, plus the applicable existing carry prerequisites; pending next-turn naming cannot substitute for the effective root. Wrong-root, missing/stale claim, stale generation or unresolved eligibility returns a typed actionable refusal and executes zero stages. No root is silently substituted.",
+    "On a host providing child A's credit-admission capability, A successful admission is bound to the immutable run/request identity, initiating session, canonical root, work/claim/fence and effective generation. The launcher revalidates that binding at the actual start boundary of each stage; mismatched, replayed, revoked or superseded authority refuses the affected stage and all remaining stages without executing them. Existing terminal source-integrity, overlap, watcher and settlement checks remain authoritative: admission is eligibility, not a guarantee of future credit or PASS.",
+    "On a host providing child A's credit-admission capability, An explicit diagnostic mode continues to execute without requiring a claim and is visibly uncredited in request/result/host reporting; it cannot be promoted to credited mode by a local artifact edit, replay, restart or later claim. Standalone invocations remain supported as uncredited diagnostics. Normal host-context full/focused/live/category launches use credit-required admission by default, and unavailable or unsupported admission never silently falls back to diagnostic execution. docs/test.md and the launcher's help text describe the credit-required default, the explicit diagnostic mode and how to request it.",
+    "On a host providing child A's credit-admission capability, Deterministic repository-local Rust/API and Node launcher regressions cover wrong effective root, pending naming, missing/stale claim/fence/generation, run/request/session replay and a change between admission and stage start, asserting zero forbidden subprocess starts. Positive unchanged eligibility follows the normal host-recorded verification path; explicit diagnostic/no-claim execution stays uncredited. Existing delayed-watcher and transient-candidate behavior is not weakened or duplicated.",
+    "Focused changed-scope tests pass on the frozen input, a fresh independent read-only Codex/Claude pair has no outstanding Medium-or-higher finding, and Merger runs the maintained full Windows gate on the exact integration tree before landing and independent acceptance evaluation. The host-capability child is reviewed, gated through the unchanged existing launcher and supported credit path, landed and installed first; the parent launcher/default/stage-check/documentation remainder starts only after a coordinated Greg-performed restart and observation that the running host actually advertises that capability. No diagnostic run is promoted into a credited run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

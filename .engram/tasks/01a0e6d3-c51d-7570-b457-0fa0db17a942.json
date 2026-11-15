@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c51d-7570-b457-0fa0db17a942",
+  "external_ref": "tm-h6uc.1",
+  "title": "Extract a compact Workspaces panel with existing actions",
+  "outcome": "Owner Termal::Grok. Create focused WorkspacesPanel (suggest ui/src/panels/WorkspacesPanel.tsx and scoped CSS) from WorkspaceSwitcher content in ui/src/workspace-shell-controls.tsx. Normal section body, no floating dialog/trigger. Current first then label/id sort; stable id keys; current synthetic fallback when summary missing; compact accessible rows with ellipsis/80-char labels, current badge, UUID in details; local search by label or id. Separate main switch button and overflow action button, never nested buttons. Header New here/New window/Refresh; row Rename for persisted rows, Open in new tab and Delete only for non-current. Keep label draft/save error local, trim and maxLength 80, empty removes label, cancel restores focus, no side effects on cancel. Delete requires confirmation, duplicate actions disabled pending. Receive existing async handlers as props, do not fetch/save workspace layout in this view. Tests alongside implementation: concrete ordering including current Zulu versus other Alpha, loading/error/retry, search no-match, draft/cancel/reject, pending delete. Existing tm-md1b describes the ordering regression; do not create another duplicate. Do not remove old entry point until integration task.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c51b-7df2-8753-e4ea12b01b75",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Workspaces panel shipped in f4ede4b (ancestor of master f7db2c58); ui/src/panels/WorkspacesPanel.tsx. Closed by evidence.",
+  "completion": null
+}

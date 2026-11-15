@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6b2-7de1-9153-5df973f60ae2",
+  "external_ref": "tm-r8ry",
+  "title": "Switching between tabs in a pane does not preserve the scroll offset",
+  "outcome": "REPORTED BY GREG, 2026-09-09: switching between tabs loses the scroll position. Coming back to a tab does not put the reader back where they were.\n\nSTATUS OF THIS DESCRIPTION: the symptom is the principal's report. Everything below the first section is source-identified only. NOTHING HERE IS AN EXECUTED REPRODUCTION, and the first task is to produce one - a failing test that goes green with the fix - before any code is changed. Two separate defects tonight were reported from a source chain alone and one of them did not reproduce, so the executed test comes first.\n\nWHAT IS UNKNOWN AND MUST BE ESTABLISHED BY THE REPRODUCTION, because each answer points at a different mechanism:\n  - Which tab kinds? The key resolver branches per kind (source, canvas, orchestratorCanvas, filesystem, gitStatus, terminal, mailbox, instructionDebugger, diffPreview) and has a separate default branch for agent sessions. A defect in one branch is a different bug from a defect common to all.\n  - Is it specific to switching tabs, or does any remount of the same content lose the offset? If any remount loses it, tab switching is only the most visible route and the title of this issue is too narrow.\n  - Is the offset lost (restores to top) or overridden (snaps to bottom by tail-follow)? These have opposite causes: the first is a missing or unmatched stored record, the second is follow authority winning over restoration.\n  - Is it a regression? If so, against which commit. If the behaviour never worked, say so plainly rather than implying a regression.\n\nWHERE THE MECHANISM LIVES:\n  ui/src/SessionPaneView.scroll-key.ts - resolveSessionPaneScrollStateKey builds the per-pane, per-tab key that the stored scroll record hangs on.\n  ui/src/SessionPaneView.scroll.ts - restoration effects and measurement.\n  ui/src/pane-scroll-position-migration.ts - migrates persisted records between key formats; a key-shape change strands old records.\n  ui/src/panels/virtualized-conversation-handle.ts and VirtualizedConversationMessageList.tsx - the virtualized path that has to settle before an exact offset can be honoured.\n\nFIRST PLACE TO LOOK, AND IT IS A HYPOTHESIS, NOT A FINDING: for a round trip A -> B -> A the key resolver returns the same string it returned before, because every branch is a pure function of the pane id and the tab identity. If that holds under test, the stored record is still addressable when the reader returns, which points away from keying and towards restoration - the offset is applied before the virtualized list has settled, so it clamps, or follow authority repins to the bottom first. Refute this before building on it: assert the key equality directly, because if the key does change the whole direction is wrong.\n\nThe one branch that deserves suspicion on its own terms is the default: it keys by pane, view mode and ACTIVE SESSION ID rather than by tab identity. Two tabs on the same session in one pane therefore share a record, and a view-mode change moves the key. Worth a targeted test even if the main defect turns out to be elsewhere.\n\nLIKELY ORIGIN IF THIS IS A REGRESSION: 6759c84 \"Put a returning reader back on the message they were reading (exact offset)\", 2026-09-07, is the newest scroll commit and is an ancestor of HEAD. It reworked exactly this behaviour across SessionPaneView.scroll.ts, the virtualized handle and the detached-restore path. A defect in returning a reader to an exact offset lands in its blast radius first. Check it before searching wider - but confirm by bisect or by an executed test, not by proximity.\n\nDONE MEANS: a test that fails on HEAD and passes with the fix, naming the tab kinds it covers, plus an explicit statement of which of the four unknowns above the fix does NOT address.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

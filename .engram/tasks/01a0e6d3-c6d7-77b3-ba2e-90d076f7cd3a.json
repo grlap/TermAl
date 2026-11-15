@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6d7-77b3-ba2e-90d076f7cd3a",
+  "external_ref": "tm-sxjz",
+  "title": "Use owned temp root in remote localization recovery race test",
+  "outcome": "The required parent review gate scripts/test-rust.sh fails deterministically on macOS in tests::project_creation_races::remote_session_create_publishes_prior_dirty_localization_recovery. Full gate evidence: 1802 passed, 1 failed, 2 ignored; focused exact reproduction fails 1/1 with EPERM while hardening /var/folders/.../T. Root cause is a test fixture defect: failing_persistence_path is created directly under std::env::temp_dir(); after the hook removes that directory, successful persistence hardens its parent, which is the protected macOS system temp directory. Use an owned TestTempRoot and place the deliberately failing persistence path beneath it, preserving the failure/recovery contract, then rerun the exact test and scripts/test-rust.sh.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The test fixture was fixed in 83c0ee3 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

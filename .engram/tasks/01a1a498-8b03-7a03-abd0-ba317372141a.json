@@ -1,0 +1,25 @@
+{
+  "id": "01a1a498-8b03-7a03-abd0-ba317372141a",
+  "external_ref": null,
+  "title": "Telegram route rate-limit test still depends on an hour of real time, and the limiter's test relies on saturating Instant arithmetic",
+  "outcome": "telegram_test_route_rate_limit_includes_retry_after_header reaches a rate-limited route without any dependence on elapsed real time and without relying on Instant::duration_since saturating, for example through a controlled clock for the route path, or the decision is recorded that an hour's margin is enough.",
+  "acceptance": [
+    "The route test's verdict no longer depends on real time passing, or a note records why the one-hour margin stands",
+    "The route test still fails if the route stops applying its rate limit, shown by a recorded failing run"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

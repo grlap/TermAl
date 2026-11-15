@@ -1,0 +1,28 @@
+{
+  "id": "01a0f528-f110-7c01-85c8-005fa5c383c4",
+  "external_ref": null,
+  "title": "A carried gate counts writes made after its launcher finished, until the host next polls it, as writes \"before it settled\"",
+  "outcome": "Reported by Engram::Opus (session-7284) through TermAl mailbox 37bcca97, message #159, 2026-10-01, host 8e8358a.\n\nA background full gate was launched at 2026-10-01T01:30:27.848Z in Engram's named-root-assessment worktree. Its launcher finished at 01:41Z: all 9 stages passed, and its own freeze check matched at completion.\n\nAt about 01:45Z the session edited a file for its next item. The host then refused the gate: \"a file in its worktree changed: …\\src\\mcp.rs.tmp.70588.7f5cb3752adc\", which is the edit's temporary file.\n\nSo the host treats the run as unsettled after the launcher has written its terminal result. It looks as if the host settles a carried run only when it next polls carried runs, at a turn checkpoint, and fences every write up to then.\n\nExpected: the run settles at the launcher's terminal result, its results.json completion time. A write after that time does not refuse it, even if the host learns of the completion later. If the delay is intended, the refusal line and docs/test.md must say what \"settled\" waits for, so that a session knows not to edit until then.\n\nRelated: w-072e84b182c7 (silence when not recorded) and the keep-focus memory, which already tells holders to wait for the record before touching anything.",
+  "acceptance": [
+    "A carried gate whose launcher wrote its terminal result before a later write in its worktree is not refused for that write, even when the host processes the completion after the write; a test covers it.",
+    "A write between launch and the launcher's terminal result still refuses the credit; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

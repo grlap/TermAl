@@ -1,0 +1,28 @@
+{
+  "id": "01a15653-e88a-7841-bc16-667e66aecbff",
+  "external_ref": null,
+  "title": "A Codex holder's read-only git command, run after its carried full gate ended but before the host settled it, refuses the gate's credit",
+  "outcome": "A Codex holder's read-only git command, run after its carried full gate ended but before the host settled it, refuses the gate's credit",
+  "acceptance": [
+    "A Codex holder's read-only git command, run after its carried full gate ended but before the host settled it, refuses the gate's credit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

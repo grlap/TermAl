@@ -1,0 +1,31 @@
+{
+  "id": "01a176b0-29f9-77d0-87fa-fa510cbcb9e0",
+  "external_ref": null,
+  "title": "Remove only target caches from nine named idle worktrees under urgent coordinator disk instruction",
+  "outcome": "Remove only target caches from nine named idle worktrees under urgent coordinator disk instruction",
+  "acceptance": [
+    "For each of the nine exact worktrees named by Fable1689, resolve and verify only its .tmp/<root>/target path, confirm no active process/run uses it, remove only that target cache one at a time, retain source/.git/review-runs/.evidence and log results plus disk-space measurements under .logs/."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 0,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; Non-code execution complete (no commit):529d3a20 records all9 authorized target caches removed, reaped processes and per-root logs; closure only, no fresh cleanup.",
+    "completed_at": "2026-11-08T19:21:46.164259200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

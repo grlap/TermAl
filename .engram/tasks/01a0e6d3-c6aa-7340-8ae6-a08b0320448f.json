@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6aa-7340-8ae6-a08b0320448f",
+  "external_ref": "tm-qt5",
+  "title": "Require real-binary verification for every external protocol integration",
+  "outcome": "PROCESS RULE, earned by tm-6ty (2026-07-29): OpenCode shipped to master unable to start a single session because TermAl emitted ACP McpServer.env as a JSON object where the protocol requires an array of {name,value}. It passed cargo check, full Rust and UI suites, freeze helper, fmt, diff-check, AND two independent /review-code reviewers.\n\nWHY EVERYTHING PASSED: every test exercised TermAl's own fixtures, which encoded the same wrong shape on both the sending and asserting side. Self-consistent fixtures prove internal agreement, never conformance. Reviewers read code, not wire. The one step that would have caught it — tm-hsw slice D, a live smoke against the installed binary — was deferred and then overtaken by the check-in.\n\nTHE RULE: any feature speaking an EXTERNAL protocol (ACP agents, MCP servers, CLI stream-json contracts, remote TermAl peers) may not be declared complete until at least one verification has touched the real counterpart. Fixture round-trips do not satisfy this. Acceptable forms: a live smoke against the installed binary; a captured real-wire transcript replayed as a fixture WITH provenance recorded (version + capture date), as done for the OpenCode invalid-session shapes and the Claude hook ordering; or a conformance test that drives the actual external process.\n\nCOROLLARY, the deeper lesson: assert the EMITTED shape, not a round trip through our own mock. A test that sends through our serializer and asserts with our deserializer is a tautology. The tm-6ty regression must assert the literal JSON we put on the wire.\n\nALSO: when a live-verification slice is assigned and the feature ships before it runs, that is a process failure independent of the bug. Either the slice blocks the check-in or the feature ships explicitly labelled unverified. Fable owned slice D and let the check-in overtake it; that is the accountability half of this bead.\n\nApply to: docs/dev-team-pattern.md (the review-cadence section) and the feature-brief template. Cross-reference tm-6ty, tm-hsw (R3 empirical-capture rule that worked), and tm-9cn (hook-ordering capture that worked).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

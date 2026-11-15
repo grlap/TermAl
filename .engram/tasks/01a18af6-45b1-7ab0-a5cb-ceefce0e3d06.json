@@ -1,0 +1,27 @@
+{
+  "id": "01a18af6-45b1-7ab0-a5cb-ceefce0e3d06",
+  "external_ref": null,
+  "title": "Let the boot_on_delegation_root source lock accept rustfmt's block-closure form",
+  "outcome": "Let the boot_on_delegation_root source lock accept rustfmt's block-closure form",
+  "acceptance": [
+    "Let the boot_on_delegation_root source lock accept rustfmt's block-closure form is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "from-review",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

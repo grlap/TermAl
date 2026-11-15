@@ -1,0 +1,31 @@
+{
+  "id": "01a188a5-62f4-7441-b527-994bd00c642c",
+  "external_ref": null,
+  "title": "Remote Codex session turn fails with 'Error running remote compact task: workspace routing discovery unauthorized (401)' after a recovered connection",
+  "outcome": "The cause of the 401 on a remote Codex session's compact task is identified with evidence: either a Codex provider authorization or workspace issue on the remote machine, or a TermAl defect in how remote sessions carry provider authorization. If it is TermAl's, it is fixed so that a recovered remote session can compact without re-pairing or manual reconciliation. If it is the provider's, TermAl surfaces it as a typed provider-authorization failure with a recovery hint, not as an opaque failed turn.",
+  "acceptance": [
+    "A cause note with evidence names the host and session, shows the message's origin as Codex runtime or TermAl with file:line where it is TermAl's, and states whether the provider authorization for that machine's Codex home was valid at 16:53:34Z.",
+    "If TermAl is at fault: a fix with deterministic tests makes a remote Codex session that recovers its connection keep valid provider authorization for compaction, with no re-pairing or manual reconciliation.",
+    "If the provider is at fault: TermAl reports the failure as a typed provider-authorization error naming the host and the recovery action, covered by a test, instead of an untyped failed turn."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "agent-runtime",
+    "codex",
+    "greg-reported",
+    "remote"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1a58d-e55e-7a91-81ee-6f99e2b6393f",
+  "external_ref": null,
+  "title": "Give write-free Node capture strict Windows descendant custody",
+  "outcome": "A refused or cancelled Node capture on Windows terminates its owned descendant tree through a trusted precompiled helper or separately prepared custody boundary, without compiling or writing bootstrap files during capture.",
+  "acceptance": [
+    "Give write-free Node capture strict Windows descendant custody is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "commit-input",
+    "greg-directed",
+    "process-cleanup",
+    "source-revision",
+    "team-pilot",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

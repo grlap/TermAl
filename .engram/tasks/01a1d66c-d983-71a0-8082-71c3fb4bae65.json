@@ -1,0 +1,33 @@
+{
+  "id": "01a1d66c-d983-71a0-8082-71c3fb4bae65",
+  "external_ref": null,
+  "title": "Refresh delegation wait targets left cold after boot hydration retries",
+  "outcome": "A wait on a delegation whose completed child was left cold during boot can settle without a separate get, result or cancel request.",
+  "acceptance": [
+    "A behavioral regression creates a boot-deferred delegation with a completed child and stored Running status, exhausts inventory hydration retries, then demonstrates that a wait settles without a separate get, result or cancel request.",
+    "Wait registration hydrates and refreshes its targets off-lock, or an equivalent bounded recovery mechanism settles skipped delegations; genuinely running delegations remain pending and corruption isolation and stale-capture fences remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation-waits",
+    "greg-reported",
+    "lazy-transcript-tails",
+    "performance",
+    "post-restart",
+    "review-follow-up",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

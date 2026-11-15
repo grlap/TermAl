@@ -1,0 +1,30 @@
+{
+  "id": "01a1910f-c810-7500-9f46-c3dc03b00c5c",
+  "external_ref": null,
+  "title": "Protect committed-input review invariants with focused regression coverage",
+  "outcome": "Regression coverage distinguishes the required committed-input identity, range, multiline brief and authority limits from unsafe alternatives.",
+  "acceptance": [
+    "Relevant regression coverage detects removal of required identity/range checks, loss of multiline brief propagation, or loss of the explicit no-new-authority boundary without adding brittle redundant tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "committed-input-review",
+    "follow-up",
+    "instructions",
+    "review",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18fb2-aa68-7ae1-833d-2637c793f4c2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

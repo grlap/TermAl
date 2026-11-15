@@ -1,0 +1,29 @@
+{
+  "id": "01a0ff70-0762-7c73-8260-6dddeecaad1d",
+  "external_ref": null,
+  "title": "SSE docs: revision gate wording says \"at or below\" but same-revision replayable session deltas are applied",
+  "outcome": "SSE docs: revision gate wording says \"at or below\" but same-revision replayable session deltas are applied",
+  "acceptance": [
+    "docs/architecture.md states the client's revision gate as strictly below the adopted snapshot with the same-revision idempotent replay exception, matching handleDeltaEvent.",
+    "The change is documentation only and the full five-stage gate passes on it; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "low",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

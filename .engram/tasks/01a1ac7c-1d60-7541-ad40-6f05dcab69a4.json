@@ -1,0 +1,29 @@
+{
+  "id": "01a1ac7c-1d60-7541-ad40-6f05dcab69a4",
+  "external_ref": null,
+  "title": "Keep mixed-window marker ordering discriminating after history load and remount",
+  "outcome": "The panel regression continues to detect mixed local/global marker ordering errors at the removal, history and remount boundaries.",
+  "acceptance": [
+    "The marker panel regression includes an older off-window marker alongside a resident marker after older-history transitions and after remounting a bounded tail window.",
+    "The strengthened assertions fail with zero-based resident positions compared to global hints and pass with the existing session-offset repair, without weakening navigation assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "review-followup",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

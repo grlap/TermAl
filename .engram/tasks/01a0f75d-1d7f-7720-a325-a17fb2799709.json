@@ -1,0 +1,29 @@
+{
+  "id": "01a0f75d-1d7f-7720-a325-a17fb2799709",
+  "external_ref": null,
+  "title": "Foreground launcher-stage lookup reads the last `results:` line of a summary, which a stage-log excerpt can displace, leaving a passed gate uncredited",
+  "outcome": "Foreground launcher-stage lookup reads the last `results:` line of a summary, which a stage-log excerpt can displace, leaving a passed gate uncredited",
+  "acceptance": [
+    "The foreground lookup of a launcher run's request record uses the launcher's own `results:` line (the first one, or the one right after the PASS/FAIL verdict line), not the last; a test where a later diagnostics excerpt line starts with `results: ` shows the gate still credited."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "test-launcher",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

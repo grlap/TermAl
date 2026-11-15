@@ -1,0 +1,34 @@
+{
+  "id": "01a11ce9-cfad-7ff0-a4a7-f9de4ccef495",
+  "external_ref": null,
+  "title": "Exercise the declared-command one-call whitespace witness with a platform-absolute directory",
+  "outcome": "Exercise the declared-command one-call whitespace witness with a platform-absolute directory",
+  "acceptance": [
+    "The whitespace rejection witness uses a platform-absolute directory and proves its ASCII control enters engram_one_call_prefix on Windows, Linux and macOS; it covers non-ASCII whitespace immediately after && and retains a passing one-call control."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "declared-checks",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

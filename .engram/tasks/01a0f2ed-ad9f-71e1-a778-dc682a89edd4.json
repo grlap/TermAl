@@ -1,0 +1,40 @@
+{
+  "id": "01a0f2ed-ad9f-71e1-a778-dc682a89edd4",
+  "external_ref": null,
+  "title": "A reported file edit fences every carried gate of its session, even when the edited path is outside the gate's worktree or under its scratch directory",
+  "outcome": "An edit report that names its path (Claude's Write and Edit tools do) fences a carried gate only when that path lies in the gate's worktree and outside its `.tmp/` scratch directory; an edit report with no path keeps today's rule.",
+  "acceptance": [
+    "A test reports an edit by the holder to a path in another worktree, and one under the gate's own `.tmp/`, while its gate runs: the carried check is not fenced and is credited.",
+    "A test reports an edit by the holder to a tracked file in the gate's worktree: the carried check is fenced, and the line names the edit.",
+    "An edit report that carries no path still fences every carried check of the session whose run is going; a test pins it.",
+    "The full gate passed on the exact landed input.",
+    "The same placement applies to an edit another session reports; a test covers both directions.",
+    "docs/test.md and docs/features/engram-host-adapter.md describe the rule, including what happens for a path Git ignores outside `.tmp/` (such as `target/`)."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fe4f-68f2-7111-b02d-aa25f77a6d2b",
+  "disposal_reason": "Same general scope as w-aa25f77a6d2b: exempting edits outside the carried root (other worktrees' tracked files, other sessions' edits). Per Architect2 ae3eb942, an exemption needs a ProvenOutside verdict; per Architect1 013d287a, that needs a per-operation cwd and a link-exit account; per 8f791136, w-aa25f77a6d2b carries that limitation. The narrow, achievable part (another worktree's .tmp/ scratch, absolute targets, fail-closed) goes to w-7997342bfc0b. Agreed by Fable2 (#1419); the carried root's own .tmp/ stays fenced for now.",
+  "completion": null
+}

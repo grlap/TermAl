@@ -1,0 +1,27 @@
+{
+  "id": "01a1d981-6043-7fd0-bed4-be16712b48aa",
+  "external_ref": null,
+  "title": "Non-Windows test builds warn that ScopedEnvVar::set_path is never used (dead_code)",
+  "outcome": "On every platform, the backend test build compiles without the dead_code warning for ScopedEnvVar::set_path, and its Windows-only caller keeps working.",
+  "acceptance": [
+    "Non-Windows test builds warn that ScopedEnvVar::set_path is never used (dead_code) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

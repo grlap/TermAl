@@ -1,0 +1,27 @@
+{
+  "id": "01a169a0-1d5f-7761-9a7b-83757ec3a3be",
+  "external_ref": null,
+  "title": "Refresh the position-fallback comments in the carried-binding test a_judged_binding_follows_its_criterion_text_and_only_a_weakened_one_is_refused",
+  "outcome": "Refresh the position-fallback comments in the carried-binding test a_judged_binding_follows_its_criterion_text_and_only_a_weakened_one_is_refused",
+  "acceptance": [
+    "Refresh the position-fallback comments in the carried-binding test a_judged_binding_follows_its_criterion_text_and_only_a_weakened_one_is_refused is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1c6fd-cccf-7c82-a134-34f5db24819c",
+  "external_ref": null,
+  "title": "Keep restart recovery after repeated rejection through remaining generic queue drains",
+  "outcome": "A restart recovery requeued after an initial synchronous rejection is retained when a later activation through an unconverted generic queue drain is synchronously rejected again. Remaining sites: federation_mailbox_wake_worker.rs:159, session_crud.rs:849/:1289, delegations.rs:2620, orchestrator_lifecycle.rs:640 and test_run_waits.rs:1194. Scope is recovery identity only; ordinary prompts and accepted/ambiguous deliveries retain their current behavior.",
+  "acceptance": [
+    "The listed owner-less generic drains retain selected queued identity and route delivery through the existing recovery-aware shared owner, or the documented supported surface is deliberately narrowed with explicit disposition of the unsupported paths.",
+    "A regression drives an initial recovery rejection, then a listed generic activation whose send is rejected again, and persists/reboots to prove the recovery is not consumed while its no-replay marker remains set."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "restart",
+    "restart-recovery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1c337-2650-7130-8f31-87a2dacd949a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c833-bd54-70f2-9ebb-6a9bcb40d633",
+  "disposal_reason": "Parent completed after independent acceptance 80a7494d4f904ff69726d8a490a756d2; continue this optional Low as independent work.",
+  "completion": null
+}

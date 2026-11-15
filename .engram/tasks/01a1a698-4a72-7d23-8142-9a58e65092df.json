@@ -1,0 +1,29 @@
+{
+  "id": "01a1a698-4a72-7d23-8142-9a58e65092df",
+  "external_ref": null,
+  "title": "Document commit-input filter-attribute refusals and nullable post-run commit",
+  "outcome": "Producer docs and refusal wording distinguish attribute-based filter rejection from configured drivers, document attribute.filter path diagnostics, and describe coherent unavailable v1 after.commit null records.",
+  "acceptance": [
+    "Document commit-input filter-attribute refusals and nullable post-run commit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

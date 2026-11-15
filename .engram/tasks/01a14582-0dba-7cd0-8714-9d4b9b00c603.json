@@ -1,0 +1,29 @@
+{
+  "id": "01a14582-0dba-7cd0-8714-9d4b9b00c603",
+  "external_ref": null,
+  "title": "Delegation result packet shows \"Findings: None\" when a read-only explorer's output lists High/Medium findings in its own format",
+  "outcome": "Delegation result packet shows \"Findings: None\" when a read-only explorer's output lists High/Medium findings in its own format",
+  "acceptance": [
+    "Delegation result packet shows \"Findings: None\" when a read-only explorer's output lists High/Medium findings in its own format is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "delegations",
+    "result-packet",
+    "review-integrity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

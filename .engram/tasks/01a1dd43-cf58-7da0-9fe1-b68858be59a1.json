@@ -1,0 +1,29 @@
+{
+  "id": "01a1dd43-cf58-7da0-9fe1-b68858be59a1",
+  "external_ref": null,
+  "title": "Scope the 'Every other committing session sends ... evidence to that owner' sentence so it does not apply to task-sync data-branch commits (TermAl and Engram)",
+  "outcome": "In the Commit and push section of AGENTS.md and CLAUDE.md, the sentence after 'Apart from author test refs and task-sync data-branch pushes, only the integration owner performs pushes under this rule' ('Every other committing session, including one committing directly on master, sends the commit hash and exact-input gate, review and task evidence to that owner by TermAl mailbox') is scoped to code commits under the standing rule, or names the task-sync data-branch commits as excepted, so routine export commits carry no impossible gate/review handoff duty. Found as a Low by the Claude reviewer (session-18136) of w-e7c5b9511ee3 R3 at 53baf7b8 (AGENTS.md:228, CLAUDE.md:153).",
+  "acceptance": [
+    "The sentence in both files no longer requires gate, review and task evidence for task-sync data-branch commits, and AGENTS.md and CLAUDE.md stay identical in that section.",
+    "Lands under the authority-file rule (both coordinators' concurrence, Greg notice, final-diff audit) as a clarification; no test reads the instruction files."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-file",
+    "review-follow-up",
+    "task-sync"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

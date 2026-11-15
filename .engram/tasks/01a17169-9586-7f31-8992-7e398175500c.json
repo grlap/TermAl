@@ -1,0 +1,31 @@
+{
+  "id": "01a17169-9586-7f31-8992-7e398175500c",
+  "external_ref": null,
+  "title": "Reconcile the launcher dependency-install documentation with full-gate UI bootstrap",
+  "outcome": "docs/test.md accurately distinguishes full-gate locked private UI dependency setup from focused/category/live behavior. Inspect the existing instruction-file wording for ambiguity without changing authority text outside its required process.",
+  "acceptance": [
+    "Reconcile the launcher dependency-install documentation with full-gate UI bootstrap is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "greg-directed",
+    "launcher",
+    "review-low",
+    "test-bootstrap",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a170de-026f-7ca2-8981-0571048015ee",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,43 @@
+{
+  "id": "01a1522e-d2ef-7db3-bbf5-7257308359dc",
+  "external_ref": null,
+  "title": "Define usable parent inventory continuation for review identity captures",
+  "outcome": "A parent capture either supports its returned continuation under the approved authority contract or explicitly omits/explains an unusable cursor; document repeated page observation cost.",
+  "acceptance": [
+    "A parent capture either supports its returned continuation under the approved authority contract or explicitly omits/explains an unusable cursor; document repeated page observation cost.",
+    "Focused verification appropriate to the change and the required independent review/exact-input full gate establish the final behavior without widening authority or increasing timeouts."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "beads-in-progress",
+    "beads-migrated",
+    "cross-project",
+    "greg-directed",
+    "host-platform",
+    "review",
+    "review-identity",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a150e9-cdc9-7a10-8ee9-f8169c6b1471",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

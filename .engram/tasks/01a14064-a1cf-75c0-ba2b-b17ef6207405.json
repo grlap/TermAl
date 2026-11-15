@@ -1,0 +1,32 @@
+{
+  "id": "01a14064-a1cf-75c0-ba2b-b17ef6207405",
+  "external_ref": null,
+  "title": "Document wake holds across failed Stop, pause and Engram grant retirement",
+  "outcome": "The wake failure feature brief describes factual Accepted/Unknown settlement under a retained pause, failed requested Stop, explicit Stop recovery and logical-wake retention after rejected grant retirement.",
+  "acceptance": [
+    "docs/features/wake-failure-recovery.md explains that failed Stop does not consume an Accepted/Unknown wake, preserves pause and reconciliation hold, and identifies Stop as the explicit cancellation path before resuming.",
+    "The brief distinguishes retiring an exhausted Engram grant from consuming the wake: the same positively rejected wake requires fresh write-ahead and authorization at the next eligible admission; it also states that runtime exit preserves independent operator pause."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "fan-in",
+    "follow-up",
+    "provider-error",
+    "wake-recovery",
+    "wakes"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a11d9d-2bd0-7af1-b87b-5656beda1d33",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

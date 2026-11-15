@@ -1,0 +1,44 @@
+{
+  "id": "01a15cd0-f370-7db0-aff5-f557b1e50f4b",
+  "external_ref": null,
+  "title": "Operator-run live admission repro fixture: real background persistence writer, seeded store, real Engram binary transport, production budgets",
+  "outcome": "An #[ignore]d, operator-run test fixture reproduces Engram turn admission against a REAL TermAl host state. It:\n- accepts a verified seed store path and explicit repo-local persistence and home paths;\n- builds AppState::new_with_paths through new_with_paths_and_engram_transport_for_test (engram_host_adapter.rs about :2548) with the REAL background persistence writer (not test_app_state's skipped worker);\n- installs the fake provider;\n- uses the real Engram binary transport (TERMAL_TEST_LIVE_ENGRAM_BINARY plus its SHA-256);\n- keeps production budgets (20,000 ms) with no fault injection.\nEngram's w-06d82cecfe49 repro and this item's measurement can then reproduce the 04:31Z admission stall under a controlled load arm.",
+  "acceptance": [
+    "Unit tests show the fixture validates its inputs before any process or state exists and places the seed exactly: the seed database and the run directory must lie under the repository's `.tmp/`, the seed's SHA-256 must equal the declared value, the run directory must be empty, and the seed is copied unchanged to the Engram home at `projects/<sha256(project id)>/engram.db` with the project id written to the fixture project's `.engram-project`; a seed outside `.tmp/`, a SHA-256 mismatch, a non-empty run directory, or an empty project id refuses with a named reason and creates nothing.",
+    "The ignored operator test builds AppState through new_with_paths_and_engram_transport_for_test with the real background persistence worker (not test_app_state), the real reviewed Engram binary behind an observing, non-faulting transport, the fake Codex provider, production budgets (20,000 ms call and dispatch) and no fault injection; it runs one warm-up cycle per session and then the configured waves over the configured sessions (1 or 4, one outstanding operation each), records per wave the admission latency and per operation the transport latency and timeout, requires each wave's prompt to reach the provider exactly once, and fails the arm on the first dispatch_budget_exhausted or begin_preparation_pending while leaving the retained prompt evidence in the run directory; it shuts the persistence worker down through shutdown_persist_blocking before dropping the state.",
+    "The full gate passes on the exact final input that lands, with an independent review pair and no outstanding in-scope Medium-or-higher finding on that input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "host-persistence",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a0ecbd-b66f-7e51-88c7-aa4ef585dc7f",
+  "external_ref": null,
+  "title": "Claude root sessions have no credited launch shape for the full gate: a foreground one-call `pushd \"DIR\" && node scripts/test-launcher.mjs full` exceeds the Bash tool's 10-minute cap, a background or --detach launch carries no result, and the launcher's terminal result is not credited to the creating session",
+  "outcome": "A one-call check in the documented form `pushd \"C:\\…\\.tmp\\wt-standin\" && cargo test …` gets no credit: \"ran after another command on its line, which TermAl cannot place\"",
+  "acceptance": [
+    "A one-call check in the documented form `pushd \"C:\\…\\.tmp\\wt-standin\" && cargo test …` gets no credit: \"ran after another command on its line, which TermAl cannot place\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "launcher",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1489e-fd10-7e21-abe1-179ec3202eca",
+  "external_ref": null,
+  "title": "Document Worker result metadata and attribution-based output fallback",
+  "outcome": "Public delegation docs describe optional host-owned Worker result fields, mutable locators, evidence provenance and the current output fallback and omission rules.",
+  "acceptance": [
+    "The delegation feature doc and relevant architecture result/output section describe baseRevision, worktreePath and workerOutputUnavailable true/false/absent legacy semantics plus summaryFallback.",
+    "Docs distinguish child Notes, transcript command statuses, watcher observations and host verification, explain Worker changedFiles/canceled-command rules, and direct readers to the child transcript when unattributable output is deliberately suppressed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation",
+    "review-followup",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

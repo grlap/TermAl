@@ -1,0 +1,48 @@
+{
+  "id": "01a0fb60-9c27-73c1-b203-cbfd8c27f706",
+  "external_ref": null,
+  "title": "Non-test build warns build_acceptance_evaluator_brief is never used (agent-neutral wrapper now test-only)",
+  "outcome": "The read-only refusal change made the API build the evaluator brief with build_acceptance_evaluator_brief_for_agent. That left the agent-neutral wrapper build_acceptance_evaluator_brief (src/acceptance_evaluation.rs) with callers only under src/tests, so the non-test build warns \"function `build_acceptance_evaluator_brief` is never used\". That breaks the project's \"cargo check clean\" rule; it is not a correctness defect.\n\nFix: mark the wrapper #[cfg(test)], as the neighbouring render_acceptance_evaluator_brief already is.",
+  "acceptance": [
+    "A non-test cargo check reports no dead_code warning for build_acceptance_evaluator_brief, and the tests that call it still build and pass.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "build"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The agent-neutral evaluator-brief wrapper build_acceptance_evaluator_brief is now #[cfg(test)], so the non-test build no longer warns that it is never used. The production path builds the brief per agent and is unchanged.\n\nCommitted as ed94d7f on 80536d0. Opus2 landed it in train 15 as master commit 169fc8b, pushed and verified on origin. The merged gate test-e3c5a5c9 passed with a warning-free cargo-check.log. The TermAl build 555af4a6 is installed and the restart signal is sent.\n\nEvidence:\n- Exact-input gate test-25549804, verification 91fdf4ad; its cargo-check.log holds only \"Finished\".\n- Focused test at ed94d7f, 151 passed.\n- Pair clean: Codex d55e31fd and Claude a261f700, no findings.\n- Independent evaluation delegation-257353f1 (Codex): both criteria passed.\n\nCriterion 1 was rebound from build to test with Fable2's advance concurrence, because the host does not record build commands (tracked as w-6845d5aeb10f).",
+    "completed_at": "2026-10-02T08:01:12.602417700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

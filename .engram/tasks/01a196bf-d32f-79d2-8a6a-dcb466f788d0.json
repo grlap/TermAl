@@ -1,0 +1,30 @@
+{
+  "id": "01a196bf-d32f-79d2-8a6a-dcb466f788d0",
+  "external_ref": null,
+  "title": "Ask Engram for a distinct refusal code when named_root_bind meets an inactive control session",
+  "outcome": "TermAl recognizes Engram's inactive-control-session refusal of named_root_bind by a distinct code or structured field, not by matching the reason text inside named_root_binding_refused. The control-OFF re-bind flag therefore fires exactly for the case a session bind cures (the control session is exited), and not for actor mismatch, which shares the reason text today.",
+  "acceptance": [
+    "Engram's owners have answered whether named_root_bind can report the inactive-session refusal (control_runtime.rs:107-113) with a distinct code or field, separately from its other named_root_binding_refused causes, and the answer is recorded on this item",
+    "if Engram provides one: TermAl's engram_named_root_refusal_remedy_locked keys on it instead of ENGRAM_INACTIVE_CONTROL_SESSION_REASON, with a test, reviewed and gated under the standing rule; if not, the coordinator records that the text match stays"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "found-by-review",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

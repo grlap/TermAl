@@ -1,0 +1,30 @@
+{
+  "id": "01a1658b-5ef4-75d1-8734-146d2c72b831",
+  "external_ref": null,
+  "title": "Resume refusal overwrites the session preview and is not rolled back on commit failure (refuse_engram_queue_resume_locked)",
+  "outcome": "Resume refusal overwrites the session preview and is not rolled back on commit failure (refuse_engram_queue_resume_locked)",
+  "acceptance": [
+    "A Resume refusal on a retained, interrupted or begun head sets its own fixed refusal text, or leaves a preview that already starts with 'Engram' untouched, so unstarted_resume_step's 'Engram recovery retained this prompt: {preview} Reconcile …' message never embeds a second refusal sentence.",
+    "When the commit after stamp_session_at_index fails, the session's preview is restored to its previous value.",
+    "A unit test covers both behaviours."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "follow-up",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

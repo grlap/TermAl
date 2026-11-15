@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c431-7d51-a625-821dca7b98ff",
+  "external_ref": "tm-9gkh",
+  "title": "Investigate delivering complex Telegram answers as Markdown files",
+  "outcome": "Greg clarified the product intent directly: when an agent response contains complex Markdown (tables, structured sections, etc.), deliver the response as a .md attachment in Telegram so the user can open the document and read it more clearly than poorly formatted inline chat text. The goal is an alternative delivery format for the actual answer, not merely an isolated Markdown-preview experiment or changing ordinary-message parse mode. Preserve the answer content and Markdown structure. Investigation should determine a practical delivery/opening flow on Greg's client, including whether a short accompanying message is useful, limitations, and whether selection should be explicit or automatic (not yet decided). Distinguish native preview from an external viewer only to establish how the intended reading experience works; do not assume identical support across clients. Use a small representative answer with a table and sections to compare inline readability with the opened file, and recommend the approach. This remains an investigation task: no implementation or external sends yet. Initial owner Termal::Codex; coordinator Termal::Fable.",
+  "acceptance": [
+    "Document an end-to-end proposed flow for sending a complex agent answer as a .md attachment and opening it from Telegram; preserve the complete answer and Markdown structure; validate readability using a representative table/section example on the identified client; report limitations and propose when to choose attachment versus inline text, leaving automatic-selection policy explicit rather than assumed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

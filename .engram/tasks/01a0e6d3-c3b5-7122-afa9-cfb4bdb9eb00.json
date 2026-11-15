@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3b5-7122-afa9-cfb4bdb9eb00",
+  "external_ref": "tm-16nk",
+  "title": "Drop the tolerated purpose and delivery_tokens fields from Engram host frames",
+  "outcome": "Found 2026-09-26 during the tm-zykn consult with Engram::Fable. TermAl always sends purpose on turn_evaluate (src/engram_host_adapter.rs:574, plain String, no skip) and delivery_tokens on turn_begin (:581, Vec<String>, sent as [] when empty; sourced from the grant at ~4398/6341). Engram HostControlRequest (host.rs 33-80, deny_unknown_fields) tolerates both only 'while hosts still send it' (host.rs 52-65): purpose must be ordinary and any non-empty delivery_tokens refuses the begin. Follow-up, not part of tm-zykn: stop sending both fields (and drop the delivery_tokens plumbing from the grant model and tests in src/tests/engram_control_transport.rs), then tell Engram so it can remove the tolerance. Coordinate the order: TermAl stops sending first; Engram removes tolerance after. No behaviour change otherwise; frames must stay byte-identical apart from the two removed fields.",
+  "acceptance": [
+    "- turn_evaluate frames carry no purpose field and turn_begin frames carry no delivery_tokens field (fixture asserting the serialized JSON).\n- Engram at the pinned build accepts the frames (focused live check or the transport fixture mirroring host.rs 33-80).\n- No other frame field changes (byte-identical fixture apart from the two removals); cargo check clean, cargo test --bin termal green.\n- Engram::Fable notified with the TermAl commit hash so the tolerance can be removed on the Engram side."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a10dbc-6043-7ed0-87d8-30499f076a09",
+  "external_ref": null,
+  "title": "Scope parked-admission Stop ownership exclusion to dedicated cleanup recovery",
+  "outcome": "Preserve baseline promoted-head retirement for healthy/public Stops outside dedicated cleanup recovery; restrict unbegun parked-head preservation to the recovery condition that requires it.",
+  "acceptance": [
+    "Scope parked-admission Stop ownership exclusion to dedicated cleanup recovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "engram-retry"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

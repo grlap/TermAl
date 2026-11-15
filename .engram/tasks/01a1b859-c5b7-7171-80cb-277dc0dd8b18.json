@@ -1,0 +1,24 @@
+{
+  "id": "01a1b859-c5b7-7171-80cb-277dc0dd8b18",
+  "external_ref": null,
+  "title": "Integrate combined TermAl train on ba6c9846: content-v1 C2, w-62605 witness, w-573c federation status, w-009f relay locators, w-463c Windows labels",
+  "outcome": "One combined candidate, composed on master ba6c9846 from five independently checked and reviewed pieces, passes one combined review pair, a whole-binary focused run, and the DL560 and Windows B FULLs on one test ref, and then lands by fast-forward and is installed.",
+  "acceptance": [
+    "Integrate combined TermAl train on ba6c9846: content-v1 C2, w-62605 witness, w-573c federation status, w-009f relay locators, w-463c Windows labels is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

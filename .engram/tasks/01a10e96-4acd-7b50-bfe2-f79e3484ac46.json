@@ -1,0 +1,82 @@
+{
+  "id": "01a10e96-4acd-7b50-bfe2-f79e3484ac46",
+  "external_ref": null,
+  "title": "Begin recovery foundation: durable ownership, containment and an operator cancel exit",
+  "outcome": "Durable exact begin ownership protects first-send and result acknowledgement; unresolved normal-operation and loaded begins remain visibly held with an operator cancel exit that preserves the original message for resend. Automatic replay is activated only by the required activation successor; combined slice and parent remain open.",
+  "acceptance": [
+    "F1: Before the first turn_begin leaves the host, an immutable durable typed envelope records exact grant, delivery tokens, original begin key, grant basis, retained head/dispatch identity and full stable session/project/store/connection/settings/work-binding authority. Exact preparation ACK/readback precedes wire send; failed or ambiguous ACK withholds send and retains visible ownership. Tests distinguish this envelope-fence failure from ordinary card-persistence failure.",
+    "F2: One reusable envelope id/revision/unique attempt owner is reserved under Inner and remains authoritative through off-lock begin transport and guarded durable result ACK. No lock spans transport or persistence waits. A matching acknowledged healthy result permits exactly one initial provider handoff; lost/invalid result, stale ownership and failed/ambiguous result ACK retain an explicit unresolved hold and permit no handoff.",
+    "F3: This foundation activates no automatic replay or fresh admission from an unresolved envelope. Stop, Cancel, Resume, ordinary admission, bind, reset, revocation, replacement, removal and compensation-checkpoint paths either preserve/pause that ownership or refuse/defer explicitly; unfinished paths remain held. Barriers before reservation, in flight and before result/local delivery commit prove no stale result clears another owner, releases a successor, resurrects a removed head, bypasses pause, or delivers a cached Begin after compensation closed its grant.\n\nF3/F7's usable operator-cancel exit is guaranteed for host-created recovery records and legacy retained heads whose exact original local operation identity, revision, head identity, original text and applicable grant/key audit can be verified. Before any new Begin send, this local cancellation tuple and immutable original head copy are included in the coherent preparation ACK, independently of decoding the transport-only replay fields. A missing old head is not reinserted and a successor is not retired. An intact local tuple permits durable cancellation even when transport-only fields are invalid.\n\nIf external loss or corruption makes that local identity/text/audit tuple unverifiable, this foundation preserves the raw recovery data and unrelated session data, shows recovery-data-invalid containment, and permits no replay, fresh admission, historical fallback or successful cancellation claim. Repair or local abandonment of this exceptional irrecoverable data is outside this foundation and requires a separately authorized disposition. This exception does not relax normal host-created, ACK-unknown, paused, stopped, loaded unresolved or legacy retained cases. All seven Test bindings remain.\n\nUnverifiable recovery data does not by itself prove external corruption: data lost or made unverifiable by a host defect (lost ACK, serialization, migration or persistence fault) is not covered by this exception, and a record whose cause is unknown is shown with cause unknown rather than classified as external corruption.\n\nA legacy retained head may reserve a new local cancellation identity and revision bound to its real record and head; no historical typed envelope, key or pre-wire ACK is fabricated for it. Every new send still requires a coherent pre-wire cancellation tuple.\n\nA session whose recovery data cannot be verified remains visibly held with its raw and unrelated data preserved and no replay, admission or cancellation claim; its exit is a separately authorized disposition, not this foundation's.",
+    "F4: Loaded new-format unresolved envelopes and old-format begin-unknown holds remain visible with their original retained heads before boot/bind/restart-checkpoint/Resume/admission actions. No unverifiable legacy envelope is invented. grant_expired and all other unresolved outcomes are held in this foundation; missing/null/different status and fresh evaluate are not negative proof. No automatic boot reconstruction or fabricated restart checkpoint is introduced.",
+    "F5: Healthy admission/bind/abort and ordinary healthy initial begin/delivery remain covered alongside containment controls. docs/features/engram-host-adapter.md states the temporary explicit hold, deferred automatic replay and boot boundary without promising that Resume resolves it. Parent incident and automatic recovery criteria remain open.",
+    "F6: The dormant Stage A prerequisites are present in the implementation base. The holder reports native Git production added/deleted lines against fixed integration base0a59128bd09546ff1dc22bd7df393b25ffdf388a, counts every changed/new production path and all cfg(test) seams, and retains StageA407e420993e71f55ad416d6c27fe13592c81a47f ancestry and whole historical comparison as provenance. At most1000 ADDED production lines are permitted; complete candidate forecasts precede implementation and the final exact input is recounted. A later integration carry reports its new base and combined input separately and cannot reset or hide this scope. All owned changed/new Rust files match repository-context formatter output. Full baseline/final cargo fmt -- --check results are retained; an inherited baseline failure may remain only where every residual difference is in untouched byte-identical baseline files, with no new formatting failure. No unrelated formatting changes are included merely to satisfy this condition. Overruns or unaccounted formatting differences require a new disposition without compressed code or dropped safeguards. The final exact input has this item's own passed maintained full gate/host Test record, independent read-only Codex/Claude pair without outstanding in-scope Medium+, filed remaining Lows and independent acceptance; no acceptance or commit uses provisional failed input. StageA evidence satisfies none of F1-F7 or this item's seven Test bindings.",
+    "F7: For every held unresolved begin envelope, an explicit operator action cancels the retained head without silent loss: the session leaves the hold, the original message text is preserved and shown to the operator for resend, the envelope is settled as operator-cancelled with its grant and key retained for audit, and no automatic or cached Begin is delivered afterwards. If Resume does not safely release the hold in the foundation, it refuses with a visible message that names this cancel route. A test drives a held envelope through the operator cancel and asserts the session becomes usable, the message is preserved, and no provider delivery of the old head occurs.\n\nF3/F7's usable operator-cancel exit is guaranteed for host-created recovery records and legacy retained heads whose exact original local operation identity, revision, head identity, original text and applicable grant/key audit can be verified. Before any new Begin send, this local cancellation tuple and immutable original head copy are included in the coherent preparation ACK, independently of decoding the transport-only replay fields. A missing old head is not reinserted and a successor is not retired. An intact local tuple permits durable cancellation even when transport-only fields are invalid.\n\nIf external loss or corruption makes that local identity/text/audit tuple unverifiable, this foundation preserves the raw recovery data and unrelated session data, shows recovery-data-invalid containment, and permits no replay, fresh admission, historical fallback or successful cancellation claim. Repair or local abandonment of this exceptional irrecoverable data is outside this foundation and requires a separately authorized disposition. This exception does not relax normal host-created, ACK-unknown, paused, stopped, loaded unresolved or legacy retained cases. All seven Test bindings remain.\n\nUnverifiable recovery data does not by itself prove external corruption: data lost or made unverifiable by a host defect (lost ACK, serialization, migration or persistence fault) is not covered by this exception, and a record whose cause is unknown is shown with cause unknown rather than classified as external corruption.\n\nA legacy retained head may reserve a new local cancellation identity and revision bound to its real record and head; no historical typed envelope, key or pre-wire ACK is fabricated for it. Every new send still requires a coherent pre-wire cancellation tuple.\n\nA session whose recovery data cannot be verified remains visibly held with its raw and unrelated data preserved and no replay, admission or cancellation claim; its exit is a separately authorized disposition, not this foundation's."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "pilot",
+    "reliability",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10e6a-1870-70e0-b938-79d03c979dfa",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10f63-d654-79a2-8122-18ed1010f1f5",
+    "01a10f63-fdd8-7fd2-9945-ca6971bb1f33"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1b069-c114-73b1-94fb-f2f1ab427254",
+  "external_ref": null,
+  "title": "A freshly named source root's first turn is recorded as a source change ('assumed_missing_baseline') although the root is clean at a landed commit and nothing was edited",
+  "outcome": "Naming a fresh, clean source root gives the host a measured baseline for it, so a turn that changes nothing in that root is not reported as a source change and creates no test obligation; a genuine change after naming is still reported.",
+  "acceptance": [
+    "When a claim names a fresh source root and the first measured sighting at the activation boundary is the root's starting content, the host records that sighting as the baseline (or otherwise reports no change) instead of an assumed_missing_baseline source change; a read-only turn in that root produces no source-change obligation.",
+    "A change made in the root after naming is still reported as a source change, and a root whose starting content cannot be measured still falls back to the existing conservative assumed_missing_baseline behaviour.",
+    "Tests cover: fresh clean root with read-only turn (no change), fresh root then edit (change), unmeasurable start (assumed change)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a145cc-d2c4-77f0-9ebc-94f5dee40694",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance clips records named in criterionEvidence despite promising to read them whole",
+  "outcome": "termal_evaluate_acceptance clips records named in criterionEvidence despite promising to read them whole",
+  "acceptance": [
+    "Every explicitly selected proof record in an admitted evaluation request is delivered whole in the evaluator brief.",
+    "A selected-proof set that cannot fit is refused before evaluator creation with the measured required bytes and supported byte limit.",
+    "Existing evidence provenance, optional-context omission and complete-criteria rules remain enforced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "evaluator-brief"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Selected acceptance proof is delivered verbatim and whole, or refused before evaluator creation with measured UTF-8 sizes and supported limits. Provenance, full criteria and truthful optional-context omissions are preserved. Landed in combo29c d53b3c7a after exact-tree FULL and complete independent review pairs.",
+    "completed_at": "2026-11-09T21:26:11.115517500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

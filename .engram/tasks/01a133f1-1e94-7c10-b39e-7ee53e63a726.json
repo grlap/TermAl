@@ -1,0 +1,29 @@
+{
+  "id": "01a133f1-1e94-7c10-b39e-7ee53e63a726",
+  "external_ref": null,
+  "title": "Clarify or pin deferral of launcher carries that cannot earn credit",
+  "outcome": "V3 review found that launcher_gone, run_missing and ambiguous carries on a non-current held claim enter bounded deferral and say they await settlement, although settlement can only refuse them. They occupy a bounded slot until focus returns or existing TTL. Clarify the holder line or refusal timing and pin the selected behavior without weakening credit safeguards.",
+  "acceptance": [
+    "A regression covers non-current held-claim launcher_gone, run_missing and ambiguous carries and pins their chosen refusal or holder-message behavior.",
+    "Holder wording accurately distinguishes a carry awaiting a credit decision from one already known unable to earn credit; no evidence is credited to another claim.",
+    "Relevant carried-check tests pass on the changed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-check",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a10e0b-2667-7402-8fcc-89d3a2d0da52",
+  "external_ref": null,
+  "title": "Quietly retain or dispose a host-wake uncertainty notice with a mismatched payload",
+  "outcome": "A permanently corrupted uncertainty-notice payload has a truthful terminal or quiet hold owner without alternating publication-failure clear/set writes on every tick; no original wake replay or fabricated presentation is introduced.",
+  "acceptance": [
+    "Quietly retain or dispose a host-wake uncertainty notice with a mismatched payload is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-follow-up",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

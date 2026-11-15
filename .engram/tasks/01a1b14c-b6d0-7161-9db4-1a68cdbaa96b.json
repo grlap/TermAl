@@ -1,0 +1,29 @@
+{
+  "id": "01a1b14c-b6d0-7161-9db4-1a68cdbaa96b",
+  "external_ref": null,
+  "title": "Focused runs through scripts/test-temp-root.mjs record their test threads as unknown even when --test-threads is given",
+  "outcome": "Focused runs through scripts/test-temp-root.mjs record their test threads as unknown even when --test-threads is given",
+  "acceptance": [
+    "A focused run of `node scripts/test-temp-root.mjs cargo test ... -- --test-threads=4` records testThreads {source: \"--test-threads\", threads: 4}, covered by a launcher test.",
+    "Without a thread option, the wrapped form records RUST_TEST_THREADS or libtest-default exactly as the direct cargo form does, unless the wrapper changes that variable, in which case it records unknown.",
+    "Commands other than the repository's own wrapper keep recording unknown, as today."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

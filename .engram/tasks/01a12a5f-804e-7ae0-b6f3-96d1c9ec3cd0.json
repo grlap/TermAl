@@ -1,0 +1,28 @@
+{
+  "id": "01a12a5f-804e-7ae0-b6f3-96d1c9ec3cd0",
+  "external_ref": null,
+  "title": "Admission-budget exhaustion in the retry tick can override an authority-changed, interrupted-with-intent or cleanup hold on the same tick",
+  "outcome": "engram_begin_preparation_lineage_step no longer overrides a protective decision the retry kind's own step would make on the same tick. When the authority changed, the head is interrupted with retained intent another path owns, a dedicated cleanup holds admission, or a runtime stop is in progress, exhaustion leaves that hold in place instead of making the head resumable. Tests cover each case with an exhausted budget.",
+  "acceptance": [
+    "Admission-budget exhaustion in the retry tick can override an authority-changed, interrupted-with-intent or cleanup hold on the same tick is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

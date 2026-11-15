@@ -1,0 +1,31 @@
+{
+  "id": "01a17e65-1173-73b2-935f-4ad8dcb0c8ef",
+  "external_ref": null,
+  "title": "Back named-root recovery lock-scaling bounds with deterministic structural assertions",
+  "outcome": "Add deterministic evidence for the root recovery lock-scope regression alongside the approved 50 ms/100-sample performance contract, so suite scheduling pressure has an explicit disposition. Reuse the existing target-build counters and off-lock planning probe; distinguish selection-only target construction from the additional current-state validation builds. Do not remove or relax the agreed latency bound without a separately concurred acceptance revision, and do not add auxiliary proof runs.",
+  "acceptance": [
+    "Back named-root recovery lock-scaling bounds with deterministic structural assertions is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "named-root",
+    "performance",
+    "review-follow-up",
+    "state-lock",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17e08-dd47-7a31-a71b-1a94544b753a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

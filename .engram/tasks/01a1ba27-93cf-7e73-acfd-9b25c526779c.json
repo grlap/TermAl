@@ -1,0 +1,30 @@
+{
+  "id": "01a1ba27-93cf-7e73-acfd-9b25c526779c",
+  "external_ref": null,
+  "title": "Pin phase-aware declared completion through the real ordinary and native producers",
+  "outcome": "Producer-level deterministic interposition tests fail if either original declared END producer stops selecting the settlement phase.",
+  "acceptance": [
+    "Exercise the real ordinary and native declared completion producers with a deterministic pause after END and before verdict application; a wait refreshed there remains pending.",
+    "The tests observe the selected row's pending phase and later artifact verdict, with no real sleeps and without mirroring Markdown or fabricated credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "greg-reported",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

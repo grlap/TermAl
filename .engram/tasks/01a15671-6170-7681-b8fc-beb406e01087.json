@@ -1,0 +1,27 @@
+{
+  "id": "01a15671-6170-7681-b8fc-beb406e01087",
+  "external_ref": null,
+  "title": "Cover control_startup_busy on begin, status/rebind and repeated-busy circuit accumulation",
+  "outcome": "w-fc87855784a7's tests cover control_startup_busy on evaluate and bind, both codes on the closing and recovery checkpoint, and the classification. Still uncovered:\n- busy answering turn_begin, including the begin-replay path;\n- busy answering session_status, or the rebind of the busy re-admission;\n- repeated busy replies accumulating in the circuit breaker. Busy now counts, so the circuit opens, the card code becomes control_circuit_open (still a retry code), and the backoff delay follows.\nAdd scripted-transport cases for these.",
+  "acceptance": [
+    "Cover control_startup_busy on begin, status/rebind and repeated-busy circuit accumulation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control-transport",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

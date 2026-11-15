@@ -1,0 +1,44 @@
+{
+  "id": "01a175b8-4bae-7200-be5a-85d171add561",
+  "external_ref": null,
+  "title": "An agent cannot stop its own hung focused launcher run: Ctrl-C from a tool session does not reach the launcher and no run-directory stop exists",
+  "outcome": "A run's owner can stop its own focused or full launcher run, given its run directory, through a supported command. The command ends exactly that run's owned process tree (launcher, owners, stages, inner launchers, guardians) and records the run as interrupted with its evidence intact. It touches no other process. `recover` can then settle the run.",
+  "acceptance": [
+    "`node scripts/test-launcher.mjs stop RUN_DIRECTORY` makes a live focused run's own worker abort through its existing interruption path. The owned command tree, including descendants started by nested launchers or guardians inside it, ends through the run's process owner. results.json is saved terminal, failed and interrupted, with the stop reason and the owner's cleanup record. stop-request.json is retained in the run directory. A deterministic regression (a focused run whose command never exits and spawns a nested descendant) is RED before and GREEN after. In the same regression, a second concurrently running focused run and an unrelated process survive, and `recover` alone still refuses the live worker before stop.",
+    "stop never signals or kills a process and adds no second reaper. It refuses a terminal run, a run not owned by the caller's session, a run whose worker is not alive (pointing to recover), and a non-focused run. No other run is affected.",
+    "docs/test.md documents stop beside recover, including the Windows Ctrl-C limitation and the blocked-event-loop limitation. The existing launcher tests stay green. A review pair has no outstanding Medium or higher, and one complete READY goes to Merger2."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "launcher",
+    "resource",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

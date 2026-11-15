@@ -1,0 +1,36 @@
+{
+  "id": "01a0f09c-ecc9-74a3-b957-6845d5aeb10f",
+  "external_ref": null,
+  "title": "Record host-observed build commands as typed Build verification on the claim's checkpoint",
+  "outcome": "The host records verification of one kind only. EngramVerificationKind has the single variant Test (src/engram_turn_checks.rs:65-67), so a genuine `cargo build` observed in a claimed turn is not recorded as a build check.\nAdd a typed Build producer:\n- recognise genuine build commands narrowly, e.g. cargo build, never by relabelling a test;\n- record check_kind build on the turn's closing checkpoint, with the same passed or failed outcome, source revision, environment and summary evidence that test checks carry;\n- keep Test recognition unchanged.\nThis is the remainder of Engram w-da97606ee102 (observed Build production), mapped by Engram::Coder (TermAl mailbox 62e0c56d #50).",
+  "acceptance": [
+    "A claimed turn that runs a genuine build command records one Build verification on its closing checkpoint, passed or failed per the command's outcome, with source revision and environment; a test covers each outcome.",
+    "A test command is still recorded as Test, and no command is recorded as both kinds; a non-build command that merely mentions 'build' is not recorded as Build.",
+    "Engram accepts the recorded Build verification against a criterion bound to kind build; a test or a recorded live check shows it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "engram-interop",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Typed Build verification landed and installed from the exact reviewed/gated tree; independent acceptance passed all three criteria.",
+    "completed_at": "2026-10-07T17:57:24.484629200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

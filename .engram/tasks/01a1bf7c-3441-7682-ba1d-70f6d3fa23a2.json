@@ -1,0 +1,37 @@
+{
+  "id": "01a1bf7c-3441-7682-ba1d-70f6d3fa23a2",
+  "external_ref": null,
+  "title": "A root session's mailbox-woken turns record no capture of its named root, so evaluation stays refused with named_root_sighting_unavailable",
+  "outcome": "A holder who has named a root and focused the item gets the capture evaluation needs from an ordinary turn, or the host tells it exactly what's missing and how to supply it.",
+  "acceptance": [
+    "The cause of the missing capture in the reported case is established from source and available records, including whether it depends on the runtime (Claude), the turn's origin (mailbox wake), several named claims, or the session's workdir.",
+    "A named and focused holder has a supported way to obtain the capture, shown by a behaviour test that fails before the fix, or, if the current behaviour is intended, the refusal names the exact supported route; the fence stays: no evaluation without an acknowledged capture of that root at that generation.",
+    "A review pair has no Medium or higher, and the normal gate passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "evaluation",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered future-turn focused-claim capture refresh with truthful refusal guidance, read-first settled authority and unchanged acknowledged root/generation fence. Landed/pushed as part of combo26 a06f2c92 with both-platform full gates and composite reviews. Worktree cleanup follows path check; immutable raw provenance retained only until open carrier closes.",
+    "completed_at": "2026-11-09T12:52:29.497840700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

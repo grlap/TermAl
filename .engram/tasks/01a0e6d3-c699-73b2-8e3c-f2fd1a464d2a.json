@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c699-73b2-8e3c-f2fd1a464d2a",
+  "external_ref": "tm-picu.1",
+  "title": "Adapt the Engram host adapter to A0 work-claim control bindings",
+  "outcome": "Planning-only follow-up after the A0 control-channel wire settled. HOLD implementation until the work-protocol claim receipt provides a ready-to-paste control_binding. Once available: decode stale_fence as a bind refusal and re-read claim plus rebind without breaker/degraded treatment; route stale_fence from evaluate/begin through claim re-read and rebind within the existing single-retry budget; include checkpoint observations in idempotency identity and distinguish observation scope mismatch from issued-grant checkpoint refusal; treat work_claim_mismatch as a non-retryable session configuration fault. Phase 0 remains unchanged: work_binding and observations stay optional and unknown fields remain ignored.",
+  "acceptance": [
+    "Implementation does not start before the claim-receipt control_binding is available; bind/evaluate/begin stale_fence re-enters through claim read and bind with one retry and no breaker count; malformed or never-valid work_claim_mismatch produces one non-retrying configuration card; checkpoint observation lists participate in idempotency and scope-mismatch classification; Phase 0 compatibility and gates remain green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c698-7781-93a0-a3fbbc3ec2d1",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

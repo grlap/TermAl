@@ -1,0 +1,71 @@
+{
+  "id": "01a161d4-c882-7b71-b84c-a8af3a34d80a",
+  "external_ref": null,
+  "title": "Direct programmatic prompt dispatch to a specific remote root session is unavailable",
+  "outcome": "Authorized callers can explicitly dispatch a complete message/prompt body directly to an identity-bound existing remote root session through a supported programmatic contract, with truthful durable acceptance, idempotency and unknown-outcome semantics. Mailbox notifications, diagnostics and operator relay instructions do not satisfy delivery. Preserve caller provenance, native identity, authorization and all existing safety fences.",
+  "acceptance": [
+    "A distinct own-caller API and MCP/CLI facade sends the complete validated text to one explicitly permitted existing satellite native root, preserving original caller provenance and exact target creation, and demonstrates that body in the existing durable prompt queue and its supported runtime without mailbox fetch or notification substitution. The initial scope is central-to-satellite, text only; references, diagnostics, local acceptance and relay instructions alone do not satisfy it.",
+    "enqueueTextPrompt is a narrow permission inside the existing TermAl federation/session authority. New dispatch requires a content-fenced durable central caller grant and independent destination-local consent for the exact source and destination native identities and generations, together with negotiated capability and fresh authenticated native proof. These versioned permission records are issued and revoked through the existing FederationState mutation/persistence path; they cannot create hosts, sessions, membership, placement or participants. Caller-owned prompt references confer no authority. Operator UI access, mailbox membership, proxy/name/handle possession, implicit binding/history migration, courier identity and prompt content do not grant an agent prompt permission. Operator permission controls remain distinct from the own-caller agent facade under the stated local operator/OS trust boundary.",
+    "Local durable intent, remote durable receive, exact durable queue association, provider handoff, positively correlated runtime acceptance, completion, cancellation and unknown/ambiguous outcome are distinguished. Immutable source/key/target/body/authority identity deduplicates exact retries across lost responses and reloads; changed intent conflicts. Reconnection changes only the current transport proof, not logical identity. No status lookup or duplicate reactivates paused, cancelled, accepted or ambiguous work, and no possibly begun handoff is automatically resent.",
+    "Current authorization is enforced at source admission and receiver commit, queue and final provider-handoff cuts. Receiver-observed permanent revocation cancels only unstarted work without erasing prior receipt history; source revocation is not claimed remotely effective until confirmed there. Transient holds and Stop/pause remain holds. Creation/enrollment/consent/placement changes, hidden/delegated targets and runtime/token/write-ahead races fail closed. New prompt authority does not weaken existing mailbox/SSH/executor guards or authorize setup, grants, restart, activation or broader commands.",
+    "Deterministic tests cover T1-T12's source/runtime cases with the R2 disposition corrections: actual full-body HTTP/MCP/CLI delivery; all advertised Codex/Claude/ACP adapters and their distinct receipt cuts; grant/reference lifecycle and stale proof; exact-operation reconnect/status/dedup; two-store queue/handoff/cancellation crash cuts; Stop/revoke races; no-TTL capacity and retained identity beyond display pruning; and mixed-host-version plus incompatible-reader rollback refusal. Applicable focused checks, intended-endpoint platform builds and the maintained exact-input full gate pass; the independent vendor pair has no outstanding in-scope Medium-or-higher finding. No exactly-once provider/business-effect claim is made.",
+    "This independent architectural/criteria disposition and concrete wire/schema/runtime inventory are recorded before implementation acceptance. Fresh independent acceptance of the final exact input includes a separately authorized bounded positive direct-body observation on the intended two hosts, identifying actual source/target creations, running candidate identities and the same operation/queue/positive runtime receipt. UNKNOWN is honestly reported but cannot satisfy this positive-delivery criterion. No completion on R1, a scaffold, an installed-only artifact, mailbox notification or relay instruction is allowed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

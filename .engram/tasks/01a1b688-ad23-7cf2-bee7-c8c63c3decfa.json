@@ -1,0 +1,36 @@
+{
+  "id": "01a1b688-ad23-7cf2-bee7-c8c63c3decfa",
+  "external_ref": "engram:w-214650b77db8",
+  "title": "Switch named-root naming, root-binding and sealing from content-v1 revision strings to the full source_id",
+  "outcome": "Switch named-root naming, root-binding and sealing from content-v1 revision strings to the full source_id",
+  "acceptance": [
+    "TermAl's named-root naming, root-binding and sealing paths (today in src/engram_source_roots.rs and the basis fields they persist and return) carry the complete source_id object agreed with Engram w-214650b77db8 instead of a content-v1 revision string, with no digest or string surrogate, no fallback and no new credit condition; existing authority, root, claim and generation rules are unchanged.",
+    "Stored historical revision strings stay readable as stored; no old-row conversion.",
+    "The wire order is agreed with the Engram owner before either side changes it, and the change lands as its own reviewed and gated candidate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed complete private source_id naming and sealing on master/origin bf7ff309. Historical string seals remain readable unchanged. Exact author pair and 43 focused tests plus non-test compile passed; fresh combined pair and eligible Linux/Windows FULL gates passed the landed tree. Bilateral host-only wire scope agreed before code; no new wire fields or credit condition. Deferred Low items remain open. Installation/restart and live runtime behavior are not claimed.",
+    "completed_at": "2026-11-08T18:14:17.821552300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

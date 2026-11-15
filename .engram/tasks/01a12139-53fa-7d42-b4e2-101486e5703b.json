@@ -1,0 +1,43 @@
+{
+  "id": "01a12139-53fa-7d42-b4e2-101486e5703b",
+  "external_ref": null,
+  "title": "Live proof: declared dotnet test from a Codex session on Windows (after the w-0dd8 restart)",
+  "outcome": "A Codex root session on Windows, on the host restarted at 15:06Z 2026-10-09 from 6cd915ed (which contains w-0dd8aea5cfc3), gets declared-command credit for a dotnet test run through Codex's own exec envelope, so the pilot's Codex sessions are covered as well as Claude's.",
+  "acceptance": [
+    "LIVE PROOF, after the restart: a scratch git repository under this repo's .tmp with one xUnit v2 project, termal-tests.toml, and a git-ignored .termal-results/. A Codex root session names that root and runs the declared `dotnet test --logger \"trx;LogFileName=results.trx\" --results-directory .termal-results` through its ordinary Windows exec (the quoted absolute pwsh.exe -Command envelope): (a) passing → a credited check with the TRX counters on its record; (b) one failing test → FAIL published. Each record is quoted on this item with its id and the session's exec envelope as recorded."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "declared-tests",
+    "live-proof",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Live Codex Windows declared-command proof completed after restart: credited TRX PASS and deliberate FAIL through the actual quoted pwsh envelope; final same-source PASS resolves the later-failure completion contradiction. Independent acceptance passes 1/1 and remains fresh.",
+    "completed_at": "2026-10-09T15:37:14.445854800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a1be84-282e-7281-bab2-d870259bd249",
+  "external_ref": null,
+  "title": "Define compact direct-prompt retention with the actual delivery owner before enabling production journal writes",
+  "outcome": "Stage B supplies compact retained identity and a safe body/evidence retirement seam owned by actual primary PromptDelivery, so a busy session is bounded by live retained work rather than a lifetime prompt count. Production journal writes remain explicitly unavailable until this contract and adapter are validated.",
+  "acceptance": [
+    "Production journal writes remain blocked until the real primary delivery owner proves when body and large evidence are no longer needed; timeout, queue acknowledgement and uncertainty alone never authorize compaction.",
+    "Compact retention preserves original source creation/key, operation identity, intent digest and required historical facts so exact retries cannot recreate execution and conflicting reuse remains refused.",
+    "Live body/evidence bytes are bounded independently of legacy mailbox/wake quotas, without a permanent lifetime prompt-count cutoff, TTL identity eviction or a separate lifecycle owner.",
+    "Meaningful behavioral tests cover settled compaction, unresolved outcomes, conflicting retries, restart and authority cuts through the actual owner before mounting."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a161d4-c882-7b71-b84c-a8af3a34d80a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,58 @@
+{
+  "id": "01a0f301-9928-7af1-a212-8dadab6ed326",
+  "external_ref": null,
+  "title": "A read-only Claude reviewer child is denied Engram's read words (memories), although its brief allows the startup recovery that project instructions require",
+  "outcome": "A read-only reviewer child can do the read-only startup recovery its brief says is allowed: Engram's words that only read (at least `memories` without an acknowledging argument, `show`, `ls`, `search`) are admitted for it by exact tool name and argument check, every word or argument that writes stays denied, and the denial of a tracker write says so. What an evaluator child may reach is decided by w-6f4ebd7130f5 and is not widened here.",
+  "acceptance": [
+    "A read-only Claude child that is not an evaluator, on a runtime the host gave the tracker's server, is allowed the tracker's reads that record nothing: `next` with `peek: true`, `ls`, `search`, `show` in every form, and `memories` without a context generation; a test covers each at the permission decision.",
+    "Every other tracker call is denied for it: each word that writes (add, claim, update, note, done, gate, evaluate, handoff, remember, forget), `next` without a peek, a context generation on `next` or `memories`, and any argument the gate does not know; the denial lists the reads; a test lists each and checks the denial.",
+    "The admission is by the tracker server's qualified tool name only, and only for the running child of a delegation that is not an evaluator whose runtime the host gave the tracker's server: an evaluator child, a finished delegation, a root session and a look-alike tool name are refused; tests cover each.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "docs/features/agent-delegation-sessions.md states which tracker calls a read-only Claude child may make, and says from the source how read-only Kimi and Codex children differ today; each difference is filed as its own item and cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-interop",
+    "read-only-delegation",
+    "reviewer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Train-2 package landed at 9c80a234; acceptance evaluation 19841874b43b4f52a6109b9ad5c939e0 passed 5/5.",
+    "completed_at": "2026-10-16T00:01:01.658167800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

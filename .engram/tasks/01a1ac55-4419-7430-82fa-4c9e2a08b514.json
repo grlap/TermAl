@@ -1,0 +1,28 @@
+{
+  "id": "01a1ac55-4419-7430-82fa-4c9e2a08b514",
+  "external_ref": null,
+  "title": "termal_read_mailbox_message returns 404 \"native mailbox home membership not found\" for a sender's own message on a native relay",
+  "outcome": "A sender that got a receipt for a message on a native relay mailbox can read that message's current delivery status by its exact message id, as the receipt note tells it to, or gets a typed answer saying why not.",
+  "acceptance": [
+    "For a message sent on a native relay mailbox, termal_read_mailbox_message with the exact returned messageId returns its current status to the sender, or a typed refusal naming the cause and the supported alternative, not a bare 404.",
+    "A test covers the sender's own read on a relay message, and the receipt note's advice matches what the call actually supports."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

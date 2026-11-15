@@ -1,0 +1,24 @@
+{
+  "id": "01a1a557-3500-7893-adba-6f77b2298964",
+  "external_ref": null,
+  "title": "The modeled parallel test has no bound on metadata rows rewritten per tick",
+  "outcome": "The modeled parallel state-lock test fails when a warm tick rewrites unchanged metadata rows, such as all the seeded journal and registration rows, instead of passing as it does today.",
+  "acceptance": [
+    "The modeled parallel test has no bound on metadata rows rewritten per tick is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

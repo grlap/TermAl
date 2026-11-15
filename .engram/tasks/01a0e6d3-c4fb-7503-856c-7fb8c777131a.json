@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4fb-7503-856c-7fb8c777131a",
+  "external_ref": "tm-esmy",
+  "title": "Bound Engram module test parallelism in developer commands",
+  "outcome": "Supplemental command cargo test tests::engram_host_adapter --no-fail-fast ran 157 FD/process-heavy tests at default parallelism and failed 9 tests through 2s gate timeouts followed by a poisoned shared kill-failure mutex. Each first-failure test passed with --exact immediately afterward. Classification: environment/resource issue caused by bypassing scripts/test-rust.sh, whose purpose is to bound Rust test parallelism and raise FD limits. Next action: use scripts/test-rust.sh as the authoritative gate; add or document a bounded module-test helper if direct Engram-module runs remain part of development workflow.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

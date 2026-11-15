@@ -1,0 +1,28 @@
+{
+  "id": "01a13cdb-f747-7441-bca6-a4e8ffca8f23",
+  "external_ref": null,
+  "title": "Make the pre-snapshot test discriminating for the test-run rail badge",
+  "outcome": "Make the pre-snapshot test discriminating for the test-run rail badge",
+  "acceptance": [
+    "A pre-snapshot test supplies at least one active run with snapshotReady=false and asserts that no badge is shown and the accessible name remains Open Test Runs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

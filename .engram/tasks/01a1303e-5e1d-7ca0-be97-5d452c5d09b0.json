@@ -1,0 +1,42 @@
+{
+  "id": "01a1303e-5e1d-7ca0-be97-5d452c5d09b0",
+  "external_ref": null,
+  "title": "Carried Codex tests share the 4-slot carried-check limit with launcher gates, and eviction drops the oldest whatever its kind or state",
+  "outcome": "When the carried-check limit is reached, eviction prefers a carried Codex test still waiting for its end over a launcher gate or a carried test whose end was already reported (or Codex tests get their own bound), so a turn closing with several running Codex tests cannot evict an earnable credit; the holder is told as today.",
+  "acceptance": [
+    "A test fills the limit with a carried launcher gate plus carried Codex tests and shows a newly carried unended Codex test evicting an unended Codex carry, not the gate or an ended carry.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

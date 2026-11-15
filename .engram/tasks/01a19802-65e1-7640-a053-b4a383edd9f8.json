@@ -1,0 +1,29 @@
+{
+  "id": "01a19802-65e1-7640-a053-b4a383edd9f8",
+  "external_ref": null,
+  "title": "Retain rejected-session persistence retry duty without churning the shared wire mutation stamp",
+  "outcome": "Unchanged rejected rows retain persistence and prompt-history retry custody without repeatedly invalidating wire projections and session caches.",
+  "acceptance": [
+    "Repeated successful sibling ticks with an unchanged rejected session preserve retry selection and last-good baseline without repeatedly advancing its wire-visible mutation stamp.",
+    "Concurrent newer mutation, removal and hiding preserve the current row owner's semantics; correction remains persistable and exact fences remain truthful."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

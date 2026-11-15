@@ -1,0 +1,42 @@
+{
+  "id": "01a122d7-3627-7c83-82bb-aef183670c4e",
+  "external_ref": null,
+  "title": "Admission guard before Begin reserves Begin's share of the shared budget (F3)",
+  "outcome": "A slow named-root authority fence before Begin can no longer leave Begin with no time: the guard's deadline keeps Begin's share of the shared admission budget, and a guard that still runs out yields a definite NotStarted hold naming the guard. Lands after 1b, because it touches src/engram_host_adapter.rs.",
+  "acceptance": [
+    "The named-root guard before Begin (src/engram_host_adapter.rs, guard_engram_root_read_until before TurnBegin) uses a deadline that reserves Begin's share of the shared admission budget, so a slow authority fence cannot leave Begin with no time. A fail-first test with a gated persist writer and a scripted clock (no load) shows the guard exhausting the budget on unchanged code; after the fix, Begin is still transmitted, or a definite NotStarted hold names the guard.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "host-persistence",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a12299-076c-70b3-9a72-0e3b338ac4a4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1239d-27c6-76c2-8e07-ad17bdd45daa",
+  "disposal_reason": "Continue as independent work: F3 was split from w-0e3b338ac4a4 (completed, F1+F2 landed as 84fc4066) by coordinator ruling #177 to land after 1b; Termal::Fable2 #214 assigns it now (with the Low w-b8d28ccb6195) after the restart.",
+  "completion": null
+}

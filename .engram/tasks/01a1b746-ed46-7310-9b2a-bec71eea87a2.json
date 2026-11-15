@@ -1,0 +1,37 @@
+{
+  "id": "01a1b746-ed46-7310-9b2a-bec71eea87a2",
+  "external_ref": null,
+  "title": "Unadmitted retirement test races the restarted host's own delivery worker (Windows landing FULL failure)",
+  "outcome": "tests::engram_host_adapter::turn_checks::claude_runtime_turns::unadmitted_runtime_reporting::repairs::retirement_joins_post_check_capture_and_delivery_installs_before_restore no longer compares against a host that can still legitimately write: the restarted host is quiesced (its background delivery work stopped/joined) before the baseline is taken, so the final equality checks only that the RETIRED host's late install is refused. The guard being tested is unchanged and not weakened.",
+  "acceptance": [
+    "Original 6201 failure and source-traced competing restored-host writer are recorded without attributing the write to retired host.",
+    "The test retires restored host before baseline while keeping old-host refusal/assertion unchanged, with no sleeps/retries/timeout or product change.",
+    "Exact candidate hash/tree/bundle and validation provenance are recorded for combined integration; no unrun check is claimed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "eo",
+    "landing-gate",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; fdbb53c8 contains exact+3 retirement-before-baseline test repair (Git diff verified); original6201 FAIL/diagnosis preserved. Map combined pair/gates/landing to source-only three criteria, then close.",
+    "completed_at": "2026-11-08T19:23:00.959197400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

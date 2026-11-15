@@ -1,0 +1,35 @@
+{
+  "id": "01a1c778-38cd-7bf0-a7d3-623bd4b2b8ac",
+  "external_ref": null,
+  "title": "Integrate combo43 on 5be407c3: d50d 6265bb97 (w-2bd7 counter carry of 88ed0a1c)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 6265bb97cba9dfa9cc20555944d48a3077577af8 (tree b42d278ba612a7150359b2950f34b1591c8b8048) is on origin/master, where master was moved to it by a fast-forward from 5be407c353f93eed3c40bf24efccc1f2abc445f2, and its raw no-renames diff against that parent is byte-identical to the reviewed d50d 88ed0a1c's diff against dab1d863.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is b42d278b passed every stage, with equal source ids before and after and an eligible clean input, and the adopted review pair of 88ed0a1c (one Codex, one Claude) recorded no finding of Medium or higher.",
+    "The release binary built from tree b42d278b was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install may since have replaced it, in which case this binary is kept aside there."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo43 (d50d counter carry of 88ed0a1c) landed on master as 6265bb97 by fast-forward from 5be407c3, with a byte-identical contribution. It was gated by DL560 FULL test-59a304f1 (6/6 stages, Rust 7586/0, vitest 5090/0, eligible, equal source ids), with the adopted 88ed pair clean. Installed on DL560 (0323a592) and Central (124f03a5), with the previous binaries kept aside and no restart. Independent evaluation by Codex session-17295 (delegation-e2c66bfe) passed all 3 criteria.",
+    "completed_at": "2026-11-10T23:40:34.554464700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a0f4ab-d36a-70e1-b9f8-154f1a1ea5a2",
+  "external_ref": null,
+  "title": "A Kimi (ACP) session exited with code 1 right after a host restart; the error shows no cause",
+  "outcome": "Know why Engram::Kimi's runtime exited with code 1 after the 2026-09-30 23:31Z restart, and make such an exit show its cause. Reported by Engram::Fable (mailbox ebe242f7 #353). About 23:37Z, session-8371 was in error with the preview \"Kimi session exited with status exit code: 1\". That text comes from src/acp.rs about 396–403, where the wait on a runtime process sees a non-zero exit. A runtime of the old host could not report to the new one, so this process was started by the new host, most likely when it resumed the session, and then exited. It is not the restart's own interruption notice (\"TermAl restarted before this turn finished\", src/messages.rs about 155). By about 23:38Z the session was active with the prompt \"resume\", so a new prompt recovered it. Unknown: the cause, and whether Kimi's stderr was captured. Start from the host's log around 23:31–23:37Z for session-8371.",
+  "acceptance": [
+    "The cause of the exit is identified from logs or a reproduction and recorded in a note, or the item records why it cannot be determined.",
+    "When an ACP runtime exits non-zero, the session's error shows the last lines of its stderr, or the item records why that is not possible; a test covers the chosen behaviour."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "kimi",
+    "restart-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

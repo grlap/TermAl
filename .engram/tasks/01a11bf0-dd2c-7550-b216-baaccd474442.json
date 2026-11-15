@@ -1,0 +1,32 @@
+{
+  "id": "01a11bf0-dd2c-7550-b216-baaccd474442",
+  "external_ref": null,
+  "title": "Move harness-role native binary production out of ordinary unit-test execution",
+  "outcome": "Assess an explicit launcher or integration-test producer for native harness-role witnesses so ordinary unit tests consume a pinned current-source binary without a nested Cargo build; preserve source provenance and clean-checkout coverage.",
+  "acceptance": [
+    "Move harness-role native binary production out of ordinary unit-test execution is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "architecture",
+    "delegations",
+    "harness-roles",
+    "review-low",
+    "user-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a112e4-b83e-7a81-9fb7-7a5ea1183a8f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

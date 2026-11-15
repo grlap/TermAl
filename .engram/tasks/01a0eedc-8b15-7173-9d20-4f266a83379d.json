@@ -1,0 +1,30 @@
+{
+  "id": "01a0eedc-8b15-7173-9d20-4f266a83379d",
+  "external_ref": null,
+  "title": "Coordinated cleanup of .tmp worktrees that hold a ui/node_modules junction to the master checkout",
+  "outcome": "Every worktree under .tmp that is no longer needed is removed without touching the master checkout's ui/node_modules, and the way worktrees get their UI dependencies no longer leaves a junction that a recursive delete can follow.",
+  "acceptance": [
+    "Every removal followed the order junction first, verify the master's ui/node_modules, then git worktree remove, and the master checkout's ui/node_modules is intact afterwards (its typescript binary present and `npx tsc --noEmit` clean in ui).",
+    "For each of the nine worktrees a note states its owner or that none could be established, what it held (branch, head, uncommitted changes), and whether it was removed or kept and why.",
+    "docs/test.md or the launcher says how a new worktree gets its UI dependencies, and if that is a junction, the launcher or a documented command creates and removes it, so that no agent makes one by hand."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "safety",
+    "worktrees"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a19f45-4449-7d20-86da-ee3a64e5d7d0",
+  "external_ref": null,
+  "title": "UI tab switch latency (248–272 ms INP): measure and fix the session-pane switch path at a realistic session count",
+  "outcome": "An isolated harness at a realistic scale (about 8300 sessions, long conversations, Monaco panes) measures tab or session-pane switching: render and commit work, mount and unmount of heavy children such as Monaco and the virtualized conversation, layout read-after-write and scroll restoration. The dominant cause is fixed through existing UI owners without changing behaviour. Before and after numbers and regression coverage are recorded, and TypeScript and the relevant UI tests pass on the candidate.",
+  "acceptance": [
+    "An isolated, reproducible harness with about 8,300 sessions, long conversations and Monaco panes records a baseline and before/after tab or session-pane switch measurements, including render/commit, heavy-child lifecycle, layout read-after-write and scroll restoration; no live 4173 UI profiling.",
+    "A small fix through the existing switching owners improves the measured dominant cost while preserving selected-session content, editor state, scroll restoration and pane cleanup; regression tests cover the confirmed cause and TypeScript plus relevant UI tests pass on the exact candidate.",
+    "A runnable isolated preview and reproduction instructions are provided for Greg, with measurement limitations and exact source/check/review evidence handed to integration; no landing claim without the standing-rule gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f0b-12f1-7cc2-b8fc-252999666e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a1bcb2-05a1-7ea2-8300-ec2e5c9c0ccd",
+  "external_ref": null,
+  "title": "Make the session-list browser guard's motion modes independent of host preferences",
+  "outcome": "Normal and reduced-motion browser checks select their own motion preference on every supported host and explain preference mismatches.",
+  "acceptance": [
+    "The guard explicitly selects no-preference and reduce using verified browser emulation or supported flags, without changing the host's accessibility settings.",
+    "Both modes are exercised independently of host defaults; a preference mismatch reports observed and intended modes and exits nonzero."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "browser-tests",
+    "greg-directed",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1b20e-26eb-75d3-9a44-5f30e3127943",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Chrome guard forces both motion preferences, checks actual mode, and reports expected/observed values. No acceptance evaluation exists.",
+    "completed_at": "2026-11-09T01:16:22.547986700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

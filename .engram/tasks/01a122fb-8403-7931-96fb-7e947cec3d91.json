@@ -1,0 +1,29 @@
+{
+  "id": "01a122fb-8403-7931-96fb-7e947cec3d91",
+  "external_ref": null,
+  "title": "Scope the TermAl remote-notification and mailbox-eligibility slice for Git task sync, after Engram's Git-only proof",
+  "outcome": "A separately scoped, testable TermAl slice that carries Engram's push-confirmed task-sync notification to a remote-backed root session of the same control plane. It covers mailbox eligibility for remote-backed proxy roots, wakes over the existing session-scoped proxy route, and the coordination-upstream relay from docs/features/agent-mailboxes.md \"Planned remote access\". It has no federation between independent control planes and no remote credit. It starts only after Engram's Git-only export/import proof has fixed the exchange contract.",
+  "acceptance": [
+    "A design note names the Engram exchange contract it builds on (the Git-only vertical slice's landed commit and its notification shape) and lists the exact TermAl changes, each with file paths: eligibility, wake routing, the coordination upstream and its pinned remote-lease semantics.",
+    "The note states explicitly that there is no federation between independent control planes, no remote or imported host credit, no root rebinding, and no background network activity (Greg #516), and that Git-only discovery at the next explicit fetch remains the fallback.",
+    "The note proposes fail-first tests for each change that run without a real second machine, and someone other than the author concurs on the slice's acceptance criteria before implementation is claimed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

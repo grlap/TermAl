@@ -1,0 +1,29 @@
+{
+  "id": "01a15437-395a-73c1-b796-42294a7039f4",
+  "external_ref": null,
+  "title": "Tighten the shared test-ref bullet: parent on origin/master, not a landing, explicit deletion refspec",
+  "outcome": "The test-ref bullet in CLAUDE.md and AGENTS.md (and Engram's twin) says three things. (1) The test commit's parent must be reachable from origin/master at push time, so a push never publishes unpushed master commits. (2) A test-ref commit and push are not landings: the master pre-push checks and commit condition 2 don't apply to them. (3) The exact refspec allowed for deleting the ref. The amended wording is concurred by both projects' coordinators and lands under the authority-text rule.",
+  "acceptance": [
+    "Both coordinators (Termal::Fable2, Engram::Fable) concur on exact amended wording that covers all three points, and it is recorded on this item.",
+    "The amended bullet lands byte-identically in TermAl's CLAUDE.md and AGENTS.md under the authority-text rule (Greg notified, final-diff audit passed); Engram's twin is landed or tracked there."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "cross-project",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

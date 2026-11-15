@@ -1,0 +1,29 @@
+{
+  "id": "01a1d05a-4fb1-7c91-8270-d645a609c440",
+  "external_ref": null,
+  "title": "Preserve keyboard focus when checkpoint chooser groups change",
+  "outcome": "Marker regrouping or viewport resize does not silently strand focus on document.body while the checkpoint chooser is open.",
+  "acceptance": [
+    "Add a behavior test that opens a group chooser, then changes its first marker or group membership through marker updates or viewport regrouping.",
+    "When the active group disappears or changes, restore focus to a surviving dot or the conversation container and retain correct chooser/navigation state."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "accessibility",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

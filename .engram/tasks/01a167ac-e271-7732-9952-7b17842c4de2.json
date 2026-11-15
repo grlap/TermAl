@@ -1,0 +1,28 @@
+{
+  "id": "01a167ac-e271-7732-9952-7b17842c4de2",
+  "external_ref": null,
+  "title": "queueHold changes that leave the queue projection hash unchanged (retry reschedule, exhaustion) may not reach the UI promptly",
+  "outcome": "A change of a session's automatic-retry queueHold (its cause, its next retryAt, or the hold clearing while the latch stays set) reaches the UI promptly, as the hold itself does.",
+  "acceptance": [
+    "Either every change of engram_automatic_retry_hold(record) for a session publishes a delta or summary that carries the new queueHold, or the hold is folded into the queue projection hash so the queue delta path carries it. A test drives a retry reschedule (same latch and prompts, a new retryAt) and an exhaustion (the latch kept, the hold cleared), and shows the UI-facing projection updated."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "session-recovery",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

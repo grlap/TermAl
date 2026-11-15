@@ -1,0 +1,24 @@
+{
+  "id": "01a18d95-3cc0-7b63-9c29-8acfa874b522",
+  "external_ref": null,
+  "title": "Extract the launcher's recordToolchain compiler-selection logic into test-launcher-source.mjs",
+  "outcome": "The ~90 lines of compiler-selection and toolchain-record logic in executeRun (recordToolchain) live as a pure builder in scripts/test-launcher-source.mjs taking probe/lookup callbacks; executeRun keeps only the probe wiring.",
+  "acceptance": [
+    "Extract the launcher's recordToolchain compiler-selection logic into test-launcher-source.mjs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

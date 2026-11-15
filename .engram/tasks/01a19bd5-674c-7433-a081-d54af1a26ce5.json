@@ -1,0 +1,38 @@
+{
+  "id": "01a19bd5-674c-7433-a081-d54af1a26ce5",
+  "external_ref": null,
+  "title": "w-3fe8 source slice: file_changes, persist_transcript_conflict and persist_fence tests off record.engram.routing_token",
+  "outcome": "w-3fe8 source slice: file_changes, persist_transcript_conflict and persist_fence tests off record.engram.routing_token",
+  "acceptance": [
+    "A source-only patch for exactly src/tests/file_changes.rs (record.engram.routing_token at ~139/263), src/tests/persist_transcript_conflict.rs (~74/94/188/525/526/535/536) and src/tests/persist_fence.rs (~488/546/704), on the integrator's current tree b30e776b, is returned to Sol-03d4",
+    "The formal own-row, WAL and rejected-session safety guarantees are preserved exactly through current ordinary state, with a per-original disposition from a full-body read",
+    "No deleted tests, no fake aliases, no remaining routing_token use in these files, and no cargo"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 three test ports plus mounted-child corrections via8adf. Preserve915fa1da withdrawal of overbroad compile audit; close only owned3-path source scope.",
+    "completed_at": "2026-11-08T19:22:24.639073400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

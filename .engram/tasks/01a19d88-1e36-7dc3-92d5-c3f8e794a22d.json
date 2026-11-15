@@ -1,0 +1,31 @@
+{
+  "id": "01a19d88-1e36-7dc3-92d5-c3f8e794a22d",
+  "external_ref": null,
+  "title": "Windows child launch has no strict end-to-end bound",
+  "outcome": "Define and enforce an honest finite end-to-end Windows child-launch contract across inheritance-lock admission, synchronous process creation and failure cleanup, preserving exact child/tree ownership and late-result cleanup.",
+  "acceptance": [
+    "The Windows launch contract defines one finite end-to-end allowance across lock admission, creation, child observation and cleanup; no unbounded Mutex::lock or INFINITE cleanup wait remains on a caller path advertised as bounded, and the deadline is not silently reset after admission or creation.",
+    "Discriminating Windows tests cover a held inheritance lock, delayed process creation and delayed or failed termination, proving the caller's finite outcome while retaining exact ownership of any late child and preventing an orphaned process or inherited-handle leak.",
+    "Relevant Windows checks pass on the exact reviewed input; existing containment, original probe deadlines and cleanup assertions remain intact, and any deliberate contract change is documented and approved separately."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "deadlines",
+    "follow-up",
+    "process-ownership",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

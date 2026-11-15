@@ -1,0 +1,28 @@
+{
+  "id": "01a10f02-548d-71e0-a2ce-445d656abe23",
+  "external_ref": null,
+  "title": "Keep host reviewer MCP observations out of assistant result-candidate scanning",
+  "outcome": "Source-identified Low from reviewer MCP pair1. Host typed observations are currently Message::Text Author::Assistant and can replace the latest model output as a result candidate on terminal fallback, masking a preceding reviewer packet or being synthesized as assistant output. Use an appropriate host/system notice kind or explicitly exclude these observations from candidate scanning, preserving bounded durable diagnostics and authoritative submission precedence. Inventory only: no assigned owner or scheduled implementation trigger.",
+  "acceptance": [
+    "Keep host reviewer MCP observations out of assistant result-candidate scanning is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "reviewer-mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

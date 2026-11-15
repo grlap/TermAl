@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c7a5-7ff0-a7c4-44f5ccec9ec2",
+  "external_ref": "tm-vict",
+  "title": "Keep disabled Engram path silent for project-less delegations",
+  "outcome": "The delegated-dispatch Engram path resolves a project before checking whether Engram is enabled. A delegation whose parent is not attached to a project can therefore emit an engram> diagnostic even when Engram is disabled everywhere, violating the S0 no-op letter.",
+  "acceptance": [
+    "With Engram disabled, project-less delegated dispatch performs no Engram request, persists no Engram fields, and emits no Engram diagnostic; focused coverage exercises the project-less parent path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch 10f6b1ad, spot-checked by Termal::Fable2): CLOSE-DONE. A projectless delegation returns disabled without a diagnostic (src/engram_host_adapter.rs:6339), with a dedicated regression at src/tests/engram_host_adapter.rs:449. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

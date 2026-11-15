@@ -1,0 +1,29 @@
+{
+  "id": "01a0fec5-6910-7021-9f06-a36cfb28359b",
+  "external_ref": null,
+  "title": "Suppress repeated full-state resyncs while a session body repair is already in flight",
+  "outcome": "Bound redundant /api/state fetches from streaming sequenced frames during an already-pending covering body repair, without suppressing independent global metadata gap recovery.",
+  "acceptance": [
+    "Suppress repeated full-state resyncs while a session body repair is already in flight is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "deferred-review",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

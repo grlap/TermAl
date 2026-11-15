@@ -1,0 +1,28 @@
+{
+  "id": "01a1984b-6bac-76c1-925c-41cb768b4539",
+  "external_ref": null,
+  "title": "A root session's MCP bridge lacks the delegation tools (spawn_session, get_session_status/result, resume_after_delegations) while other sessions on the same host have them",
+  "outcome": "A root session's MCP bridge lacks the delegation tools (spawn_session, get_session_status/result, resume_after_delegations) while other sessions on the same host have them",
+  "acceptance": [
+    "The cause of Termal::Sol-1cee's (session-13169) active bridge exposing mailbox, review_identity and resume_after_test_runs but not termal_spawn_session, termal_get_session_status/result or termal_resume_after_delegations is identified",
+    "A root session gets the full delegation tool set, or a clear typed reason why it is withheld, without a config edit or session replacement; a test covers the identified path"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "mcp-bridge"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

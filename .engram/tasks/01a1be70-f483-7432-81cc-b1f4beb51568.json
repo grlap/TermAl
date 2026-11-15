@@ -1,0 +1,31 @@
+{
+  "id": "01a1be70-f483-7432-81cc-b1f4beb51568",
+  "external_ref": null,
+  "title": "Work view loads a large project very slowly: 'Reading work... 4261 of 4270 Engram items so far'",
+  "outcome": "The work view is usable quickly on a project of about 4270 items without synchronously reading the whole project, with measured before and after, no worse filtering, and partial results never presented as complete.",
+  "acceptance": [
+    "The real cause is measured on the real project of about 4270 items: number of requests, time per request and where time goes across host fetch, pagination, SQLite and UI render, with no speculation.",
+    "A simple fix, using existing pagination or search rather than a new mechanism where possible, makes the view usable quickly. Before and after are measured on the same project, filtering and search are no worse, and partial results are clearly shown as partial.",
+    "Review pair with no Medium or higher and the normal checks and gate, without heavy tests beyond need and without blocking P0."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "performance",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

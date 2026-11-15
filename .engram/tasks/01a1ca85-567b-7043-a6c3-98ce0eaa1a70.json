@@ -1,0 +1,30 @@
+{
+  "id": "01a1ca85-567b-7043-a6c3-98ce0eaa1a70",
+  "external_ref": null,
+  "title": "Make evaluator in-flight retry span cover an admitted authority transition",
+  "outcome": "An evaluator waiting on a current bounded authority transition can retry within a documented span appropriate to the longer Engram operation window, without changing the recurring scheduler cadence or resending unknown writes under new identities.",
+  "acceptance": [
+    "The host's in-flight retry hint and evaluator bounded retry span account for an admitted authority transition lasting the current operation/disposition window, or the host uses an existing bounded wait owner to settle that transition.",
+    "A controlled-clock fixture holds the actual transition past the old roughly9s retry span, then completes it within its valid operation window and shows the same evaluator can obtain its allowed result; another control retains bounded refusal on genuine expiry.",
+    "The recurring reclamation interval remains independent, and attempt identity, unknown-outcome replay rules and existing evaluation authority guards remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "retry",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

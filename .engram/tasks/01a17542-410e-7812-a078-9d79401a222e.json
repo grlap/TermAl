@@ -1,0 +1,31 @@
+{
+  "id": "01a17542-410e-7812-a078-9d79401a222e",
+  "external_ref": null,
+  "title": "Duplicate host labels can change explicit mailbox alias recipient when a peer disconnects",
+  "outcome": "An explicit host-label mailbox alias cannot silently select a different host when another enrolled host with the same label becomes unavailable; UUID targets remain exact.",
+  "acceptance": [
+    "A host label associated with more than one distinct retained host id refuses with UUID guidance before and after either peer disconnects.",
+    "The same parser/selector is reused; current native host-UUID targets and append authority fences retain their behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "mailbox-alias",
+    "pre-existing",
+    "review-follow-up",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a174c9-ea52-79e1-a235-8837ca2accca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

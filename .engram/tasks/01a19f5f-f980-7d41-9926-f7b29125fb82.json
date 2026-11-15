@@ -1,0 +1,27 @@
+{
+  "id": "01a19f5f-f980-7d41-9926-f7b29125fb82",
+  "external_ref": null,
+  "title": "Cover the remaining unconfirmed-root reason branches end to end",
+  "outcome": "Every Unconfirmed exit of the explained root and turn captures is reached through the capture function in a test, or is documented as unreachable in practice. That includes the claim-journal reasons (JournalPending, JournalReconciliationUnsettled, JournalRetired), the turn-level opening-store work-unresolved exit, and the retired-journal fallthrough that returns the opening provenance. The reason sentences for BoundRootMismatch (which also covers a non-positive generation) and NamedRootUnknown (which asserts a cause the check does not test) describe exactly what is checked.",
+  "acceptance": [
+    "Cover the remaining unconfirmed-root reason branches end to end is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1d807-7dc3-7822-96b5-0434753e7ac0",
+  "external_ref": null,
+  "title": "Codex /review-code child aborts with \"Review resource limit prevented completion\" on a 55-path committed input",
+  "outcome": "A reviewer that cannot cover a large committed input says so before it starts, or the host offers a supported way (such as an automatic path-family split with a coverage ledger) to complete whole coverage, so whole-diff reviews no longer end partial.",
+  "acceptance": [
+    "The cause of the abort for Codex session-17937 (delegation-6723fef7-f6bd-4cfb-a0d2-26e48f291df5) is identified and recorded: either a model context or budget limit of the reviewer, or a host-side defect in the review resource accounting.",
+    "If it is a host defect, it is fixed, and a regression test shows a reviewer over an input of comparable size completing or refusing with a clear, documented reason before review begins.",
+    "If it is an expected model budget, the supported procedure for whole-coverage review of large inputs is documented (in the /review-changes command or docs/features), including how coverage across split sessions is evidenced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

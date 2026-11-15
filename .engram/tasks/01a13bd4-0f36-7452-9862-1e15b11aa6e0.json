@@ -1,0 +1,36 @@
+{
+  "id": "01a13bd4-0f36-7452-9862-1e15b11aa6e0",
+  "external_ref": null,
+  "title": "Align the trusted Engram help resolver with the host's configured-program launch resolution",
+  "outcome": "The help permission exception and actual Engram host launch resolve a configured native program to the same executable identity, with deliberate unsupported configuration forms documented and refused.",
+  "acceptance": [
+    "A shared resolver or an explicitly justified narrower contract prevents help admission from trusting a different executable than the host would launch for the same supported configured native program.",
+    "Regression coverage checks configured absolute paths and Windows native basename search precedence, including application/system directories versus PATH, without mutating process-wide test environment concurrently.",
+    "The maintained gate passes on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "read-only-gate",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

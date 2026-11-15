@@ -1,0 +1,27 @@
+{
+  "id": "01a17121-1b81-7bd2-a6b2-1917843d3f37",
+  "external_ref": null,
+  "title": "Full gate in a fresh worktree without ui/node_modules fails with a raw runner ENOENT on tsc and all stages unrun, instead of a named dependency preflight failure",
+  "outcome": "Before any stage, the launcher checks the worktree's UI dependencies (ui/node_modules, including typescript/bin/tsc). When they're missing, it fails with a clear preflight message naming the missing path and the setup step, not a raw ENOENT.",
+  "acceptance": [
+    "Full gate in a fresh worktree without ui/node_modules fails with a raw runner ENOENT on tsc and all stages unrun, instead of a named dependency preflight failure is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "preflight"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

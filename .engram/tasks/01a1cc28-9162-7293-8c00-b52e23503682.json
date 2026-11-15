@@ -1,0 +1,28 @@
+{
+  "id": "01a1cc28-9162-7293-8c00-b52e23503682",
+  "external_ref": null,
+  "title": "State the 16384-character per-text limit in the injected reviewer result-submission protocol",
+  "outcome": "Reviewer children learn the per-field text limit of the structured review-result submission before they submit, so a long coverage note is split up front instead of being rejected and retried.",
+  "acceptance": [
+    "The reviewer-mode result protocol that TermAl injects into delegated /review-code children states the per-text-field limit enforced by MAX_DELEGATION_REVIEW_RESULT_TEXT_CHARS (src/delegation_review_results.rs, currently 16 * 1024 characters) and the list limit MAX_DELEGATION_REVIEW_RESULT_LIST_ITEMS (200), or derives them from those constants, so the stated limits cannot drift from the enforced ones.",
+    "A test drives a submission whose single text field exceeds the limit and asserts the existing rejection names the field and the limit; no test pins the protocol text itself."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

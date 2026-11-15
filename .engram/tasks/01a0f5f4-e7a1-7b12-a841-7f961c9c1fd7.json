@@ -1,0 +1,26 @@
+{
+  "id": "01a0f5f4-e7a1-7b12-a841-7f961c9c1fd7",
+  "external_ref": null,
+  "title": "Replying to a mailbox page before acknowledging it costs five calls: the reply is left unread to its own sender until a re-read and second acknowledgement",
+  "outcome": "Reported by Engram::Advisor (TermAl mailbox 10abf22f #66), first observed in CV2 session-9302 at 2026-10-01 05:33Z.\n\nThe documented order is read, process (including replying), then acknowledge the unchanged receipt. Following it costs five calls: read, send, acknowledge, re-read the own send, acknowledge. The send cannot advance the sender's cursor because the cursor does not sit immediately before it (the page is still unacknowledged). The acknowledgement then stops at the page's end, so the own reply is left unread.\n\nAcknowledging first and then sending costs three calls, because the send then advances the cursor over itself. But that order is not sanctioned by the protocol text, which says to acknowledge after processing the whole page.\n\nOptions:\n(a) Document ack-then-reply as sanctioned when the reply is sent with a stable idempotency key, so that a failed send is retried rather than lost.\n(b) Let an acknowledgement also advance over the acknowledger's own messages that immediately follow the acknowledged page.\nKeep the current durable acknowledgement semantics until one of these is chosen.",
+  "acceptance": [
+    "A reply to a mailbox page can be sent and the page acknowledged in at most three calls without leaving the reply unread to its sender, either by a documented sanctioned order or by the acknowledgement advancing over the acknowledger's own immediately following messages; the protocol text in the mailbox tool descriptions says which, and a test covers the cursor behaviour."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f627-8605-7061-b5d3-0cce648f6c3c",
+  "disposal_reason": "Duplicate of the same Engram::Advisor report (CV2 session-9302, 2026-10-01 05:33Z), filed twice: here by Termal::Opus2 from mailbox 10abf22f #66, and as w-0cce648f6c3c by Termal::Fable2 from mailbox b9d13887 #118. w-0cce648f6c3c is canonical. It carries the same CV2 provenance, test-bound criteria, and the extra criterion that no inbound message is skipped. Both fix directions here (a documented ack-then-reply order with a stable idempotency key, or an acknowledgement that covers the sender's own following messages) are in its outcome.",
+  "completion": null
+}

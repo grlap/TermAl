@@ -1,0 +1,55 @@
+{
+  "id": "01a0e6d3-c3fc-7541-8aef-575de1249912",
+  "external_ref": "tm-5yhp",
+  "title": "Strengthen acceptance-policy argument validation regression coverage",
+  "outcome": "Claude7199 test Note: idempotency_key newline is rejected at required prefix before charset check. Add a valid-prefix invalid-character case and explicit actor single-argv-token builder assertion. Parent correction: normalize_engram_host_settings already bounds developerName to64 and ASCII letters/digits/dot/underscore/hyphen; production actor is not unvalidated, and Command uses argv not shell. Test hardening only, no confirmed injection defect.",
+  "acceptance": [
+    "C1 (idempotency-key charset and length are each exercised on their own).\n- A test in src/tests/acceptance_settings.rs asserts that `args` returns Err for keys that PASS the `termal-policy-` prefix check and fail only the charset check: `termal-policy-a\\nb`, `termal-policy-a b`, `termal-policy-a;b`, `termal-policy-a_b` and `termal-policy-ä`.\n- It also asserts Err for a prefixed, valid-charset key of 101 characters, and Ok for one of exactly 100 characters.",
+    "C2 (the actor stays a single argv token).\n- A test asserts that, for actors containing a space, `=`, a quote, `;`, `$(…)`, a leading `--`, or a newline, `args` returns exactly one element holding the actor text: `--authorized-by=<actor>`, byte for byte.\n- It also asserts that the argv length and every other element equal those produced with a plain actor.",
+    "C3 (test-only).\n- The change touches only src/tests/acceptance_settings.rs, with no production code and no policy or authority change.\n- Every existing acceptance_settings test passes unchanged.",
+    "C4 (validation and landing).\n- The full gate passes on the exact tree submitted for landing.\n- The review pair has no outstanding finding of Medium or higher on it.\n- The item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

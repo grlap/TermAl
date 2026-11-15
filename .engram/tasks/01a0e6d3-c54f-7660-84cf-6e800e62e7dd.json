@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c54f-7660-84cf-6e800e62e7dd",
+  "external_ref": "tm-kvkt",
+  "title": "Relocated worktree: Cargo integration-test binaries keep stale absolute CARGO_BIN_EXE paths",
+  "outcome": "Gate failure evidence (2026-09-26): full gate test-f299baaa-c051-4dbe-bdcc-403968a0b635 in worktree .tmp/wt-waits, rust-tests stage. tests/review_freeze_cli.rs:82 Command::new(env!(\"CARGO_BIN_EXE_termal\")) panicked with Os error 3 NotFound.\n\nDiagnosis (confirmed): the worktree had been moved with git worktree move from C:\\github\\Personal\\TermAl-wt-waits to C:\\github\\Personal\\TermAl\\.tmp\\wt-waits, so delegated reviewers could use it as cwd, since they must stay inside the project. Cargo did not rebuild the integration-test binary because its inputs were unchanged: review_freeze_cli-7be1bc77602b0870.exe was built at 08:20, before the move. It still embeds C:\\github\\Personal\\TermAl-wt-waits\\target\\debug\\termal.exe, which no longer exists, while termal.exe was rebuilt at the new path at 09:26. The pre-move gate test-7c5416e9 passed.\n\nClassification: environment (a stale build artifact after relocation), not a product or test defect.\nFix applied: cargo clean -p termal in the moved worktree, then a fresh full gate on the unchanged input.\nFollow-up option: after a worktree move, or when target/ was produced at another path, the launcher could detect it (for example CARGO_BIN_EXE paths outside the current root), or docs/test.md could say to run cargo clean -p termal after git worktree move. Better still, create review worktrees under .tmp/ from the start.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

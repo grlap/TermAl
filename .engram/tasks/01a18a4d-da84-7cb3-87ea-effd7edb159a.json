@@ -1,0 +1,27 @@
+{
+  "id": "01a18a4d-da84-7cb3-87ea-effd7edb159a",
+  "external_ref": null,
+  "title": "fullGatePlan accepts a relative root or runDir and resolves it against the computing host's cwd",
+  "outcome": "fullGatePlan accepts a relative root or runDir and resolves it against the computing host's cwd",
+  "acceptance": [
+    "fullGatePlan accepts a relative root or runDir and resolves it against the computing host's cwd is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

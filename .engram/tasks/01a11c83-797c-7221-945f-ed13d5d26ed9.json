@@ -1,0 +1,29 @@
+{
+  "id": "01a11c83-797c-7221-945f-ed13d5d26ed9",
+  "external_ref": null,
+  "title": "The documented credited form for a Claude full gate (Bash background) never earns credit: the host treats it as restricting \"background Claude work\" and withholds the closing grant",
+  "outcome": "A Claude root session's full gate, launched in the form CLAUDE.md and docs/test.md prescribe, earns host credit, or the docs prescribe a form that does, so no passing gate is lost to the session's own sanctioned launch.",
+  "acceptance": [
+    "The cause is classified with evidence: why a Claude Bash-background launcher gate counts as restricting background work for its own closing grant, while a `--detach --notify` gate does not.",
+    "Either the Bash-background form earns credit for its own gate (a test drives it through start, completion and the closing grant), or CLAUDE.md and docs/test.md prescribe the detached form for Claude sessions, through the authority-file route."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "claude-runtime",
+    "host-recording",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Premise false (Termal::Opus2's correction, TermAl mailbox 4daa5b87 #2027). Gate test-34280d8d, launched in the Bash-background form, WAS credited: its host verification record (passed) was recorded at 17:14:39Z and appended at 17:15:34Z, 32 s after the reader looked. Only test-e35ae7ed went uncredited, plausibly because the same session's 15 s background `sleep` timer overlapped the closing grant. That trap is recorded in memory gate-credit-trap-background-timer. Filed in error by Termal::Fable2 on the mistaken report; cancelled.",
+  "completion": null
+}

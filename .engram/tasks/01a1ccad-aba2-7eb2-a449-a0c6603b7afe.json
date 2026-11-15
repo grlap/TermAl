@@ -1,0 +1,29 @@
+{
+  "id": "01a1ccad-aba2-7eb2-a449-a0c6603b7afe",
+  "external_ref": null,
+  "title": "Make Urgent sort controls reflect its displayed row order",
+  "outcome": "The enabled Work sort controls produce the order shown in Urgent, or clearly indicate a fixed order.",
+  "acceptance": [
+    "Changing an enabled sort control in Urgent changes its displayed row order, or the controls explicitly disclose that ordering is fixed.",
+    "A behavioral UI test exercises the chosen sorting behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "ui",
+    "work-panel"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

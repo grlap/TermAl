@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-7ff09206e77c",
+  "external_ref": "tm-5fsy.7",
+  "title": "Freeze checker: preserve observed failure diagnostics within stderr bounds",
+  "outcome": "Claude session-6885 Low, src/review_freeze.rs:131. Git stderr up to 64 KiB is embedded with extra context into checker stderr also capped at 64 KiB, turning a normal failed verification into transport HTTP 500. Bound embedded diagnostics (e.g. 4 KiB) and assess draining excess stderr while retaining bounded memory.",
+  "acceptance": [
+    "Verbose Git failure remains bounded and returns an observed verified:false with useful diagnostic; true launch/transport failures remain distinct."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

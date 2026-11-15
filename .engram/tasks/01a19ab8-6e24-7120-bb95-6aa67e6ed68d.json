@@ -1,0 +1,28 @@
+{
+  "id": "01a19ab8-6e24-7120-bb95-6aa67e6ed68d",
+  "external_ref": null,
+  "title": "Central FULL: review_identity_questly_capacity_covers_ten_thousand_files_without_relaxing_limits exceeded its 40s review-identity deadline under a full gate",
+  "outcome": "The cause of the 40-second review-identity deadline breach in the 10,000-file capacity test during a Central Windows full gate is identified with discriminating evidence and classified as product, test/runner or environment, and the confirmed cause is fixed without relaxing the deadline, retrying or quarantining the test.",
+  "acceptance": [
+    "Central FULL: review_identity_questly_capacity_covers_ten_thousand_files_without_relaxing_limits exceeded its 40s review-identity deadline under a full gate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "found-by-gate",
+    "nondeterminism",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

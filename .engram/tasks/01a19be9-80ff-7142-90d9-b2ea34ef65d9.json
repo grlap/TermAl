@@ -1,0 +1,30 @@
+{
+  "id": "01a19be9-80ff-7142-90d9-b2ea34ef65d9",
+  "external_ref": null,
+  "title": "submit_review_result schema does not advertise the 200-item cap on filesInspected; large reviews hit a 400 mid-submission",
+  "outcome": "submit_review_result schema does not advertise the 200-item cap on filesInspected; large reviews hit a 400 mid-submission",
+  "acceptance": [
+    "The review-result submission schema and tool description advertise every server-enforced bound on filesInspected (and any other capped array or string), so a reviewer learns the limit before submitting",
+    "A review whose input exceeds the bound has a supported, lossless way to report full coverage (a raised or removed cap, a structured overflow field, or documented chunking), shown by a deterministic test with more than 200 inspected files",
+    "The review pair has no outstanding Medium or higher finding, and the full gate passes on the landing input"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation-results",
+    "review",
+    "schema"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

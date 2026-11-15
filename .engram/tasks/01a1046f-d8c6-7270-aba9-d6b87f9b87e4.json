@@ -1,0 +1,54 @@
+{
+  "id": "01a1046f-d8c6-7270-aba9-d6b87f9b87e4",
+  "external_ref": null,
+  "title": "Budget-clock B4d: ClaimedRoot selects its budget clock before Engram is enabled, with a per-caller audit of its 108 call sites",
+  "outcome": "The ClaimedRoot fixture (src/tests/engram_turn_observations.rs, :534 at c98d041) chooses its budget clock through the slice-1 boundary before Engram is enabled.\n- ClaimedRoot::new_scripted (:535) today installs the scripted clock AFTER ClaimedRoot::new has already enabled Engram at :562. That is the mixed-clock order, in which a target or worker can snapshot Real first. Moving the selection before enable is a real ordering change for its 96 callers: engram_source_root_naming 62, engram_root_authority 20, engram_turn_observations 5, engram_legacy_root_recovery 4, engram_source_root_confirmation 4, engram_budget_authority 1.\n- The 12 plain ClaimedRoot::new callers run on undeclared Real (engram_root_authority 9, engram_source_root_naming 3). Each chooses Scripted or declares Real with a reason.\n- The TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK hook in engram_source_root_naming.rs (:244/:249) and its removed-root deadline assertions are reconciled with the chosen clock.\nThe criteria must require a per-caller audit note and the boundary controls (coordinator #812). No production change. Criteria are to be drafted in the test-only template and agreed before the batch starts.",
+  "acceptance": [
+    "Scope at 2933a6a: ClaimedRoot (engram_turn_observations.rs :534) and its 113 call sites across 10 files (the 108 at c98d041 plus 5 in 4 later files): 101 ClaimedRoot::new_scripted and 12 ClaimedRoot::new, as listed in note 601b69f5 plus the B4d inventory. The fixture chooses its budget clock through the slice-1 boundary before Engram is enabled and before any target or worker snapshot: select_test_scripted_engram_budget_clock, or declare_test_real_engram_budget_clock with its reason in a comment. Each of the 12 plain-new tests and the 4 in-test install sites (engram_root_authority 3, engram_legacy_root_recovery 1) makes that choice before enable. install_test_engram_budget_clock no longer appears in these 6 files.",
+    "A per-caller audit note lists, for each of the 113 call sites, the test's deadline, backoff, elapsed and wait sources and its assertions. It states what the earlier selection changes for that test: which targets or workers now snapshot the scripted clock where they snapshotted Real before.",
+    "Each test in scope passes on its chosen clock. A budget-expiry assertion either advances the same scripted clock across its causal boundary, with an unadvanced positive control, or declares Real with its reason. The fixture asserts the clock is unread before enable. A focused control shows that a ClaimedRoot target constructed at enable holds the selected scripted clock.",
+    "TEST_ENGRAM_REMOVED_ROOT_READ_CLOCK (engram_source_root_naming.rs :244/:249) is reconciled. Either it is kept as a separate time hook, with its reason stated in a comment and the note, or the removed-root read is driven by the scripted clock. Its removed-root deadline assertions are unchanged in meaning.",
+    "No production change. No expectation is weakened, no timeout grows, and no retry is added.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a102f3-27ce-76a3-9b8c-8fb4c2131717",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "ClaimedRoot now chooses its budget clock before enable: new_scripted or new_real, with an explicit unread-clock assertion. The engram_root_authority, source_root_naming and legacy_root_recovery sites were migrated, and the mid-test Real installs were removed. The writer_wait wall-clock sleep was replaced by a scripted advance. Committed 6f8b28d7 (freeze fd4c706d, evaluation 902323c9 6/6). Landed in train 38 as master da0a3d9d (two-parent merge onto c083c33, tree 7b2f69f2), with the train gate test-0576583b PASS and a clean integration pair (Codex delegation-f1d7e34f, Claude delegation-39155d1f).",
+    "completed_at": "2026-10-04T09:09:24.403810600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

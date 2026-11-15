@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c648-7112-adaa-e4e791a9b1e4",
+  "external_ref": "tm-mx5d",
+  "title": "Hide stale New response indicator at fractional transcript bottom",
+  "outcome": "Chromium can report a reachable transcript bottom with a remaining/subpixel 0.5px movement. The detached-tail scroll handler currently requires more than 1px of forward movement before reattaching, so the live-turn card is fully visible at the physical bottom while the floating New response button remains and overlaps it. Accept any positive input-owned movement that lands inside the physical-bottom tolerance and add a regression for the 0.5px final step plus indicator visibility.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,42 @@
+{
+  "id": "01a13181-e75d-7492-a729-a4f77d367a96",
+  "external_ref": null,
+  "title": "The unended-check closure line advises 'run it again' for a still-running non-carried Codex test whose rerun will be overlapped",
+  "outcome": "When engram_close_unended_checks closes a Codex test with outcome Unknown that is still recorded as running (EngramSessionState::running_codex_tests) because it could not be carried (it was overlapped, ran in a delegated session, or had no named root), the holder line says it is still running and that a rerun in its worktree is overlapped until it ends or the session is stopped, instead of 'run it again to record it'.",
+  "acceptance": [
+    "A test closes a non-carried still-running Codex test at its turn's close and shows the still-running wording, and a test whose process has ended keeps the existing wording.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

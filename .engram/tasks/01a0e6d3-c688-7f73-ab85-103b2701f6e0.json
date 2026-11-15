@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c688-7f73-ab85-103b2701f6e0",
+  "external_ref": "tm-oqt1",
+  "title": "Codex Engram bootstrap has no capability gate or degrade path for config/read",
+  "outcome": "Both structured reviewers examined the Codex Engram new-thread bootstrap in the\nimplementation checkout (HEAD 0e7ab55, tracked diff 642ffdc4...). Claude review\nsession-6531 raised this as Medium at src/codex_engram_bootstrap.rs:78 and\nproposed P1; the parent agrees with P1 because the failure is TOTAL and\nPERMANENT for an affected user, not degraded.\n\nThe bootstrap hard-depends on a Codex app-server `config/read` RPC that appears\nnowhere else in this repository. There is NO capability gate and NO degrade\npath. Any error fails the requesting turn (compose_codex_engram_instructions\n:21-24), and a permanent failure is INDISTINGUISHABLE from a transient one, so\nevery retry re-runs the same failing request. The `initialize` response that\ncould carry capabilities is discarded at src/codex.rs:367-381.\n\nFAILURE SCENARIO: a user on a Codex build without `config/read` - or one whose\nreply is not shaped {\"config\": {...}} - CAN NEVER START A NEW THREAD IN ANY\nENGRAM-ENABLED PROJECT. The only escape is disabling Engram for the project\nentirely. Nothing tells them why.\n\nFIX DIRECTION: separate permanent from transient failures. On a\nmethod-unsupported or malformed-shape response, either start the thread with the\nbootstrap appended to no base, or start it with no bootstrap, and record a\nvisible notice; alternatively gate the whole path on a capability observed\nduring `initialize`.\n\nNOT A REGRESSION IN SHIPPED CODE: this is in the unmerged bootstrap changeset\nand must be resolved before it lands.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

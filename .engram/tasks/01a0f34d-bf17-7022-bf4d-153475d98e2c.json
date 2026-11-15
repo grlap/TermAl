@@ -1,0 +1,37 @@
+{
+  "id": "01a0f34d-bf17-7022-bf4d-153475d98e2c",
+  "external_ref": null,
+  "title": "A holder's own command that TermAl cannot place no longer fences its carried gates outside its workdir and current named root",
+  "outcome": "The holder's own command that TermAl cannot place fences every carried check of the holder whose run is going, as a path-less edit of the holder already does; the narrowing to where a session works applies to other sessions' checks only.",
+  "acceptance": [
+    "A test carries a gate, then reports an unplaced writing command of the holder in a turn without a grant (and one under another claim's named root): the carried check is fenced, and the line names the command.",
+    "Another session's unplaced command still counts only where that session works; the existing tests pass unchanged.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

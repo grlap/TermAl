@@ -1,0 +1,29 @@
+{
+  "id": "01a146a3-54e0-70c0-89d3-c2ad725f3ba8",
+  "external_ref": null,
+  "title": "termal_name_source_root took more than 30 s and returned 502 \"named-root control reply arrived after its budget\" (pending intent) under load",
+  "outcome": "termal_name_source_root took more than 30 s and returned 502 \"named-root control reply arrived after its budget\" (pending intent) under load",
+  "acceptance": [
+    "termal_name_source_root took more than 30 s and returned 502 \"named-root control reply arrived after its budget\" (pending intent) under load is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "control-plane",
+    "named-root",
+    "storage-stall"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

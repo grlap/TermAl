@@ -1,0 +1,35 @@
+{
+  "id": "01a19f46-116f-7c53-a8ab-e005d8164e8c",
+  "external_ref": null,
+  "title": "Hidden-retention pass: share one removal-duty predicate with the blocker, and broaden the oracle fixture",
+  "outcome": "The commit-time hidden-retention pre-filter can never become narrower than the removal blocker, and its equivalence with the per-session reference is guarded for the topologies the argument depends on.",
+  "acceptance": [
+    "One shared function decides the removal duty (runtime_observation_has_removal_duty || source_root_bind_owner) and is used by both source_observation_removal_blocker and retain_hidden_source_observation_sessions.",
+    "The reference-oracle fixture adds a child with several parents, a delegation cycle or self-delegation, a delegation whose parent or child session is missing, and a runtime-observation duty, and the compared image includes mutation_stamp.",
+    "The scaling diagnostic does not run the quadratic reference at 8,400 hidden sessions on every suite run (#[ignore] or a smaller default)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "greg-reported",
+    "host-persistence",
+    "p0-profiling-2026-10-22",
+    "performance",
+    "review-low",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a164ff-dc1b-71f3-bda3-de6021f4b32f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

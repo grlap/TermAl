@@ -1,0 +1,27 @@
+{
+  "id": "01a18a4e-2709-7460-a6c9-1084790d8a16",
+  "external_ref": null,
+  "title": "Update docs/features/remote-full-gates.md to the owner-recorded remote gate condition",
+  "outcome": "The \"What a remote result counts for\" section and the evidence list in docs/features/remote-full-gates.md match the amended \"Test refs for remote runs\" bullet: no host import of a recognized check record is required, and the integration owner records on the item the run id, host, commit, tree id and the launcher's before and after fingerprints.",
+  "acceptance": [
+    "Update docs/features/remote-full-gates.md to the owner-recorded remote gate condition is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "docs",
+    "remote-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

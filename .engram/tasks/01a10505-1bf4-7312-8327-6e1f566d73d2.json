@@ -1,0 +1,28 @@
+{
+  "id": "01a10505-1bf4-7312-8327-6e1f566d73d2",
+  "external_ref": null,
+  "title": "Bound retained named-root retirement notice metadata without losing delivery provenance",
+  "outcome": "Retained retirement history has an explicitly validated metadata bound while unpublished publication replay and undelivered live-session notices remain safe.",
+  "acceptance": [
+    "Bound retained named-root retirement notice metadata without losing delivery provenance is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "metadata"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

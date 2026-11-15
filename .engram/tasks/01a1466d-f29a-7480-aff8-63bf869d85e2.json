@@ -1,0 +1,41 @@
+{
+  "id": "01a1466d-f29a-7480-aff8-63bf869d85e2",
+  "external_ref": null,
+  "title": "Pin the unsupported-test notice variant for force-exit negative forms",
+  "outcome": "The force-exit negative tests distinguish the unsupported-test notice from other feedback instead of relying only on a flag appearing in an echoed command.",
+  "acceptance": [
+    "The negative-form regression asserts the exact unsupported-test notice or its distinguishing test-intent wording for each invalid flag form, while still verifying that no Test check is admitted.",
+    "The focused Node recognition tests pass without widening accepted production syntax or weakening existing artifact/count/source/grant guards."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

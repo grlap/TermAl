@@ -1,0 +1,33 @@
+{
+  "id": "01a19341-e501-79a0-91a7-f14b3707bf62",
+  "external_ref": null,
+  "title": "Make test-run card read mocks explicit and cover history retry and detail recovery transitions",
+  "outcome": "UI tests explicitly model read-only API success/failure and verify failed-cursor history retry, exact-id Refresh recovery and transition into live/paged summary mode.",
+  "acceptance": [
+    "Card tests mock the existing history and exact-id reads, name their read behavior accurately, and assert safe recorded-path fallback without implicitly relying on Node relative-URL fetch failure or starting any test.",
+    "Focused cases distinguish retrying a failed initial page from retrying a failed older-page cursor, exact-id error followed by successful Refresh details, and same-key transition from exact-id mode to summary mode."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "review-low",
+    "state-flood",
+    "test-runs",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19336-6946-7502-b7b6-2e2e7001a9cf",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

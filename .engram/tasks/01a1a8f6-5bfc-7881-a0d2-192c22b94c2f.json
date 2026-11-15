@@ -1,0 +1,37 @@
+{
+  "id": "01a1a8f6-5bfc-7881-a0d2-192c22b94c2f",
+  "external_ref": null,
+  "title": "Launcher selects committed input automatically on a clean checkout, on master's existing capture",
+  "outcome": "An ordinary launcher run on a clean checkout earns a committed-input record without a flag, and a dirty or not-admitted checkout runs plain with its real outcome, so the simple evaluation rule works end to end on repositories with no submodules. It carries none of the submodule capture producer or its batching.",
+  "acceptance": [
+    "Automatic launcher selection is enabled while the host's ORDINARY_COMMIT_INPUT_DEFAULT remains false. Before immutable run registration, a clean checkout admitted by the committed-input producer selects input=commit; any other checkout, dirty or not admitted, including one with a submodule gitlink, selects the existing plain run, preserving its actual command outcome, naming why in the run's summary and emitting no committed-input verification record. The plain run's own preconditions, including a readable HEAD and root, are unchanged; where they fail, the run stops with its existing error as it does today. Explicit --input commit remains strict and refuses a checkout the producer does not admit; --input plain selects a plain run with no verification record. Existing plain-run pre/post fingerprint guards are retained; no new drift mechanism is introduced.",
+    "A full or focused run in the commit lane whose input changed, or whose post-run capture was unavailable, reports its stages' actual outcome and exit code, and its summary says on its own line that the run is not eligible and not a landing gate, and why. Only a run recorded as eligible, with equal before and after fingerprints, counts as a gate. A registration refusal names its cause and both ways out. docs/test.md says so and states the committed flow's entry in the wording on w-83d4e75fef4f.",
+    "The change uses master's existing commit-input capture and adds no Git reads to a clean run's captures beyond reuse of the first status. It adds no time-based assertion, budget change or retry. Each behaviour above has a row, including automatic start, then dirty, then evaluate refused, and a plain fallback for a checkout with a gitlink.",
+    "The required independent review pair has no unresolved in-scope Medium-or-higher finding, and the final exact input passes the standing full-gate and integration requirements, including the relevant Windows check. A future host-default flip needs a separate decision."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "execution-observability",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Automatic launcher selection landed on master/origin at cdfb7a4c: admitted clean checkouts register committed input; dirty/ineligible checkouts run plain with named reason; explicit plain/commit and actual outcomes preserved, with separate ineligible gate line. Host default remains false; no N11 producer/batching included.",
+    "completed_at": "2026-11-05T02:14:08.207118300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

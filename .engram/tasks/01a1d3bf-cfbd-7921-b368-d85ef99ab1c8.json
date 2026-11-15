@@ -1,0 +1,43 @@
+{
+  "id": "01a1d3bf-cfbd-7921-b368-d85ef99ab1c8",
+  "external_ref": null,
+  "title": "K3 slice 1: qualify remote native completion against the sealed SourceId contract",
+  "outcome": "One existing admission boundary applies K3's use-specific remote-completion rules against Engram's sealed contract, with exact capability/reasons and no second credit policy.",
+  "acceptance": [
+    "Behavioral conformance evidence against the implemented w-180d contract at Engram cc1aa93a shows that new remote deliveries for committed_input verification and landing_gate use only the SourceId input with the complete before/after source_id pair; the legacy commit/fingerprint input is never sent. This is a narrowing of the parent's legacy compatibility lane for new delivery, not permission to rewrite historical records.",
+    "Behavioral evidence preserves K3's genuine native-terminal/input/use qualification, exact shared capability and reason vocabulary, original verdict/terminal/exit/reason, unsupported/incomplete/failure/conflict distinctions, and current destination authority and completion-time admission guards. No local run, observation, grant, turn, sighting or verification credit is fabricated and no duplicate qualification owner is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "K3 slice 1: remote native completion is qualified against Engram's sealed SourceId contract at one existing admission boundary, with the exact capability and reason vocabulary and no second credit policy.\nLanded in combo94 as master 05062f47658d48fb656f00237f87145e61d73268 (tree cddfbe98), gated by DL560 FULL test-0a6f2ba8 on the identical tree (Rust 7791/0/114 including the six remote_verification tests) and Windows leg S1-WIN-1 test-0f1b1250 (66/0); the review pair was clean.\nClosure used the rev-8 binding route with Fable2's concurrence (bindings [] at revision 2, a workaround pending w-180d6f507470), plus one ADMISSION ONLY run, test-0a85ecff (9/0 at a6f605aa). The independent evaluation delegation-b7f512a2 (session-18070) passed both criteria.",
+    "completed_at": "2026-11-14T18:40:06.557936Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

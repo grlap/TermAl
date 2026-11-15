@@ -1,0 +1,48 @@
+{
+  "id": "01a10007-5fbb-7cf1-a54b-27e72e84f791",
+  "external_ref": null,
+  "title": "A test-run wait reports a run `recover` settled as interrupted as \"UNKNOWN (process gone)\", \"Interrupted: no\", and suggests recover again",
+  "outcome": "When a waited run's launcher died and `node scripts/test-launcher.mjs recover` settled it, termal_resume_after_test_runs reports it from the settled results.json: Interrupted: yes, its exit code (1), ended at the recovery time, with no suggestion to recover again.",
+  "acceptance": [
+    "A test registers a wait on a run, kills its launcher, settles it with `recover`, and shows the wait's resume report reads the settled result: Interrupted yes, exit 1, the recovery time as its end, and no 'recover' suggestion.",
+    "A run whose process is gone and that nothing has settled still reports UNKNOWN (process gone) with the recover suggestion, so the report tells the two cases apart.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-launcher",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

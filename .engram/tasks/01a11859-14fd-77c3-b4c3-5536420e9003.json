@@ -1,0 +1,29 @@
+{
+  "id": "01a11859-14fd-77c3-b4c3-5536420e9003",
+  "external_ref": null,
+  "title": "Apply the diagnostics-enabled gate to unsupported focused notices on command re-description",
+  "outcome": "Align note_engram_command_described's unsupported-focused notice admission with note_engram_command_started's diagnostics_enabled gate, preserving truthful no-Test feedback and all credit/provenance/dedup fences. Add controls for enabled and disabled sessions without changing check admission.",
+  "acceptance": [
+    "Apply the diagnostics-enabled gate to unsupported focused notices on command re-description is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "node",
+    "review-low",
+    "test-recognition"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,46 @@
+{
+  "id": "01a1418a-5edb-71e1-9652-9b98c0e65bfa",
+  "external_ref": null,
+  "title": "Avoid an empty read-record clause in same-session omission notices",
+  "outcome": "A same-session notice with unread records and no read records reports the unread boundary without '0 entries ... ()'.",
+  "acceptance": [
+    "When the same-session brief has unread records and no read records left out, its cut notice reports the unread boundary and contains neither 'The host read 0 entries' nor an empty '()'; a test covers it.",
+    "The full gate passes on the master tree that contains the change."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Removed the empty read-record clause from same-session omission notices while preserving the unread boundary. Fresh independent evaluation 9ed294fb970748afbb19e6f69f9bd592 passed both criteria on the landed master tree.",
+    "completed_at": "2026-10-16T23:16:43.745782200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

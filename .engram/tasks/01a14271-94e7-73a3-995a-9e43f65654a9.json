@@ -1,0 +1,31 @@
+{
+  "id": "01a14271-94e7-73a3-995a-9e43f65654a9",
+  "external_ref": null,
+  "title": "Work retained filters: validate hidden-window geometry and remaining lifecycle coverage",
+  "outcome": "Follow up three non-blocking R1 Low groups after the retained-filter fix lands: verify and address hidden-width ResizeObserver measurement retention for long lists, strengthen hidden-scroll/view-remount/filter-focus witnesses, and cover all source-key fields plus display-state reset. Preserve local-only filtering and serial read ownership. This is optional follow-up inventory with no executing assignee; Fable2 owns later prioritization after parent landing.",
+  "acceptance": [
+    "A deterministic measurement witness and supported real-browser observation with more than 60 rows establish whether a Memories round trip drops cached heights or changes the viewed rows; any confirmed defect is fixed without causing work-list reads.",
+    "Scroll coverage distinguishes hidden scroll events, a measured Table-to-Hierarchy remount and Search/Apply control focus. Removing the corresponding production guard makes each new witness fail for its stated behavior.",
+    "Source-generation tests distinguish changes to remoteId, engramDeclared and engramOperatorDisabled and verify that a source replacement resets local filters, label selection, sort, view and Memories state while unrelated updates retain the read."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "browser-validation",
+    "greg-directed",
+    "review-follow-up",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1423d-daf6-7f80-acba-e803e7f5cb8c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

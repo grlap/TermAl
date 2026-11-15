@@ -1,0 +1,27 @@
+{
+  "id": "01a18bd1-46fa-79e0-87d7-dbfc16bc8f68",
+  "external_ref": null,
+  "title": "Keep the first archived project basis for later legacy review captures",
+  "outcome": "Once a legacy reviewer delegation has a verified stamped publication, later recaptures keep that established project basis. A consistent native-session project move alone does not mint a new project-stamped version of unchanged result/output or consume an extra custody slot.",
+  "acceptance": [
+    "Keep the first archived project basis for later legacy review captures is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c643-73a1-b8c5-fb35d7e76d72",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

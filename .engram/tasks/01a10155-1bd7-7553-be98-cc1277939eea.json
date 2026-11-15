@@ -1,0 +1,28 @@
+{
+  "id": "01a10155-1bd7-7553-be98-cc1277939eea",
+  "external_ref": null,
+  "title": "Boot-recovery worker panics after the batch budget expires are not re-raised to the owning test",
+  "outcome": "In test builds, recover_prepared_engram_sessions_after_boot (src/engram_host_adapter.rs) records each recovery worker's caught panic and re-raises it on the calling thread when the coordinator returns, so the owning test fails. A worker still running when the batch budget expires finishes on the late path (finish_late_engram_restart_recovery) after that list is read, so its panic reaches only stderr. The fix covers late workers in test builds as well, for example a state-level failure channel that the test helpers check, or a test-owned completion guard. The production coordinator's bounded behaviour stays unchanged.",
+  "acceptance": [
+    "Boot-recovery worker panics after the batch budget expires are not re-raised to the owning test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a14882-9853-72f2-8565-339b57a1d89d",
+  "external_ref": null,
+  "title": "Handle Engram's control_request_expired as certified non-application: keep the checkpoint report, auto-retry admission with the same key",
+  "outcome": "When Engram returns control_request_expired on any control verb, TermAl treats it as a certified no-effect result: it keeps retained reports and intents and retries with the same idempotency key. It never loses turn evidence and never strands a queue on that code.",
+  "acceptance": [
+    "A closing checkpoint that receives control_request_expired keeps the turn report, so the next closing attempt carries the same report. A regression proves the report, including a host-recorded test run, survives one expired attempt and is delivered on the retry.",
+    "An admission evaluate that receives control_request_expired enters the automatic retry schedule with the same idempotency key, not a Reconcile hold. A regression covers this.",
+    "Begin and end responses with control_request_expired are classified as certified non-application for that invocation, and are retried or reconciled with the same key. Regressions cover both. The code is never synthesized from a host-side timeout: a local deadline still yields deadline_exceeded with unknown outcome."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed certified invocation-only non-application handling for remote control_request_expired/control_store_busy: retain and replay the exact report/request/key/Wait-or-Exit intent before ordinary admission, preserve earlier Begin uncertainty and automatic admission retry, keep local Deadline outcomes unknown. Full exact-source five-stage gate dd9e449b25c94bd4864a2ca5cd801ce0 passed; full independent R2 review pair has no outstanding Medium+; fresh independent evaluation c29224d222df430ab5d7c6790defc3c6 passes all 3 criteria with stale:null. Integration owner Opus2 mailbox #9/message mailbox-message-a2995440-d996-4a2f-859a-c786438b1cfd reports verified fast-forward from 21241d54 and origin/master = ls-remote = a694b626 at 21:41:31Z. Installation/build/restart remain pending, so installed_build is omitted. Named root retained through done per corrected lifecycle. Five optional Low/coverage/hardening children remain separate.",
+    "completed_at": "2026-10-17T21:42:32.651268700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1671e-77af-7d81-b766-ed3c1712c8a9",
+  "external_ref": null,
+  "title": "Confirm with a live capture that each Claude Code ScheduleWakeup or /loop tick carries a fresh command identity named by the turn's first frame",
+  "outcome": "Confirm with a live capture that each Claude Code ScheduleWakeup or /loop tick carries a fresh command identity named by the turn's first frame",
+  "acceptance": [
+    "A live stream-json capture from the pinned Claude Code version of at least one ScheduleWakeup tick and two consecutive /loop ticks records whether each tick carries a distinct command uuid and whether that uuid is named by the tick turn's first top-level frame.",
+    "The claude_turn_ownership.rs module header cites that capture as the basis for the self-started identity rule, or, if the capture contradicts the rule, a bug item is filed with the capture and the header's claim is narrowed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "claude-runtime",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

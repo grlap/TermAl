@@ -1,0 +1,41 @@
+{
+  "id": "01a19c4e-1598-7563-b701-b3a73c832ac8",
+  "external_ref": null,
+  "title": "w-3fe8 product correction: preserve provider-capacity retry arm and finalization during connection cleanup",
+  "outcome": "required for the w-3fe8 landing; enforced by the parent's FULL\nRestore the pre-removal provider-capacity retry arm/finalization behavior during live project connection cleanup; retain the tick's dispatch delay.",
+  "acceptance": [
+    "On the exact 0c00 before-image, only src/provider_capacity_retry.rs changes: remove the two early reset returns in arm and finish_provider_capacity_failure, and retain the tick's reset continue.",
+    "Record the introducing slice/rationale from integrator source provenance and return the frozen tree, before/after blobs, bounded rationale and expected affected provider_capacity tests to Sol-03d4 and Fable2; no Cargo or execution credit is claimed.",
+    "The integrated correction is covered by the parent candidate's required checks and review; this source slice alone does not claim validation or landing readiness."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gated-control",
+    "greg-directed",
+    "provider-capacity",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 provider-capacity arm/finalization correction and accepted test sourceb9964187. C3 integrated-check/review accounting must disclose parent's exception; no new product fix established.",
+    "completed_at": "2026-11-08T19:22:51.857865300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

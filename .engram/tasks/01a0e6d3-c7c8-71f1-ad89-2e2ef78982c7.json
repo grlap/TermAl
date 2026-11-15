@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7c8-71f1-ad89-2e2ef78982c7",
+  "external_ref": "tm-wmpn",
+  "title": "Wybor panelu przy otwieraniu plikow/diffow: analiza (algorytm slepy na szerokosc) i rekomendacja (stickiness + best-fit + prog splitu)",
+  "outcome": "GREG 2026-08-17: 'sprawdz algorytm wybierania panelu kiedy otwieramy pliki — jest za male; nie zmieniaj kodu, przygotuj rekomendacje'. ANALIZA + REKOMENDACJA (bez zmian w kodzie).\n\nJAK DZIALA DZIS (ui/src/workspace.ts):\n- resolveSessionOpenTargetPaneId(:2845): otwarcie z powierzchni kontrolnej (git status itp.) szuka celu przez findDirectionalContentPaneId(:3157).\n- findDirectionalContentPaneId: splaszcza uklad paneli do listy (flattenPaneOrder), znajduje pozycje panelu zrodlowego i bierze PIERWSZY nie-kontrolny panel NA PRAWO; jak nie ma - pierwszy na lewo; fallbacki: findSiblingContentPaneId / findContentPaneId (tez czysto porzadkowe).\n- NIGDZIE nie wystepuje szerokosc (grep za clientWidth/width/widest w workspace.ts: zero trafien w logice wyboru). Otwarcie taba nigdy nie zmienia rozmiarow splitow.\n\nDLACZEGO WYGLADA ZLE (screenshot Grega: 4 panele, diff wcisniety w waski srodkowy):\n1. SLEPOTA NA SZEROKOSC: 'pierwszy na prawo od control panelu' wygrywa niezaleznie od tego, ze ma ~500px, podczas gdy obok stoi szeroki panel. Diff/kod potrzebuje szerokosci; algorytm o tym nie wie.\n2. BRAK MINIMUM: cel nie jest powiekszany ani walidowany progiem czytelnosci; tab laduje i jest 'za maly'.\n3. BRAK PAMIECI INTENCJI: gdy uzytkownik przeciagnie diff do szerokiego panelu, nastepny diff i tak poleci do waskiego — reguła porzadkowa nie uczy sie niczego.\n4. BRAK AFINICJI TYPU: sesje, pliki i diffy dziela jedna regule, choc maja rozne potrzeby (diff = szerokosc; sesja = cokolwiek).\n\nREKOMENDACJA (warstwowo, od najtanszego):\nR1. STICKINESS (najwazniejsze): per-workspace zapamietuj panel, w ktorym uzytkownik OSTATNIO umiescil/przeniosl tab danego typu (diff/file vs session). Nastepne otwarcie tego typu -> ten panel, jesli nadal istnieje. Reczne przeciagniecie taba AKTUALIZUJE pamiec. To respektuje intencje i rozwiazuje 90% przypadku Grega bez dotykania layoutu.\nR2. BEST-FIT ZAMIAST FIRST-IN-ORDER (fallback gdy brak pamieci): wsrod kandydatow (nie-kontrolne panele) wybierz NAJSZERSZY zamiast pierwszego z brzegu; remis rozstrzyga blizszosc porzadkowa. Szerokosci paneli sa znane warstwie layoutu (split sizes) - zadnych nowych pomiarow DOM w logice czystej: przekazac mape paneId->width do resolvera.\nR3. PROG CZYTELNOSCI dla diff/file (opcjonalny, po R1+R2): jesli najlepszy kandydat < ~600px, preferuj SPLIT szerokiego panelu zamiast dokladania taba do waskiego (mechanizm splitAnchorPaneId juz istnieje w resolverze — uzyc go szerzej). NIE zmieniac rozmiarow istniejacych paneli automatycznie (lekcja tygodnia: zadnych niespodziewanych przesuniec ukladu).\nODRZUCONE: automatyczne poszerzanie panelu przy otwarciu (layout skacze pod reka uzytkownika — ta sama rodzina co sticky live-turn, ktora Greg wyrzucil).\n\nTESTY (gdy wejdzie w implementacje): otwarcie diffu z git status przy ukladzie [control | waski | szeroki] -> laduje w szerokim (R2); po recznym przeniesieniu do panelu X nastepny diff -> X (R1); pamiec przezywa restart (persist w workspace state); sesje nadal wg dotychczasowej reguly kierunkowej.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

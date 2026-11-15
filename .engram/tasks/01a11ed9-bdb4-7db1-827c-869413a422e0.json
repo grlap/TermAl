@@ -1,0 +1,63 @@
+{
+  "id": "01a11ed9-bdb4-7db1-827c-869413a422e0",
+  "external_ref": null,
+  "title": "A non-holder's `engram work note` from another checkout voids the holder's carried gate credit (attributed to the item's named root, not the real cwd)",
+  "outcome": "A command run by a session that isn't the holder, from a working directory outside the holder's named root, never voids the holder's carried check. Commands are attributed by their real cwd, not by the item focus a tracker command moves.",
+  "acceptance": [
+    "C1 (diagnosis). The item records, with source locators, why check 7921f177… refused test-b4eb5619 (and 332d1e4681be's occurrence): a Claude Bash subshell `cd` into the holder's root left the session's shell lost among places that include that root, and the session's later lines, though they began with their own absolute `cd` to another checkout, were placed at those lost places, so the other-session fence named the holder's root.",
+    "C2 (subshell). For a Claude session, whose Bash tool runs bash, a directory change inside a top-level `( … )` subshell does not move or lose the session's shell. The subshell's own commands are still placed where its `cd` leads, so a write there still fences a gate in that root. A `{ …; }` group, a pipeline element, `eval`, or a non-bash runtime keep today's conservative handling.",
+    "C3 (leading absolute cd). For a Claude session, a line that starts with `cd ABS &&` (a literal absolute directory that resolves; joined by `&&`, not `;` or `||`) places the rest of the line at ABS alone, not at the lost shell's places. A line whose first change is joined by `;`, or is relative or computed, keeps today's placement.",
+    "C4 (tests). Through the production command-start path: a session's `(cd <holder root> && <command>)` followed by `cd <other checkout> && engram work note <holder item> …` leaves the holder's carried gate credited; the same with no subshell (`cd <holder root> && <command that writes>`) still refuses it; a write inside the subshell while the gate is carried still refuses it; `cd <holder root>; cd <other> && x` and a relative leading cd keep today's behaviour; a non-Claude runtime is unchanged.",
+    "C5 (refusal text). When an other-session command refuses a gate, the cause also names where TermAl placed it: the line's leading absolute directory, or \"a shell TermAl could not follow\", instead of \"there\" alone.",
+    "C6 (validation and landing). The full gate passes on the exact tree submitted for landing; the review pair has no outstanding finding of Medium or higher; the item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

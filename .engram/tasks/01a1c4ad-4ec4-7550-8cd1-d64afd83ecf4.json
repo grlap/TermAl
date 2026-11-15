@@ -1,0 +1,28 @@
+{
+  "id": "01a1c4ad-4ec4-7550-8cd1-d64afd83ecf4",
+  "external_ref": null,
+  "title": "Document the bounded test-run registration view in the architecture route table",
+  "outcome": "The canonical architecture route table describes the registration view, its identity-only response and the 400/413 outcomes already implemented and documented in the feature guide.",
+  "acceptance": [
+    "The GET /api/test-runs/{run_id} route entry documents view=registration and view=detail, the 11-field registration identity projection plus source, HTTP 400 for an unknown view and HTTP 413 above the 64 KiB encoded response bound, with a link to the feature guide."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "api",
+    "documentation",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,40 @@
+{
+  "id": "01a0fcf0-7ff7-78a0-aa60-7997342bfc0b",
+  "external_ref": null,
+  "title": "A session's file edit outside its carried gate's worktree still refuses that gate's credit",
+  "outcome": "While a gate is carried, a file edit the session reports refuses that gate's credit only when the edited path lies inside the gate's worktree, or could otherwise reach the gate's input. An edit to a path outside the worktree leaves the credit intact.",
+  "acceptance": [
+    "A session's file edit outside its carried gate's worktree still refuses that gate's credit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a1070b-207a-7570-a1cc-b6c2f74d6b7f"
+  ],
+  "blockers": [
+    {
+      "blocker_id": "01a10706-383d-7391-a526-cae78ba42f3a",
+      "kind": "manual",
+      "detail": "Blocked on an operation-bound placement witness (Architect2 9319b1e8; Fable2 #1427/#1428). A post-write check of the edit target cannot prove where the write landed: a scratch-side junction retargeted between the write and the classification defeats it, and so does a replaced hard-link alias. The launcher fingerprint does not cover the gated root's ignored trees. Known route (not filed, a new feature under 'tech debt first'): a host-controlled scratch write path that verifies GetFinalPathNameByHandle and the file ID on the handle it writes through, with only such writes exempt. Until then: no file edits anywhere in the session while a gate is carried.",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-04T13:06:50.552458Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

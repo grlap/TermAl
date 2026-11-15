@@ -1,0 +1,42 @@
+{
+  "id": "01a111c5-fe7a-7b10-b574-932c992379d1",
+  "external_ref": null,
+  "title": "H — DORMANT OCCURRENCE TRANSACTION AND CLOSED CAPABILITY",
+  "outcome": "H — DORMANT OCCURRENCE TRANSACTION AND CLOSED CAPABILITY",
+  "acceptance": [
+    "H — DORMANT OCCURRENCE TRANSACTION AND CLOSED CAPABILITY, cap +450. Depends on B/C/G and D/E's scope fencing; ordinary F lands first in the proposed sequence. Define the opaque capability interface and combine complete retirement image, new mappings, handled occurrence and strict persistence. Production construction remains owned by the future quiescence guard; tests alone issue it for permanently closed disposable fixtures. No API/boot/status reader can mint the token, rotate live identities or reopen admission here. Acceptance subset: I4 all occurrence/retry/crash/atomicity controls; I5 no old authority replay; I6 retired scope refused; I7 reachability and no activation. Test a stale hold token, lost ACK with exact retry, partial required image, same occurrence reuse and new occurrence rotation. Actual process-tree/MCP drain, physical-alias exclusion and release races remain on the dependent guard."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-backup",
+    "engram-host",
+    "identity-stage-h"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0fa84-7f43-7782-b76d-47338f8245e3",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a111c5-fce2-71d3-a457-b22c9ab51bb7",
+    "01a111c5-fd68-75b3-872f-28bbf0c41e19",
+    "01a111c5-fd9d-71f3-bd26-a40efb6e3b33",
+    "01a111c5-fdcc-7640-97d9-69d5bf0d779f",
+    "01a111c5-fe00-76a0-8aad-7d0cd35f9795",
+    "01a111c5-fe3e-72b3-aa61-69da67e86939"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

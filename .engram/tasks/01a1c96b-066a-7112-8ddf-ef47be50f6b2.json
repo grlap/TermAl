@@ -1,0 +1,24 @@
+{
+  "id": "01a1c96b-066a-7112-8ddf-ef47be50f6b2",
+  "external_ref": null,
+  "title": "Registered focused run refused at capture_registration (\"test run source owner configuration changed before publication\") when the launching turn ends before TRACKED",
+  "outcome": "A registered focused run whose launching turn ends while registration is still in flight is either admitted, or refused with a message that names the turn boundary as the cause and tells the agent to keep the turn open until TRACKED, instead of the misleading \"configuration changed\" text.",
+  "acceptance": [
+    "Registered focused run refused at capture_registration (\"test run source owner configuration changed before publication\") when the launching turn ends before TRACKED is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

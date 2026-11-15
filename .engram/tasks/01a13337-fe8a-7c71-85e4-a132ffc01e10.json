@@ -1,0 +1,28 @@
+{
+  "id": "01a13337-fe8a-7c71-85e4-a132ffc01e10",
+  "external_ref": null,
+  "title": "Test that a new acceptance attempt key clears the citation retry",
+  "outcome": "A test records a citation retry on an evaluator attempt, mints a new attempt key through reuse or typed resubmit, and shows the new attempt's history has no citation retry while the previous attempt's refusal is kept. Today nothing tests the clearing in install_reused_acceptance_evaluation, so a regression would give a refreshed attempt a stale citation restriction. Review-pair Low from Claude /review-code delegation-d4287a70 on w-f8f8e04dffbb (freeze 1a4bbe3b), src/acceptance_evaluation_reuse.rs.",
+  "acceptance": [
+    "Test that a new acceptance attempt key clears the citation retry is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "follow-up",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

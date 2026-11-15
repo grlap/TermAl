@@ -1,0 +1,28 @@
+{
+  "id": "01a11ef3-6bc0-7b21-a591-dc9d028273f6",
+  "external_ref": null,
+  "title": "Clarify declared word-reader comment for the quoted Windows pwsh wrapper exception",
+  "outcome": "The engram_declared_words comment describes the shared rule for unquoted wrapper shell words and identifies the separate quoted Windows pwsh.exe envelope rule without changing recognition behavior.",
+  "acceptance": [
+    "The comment above engram_declared_words no longer claims that every wrapper shell word passes engram_declared_program_word; it states that the shared rule applies to unquoted shell words and agrees with engram_declared_wrapper_script."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "declared-tests",
+    "documentation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

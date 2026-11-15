@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c695-7080-923d-3302bbf2689b",
+  "external_ref": "tm-pg58",
+  "title": "A failed context refresh is invisible to the agent: silence looks identical to a successful read",
+  "outcome": "Reported from the peer project after a live pilot, and classified here rather than implemented. When the host prepares a turn it runs a bounded context refresh against the memory store and prepends the result to the next prompt. When that refresh FAILS - today it fails at store-open for every session bound to a store whose schema the installed binary refuses - the failure is reported only to the server process standard error and the preparation returns a failed outcome; nothing reaches the agent. From the agent side the turn simply arrives without fresh context, which is indistinguishable from a turn where the refresh succeeded and there was nothing new to say. The consequence is not a missing feature but a false impression: an agent may proceed believing it holds current context when its context is absent or older than it assumes. This is the same defect shape recorded twice already today: code that cannot obtain the strong thing it needs proceeds quietly rather than saying so - see the silent-proxy-substitution memory. Requested shape, from the reporting project and endorsed here: the user turn must still be able to continue, so this is NOT a hard failure; but an unsuccessful refresh should be visible to the agent as a concise status along the lines of context refresh unavailable, use a direct read instead, and cached text must never be presented as fresh. Explicitly out of scope: automatic retries, a large diagnostic block, any component-version surface, and the separate post-compaction hook wiring. Sequencing note: this is deliberately NOT urgent to implement, because the same peer project is preparing a store repair that will make these refreshes succeed again; the visibility gap will persist afterwards, which is precisely why it is worth fixing on its own rather than being masked by the repair.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

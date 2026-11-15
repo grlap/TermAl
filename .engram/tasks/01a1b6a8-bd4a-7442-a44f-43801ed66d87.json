@@ -1,0 +1,28 @@
+{
+  "id": "01a1b6a8-bd4a-7442-a44f-43801ed66d87",
+  "external_ref": null,
+  "title": "Remove unused allowAbsent plumbing from the review-freeze Git reader",
+  "outcome": "The review-freeze Git reader no longer carries the allowAbsent parameter, its exit-status-1 branch or the comment left unused after the dead launcher input predicate was removed; existing fingerprint behavior stays unchanged.",
+  "acceptance": [
+    "Remove the unused allowAbsent argument and unreachable absent-result branch from runGit/captureGit in scripts/review-freeze-fingerprint.mjs after verifying surviving call sites.",
+    "Existing review-freeze capture and error behavior remains unchanged under the relevant maintained checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

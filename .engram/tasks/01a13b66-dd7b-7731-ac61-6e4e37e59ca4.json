@@ -1,0 +1,36 @@
+{
+  "id": "01a13b66-dd7b-7731-ac61-6e4e37e59ca4",
+  "external_ref": null,
+  "title": "Stable retained delegation cleanup polls advance the child mutation stamp",
+  "outcome": "Unchanged terminal status/result polls of a retained dedicated cleanup failure leave the child mutation_stamp stable; mutating/claiming paths still stamp their actual changes.",
+  "acceptance": [
+    "An unchanged retained-failure or busy-cleanup poll uses immutable inspection before stamped mutable access; actual cleanup claims or visible state changes still advance the correct child's stamp.",
+    "A deterministic regression asserts stable child mutation_stamp and revision across repeated unchanged terminal status/result reads, and preserves the exact failed-owner public Stop retry behavior."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

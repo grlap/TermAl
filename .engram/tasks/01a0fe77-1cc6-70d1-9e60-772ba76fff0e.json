@@ -1,0 +1,27 @@
+{
+  "id": "01a0fe77-1cc6-70d1-9e60-772ba76fff0e",
+  "external_ref": null,
+  "title": "Scope and recheck the retained legacy-history repair notice at provider handoff",
+  "outcome": "Current retained-history status uses canonical store/work scope and is recomposed at final handoff; prospective forward naming resolves current warning without rewriting old-history refusals.",
+  "acceptance": [
+    "Scope and recheck the retained legacy-history repair notice at provider handoff is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

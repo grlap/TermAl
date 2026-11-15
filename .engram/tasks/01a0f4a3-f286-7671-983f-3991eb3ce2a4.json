@@ -1,0 +1,44 @@
+{
+  "id": "01a0f4a3-f286-7671-983f-3991eb3ce2a4",
+  "external_ref": null,
+  "title": "Clear omitted empty queue fields in loss-repair replacement projections",
+  "outcome": "An authoritative transcript-loss repair cannot retain a dispatched pending prompt merely because the server omits its now-empty queue field.",
+  "acceptance": [
+    "A public regression queues P, loses attached local dispatch updates, and admits a current targeted tail response that omits the empty pendingPrompts field; no phantom P remains in ref, store or render. Normal detached navigation preserves master's metadata/window semantics, without asserting detached loss-range repair.",
+    "Every admitted current targeted response uses the shared omitted-empty decoder for pendingPrompts, markers, promptHistory unless redacted, and option lists. The D7 central metadata gate preserves newer resident metadata when an older response arrives; a current response clears omitted authoritative empty fields. The exact corrected input passes the full five-stage gate and a fresh complete independent Codex/Claude pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "architecture-escalation",
+    "conversation-view",
+    "regression-suspect",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fe83-6e02-7623-8894-2b83ebfba577",
+  "disposal_reason": "Greg closed the parent P0 w-1b692f268123 at about 21:25Z on 2026-10-02 (note 13ee75cf). This required child continues as standalone work in w-2b83ebfba577, so it no longer blocks the parent. Coordinator: Termal::Fable2.",
+  "completion": null
+}

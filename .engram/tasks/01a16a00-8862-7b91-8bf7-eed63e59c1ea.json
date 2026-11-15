@@ -1,0 +1,63 @@
+{
+  "id": "01a16a00-8862-7b91-8bf7-eed63e59c1ea",
+  "external_ref": null,
+  "title": "Codex-turn-to-generation map: bound per session (or retain while its rows run) so other sessions cannot evict a long id-less run's turn",
+  "outcome": "A late, tagged, id-less Codex end of a long run, such as a 30+ minute full gate, still resolves its turn while other sessions start many commands. Entries are dropped when their session is removed. A test covers eviction.",
+  "acceptance": [
+    "A late Codex end of an id-less command, tagged with the Codex turn it ran in, still ends that turn's host-observed test-run row with its own exit after other sessions have started commands in more than 256 Codex turns since it started; a test drives this through the shared app-server path.",
+    "The Codex-turn-to-TermAl-generation mapping is bounded per session: another session's turns never evict a session's mapping, a session's own oldest mappings are evicted only beyond its own bound, and a late end whose mapping was evicted changes no row (left to terminal reconciliation); a test covers that eviction.",
+    "When a session is removed, its Codex turn mappings are dropped; a test shows none remain for it after removal.",
+    "Focused tests covering the change and its new tests pass in the item's named worktree, and the full gate is green on the frozen input.",
+    "The review pair (Codex and Claude, read-only) has no outstanding Medium-or-higher finding on the frozen input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "review"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "observed-runs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

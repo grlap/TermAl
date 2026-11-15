@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4d0-7e31-a889-5b8ddb017e2b",
+  "external_ref": "tm-cnsv.8",
+  "title": "Reconcile absent Engram control bindings during strict project Save checkpointing",
+  "outcome": "Greg authorization relayed by Engram::Codex mailbox92: repeated live Save abort for errored reviewer session-6010: session has no host-private control binding. Read-only Verify succeeds on migrated103a9714d03b; saved turnGatedControl remains false. Host retains active_grant_id and attempts TurnCheckpoint during tier reset. Establish exact session/store identity and implement safe reconciliation only when absence of binding AND outstanding authority is authoritatively established. Preserve strict refusal for uncertain identity or real/unconfirmed grants. Do not infer origin of disagreement, skip arbitrary checkpoint failures, delete sessions/reset stores, or change live policy/config/runtime. Live Save persistence and fresh-session binding acceptance require separately coordinated operator validation.",
+  "acceptance": [
+    "Deterministic regression for errored/non-running reviewer with retained host grant and absent store binding; negative tests preserve refusal for outstanding authority, stale identity and uncertain reads. Source gates and dual review pass. Operator separately validates real Save persistence and fresh compatible session binding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c4cb-75d2-b163-b711849dc8d8",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

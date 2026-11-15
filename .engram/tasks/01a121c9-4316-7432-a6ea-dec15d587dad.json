@@ -1,0 +1,27 @@
+{
+  "id": "01a121c9-4316-7432-a6ea-dec15d587dad",
+  "external_ref": null,
+  "title": "Forget an acceptance evaluation's unconfirmed-submission count when its evaluator ends, and decide whether the host enforces a final authority refusal",
+  "outcome": "StateInner.acceptance_evaluation_unsettled_submissions keeps no entry for an evaluator delegation that has ended or whose submission has left None. Whether a final \"naming authority cannot be confirmed\" refusal is enforced by the host (recorded on the target) or stays advisory is decided and documented.",
+  "acceptance": [
+    "Forget an acceptance evaluation's unconfirmed-submission count when its evaluator ends, and decide whether the host enforces a final authority refusal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage against master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — acceptance_evaluation_unsettled_submissions and its submit-time settlement ladder are absent from src/state.rs and src/engram_source_roots.rs; no counter remains to clean. Historical evaluations, verifications and seals are untouched.",
+  "completion": null
+}

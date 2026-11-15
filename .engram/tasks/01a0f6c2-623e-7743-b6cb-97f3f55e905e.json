@@ -1,0 +1,27 @@
+{
+  "id": "01a0f6c2-623e-7743-b6cb-97f3f55e905e",
+  "external_ref": null,
+  "title": "Move the carried-failure parsing and brief rendering out of acceptance_evaluation.rs into its own module",
+  "outcome": "Low from the Claude reviewer of w-f7620f648ea8, round 2 (delegation-333b3120-43ca-4854-be2a-c6d9e5723454). The carried-failure change grows src/acceptance_evaluation.rs by about 420 lines, to about 2 400, while the project is splitting large files. The carried-failure reading (EngramShowEvaluationForEvaluation, the EngramCarriedFailure* types, AcceptanceCarriedFailure, AcceptanceNewerFailure, acceptance_carried_failure, acceptance_blocking_verdicts) and its rendering (acceptance_brief_carried_failure, acceptance_brief_failed_contract) form one unit with few dependencies, and its tests are already in their own file. The split should be a pure code move into src/acceptance_evaluation_carried_failure.rs, with the provenance header CLAUDE.md asks for.",
+  "acceptance": [
+    "The carried-failure types and functions live in their own module with a header naming what it owns, what it does not, and the file it came from; the move is behaviour-preserving and the acceptance-evaluation tests pass unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

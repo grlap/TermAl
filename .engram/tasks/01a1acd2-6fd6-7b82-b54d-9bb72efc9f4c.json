@@ -1,0 +1,38 @@
+{
+  "id": "01a1acd2-6fd6-7b82-b54d-9bb72efc9f4c",
+  "external_ref": null,
+  "title": "Unconfirmed source-root opening notice names the failing check (diagnostic step toward the restart #2 unconfirmed-root cause)",
+  "outcome": "The host's unconfirmed-source-root opening notice states which confirmation check failed, so the next live occurrence on a root session identifies its own cause, without changing which roots are confirmed.",
+  "acceptance": [
+    "When a turn opens with an unconfirmed source root, the opening notice names the check that failed, in one bounded sentence that contains no path, store, id or secret.",
+    "Every Unconfirmed branch of the root capture and of the work-authority check has a test showing its reason. Each test also shows that the explained capture agrees with the unexplained one, so which roots are confirmed is unchanged.",
+    "The existing source-root naming, opening and authority tests pass on the candidate. Only signature-forced call-site edits are made to existing tests: false becomes None."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "engram-host-adapter",
+    "execution-observability",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The unconfirmed source-root opening notice names the failed check, without changing which roots are confirmed. Landed in master 47fdba2f on 2026-11-03.",
+    "completed_at": "2026-11-05T17:47:49.752166200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

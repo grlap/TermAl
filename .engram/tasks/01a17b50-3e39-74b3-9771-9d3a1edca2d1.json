@@ -1,0 +1,30 @@
+{
+  "id": "01a17b50-3e39-74b3-9771-9d3a1edca2d1",
+  "external_ref": null,
+  "title": "Record OFF checkpoint capacity refusal as unsent while preserving containment",
+  "outcome": "OFF containment applies its false flag and dispatch exclusion even when custody is unavailable, while its retained phase truthfully distinguishes an unsent checkpoint.",
+  "acceptance": [
+    "Decide bounded reply custody before publishing the OFF checkpoint send intent, through the existing containment and receipt owners.",
+    "When custody is unavailable, retain an Intended unsent duty and capacity reason while still durably applying OFF and exclusions; do not manufacture settlement, dispatch authority or a generic replay scheduler.",
+    "Cover shared-slot and byte-cap refusals, successful reserved sends, rollback and guard release; obtain focused validation and independent review."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "checkpoint-custody",
+    "engram-control",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

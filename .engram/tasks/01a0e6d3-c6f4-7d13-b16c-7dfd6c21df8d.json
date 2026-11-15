@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6f4-7d13-b16c-7dfd6c21df8d",
+  "external_ref": "tm-ulc0",
+  "title": "Make loopback-heavy Rust gate resilient to Windows WSAENOBUFS",
+  "outcome": "The required scripts/test-rust.sh gate failed on Windows while delegation_mcp_tests::delegation_mcp_wait_polls_until_terminal_then_fetches_result attempted TcpListener::bind(127.0.0.1:0): OS error 10055 (WSAENOBUFS, insufficient socket buffer space / queue full). The exact test immediately passed in isolation in 0.11s, so this is classified as an environment/resource exhaustion defect in the parallel test harness, not a product failure and not an unexplained flaky symptom. Investigate loopback socket/ephemeral-port pressure across the 4-thread full suite and make the wrapper or fixtures bound/reuse/retry resources deterministically. Acceptance: repeated required full Rust gates on Windows do not fail bind with 10055, and genuine fixture bind failures remain diagnosable.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

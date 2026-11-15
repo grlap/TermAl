@@ -1,0 +1,35 @@
+{
+  "id": "01a1db3f-1302-7a52-8558-1502514b4d33",
+  "external_ref": null,
+  "title": "Gate combo105 (794f mimalloc + 54e1 + 5963) as bca419c7 on a6f605aa with a Windows focused check and one full launcher run on a DL560 test ref; Opus2 lands",
+  "outcome": "The review-clean w-794fbe2d6123 (aa0759bf, mimalloc), w-54e15402ea0e (fd7294e2) and w-5963146b3f56 (096de859) are on master a6f605aa as aa0759bf -> 3b519737 -> bca419c7, carried byte-identically. They have a registered Windows focused check on the exact input (proving mimalloc compiles and links under MSVC) and one passing full launcher gate on their exact tree via a DL560 test ref. The integration checks hold, and master is fast-forwarded to bca419c7 and pushed.",
+  "acceptance": [
+    "A full launcher run (node scripts/test-launcher.mjs full) on a fresh checkout of the test ref test/w-<this item>-<fp8>, whose commit has the tree of the landing commit bca419c7, passed every stage, with the runner's own review-freeze fingerprint the same before and after its run. The landing chain aa0759bf -> 3b519737 -> bca419c7 sits on a6f605aa, and the contributions of 3b519737 and bca419c7 are byte-identical (raw diff, full blob ids, no renames) to fd7294e2 (against 73177116) and 096de859 (against a6f605aa); aa0759bf is the reviewed commit itself. The run id, host, test-ref commit, tree, and before and after fingerprints are recorded on this item.",
+    "A registered Windows focused committed-input check on bca419c7 in this item's named root on Central passed, compiling and linking the termal test binary with mimalloc under MSVC.",
+    "Before the push, origin/master equals a6f605aa93abfc5bbcf6bfdbf449f7752d7ae98a, so the landing a6f605aa -> bca419c7 is a fast-forward. After the push, git ls-remote origin refs/heads/master equals bca419c7, which is recorded on this item, and the test ref is deleted with its push and deletion recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo105 (w-794f mimalloc aa0759bf, w-54e1 fd7294e2 and w-5963 096de859, carried byte-identically) landed as bca419c7 on a6f605aa. Gated by a Windows registered focused check (test-332aea98, 243/0, verification 9ea43e2a; mimalloc compiles and links under MSVC) and a DL560 test-ref FULL (test-30b26a4d, all six stages PASS, runner fingerprint equal before and after). Master was fast-forwarded and pushed at 19:12:53Z (ls-remote verified), and the test ref was deleted. The independent evaluation passed all 3 criteria.",
+    "completed_at": "2026-11-14T19:23:50.031990800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

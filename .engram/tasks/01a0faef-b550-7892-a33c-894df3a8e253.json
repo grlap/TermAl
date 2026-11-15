@@ -1,0 +1,45 @@
+{
+  "id": "01a0faef-b550-7892-a33c-894df3a8e253",
+  "external_ref": null,
+  "title": "Route owner-originated tail-read retries through current demand and the shared gate",
+  "outcome": "Route owner-originated tail-read retries through current demand and the shared gate",
+  "acceptance": [
+    "Every other hydration origin preserves acea4c74 retry and tail/page selection semantics: retries only while unloaded and restarts without options and caps only the endings base caps. One exception is accepted and filed as w-a087e5c52d33: while an owner retry timer is pending for a session, a master-originated retry request for it is absorbed by that timer, as base absorbs a second request, and the master restart is not performed when it fires. sessionStillNeedsHydration and shouldStartTailLoad retain base meanings/signatures. Every timer runs the requester once after its own action. When a flight of any origin ends without asking for a retry or a recovery resync, the requester runs once for that session. Real-hook fake-timer witnesses W1-W15 with W5c in Architect notes d0511c10be2e44b8bcc0a4f4e7ddfb7c, 4cf00acf0e054cc4a04ad6215bb41be9 and correction 1c987d035b9d4c6793c613268a899820 demonstrate no GET after closed demand, hidden pane or detached window; exactly one GET with standing demand; excluded loaded/unloaded master retry; older-prefetch page preserved with one gated tail read afterward; an earlier answer refused as stale, no GET before its retry timer, exactly one GET when the timer fires and newest message convergence; no immediate GET after a capped rejection or owner 404 flight end. As amended by cd25b2523f4f450b92cd4d4d3d4c4e73, 3183ba43bdaa46bca560cd604a134e4f and 5b083150e1ef474c96585eddbd02d8dc: W5c retains the fifth stale master retry; W8 and W10 receive one backstop read at the next polling opportunity; W9 requires one recovery resync and no tail GET at the flight end, not a universal summary barrier; W11a/b/c repair Idle sessions after equal-current, failed or still-pending resync; W12 and W15 distinguish pane absence from document hidden/offline; W13 attributes backstop and retry requests across periods; W14 permits and admission-checks the joined page flight's early tail read. The backstop is a sibling operation on that interval. It is independent of every policy return of handleLiveSessionResumeWatchdogTick: resync in flight or pending, no active streaming session, drift and cooldown checks. The backstop invokes the requester for each currently visible session no more than once per 3-second polling period. All invocations use the shared gate. This bounds requests introduced by the backstop; existing event, hydration, recovery and retry paths retain their own scheduling and are not covered by a global one-read-per-period claim. After external changes quiesce, while the hook remains mounted and the session visible, attached and eligible, assuming browser ticks continue, blocking flights/retry timers settle, and a subsequent read returns an admissible response covering the last observed sequence, standing demand is eventually served and that response closes it. Missing edge notifications alone cannot strand demand. There is no fixed completion-time or fixed-attempt bound without corresponding scheduler and response bounds. The callback of the existing one-second interval runs the backstop first, then the existing handleLiveSessionResumeWatchdogTick unchanged. The backstop inherits only the cancelled/unmounted guard and acts on every third actual interval firing, counted by one hook counter, not per session or by a clock. No interval or global rate limiter is added. W12 covers no demand, a session absent from the current visible-session set, or a detached window: no GET. W15 covers a visible pane with eligible attached demand while document.visibilityState is hidden or navigator.onLine is false: a backstop read at the next acting firing. Browser timer suspension provides no wall-clock service guarantee.",
+    "Owner-originated tail reads start only at requestSessionTailRead through the shared four-condition gate. The call carries one origin field, set only there; no additional stored origin state or read registry is introduced. A rejected or stale owner flight schedules capped back-off only while current owner demand holds, and timer firing clears pending and re-enters the requester without carrying hydration options.",
+    "Preserved fail-first and actual-source-revert evidence detects frozen direct timer restart in W1-W3 while W4 remains passing, option-carrying master retry in W5, and restored Q4 owner-demand helper terms in W6. Additional actual-source-revert runs show W6 fails without the flight-end requester call, W8-W9 fail without its retry/recovery exclusions, and corrected W7 fails without the timer's requester call. The generated model schedules no retry timer if demand closes before flight completion; focused checks and full gate pass on the exact independently reviewed resulting input. Additional actual-source-revert runs show W5c fails when the cap starts from forceTailRepair rather than owner origin; removing the sibling backstop call fails W8, W10 and W11a/b/c; bypassing its shared gate fails W12; moving it behind watchdog policy returns fails W11c and the document-hidden/offline W15 rows."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "architecture-escalation",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fe83-a24b-7770-904a-b8a34a48b9e3",
+  "disposal_reason": "Greg closed the parent P0 w-1b692f268123 at about 21:25Z on 2026-10-02 (note 13ee75cf). This required child continues as standalone work in w-b8a34a48b9e3, so it no longer blocks the parent. Coordinator: Termal::Fable2.",
+  "completion": null
+}

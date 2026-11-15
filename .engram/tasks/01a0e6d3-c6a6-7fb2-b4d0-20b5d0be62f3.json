@@ -1,0 +1,29 @@
+{
+  "id": "01a0e6d3-c6a6-7fb2-b4d0-20b5d0be62f3",
+  "external_ref": "tm-q1k",
+  "title": "Implement human-prompt overview classification end to end",
+  "outcome": "The architecture defines a dedicated conversation-overview h count for source-free human prompts, separate from compatibility field u. The Rust wire type and aggregation currently expose only u, so the frontend gives peer and mailbox-authored 'you' messages the same strong accent as actual human prompts. Carry h through message metadata, persistence and backfill, API serialization, TypeScript types, remote validation, and overview styling.",
+  "acceptance": [
+    "Conversation-overview buckets expose a required h count alongside unchanged c/k/u/m. h counts only Message::Text authored by You with no MessageSource; peer, peer-batch and mailbox-sourced text, assistant text and non-text You messages do not contribute. Local resident and persisted-prefix aggregation produce identical counts with 0 <= h <= u <= c.",
+    "Persisted human-prompt classification is maintained transactionally by the existing transcript-overview owner as a compact h flag alongside the existing kind/user bits. The typed Message::Text + Author::You + source=None predicate is used for new messages, replacements and migration; h is never inferred from u or textual substring matches. The existing writable schema-upgrade owner atomically rebuilds valid admitted local legacy overview metadata from authoritative message JSON and advances the explicit H reader floor, preserving canonical messages and independently activated A state. An identifiable session with row-local invalid metadata or transcript content is isolated: its unverified derived overview is absent, its canonical rows remain preserved, and the existing loader quarantines it before admission, including corruption outside the retained tail. It is neither certified as upgraded nor assigned invented h values; unrelated valid sessions remain loadable. Present admitted local H metadata has complete validated coverage. Missing metadata can be reconstructed only by the same typed writable owner before admission; unresolved missing/invalid coverage stays excluded across reload and maintenance. SQL/I/O, structural schema, inventory, header/CAS and commit failures abort the whole migration and roll back replacements, removals and header together. Unknown formats refuse before mutation. Supported base/H/A/H+A transitions preserve both features without activating A solely for h; incompatible older builds refuse H/H+A, with no old-format writer roundtrip claim. Overview GET remains read-only and aggregates compact metadata without per-request JSON parsing or a new cache lifecycle. Append, replacement, truncation, reload and supported migrations preserve resident/persisted parity for admitted sessions. The unchanged 25k-row/10 ms bounded-resident overview budget passes on the exact final input.",
+    "Remote overview validation preserves h and rejects malformed or inconsistent counts, including h > u, under the existing current-response lease checks. Frontend wire types, overview equality/projection and rail styling consume h; only h gets the human accent while sourced You traffic stays quiet, and error/marker/viewport signals retain their existing behavior.",
+    "RED-first backend and frontend regressions cover human versus peer/peer-batch/mailbox/non-text classification, persisted/resident parity, migration/backfill, malformed remote counts and h-only UI updates. Authorized focused Rust checks, affected UI suites and TypeScript pass; the independent Codex/Claude pair has no outstanding Medium-or-higher finding, and the integration owner runs the required full gate on the exact final input before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

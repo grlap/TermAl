@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c788-7081-836a-44ddaffeb67a",
+  "external_ref": "tm-uwx.5",
+  "title": "Support exact mailbox message retrieval and explicit presentation truncation",
+  "outcome": "Persist every mailbox body exactly once and make it retrievable by stable message id or ordered range. Routine turn-start notifications contain complete bounded metadata only and never shortened bodies. Any UI or fetched-envelope presentation budget replaces an oversized body with an explicit stub while preserving id, sequence, sender, receivers, class, topic, state stamp, supersedes/releases links, and exact retrieval instructions.",
+  "acceptance": [
+    "Authorized participants can fetch exact bodies by id and ordered ranges after restart. Oversized renderings show explicit stubs without dropping, merging, or reordering items or metadata. Tests cover boundary sizes, multiple oversized messages, Unicode, authorization, retention/GC behavior, deleted participants, superseded records, and bounded inline STOP payloads."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c787-7eb0-87d9-543a5293bb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

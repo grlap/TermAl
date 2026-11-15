@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c501-7381-ae27-51b2e3b3cc41",
+  "external_ref": "tm-fa5e",
+  "title": "recover: also check the launcher's stage processes, and tell a reused pid apart from the launcher",
+  "outcome": "Follow-up from the Claude /review-code of the tm-uex8 launcher changes (delegation-654c0916, 2026-09-25). recoverRun (scripts/test-launcher.mjs) checks only the launcher's own pid with processMayBeAlive.\n\n(1) If a host interrupt kills a foreground launcher but a stage child (cargo, vitest) keeps running, which happens because Windows does not kill children with the parent, recover settles the run while that stage still runs. The later output is never recorded.\n(2) If the recorded pid is reused by an unrelated process, recover refuses forever; docs/test.md tells the user to start a new run.\n\nOptions: record each stage child's pid, and a process identity such as start time next to every pid, in results.json; have recover require all of them to be gone. Or run stages under a job object or process group that dies with the launcher. Keep the conservative rule that only proof of exit counts, and add no polling.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

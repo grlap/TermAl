@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4be-7bb2-bcc2-046adeeaa691",
+  "external_ref": "tm-azzu",
+  "title": "Extract session hydration lifecycle from useAppLiveState",
+  "outcome": "Current-tree audit 2026-09-22: ui/src/app-live-state.ts is 1,794 lines. useAppLiveState mixes broad state adoption with per-session hydration admission, queued tail repairs, retry timers, partial-tail proof tracking, request context capture, stale-response handling and startSessionHydration. Extract the hydration lifecycle into a focused controller/hook with explicit state ownership and narrow dependencies, retaining app-level orchestration and SSE event handling in their existing modules. Coordinate with active tm-kei8 (hydration bursts), tm-moao (send-response duplicate prompt), and tm-7cu.44 (activation viewport) before changing shared code; land this separately from those correctness fixes.",
+  "acceptance": [
+    "No change to hydration concurrency/deduplication, retry timing, mutation/revision adoption, partial-tail proofs, queued-after-current semantics, session deletion cleanup or unmount cancellation. Keep one owner for refs/timers instead of copying state into two controllers. Move focused tests and preserve integration coverage; no weakened checks or timer inflation. Ownership header and maintained-launcher validation required."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

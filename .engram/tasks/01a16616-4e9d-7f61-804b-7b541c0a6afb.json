@@ -1,0 +1,27 @@
+{
+  "id": "01a16616-4e9d-7f61-804b-7b541c0a6afb",
+  "external_ref": null,
+  "title": "A retained bind that fails as its head's admission window runs out parks a bind retry that promises an automatic retry until the next tick ends it",
+  "outcome": "w-ac230a24d0d8's window-spent check runs first at the generic admission park (engram_queued_admission.rs) only. A retained bind failure parks through src/api.rs:366 and park_engram_bind_retry (engram_bind_retry.rs:371-405). That path still creates a bind_retry unconditionally and shows \"waiting for durable automatic retry\", even when the bind attempt has used up the head's 240 s window. The next retry tick ends it in the exhaustion hold, but until then the card promises a retry that will not happen.\nFix: apply engram_admission_window_spent and end_engram_spent_admission_window before the bind park schedules. Add a test that expires the window during the bind attempt and inspects the park before another tick.",
+  "acceptance": [
+    "A retained bind that fails as its head's admission window runs out parks a bind retry that promises an automatic retry until the next tick ends it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

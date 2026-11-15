@@ -1,0 +1,30 @@
+{
+  "id": "01a16814-9262-7250-bea4-460545376bee",
+  "external_ref": null,
+  "title": "Align stage writer-presence refusal with carried-check interference semantics",
+  "outcome": "Determine whether a stage authority observation should refuse mere co-presence of another writable session when the carried recorder has recorded no interfering action, and either use the existing carried-fence semantics at stage boundaries or explicitly document the stricter contract. Preserve refusal for actual overlapping writes and unresolved Claude work.",
+  "acceptance": [
+    "Align stage writer-presence refusal with carried-check interference semantics is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "host-capability",
+    "launcher",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16742-3d70-74e2-8a89-273596743af6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

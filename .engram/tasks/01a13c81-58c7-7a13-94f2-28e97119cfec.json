@@ -1,0 +1,31 @@
+{
+  "id": "01a13c81-58c7-7a13-94f2-28e97119cfec",
+  "external_ref": null,
+  "title": "Cover clamp predicate boundaries and deferred restoration with an unmounted anchor page",
+  "outcome": "Add direct geometry predicate coverage for reachable/unreachable anchors, missing mounted slots and fractional 0.5px boundaries, plus a multi-page virtualizer regression where the saved anchor page is unmounted during deferred identity restoration. Verify current restoration retains its identity until positionable and newer user navigation invalidates it. No product semantics change implied.",
+  "acceptance": [
+    "Focused tests distinguish reachable and unreachable mounted anchors, absent slots, and fractional bottom/desired-top threshold boundaries.",
+    "A multi-page virtualizer test covers an initially unmounted anchor during deferred restoration and user-generation cancellation without leaving stale restoration authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "scroll",
+    "test-coverage",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c4de-7140-8847-940234534ed8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

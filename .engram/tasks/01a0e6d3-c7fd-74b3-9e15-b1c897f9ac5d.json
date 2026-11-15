@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7fd-74b3-9e15-b1c897f9ac5d",
+  "external_ref": "tm-z0mg",
+  "title": "Completed delegation children keep their Codex thread and per-thread MCP servers alive indefinitely, accumulating host memory",
+  "outcome": "REPORTED BY Engram::Fable (mailbox #706, 2026-09-11 17:11Z) after Windows raised \"Virtual Memory Minimum Too Low\", Volsnap dropped shadow copies under IO load, Tcpip reported ephemeral port exhaustion, and an Engram MCP gate failed on an initialize timeout at 17:06-17:08Z. Coordinator measurements below are independent, read-only (Win32_Process, GET /api/state), taken 17:12-17:14Z. Nothing was killed.\n\nHOST: commit 94.7 GB of 103.6 GB, 1072 processes. chrome.exe 136 / 26.1 GB is Greg's real browser: zero headless flags, zero node ancestors. Not TermAl's.\n\nTERMAL SERVER TREE (PID 56288, started 2026-09-10 17:51Z): 575 descendants. node.exe 216 = 18.8 GB private, of which 210 are chrome-devtools-mcp (npx wrapper + cmd + server, three per Codex thread); cmd.exe 145 = 0.8 GB; termal.exe delegation-mcp bridges 85 = 0.3 GB; node_repl.exe 70 = 0.2 GB; engram.exe mcp 24 = 0.1 GB; claude.exe 6 = 3.1 GB; codex.exe 1 = 1.6 GB (shared app-server).\n\nWHO OWNS THEM: the 85 bridges belong to 85 sessions that all still exist in state: 70 Codex, 6 Claude, 4 Cursor. 64 are delegation children (today's reviewer pairs for TermAl, Engram and PhoenixCodeNav) and 16 are root sessions. State shows only 6 active sessions, so the children are idle, i.e. completed. These are not orphans of deleted sessions: the sessions live on, and their runtimes with them.\n\nMECHANISM (source read, not traced live): with the shared Codex app-server, each thread spawns the MCP servers from the operator's global ~/.codex/config.toml (chrome-devtools-mcp via npx, node_repl) plus TermAl's delegation-mcp bridge and, for enabled projects, engram mcp. TermAl never archives or closes a child's thread when a delegation completes: archive_codex_thread (src/codex_thread_actions.rs) is reachable only through POST /api/sessions/{id}/codex/thread/archive from the UI; grep finds no automatic caller in delegations.rs or orchestrator_transitions.rs. So every completed child keeps roughly 270-280 MB of MCP servers for the life of the server. 70 idle Codex threads in 23 hours explain ~19 GB.\n\nOPEN QUESTIONS to settle before designing:\n1. Does Codex free a thread's MCP servers on thread/archive or thread/close? The archive doc comment says the codex-side thread is preserved. Unverified; measure with one archived thread.\n2. Claude reviewers: only 6 claude.exe remain for 760 Claude sessions, so Claude runtimes do exit; confirm which 6 are live and why.\n\nOPTIONS: (a) after a delegation child completes and its result is captured, close or archive its thread automatically, with reopen on demand; (b) an idle-runtime reaper for threads idle beyond a threshold with no pending prompts; (c) operator-side: scope chrome-devtools-mcp per project instead of globally, since it costs ~260 MB per thread even when unused. (c) is Greg's config, not TermAl code.\n\nRELATED, not duplicates: tm-xbw6 (reap Engram sessions before project deletion), tm-vjr (phantom Codex shells after restart), tm-d9gl (Engram MCP children after binary upgrade).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in c07657c (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

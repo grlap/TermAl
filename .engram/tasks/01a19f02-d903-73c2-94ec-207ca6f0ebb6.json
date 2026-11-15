@@ -1,0 +1,30 @@
+{
+  "id": "01a19f02-d903-73c2-94ec-207ca6f0ebb6",
+  "external_ref": null,
+  "title": "Local domain-session mailbox reads transiently fail with '409 federation authority changed; refresh enrollment and retry' after a peer reconnects",
+  "outcome": "A remote peer reconnecting or re-authenticating does not make reads of LOCAL domain-session mailboxes on Central fail. If a federation authority change genuinely invalidates a read, the host refreshes internally and the read either succeeds or returns a typed, actionable refusal. A receipt is issued on the first successful read, not after an extra receiptPending round.",
+  "acceptance": [
+    "unrelated peer re-auth does not fail local domain mailbox reads; genuinely stale authority is safely refreshed or returns a typed actionable refusal",
+    "first successful logical read returns its durable receipt without requiring an avoidable extra receiptPending round, preserving exact page/key/idempotency and ownership",
+    "focused reconnect/negative tests and Windows/WSL checks pass, clean review pair"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a1285e-2ba4-7850-899b-5f2374978054",
+  "external_ref": null,
+  "title": "Minimap dragging lets stale navigation overwrite the current target",
+  "outcome": "Minimap dragging lets stale navigation overwrite the current target",
+  "acceptance": [
+    "A newer minimap target supersedes earlier pending history responses and delayed scroll work, including a target already resident.",
+    "Minimap dragging maintains a stable pointer target through loading and layout updates and ends at the latest requested message.",
+    "Focused UI regression tests and TypeScript validation pass; the UI fix is available in the main checkout for Greg to exercise."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "minimap",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fresh independent acceptance evaluation 156539c017854387af838499146254e6 passed all 3 criteria on source fingerprint content-v1:6b6834fce642540d4df1850a40eb264793f875d4866125088ac0cec827dbe6a6. Commit 02474e0aa62ebe5ca34f24da8ea2dfec8adaaac2 is on origin/master; the served UI was rebuilt from it and independently verified.",
+    "completed_at": "2026-10-11T09:12:13.202929900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

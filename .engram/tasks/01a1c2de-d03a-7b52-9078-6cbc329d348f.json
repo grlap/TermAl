@@ -1,0 +1,33 @@
+{
+  "id": "01a1c2de-d03a-7b52-9078-6cbc329d348f",
+  "external_ref": null,
+  "title": "Update stale \"five-stage gate\" wording after the fmt stage (docs, fixture; CLAUDE.md/AGENTS.md via authority process)",
+  "outcome": "Current gate descriptions in README.md, the five assigned docs/features files, AGENTS.md and CLAUDE.md agree with the maintained full gate. Historical dated descriptions and test fixtures stay unchanged. AGENTS.md and CLAUDE.md receive only the exact agreed count-free sentence; authority-text conditions (a), (b) and (c) apply to the final input.",
+  "acceptance": [
+    "Bieżące opisy pełnej bramki w README.md i wskazanych pięciu docs/features odpowiadają sześciu etapom z docs/test.md, z fmt jako pierwszym; historyczne opisy i fixture pozostają niezmienione.",
+    "W AGENTS.md i CLAUDE.md zmienia się wyłącznie uzgodniony wiersz na: Use `node scripts/test-launcher.mjs full` for the maintained full gate (its stages are listed in docs/test.md) and; pozostała treść obu plików pozostaje niezmieniona, a warunki (a), (b) i (c) są udokumentowane dla końcowego wejścia.",
+    "Nie dodano testów; para recenzji nie ma otwartych uwag Medium lub wyższych (recenzenci sprawdzają też, że zmienione odnośniki i nazwy etapów zgadzają się z docs/test.md), a końcowe wejście ma wymaganą pełną bramkę przed lądowaniem."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Current full-gate descriptions corrected in eight documentation files and landed on origin/master as a6978c03b68467d5123724c8097f0a1a7e19d76b, tree23623fbb7b522d98af9f3a2427ef449cb8adfdf2. Historical five-stage results and test fixtures preserved; AGENTS.md/CLAUDE.md change only the exact concurred line. Clean independent review pair, exact-tree six-stage DL560 FULL and final authority audit(c) PASS recorded.",
+    "completed_at": "2026-11-10T04:17:55.357232900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

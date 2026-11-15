@@ -1,0 +1,30 @@
+{
+  "id": "01a1d81f-1b50-73e0-bed1-4ace765005c8",
+  "external_ref": null,
+  "title": "Define and cover refused-relay bypass across a durability-held historical queue front",
+  "outcome": "The direct-send contract explicitly decides whether a non-runnable historical front with an unacknowledged durability hold blocks an exact refused-relay bypass, and behavior matches that decision.",
+  "acceptance": [
+    "Record a concrete contract decision for a non-runnable historical front carrying an unacknowledged durability hold, distinct from the selected runnable relay carrier's own hold.",
+    "A controlled behavioral test creates that queue/hold shape, verifies the decided direct-send result and unchanged retained entries, and still proves a held selected relay carrier blocks bypass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "prompt-delivery",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d73f-656b-7b32-a712-610b5060255e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

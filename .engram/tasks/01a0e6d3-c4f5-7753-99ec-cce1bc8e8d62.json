@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4f5-7753-99ec-cce1bc8e8d62",
+  "external_ref": "tm-e5kv",
+  "title": "Stabilize shared Codex stdin watchdog timeout test",
+  "outcome": "Full serial backend validation for the Engram adapter intermittently failed tests::session_stop::shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime while isolated reruns passed. This is a pre-existing timing/flakiness issue outside the Engram adapter scope and must not be normalized as an acceptable flaky gate.",
+  "acceptance": [
+    "The watchdog test uses deterministic coordination or a proven bounded deadline, passes repeatedly under the full serial suite, and still asserts the stalled writer is timed out and runtime state is cleared."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

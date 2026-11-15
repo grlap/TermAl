@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3dd-74b2-a98d-e237b055a1b5",
+  "external_ref": "tm-4qey",
+  "title": "Acceptance evaluator brief: on a stale bound check submit insufficient_evidence naming it; the holder reruns the check and requests a new evaluation; the evaluator never reruns checks",
+  "outcome": "From the case-D discussion of the Beads-to-Engram migration's live proof (Engram::Fable mailbox a71ec118 #62, 2026-09-27 21:35Z; Engram item w-d9d85d42c6ac on the core side). Engram's core validates a bound passing citation's source revision on one completion path only (the Satisfied obligation path); Engram will validate every bound passing citation's source revision against the run's newest sighted revision at evaluate and again at done, independent of the waiver path. TermAl's side is prompt/docs only: build_acceptance_evaluator_prompt (src/acceptance_evaluation*.rs) should tell the evaluator that when the newest passed host check for a bound criterion is at an older source revision than the run's latest, it submits insufficient_evidence for that criterion naming the stale check and the two revisions; the holder reruns the check in the named root and requests a new evaluation; the evaluator never reruns checks itself. No transport change. Owner: Termal::Opus2 or Termal::Codex (Greg: Opus and Codex write code).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

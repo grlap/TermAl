@@ -1,0 +1,27 @@
+{
+  "id": "01a12bfc-587e-76c0-9929-e5361e439532",
+  "external_ref": null,
+  "title": "Drive one prepared-begin settings-change test through the real project-settings update",
+  "outcome": "At least one test drives a head in prepared-begin recovery through the real update_project_engram_settings path (src/session_crud.rs, around the settings reset that rebuilds EngramSessionState). It proves that the reset carries the ended window and drops the pending marker, and that a later Resume reports 'may have been sent' and sends nothing. Today a_settings_change_ends_a_pending_begins_claim_to_be_sent and a_settings_change_keeps_an_ended_window_and_drops_any_other_budget simulate the reset by hand, through take_engram_admission_budget_for_settings_reset, so a regression in the session_crud wiring would not be caught.",
+  "acceptance": [
+    "Drive one prepared-begin settings-change test through the real project-settings update is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

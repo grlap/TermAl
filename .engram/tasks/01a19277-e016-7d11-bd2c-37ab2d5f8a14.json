@@ -1,0 +1,29 @@
+{
+  "id": "01a19277-e016-7d11-bd2c-37ab2d5f8a14",
+  "external_ref": null,
+  "title": "Clarify that a candidate commit is never pushed by its committing session but reaches origin through the integration owner's landing push",
+  "outcome": "Clarify that a candidate commit is never pushed by its committing session but reaches origin through the integration owner's landing push",
+  "acceptance": [
+    "TermAl's candidate-commits wording in CLAUDE.md, AGENTS.md and .claude/commands/review-changes.md adopts Engram w-75bb's draft-2 clarification, so 'never pushed' no longer reads as contradicting the fast-forward-and-push landing",
+    "The change lands under the instruction-change conditions (a), (b) and (c), with a clean review pair and full gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

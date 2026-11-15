@@ -1,0 +1,45 @@
+{
+  "id": "01a11830-b6aa-79b2-94a1-bb9f2587b0e5",
+  "external_ref": null,
+  "title": "Extract workspace tab lookup helpers without changing selection behavior",
+  "outcome": "Move the fifteen existing tab lookup helpers out of ui/src/workspace.ts into ui/src/workspace-tab-lookups.ts, preserving existing public workspace APIs and exact lookup behavior. This bounded slice does not complete the broader pane-routing extraction.",
+  "acceptance": [
+    "Only ui/src/workspace.ts and the new ui/src/workspace-tab-lookups.ts change. Move the fifteen helpers identified in plan2be887c4a3114df882031ab06c1d0330 with unchanged signatures and bodies apart from module exports/imports; no policy, normalization, return-shape, iteration-order or object-identity changes.",
+    "The extracted module depends only on workspace-types and the existing workspace-normalize helpers; it introduces no reverse import from workspace.ts or workspace-queries.ts and no runtime dependency cycle. Public workspace exports and callers remain compatible.",
+    "Existing workspace, mailbox, Work, test-runs, response-board and pane-routing tests pass on the changed input, along with the maintained full gate including TypeScript checks. Existing test cases and assertions are not weakened or removed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "beads-migrated",
+    "behavior-preserving",
+    "large-file",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6d3-c3c9-76b0-a71f-e080ae841921",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed fifteen-helper mechanical lookup extraction in master/origin commit0a59128bd09546ff1dc22bd7df393b25ffdf388a, exact reviewed/gated tree1907e46b. Only workspace.ts and new workspace-tab-lookups.ts changed; signatures, bodies, order, object identity, origins, public exports and callers preserved. Fresh full gate85223620 five stages PASS including263 UI files/4585 tests; independent Codex/classified-simple Kimi reviews clean; acceptance6267e4d6 3/3 PASS. Exact clean-export release installed with backup; no restart.",
+    "completed_at": "2026-10-07T23:16:12.487882400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a170e8-a1bf-7131-bea0-312da3a498fb",
+  "external_ref": null,
+  "title": "Pin recovery after a refused fresh Base-only naming bind leaves authority Prepared",
+  "outcome": "Previously published work has an explicit, tested recovery contract after a grant-free fresh naming SessionBind fails; unknown outcomes preserve canonical authority and never publish unproven state.",
+  "acceptance": [
+    "A regression starts from published naming authority, attempts a fresh Base-only session bind that fails or is refused, and asserts the exact remaining authority phase, withheld evidence and canonical recovery outcome.",
+    "Any recovery change preserves unknown-outcome, owner/version, claim/store/runtime and exact acknowledged-image guards; it creates no turn grant or evidence association."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "greg-reported",
+    "host-recording",
+    "review-followup",
+    "source-root",
+    "source-root-naming"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1708c-a60a-7781-b45a-c7b546116c5a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

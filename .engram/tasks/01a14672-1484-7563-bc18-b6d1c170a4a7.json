@@ -1,0 +1,31 @@
+{
+  "id": "01a14672-1484-7563-bc18-b6d1c170a4a7",
+  "external_ref": null,
+  "title": "Cover malformed host path values in launcher registration query controls",
+  "outcome": "Launcher regression controls directly prove malformed host runDir/worktree values fail registration before preflight or execution.",
+  "acceptance": [
+    "Local host-query controls cover absent, non-string and empty runDir/worktree values, asserting explicit registration refusal and no preflight or target execution.",
+    "Controls retain exact owner/run/contract checks and positive alias/short-path discrimination without timeout inflation or skipped assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "ci",
+    "greg-reported",
+    "review-followup",
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a145cf-8b9f-7d93-a5f7-9b211ca7daa2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

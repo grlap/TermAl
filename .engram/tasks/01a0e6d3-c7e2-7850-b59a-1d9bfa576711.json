@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7e2-7850-b59a-1d9bfa576711",
+  "external_ref": "tm-xshd",
+  "title": "Detect Vitest CPU starvation that begins after startup preflight",
+  "outcome": "A full serialized Vitest run passed startup resource admission, then an unrelated sorted_list_stress_tests process began consuming up to ~425% CPU and system load reached 37 on 8 logical CPUs. App.control-panel.openers timed out at 11.4s under the unchanged 10s limit. An immediate focused command was rejected before tests: median 790.8ms wall / 100.8ms CPU (12.7% CPU, ratio 7.84 > 3). The product/test assertion did not fail; the environment starved the runner after the one-shot preflight. Add a bounded mid-run/per-file resource admission mechanism that reports resource starvation explicitly without retries, quarantine, or timeout inflation.",
+  "acceptance": [
+    "A CPU-starved serialized file that begins after Vitest startup is rejected with the explicit resource diagnostic before a normal test timeout is misreported; normal runs retain the 10-second timeout and add negligible overhead; focused tests cover pass and reject paths."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

@@ -1,0 +1,39 @@
+{
+  "id": "01a1bc3f-acb7-7260-abfd-f7c5c15cf8b0",
+  "external_ref": null,
+  "title": "Domain mailbox messages never wake a domain-bound runner ('automatic participation does not authorize an executor wake'), which forces polling",
+  "outcome": "A message sent to a participant of a domain mailbox reaches a session that is able and authorized to act on it, without that session polling. Either the delivery wakes the session through the existing authority, or the participant is told clearly at setup that this mailbox doesn't wake it and which supported channel does. No agent has a reason to run a sleep loop reading mailboxes.",
+  "acceptance": [
+    "Record the code path producing the routing-only notification cause and explain the distinct authority of automatic domain participation, explicit executor placement, and the authenticated native relay. Do not infer a missed wake from durableButNotWoken alone.",
+    "At setup, an affected participant is told that routing-only domain mail does not wake it and is given the supported existing wake-capable address/channel when available. Preserve existing enrollment, native identity and executor fences, immutable earlier delivery outcomes and original request identity; add no polling, implicit authority upgrade or fallback replay.",
+    "Behavioral fixtures cover routing-only delivery without an executor wake and the supported existing native wake route, including unchanged stale/revoked authority refusals. The author supplies exact-input build and change-covering test results; a fresh independent review pair has no outstanding in-scope Medium-or-higher finding and the full gate passes on the exact landing input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-reported",
+    "mailbox",
+    "token-cost"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Domain routing-only wake boundary and supported authenticated native wake route are taught at setup and CLI, covered by behavioral fixtures and clean required reviews, and landed in combo16 with exact-tree FULLs.",
+    "completed_at": "2026-11-08T21:24:22.075115600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

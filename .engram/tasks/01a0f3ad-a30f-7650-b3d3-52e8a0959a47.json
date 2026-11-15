@@ -1,0 +1,27 @@
+{
+  "id": "01a0f3ad-a30f-7650-b3d3-52e8a0959a47",
+  "external_ref": null,
+  "title": "Host architecture brief: name the bounded carried-poll wait as an entry condition of step 5's verification move",
+  "outcome": "Host architecture brief: name the bounded carried-poll wait as an entry condition of step 5's verification move",
+  "acceptance": [
+    "In docs/features/host-architecture.md, section 10's dependency list for step 5 (or section 5.5 item 8) names the bounded checkpoint wait on the carried-poll lock of section 6.5 as an entry condition of the verification move, so that the dependency list read alone cannot place the verification move before the wait is bounded; a review pair without a Medium or higher on the change"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

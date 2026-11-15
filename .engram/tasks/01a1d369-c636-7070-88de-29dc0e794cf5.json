@@ -1,0 +1,31 @@
+{
+  "id": "01a1d369-c636-7070-88de-29dc0e794cf5",
+  "external_ref": null,
+  "title": "Exercise Git warning and post-exit drain policy through runner entry points",
+  "outcome": "Behavioral coverage detects a Git runner losing its extended drain bound or warning, submodule runners losing shared warning ownership, or Engram/default callers accidentally opting into Git drain policy.",
+  "acceptance": [
+    "Tests drive production runner or entry-point wiring and fail if Git warning/drain arguments are dropped or a child runner gets an independent warning owner.",
+    "Coverage checks Git extended drain and Engram/default shared one-second grace through observable behavior using controlled IO/time, without source-text pins, real long sleeps or timing thresholds.",
+    "Relevant focused tests pass and the review provenance and deferred scope are recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "limits",
+    "review-follow-up",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

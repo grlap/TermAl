@@ -1,0 +1,27 @@
+{
+  "id": "01a16f0d-3986-7760-bccc-74eebce675c3",
+  "external_ref": null,
+  "title": "Unexplained TermAl host restart 17:27–17:29Z on 2026-10-24 (instance 9a478f6f → 37005720), not authorized and not initiated by any coordinator",
+  "outcome": "The cause of the 17:27–17:29Z host restart is established from evidence, or recorded as unestablished with exactly what evidence is missing. If the host exited on its own (crash, panic, abort or OOM), the defect is filed with its trace.",
+  "acceptance": [
+    "Unexplained TermAl host restart 17:27–17:29Z on 2026-10-24 (instance 9a478f6f → 37005720), not authorized and not initiated by any coordinator is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-incident"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Cancelled under Greg's word of 2026-11-08 (Asistant #1015). Not fixed and not explained. Per Sol-c593's sweep: no causal fix; triage says a probable operator or tool restart, UNPROVEN; OS evidence is bounded and the old stderr is gone. Nothing further can be established for the 2026-10-24 restart. If an unexplained host restart recurs, file a new item with fresh evidence.",
+  "completion": null
+}

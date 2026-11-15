@@ -1,0 +1,42 @@
+{
+  "id": "01a12852-6e14-7850-9a1c-bc7ddb601790",
+  "external_ref": null,
+  "title": "Witness each arm of the closing-checkpoint retry exception and anchor its ordering checks at the park",
+  "outcome": "The scope-guard witness in src/tests/engram_closing_checkpoint_retry.rs swaps in a grant with no checkpoint card, so a regression dropping the continuation_id or authority comparison would pass. Predicate-level witnesses cover a newer non-Degraded checkpoint card for the same grant, a cause naming another continuation, a different authority, a refused cause (per its sibling item) and an uncertain grant. The ordering checks assert on the operation log after the park (not rposition over the whole log), and raw turn_checkpoint sends are counted there.",
+  "acceptance": [
+    "Tests fail if any one comparison in engram_unsettled_closing_checkpoint_holds (stage, grant, decision, operation, continuation_id, authority) or the uncertain-grant exclusion is removed, and the ordering witnesses assert on the slice of operations after the park, counting raw recovery checkpoint sends.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

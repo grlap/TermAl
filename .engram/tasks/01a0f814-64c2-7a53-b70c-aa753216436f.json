@@ -1,0 +1,42 @@
+{
+  "id": "01a0f814-64c2-7a53-b70c-aa753216436f",
+  "external_ref": null,
+  "title": "A Claude root session mid-turn is listed as \"idle\" (preview \"Thinking\"), so senders and the coordinator misread a live session",
+  "outcome": "A session whose turn is running is listed as active by termal_list_sessions and the session status. Mail sent to it is labelled as queued behind its active turn, not as delivered to an idle session.\n\nObserved 2026-10-01 about 15:27Z by Termal::Fable2. termal_list_sessions showed Termal::Opus2 (session-8111) with status \"idle\" and preview \"Thinking\". By Opus2's own report (TermAl mailbox 4daa5b87 #556), he was in one long turn since about 15:16Z, writing code in .tmp/wt-stuck-session. A probe sent at about 15:27Z returned notificationDisposition \"deliveredToIdleSession\" while that turn was running, and he read it mid-turn. The same session had listed \"idle\" with a \"Thinking\" preview earlier (about 08:31Z), while its gate was running.\n\nWhy it matters: the coordinator decides whether to wake a peer, or to report a stuck session to Greg, from this listing. A wrong \"idle\" invites needless wakes, and it may also bear on the wake-dispatch race w-3bd74078208d (a wake marked delivered-to-idle while a turn is live). Related: w-f23a694c9bc5 (held visibility).",
+  "acceptance": [
+    "A mailbox message sent to a session mid-turn is labelled as queued behind its active turn, not delivered to an idle session; a test covers it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "While a Claude root session's turn is running, termal_list_sessions and the session status report it as active; a test covers a long turn with extended thinking or tool calls in progress."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

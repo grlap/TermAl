@@ -1,0 +1,30 @@
+{
+  "id": "01a183cc-ca55-7d51-bcd8-b49d4d7f0f55",
+  "external_ref": null,
+  "title": "Make Refuse-held checkpoint retry tests independent of scripted authority queue exhaustion",
+  "outcome": "The refusal-held retry witnesses expose an erroneous retry while preserving the original canonical refusal, request and settlement invariants; authority queue exhaustion cannot be the only reason no checkpoint is sent.",
+  "acceptance": [
+    "The carried-check refusal test explicitly establishes the original work-authority image before its retry ticks, and documents any other eligibility gate that can mask the negative witness.",
+    "The source-observation refusal test's existing queued binding consumption is established before changing it; optional hardening preserves all original negative assertions.",
+    "Focused checks covering changed witnesses pass without product changes, timeout inflation, skipped tests or weakened assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "review-low",
+    "test-strength"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

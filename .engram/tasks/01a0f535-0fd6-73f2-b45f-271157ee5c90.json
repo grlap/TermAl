@@ -1,0 +1,43 @@
+{
+  "id": "01a0f535-0fd6-73f2-b45f-271157ee5c90",
+  "external_ref": null,
+  "title": "Read-only Claude reviewers are denied single read-only git commands they need (git diff --cached --stat, git ls-files --others --exclude-standard) while a ;-chained sequence was allowed",
+  "outcome": "A read-only Claude reviewer can run, as single Bash commands, the read-only git commands a review needs to establish \"nothing staged, no untracked files\". The host's read-only parser behaves the same way on chained sequences in every session. Reported by Engram::Kimi (TermAl mailbox 38e17f30 #44, 2026-10-01 02:04Z), from read-only Claude reviewer session-9256 (round 1, about 00:53Z, cwd C:/github/Personal/Engram/.worktrees/landing-values). Denied, as single commands with no chaining: `git diff --cached --stat` and `git ls-files --others --exclude-standard`. Both subcommands are on the allowed list in src/claude.rs (claude_git_output_tokens_are_read_only for diff and ls-files), and neither flag writes output. Allowed in the same session: plain `git diff`, and the ;-chained `git rev-parse HEAD; git branch --show-current; git rev-parse --git-path engram-review-freeze.json; git status --short`, although compound commands are described as denied by default. Its sibling, session-9261, was denied a fully &&-chained compound and a PowerShell command, which matches the design. Two questions to settle from the parser: why the two single commands were denied, and whether ;-sequences of allowed commands are intentionally accepted, or show the bypass in w-e4ead056e0bd (inherited allow rules).",
+  "acceptance": [
+    "A test shows that a read-only Claude reviewer's Bash `git diff --cached --stat` and `git ls-files --others --exclude-standard` (single commands) are allowed, or the item records why either must stay denied and documents the allowed alternative.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The parser's treatment of ;-separated sequences of allowed read-only commands is decided, documented in the code, and pinned by a test; if the session-9256 acceptance came from inherited allow rules rather than the parser, that is recorded on w-e4ead056e0bd."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "claude",
+    "read-only-delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

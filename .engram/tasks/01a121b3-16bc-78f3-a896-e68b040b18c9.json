@@ -1,0 +1,28 @@
+{
+  "id": "01a121b3-16bc-78f3-a896-e68b040b18c9",
+  "external_ref": null,
+  "title": "Cover acceptance-submission settlement against concurrent authority operations, the locked second root check end to end, and workdir (source_claim) targets",
+  "outcome": "Tests and documentation show how submission-time authority settlement interacts with a concurrent admission reconcile, a naming request or a maintenance recovery holding the previous owner. Tests also show the retryable refusal from the locked check in begin_acceptance_evaluation_submission through a real submission, and settlement for an evaluation requested with no named root.",
+  "acceptance": [
+    "Cover acceptance-submission settlement against concurrent authority operations, the locked second root check end to end, and workdir (source_claim) targets is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

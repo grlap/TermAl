@@ -1,0 +1,30 @@
+{
+  "id": "01a1b356-9ed6-7821-8345-a270ae69a98a",
+  "external_ref": null,
+  "title": "Preserve final-turn watcher attribution when the pending generation outlasts the grace window",
+  "outcome": "Pending workspace event batching does not omit or misattribute final-turn changes or settle delegation observations before the relevant pending changes are accounted for.",
+  "acceptance": [
+    "A deterministic regression covers continuous unrelated traffic and a write near turn completion, with generation delay exceeding the existing 750 ms grace, and verifies attribution to the original turn.",
+    "A delegation-settlement regression accounts for pending last-window file changes without observing post-settlement writes or crossing attempts; the implemented synchronization retains bounded pending storage and avoids state-lock inversion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "attribution",
+    "review-followup",
+    "review-low",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

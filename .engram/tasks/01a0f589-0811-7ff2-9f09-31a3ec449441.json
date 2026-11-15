@@ -1,0 +1,31 @@
+{
+  "id": "01a0f589-0811-7ff2-9f09-31a3ec449441",
+  "external_ref": null,
+  "title": "Split engram_host_adapter.rs, its test file and the acceptance-evaluation test file by pure moves (plan in notes)",
+  "outcome": "src/engram_host_adapter.rs, src/tests/engram_host_adapter.rs and src/tests/acceptance_evaluation.rs are split along the components of docs/features/host-architecture.md section 5.1 by commits that only move code, so that each of the three files and every file made from them is under 2,500 lines and no behaviour, name or signature changes.",
+  "acceptance": [
+    "Each commit passes the full five-stage gate on its exact reviewed tree and has a review pair with no outstanding Medium or higher; run directories and diff hashes are cited in notes.",
+    "Each of src/engram_host_adapter.rs, src/tests/engram_host_adapter.rs and src/tests/acceptance_evaluation.rs, and every file created from them, has fewer than 2,500 lines on master.",
+    "Every commit of the split is a pure move: its only lines that are not moved text are the new file's header comment, a `use super::*;` line, an `impl AppState {` wrapper with its closing brace, and the include or mod line; the moved-lines check of the plan is recorded in a note for each commit.",
+    "The set of test function names in the test binary is the same before the first and after the last commit, shown by comparing `cargo test --bin termal -- --list` with module paths removed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "engram-host-adapter",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0f40a-60f3-7e33-8a14-8597a0e17af3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d3-c3df-7ae2-9176-fb2b0d02457c",
+  "disposal_reason": "Merged into one plan (Termal::Fable2, coordinator, 2026-10-03, under Greg's file-size priority and the joint architecture ruling: Architect2 878916a1, with Architect1 concurring in TermAl mailbox 2a27fd51 #204). This item overlapped w-fb2b0d02457c (production adapter, Engram w-0aeab324dfeb) and w-9a2601def6b6 (adapter tests, Engram w-3b2ed0980172), which carry the Engram contracts and stay canonical. Its seam map, P1-P10 and wave H in its notes, stays the plan input. Mechanics change to ordinary modules, not include! fragments; each commit keeps byte-identical moved bodies and adds a visibility and import inventory. Its unchanged-test-name-set check is kept as a per-slice practice. Its third file, src/tests/acceptance_evaluation.rs, moves to the follow-on inventory, to be enforced by the w-d889be50979e guard's shrink-only baseline.",
+  "completion": null
+}

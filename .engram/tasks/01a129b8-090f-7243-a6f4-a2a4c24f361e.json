@@ -1,0 +1,57 @@
+{
+  "id": "01a129b8-090f-7243-a6f4-a2a4c24f361e",
+  "external_ref": null,
+  "title": "A finished detached test run leaves the train idle: no durable sign-off naming the next transition, and the UI shows an active detached runner as an idle session",
+  "outcome": "When a detached launcher run (`node scripts/test-launcher.mjs full|focused --detach --notify …`) reaches a terminal result, the host produces one durable, actionable sign-off: what finished, the verdict, who owns the next transition, and the exact next action, or one named blocker. The owner is woken through the existing durable notification path and acts without Greg prompting. While the run is active, the UI shows that session as owning an active detached runner (run id, stage, start), not as idle. After it ends, the UI shows the verdict and the pending next transition until the owner acts. No polling, watchdog, timer or new telemetry system. The first slice is narrow: terminal runner receipt → owner wake → one deterministic next action or named blocker, with an observable UI state.",
+  "acceptance": [
+    "A detached launcher run may declare its next transition at launch: the owner session and an exact next-action text. Its terminal notification carries, and its request.json with its terminal results.json determine, what finished, the verdict, the next-transition owner and the exact next action, and additionally one named, metadata-only blocker for FAIL, UNKNOWN or interrupted runs. Tests cover PASS, FAIL, UNKNOWN and interrupted, plus a run with no declared transition.",
+    "When a run that declares a next transition reaches a terminal result, its completion goes through the existing --notify mailbox route with one frozen body: to the --notify target, and also to the declared owner when that owner is neither the --notify target nor the launching session, each recipient once under its own stable idempotency key. No polling, watchdog or timer is added. Tests show both deliveries after the launcher process has exited, that a repeated notify or recover sends neither again, and that an owner equal to the --notify target or to the launching session gets no second mail.",
+    "The UI distinguishes a session that owns an active detached runner from an idle session: it shows run id, current stage and start time. After the terminal result, the launching and owner sessions show the verdict and the declared next transition (owner and action, plus the blocker when not PASS) from the host's run index, which reads nextTransition from request.json, for as long as the run stays in that index. UI tests cover active, finished-awaiting-owner and a run with no declared transition.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "greg-direction",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7fc-7c63-946e-aa4dc043188c",
+  "external_ref": "tm-ytyg",
+  "title": "Back off or disable restart checkpoint refusals",
+  "outcome": "restart_checkpoint_refused is not included in Engram's disables_session classification, so an unknown-control-schema checkpoint refusal can reappear on every dispatch without backoff.",
+  "acceptance": [
+    "A restart checkpoint refusal follows a deliberate fatal/backoff policy, is surfaced durably, and has regression coverage preventing per-dispatch retry loops."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1b68e-43d4-7ff1-a50c-0f35df32e653",
+  "external_ref": null,
+  "title": "Diagnose native opening authority refusal after claim renewal and root re-naming",
+  "outcome": "Identify the exact pre-S0 refusal for the DL560 Questly sequence with source and a controlled reproduction; propose the smallest correction before any product commit.",
+  "acceptance": [
+    "The reported Questly opening_unavailable evidence is preserved and each remaining pre-S0 failure branch is distinguished from the naming-time legacy content capture.",
+    "A controlled test through existing claim and naming seams reproduces or rules out the retained-proof versus named-root-fence hypothesis without accessing a live store.",
+    "The coordinator receives the observed result and a minimal fix proposal or an explicit remaining evidence gap before product changes are committed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1b68e-c6b2-7003-8951-7e09cc1cef28",
+  "disposal_reason": "Fable2836: crossed duplicate; full diagnosis/proposal and run evidence copied to canonical bug. Same dedicated worktree retained.",
+  "completion": null
+}

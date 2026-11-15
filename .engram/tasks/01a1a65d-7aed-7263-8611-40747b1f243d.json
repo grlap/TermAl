@@ -1,0 +1,28 @@
+{
+  "id": "01a1a65d-7aed-7263-8611-40747b1f243d",
+  "external_ref": null,
+  "title": "A host-raised named-root end blocks all naming on its claim, and this build has nothing that sends it",
+  "outcome": "A pending root_invalid or session_gone_at_restore end on a live claim is sent by a production path, so naming on that claim can finish without a restart, and an end that truly remains unsettled still can't be overtaken.",
+  "acceptance": [
+    "The sequence is reproduced by a deterministic test on the unchanged product: a host-raised end pending on a live claim, then naming and clearing on that claim",
+    "After the fix a production path sends that end, naming on the claim then finishes, and a failed send leaves it pending"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

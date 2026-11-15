@@ -1,0 +1,41 @@
+{
+  "id": "01a1466d-f2c9-7fe0-bd3e-518cdebb703a",
+  "external_ref": null,
+  "title": "Cover force-exit omitted from matched launcher request and stage arguments",
+  "outcome": "A focused Node command containing --test-force-exit cannot receive passing credit from a request/stage record that omits the flag, including mutually consistent altered artifacts.",
+  "acceptance": [
+    "Regression cases remove --test-force-exit from the recorded request args alone and from both request args and stage command while retaining it in the observed command; native exit0 and positive counts still yield no passing credit.",
+    "The focused Node recognition tests pass with the existing exact-argument validator preserved."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

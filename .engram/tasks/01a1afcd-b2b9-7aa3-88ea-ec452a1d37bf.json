@@ -1,0 +1,30 @@
+{
+  "id": "01a1afcd-b2b9-7aa3-88ea-ec452a1d37bf",
+  "external_ref": null,
+  "title": "Document strict Git stderr refusals and remedies for benign warnings",
+  "outcome": "Operators can identify why a Git read refuses despite exit zero and how to resolve known benign warning configurations, while every residual stderr continues to refuse.",
+  "acceptance": [
+    "Document the strict zero-exit-stderr refusal contract and representative rename-limit/deprecated-config warnings with actionable remedies; do not introduce a text-based allowlist or weaken refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "documentation",
+    "review-low",
+    "source-revision",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1af65-1815-71b3-8f6b-43ba19db0403",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

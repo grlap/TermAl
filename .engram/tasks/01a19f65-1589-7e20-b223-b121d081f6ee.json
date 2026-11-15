@@ -1,0 +1,39 @@
+{
+  "id": "01a19f65-1589-7e20-b223-b121d081f6ee",
+  "external_ref": null,
+  "title": "Remove duplicate Pages workflow; retain static.yml as canonical",
+  "outcome": "Exactly one repository Pages workflow publishes the unchanged website artifact, using the existing static.yml configuration; duplicate publication is removed without remote settings changes.",
+  "acceptance": [
+    "The candidate removes only .github/workflows/jekyll-gh-pages.yml; .github/workflows/static.yml, its permissions, master/manual triggers, Pages concurrency, website artifact and deployment action remain unchanged.",
+    "The exact candidate has the normal independent read-only review pair and required gate evidence, recorded with its Git identities; no remote Pages setting or workflow dispatch is changed.",
+    "After landing exactly one Pages deployment runs for the landing commit and succeeds; record this as a post-landing observation, not as pre-landing evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "github-pages",
+    "greg-directed",
+    "legacy-removal",
+    "legacy-scan"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a19ef2-54b4-7661-a602-1fd8f197b596",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Duplicate Pages workflow removal delivered in landing2707075cf8d35c28223ec0e55b2d299e4721d675/TREE0341aa450df501138e58b8d0b96db6cd9b57e6ad; canonicalstatic.yml unchanged. Historical cleanpair/exacttreeDL560+WindowsFULL evidence and freshpostlandingGET proof of exactlyone successfulPagesrun41767392394/deployment7537116552 recordedinholder4320e400/437c4eb2. IndependentClaude session17910 evaluationbbfb7df27c324475ba04499990d6e077,2026-11-13T23:59:01Z,rev2/cut57:3/3PASS,fullrecordand2458byteoutputread. C2historicalreview/gates andC3remoteobservation rest onattributedholdernotes; child'sghreadsrefused, no independentremote/gatecertificationclaimed. No newsource/checks/nativecredit/dispatch/settingschange. Closure-root3683 cleanatcca3/tree67067221; retainuntilcompletionthenpathcheckedremove; old8e1froot/private52eb untouched.",
+    "completed_at": "2026-11-14T00:00:34.989235400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

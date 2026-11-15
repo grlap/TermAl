@@ -1,0 +1,28 @@
+{
+  "id": "01a15bbc-1fad-7e91-9296-176eaac998f4",
+  "external_ref": null,
+  "title": "Design safe recovery for an uncertain Codex restore or cleanup retained across restart",
+  "outcome": "Provide operator recovery for retained Pending/Ambiguous unarchive or requested compensation across restart using actual origin-exit proof and operation-specific evidence. Preserve fences when those facts cannot be established; instance changes or Archived/absence samples alone must not authorize duplicate unarchive/archive.",
+  "acceptance": [
+    "Design safe recovery for an uncertain Codex restore or cleanup retained across restart is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "design-pending",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

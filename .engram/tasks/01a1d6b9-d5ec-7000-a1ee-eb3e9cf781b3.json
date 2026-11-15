@@ -1,0 +1,28 @@
+{
+  "id": "01a1d6b9-d5ec-7000-a1ee-eb3e9cf781b3",
+  "external_ref": null,
+  "title": "named_root_binding_refused no longer settles the refused naming intent; an unsettleable read leaves the claim's naming journal pending and blocks naming",
+  "outcome": "A definitive named_root_binding_refused answer retires that exact naming event, so a stale-fence or no-longer-current claim refusal never leaves the claim's naming journal pending or its checks withheld.",
+  "acceptance": [
+    "named_root_binding_refused is treated as definitive non-application of that exact event: the journal's pending intent is cleared or retired with the refusal recorded after the authority image is learned, keeping the settles_intent/definitively_unbound handling for the retirement kind.",
+    "A regression test: a lapsed claim is recovered (fence advances), naming with the stale fence is refused, and a following naming request with the current fence for the same claim_id succeeds and check capture is not Unconfirmed, while the run stays open."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "named-roots",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1a4d7-89ea-78b1-829b-02cbd6009066",
+  "disposal_reason": "Already repaired by completed w-02cbd6009066, landed24b426154526b5c3c89f392fde28ff51bbee59d8 (ancestor of mastercca3d3b2). Historical finding examined87f49ed0, which lacks supersedes_fence_of; currentmaster has higher-fence Bound settlement for both refusal codes with exact-intent safeguards retained. Fullpriorclosingnote80840dbdf1a440e58516a0afe49ee1e2; diagnosis92767f70171d4a1e961f786549174f7b; currentf718 pinnedlive793048b1 all12PASS includingbothstale-fencevariants. CoordinatorFable3098/3099 concurs; filingownerOpus ownnote06a47f0989f344dfb38ec2f28fd877d0 explicitlyconcurs. No newsource/test/criteriachange or acceptancepass asserted; supersede duplicate historicalfinding ratherthan fabricatework.",
+  "completion": null
+}

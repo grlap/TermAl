@@ -1,0 +1,29 @@
+{
+  "id": "01a11e77-1db0-7a21-bd36-9317d8dcfd27",
+  "external_ref": null,
+  "title": "termal_review_freeze_check fails with HTTP 500 (os error 2) while target/release/termal.exe is being replaced by an install",
+  "outcome": "The host's freeze checker doesn't depend on the installed binary at target/release/termal.exe being present and unchanged. Replacing that file (rename aside, copy new) while the host runs never makes a reviewer's freeze check fail, or the failure is a typed, retryable refusal naming the cause.",
+  "acceptance": [
+    "Diagnose, with source locators, how the checker resolves its executable (review_freeze_api.rs uses std::env::current_exe() at ~106) and confirm or refute that an install's rename-then-copy window explains HTTP 500 \"review checker did not complete: The system cannot find the file specified. (os error 2)\".",
+    "If confirmed: the checker runs from an executable path that an install can't remove from under it (e.g. resolved and opened once at host start), or the install procedure documents a way that leaves no window; a test or documented drill shows a check during a replace succeeds or refuses with a typed, retryable reason."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "install",
+    "review-freeze",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

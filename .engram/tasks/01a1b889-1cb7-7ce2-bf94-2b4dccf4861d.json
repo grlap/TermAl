@@ -1,0 +1,37 @@
+{
+  "id": "01a1b889-1cb7-7ce2-bf94-2b4dccf4861d",
+  "external_ref": null,
+  "title": "termal_resume_after_test_runs refuses a host-observed declared run with 404 \"test run … is not indexed\"; a declared run has no supported completion wait",
+  "outcome": "A session that launches a declared test command can wait for that run's completion through TermAl's existing wait route, without polling. The route is termal_resume_after_test_runs (MCP), with its CLI and HTTP equivalents, using the run id TermAl itself assigned to the host-observed run. The session is resumed once when the run reaches its terminal state. No new wait mechanism is added.\n\nObserved on 2026-11-08 at about 00:22Z, reported by Comovo::Opus via Asistant #944. Its declared `flutter test` run was detected durably as host-observed run observed-f16a3ee0c695f609cb53a97830bfd7cd506db849d6979bb6d51c2c8b67f1be6f (project-3, running). termal_resume_after_test_runs([that runId]) returned 404 \"test run … is not indexed\", so no wait was possible.",
+  "acceptance": [
+    "The cause is recorded from code. It names why a host-observed declared run id is not found by the test-run index that termal_resume_after_test_runs consults (separate stores, a missing index entry, or an id-namespace mismatch).",
+    "termal_resume_after_test_runs accepts the id of a host-observed declared run that TermAl assigned and exposed to the session. It parks the caller until that run is terminal and then resumes it once, with the same semantics as for launcher runs: no polling, no duplicate resume, and an unknown or foreign id is still refused with a named reason. Launcher-run behavior is unchanged.",
+    "Deterministic tests cover: waiting on a running host-observed declared run that later completes (exactly one resume); an already-terminal declared run (immediate result); and an unknown id (refused). The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "declared-commands",
+    "greg-reported",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Declared host-observation ids now use the existing once-only completion wait; landed d3499b97 with clean final review and both exact-tree FULLs passed.",
+    "completed_at": "2026-11-08T07:54:34.773996300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

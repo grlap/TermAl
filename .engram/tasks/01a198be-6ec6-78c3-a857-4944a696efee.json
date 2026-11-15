@@ -1,0 +1,29 @@
+{
+  "id": "01a198be-6ec6-78c3-a857-4944a696efee",
+  "external_ref": null,
+  "title": "Queued-prompt durability persisted fixtures should await their root cleanup receipt",
+  "outcome": "Each converted real persisted-state queued-prompt durability test attributes root cleanup success or failure before it finishes, using existing cleanup receipts and synchronization.",
+  "acceptance": [
+    "The three real persisted-state tests in queued_prompt_durability register the existing TestTempRoot cleanup observer and await its result after dropping or joining their state owners, using existing phase_sync/cleanup helpers without sleeps, retries, longer timeouts or product changes.",
+    "Focused tests cover the three converted fixtures and their retained-root regression; a cleanup failure cannot be silently printed after the test reports success."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "from-review",
+    "temp-root-leak",
+    "test-hygiene"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

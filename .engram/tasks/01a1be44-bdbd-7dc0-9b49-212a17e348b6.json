@@ -1,0 +1,32 @@
+{
+  "id": "01a1be44-bdbd-7dc0-9b49-212a17e348b6",
+  "external_ref": null,
+  "title": "Clarify stored wake state and state-sentence wording in mailbox current-status docs",
+  "outcome": "The currentStatus field bullets accurately distinguish the stored notification disposition from evidence-driven remote exact-read wording.",
+  "acceptance": [
+    "docs/features/agent-mailboxes.md calls notificationState the stored wake state and scopes the no-wake-never-happened statement to the state-derived sentences, consistently with the remote-target exact-read override.",
+    "No Markdown-reading or phrase-pinning test is added; repository review and gate requirements apply."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "federation",
+    "federation-mailbox",
+    "follow-up",
+    "greg-reported",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173d0-4952-7482-8ab2-44909af1b8bc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

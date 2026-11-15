@@ -1,0 +1,28 @@
+{
+  "id": "01a198d6-e848-7cc1-b4b8-f5b2ec5c8d62",
+  "external_ref": null,
+  "title": "Name and place the cloned-state fixture-root witness according to its ownership scope",
+  "outcome": "The fixture-root lifetime witness is discoverable with the shared boot-helper tests and its name and owning module header describe the property it tests.",
+  "acceptance": [
+    "Rename a_persisted_queued_prompt_state_keeps_its_root_until_the_last_continuation to describe retention of the fixture root by a cloned AppState, and either move it beside shared boot-helper tests or document that ownership explicitly in its module header.",
+    "Keep its deterministic channel barrier, real writer shutdown, late synchronous write, joined continuation, early-cleanup/root-survival checks and final cleanup receipt/root/marker checks unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "test-hygiene"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3cf-7ec3-ad83-6f335f0cc3c3",
+  "external_ref": "tm-3nd",
+  "title": "Parked Codex prompt has no independent timeout and no user-visible 'waiting for thread setup' state",
+  "outcome": "From the round-2 review. A prompt parked on an in-flight thread setup inherits the opener's already-running SHARED_CODEX_THREAD_SETUP_TIMEOUT clock (180s). If the setup wedges, the session shows Active with no output for the remainder of that window, then the parked prompt is dropped and the turn failed.\n\nThis is usually FASTER than the old behaviour (the parked prompt does not restart the clock), but there is no user-visible signal that the prompt is queued behind thread setup rather than being worked on.\n\nAlso still untested (round-2 reviewer): the CodexThreadSetupCompletion::Superseded branch, and whether a setup FAILURE with a current request id actually surfaces an error on the PARKED prompt's turn (the existing test only covers the NotCurrent branch).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

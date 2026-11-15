@@ -1,0 +1,46 @@
+{
+  "id": "01a15671-1059-7230-bce6-388e840b334d",
+  "external_ref": null,
+  "title": "Enforce deterministic display metadata normalization on satellite wake admission",
+  "outcome": "Enforce deterministic display metadata normalization on satellite wake admission",
+  "acceptance": [
+    "Satellite admission gives sender_name/topic a documented deterministic control-character policy before constructing agent notification text, while exact identifiers, immutable operation digest and duplicate/conflict semantics remain coherent.",
+    "Authenticated wake tests cover non-normalized display metadata, valid metadata and exact retry behavior; full gate and independent review pass without claiming untrusted-central isolation or altering captured authority."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-c160-77c3-b4e2-c50515867f37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

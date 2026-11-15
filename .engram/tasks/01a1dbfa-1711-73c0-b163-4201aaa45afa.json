@@ -1,0 +1,30 @@
+{
+  "id": "01a1dbfa-1711-73c0-b163-4201aaa45afa",
+  "external_ref": null,
+  "title": "Cover named-root late events through adopted and Windows early observation close",
+  "outcome": "Named-root file event attribution is covered across the adopted two-step close and the Windows early close, in addition to ordinary completion.",
+  "acceptance": [
+    "A behavioral adopted-turn test closes the actual observation before a separate terminal finish, then delivers a named-root event and asserts the completed turn's FileChanges summary with unchanged ownership.",
+    "A Windows early-close behavioral test covers the same scope retention where platform ownership permits it; any unavailable platform setup is explicitly recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "file-changes",
+    "review-medium",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

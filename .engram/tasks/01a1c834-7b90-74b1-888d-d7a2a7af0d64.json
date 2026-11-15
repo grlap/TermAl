@@ -1,0 +1,37 @@
+{
+  "id": "01a1c834-7b90-74b1-888d-d7a2a7af0d64",
+  "external_ref": null,
+  "title": "Record an explicit notification route for standalone launcher runs and document restart-safe launch forms",
+  "outcome": "A standalone launcher can retain a genuine recorded completion route without host test-run registration. Existing recover settles an interrupted standalone run and notifies that recorded recipient without rerunning it; launch documentation explains which forms can survive a host restart and why an unregistered run with no route cannot notify GO-only owners.",
+  "acceptance": [
+    "A standalone launcher invocation can deliberately record one completion recipient using the genuine inherited notification identity while opting out of host test-run registration. The saved request identifies the originating sender and exact recipient; missing/partial identity, self-send and a later recovery attempt under a different sender cannot invent or take over that route.",
+    "When a recorded standalone run is recovered after its launcher and recorded command owners have exited, existing recover settlement preserves completed stages and terminal-write races, marks interrupted work unknown rather than passed, and sends one run-named interruption/completion notice to the saved recipient under its stable key. Repeated recovery or notification does not rerun stages or duplicate delivered mail; a send failure leaves the saved result and retryable notification intact. A surviving worker is not recovered as interrupted.",
+    "Behavioural tests cover the standalone route without registration, recovery and idempotent notification, missing or substituted sender refusal, notification transport failure, and a surviving worker control. docs/test.md explains harness background versus detached launch lifetimes, the supported notification-only standalone form, and that a hostless unregistered run with no recorded recipient cannot be automatically discovered or notify owners named only in GO prose."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "restart",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

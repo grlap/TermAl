@@ -1,0 +1,27 @@
+{
+  "id": "01a1aa20-7fcf-7fd1-bb4b-f64d1fa74a43",
+  "external_ref": null,
+  "title": "Clarify background command lifetime comment after terminal task observation handoff",
+  "outcome": "The command-finished helper comment distinguishes a launch result's missing test verdict from a later terminal task notification settling its host observation.",
+  "acceptance": [
+    "The helper comment no longer claims TermAl never sees background work end; it states the separate turn-check and host-observation lifetimes accurately."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

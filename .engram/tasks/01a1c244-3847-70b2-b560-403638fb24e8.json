@@ -1,0 +1,27 @@
+{
+  "id": "01a1c244-3847-70b2-b560-403638fb24e8",
+  "external_ref": null,
+  "title": "Preserve known untracked fixture bytes independently of owner samples",
+  "outcome": "Strengthen source-preservation regressions so a content-only mutation of an existing known untracked fixture file is detected independently of scripted source_id samples; do not use these byte snapshots to derive source identity.",
+  "acceptance": [
+    "A preservation regression detects a byte-only change to its known untracked fixture input while the Git status path and scripted owner sample remain unchanged, and retains an unchanged positive control."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "source-revision",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a10839-bda4-7862-a8a7-ecbd7c18556a",
+  "external_ref": null,
+  "title": "Docs: the boot-recovery overall line is emitted only when the boot plan has at least one target",
+  "outcome": "docs/features/engram-host-adapter.md (about line 3163, Recovery diagnostics) says unconditionally that the boot-recovery coordinator \"emits an overall line with elapsed time, budget, outcome, and unfinished count\". Since w-b3f0058feb49, recover_prepared_engram_sessions_after_boot returns before any clock, worker or channel when the plan has no targets, so a boot with no recovery targets prints no overall line. That was the change's one stated behaviour change, concurred under its criterion 2. Qualify the sentence: the overall line is emitted when the plan has at least one target. Docs only; no code change.",
+  "acceptance": [
+    "Docs: the boot-recovery overall line is emitted only when the boot plan has at least one target is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a0fab6-1547-7d81-a4b9-de88905c857d",
+  "external_ref": null,
+  "title": "UI test category guard: require whole-number groupOrder values (a fractional value makes Vitest 4 silently skip that project)",
+  "outcome": "ui/src/test-categories.test.ts checks that groupOrder values are sorted, distinct and at least 1, but not that they are whole numbers. Vitest 4.0.18's groupSpecs stores each group at groups[order] and runs them with for..of over that array (cli-api.B7PN_QUv.js around 8389 and 8212). A fractional value such as 2.5 becomes a named property rather than an array slot, so that project's files never run and nothing fails. If the unit project got such a value, the guard itself would stop running. The fix asserts Number.isInteger for each groupOrder.\n\nOptional tidy-ups from the same review's Notes, which need not be fixed:\n- skip node_modules, dist and coverage only at the ui/ root, or follow Vitest's exclude list (its default excludes only **/node_modules/** and **/.git/**);\n- change the groupOrder comments in ui/test-categories.ts and ui/vite.config.ts to say that distinct values set the order between projects (one worker already keeps one file at a time);\n- detect `export const NAME =` harness helpers that render the App, not only function declarations.",
+  "acceptance": [
+    "The category guard fails when any project's groupOrder is not a whole number, and a test shows it failing for a fractional value."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "test-architecture",
+    "test-categories",
+    "vitest"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

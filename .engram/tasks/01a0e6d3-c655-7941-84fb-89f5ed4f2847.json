@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-89f5ed4f2847",
+  "external_ref": "tm-ncc6.10",
+  "title": "Migration and guidance: hosted agents start runs through the tool; CLI detach/notify stays for external coordinators; /review-changes uses host runs",
+  "outcome": "HOW\n- src/coordination_instructions.rs (shared guidance text; tm-43f4 adds the wait rule): add 'Test runs: termal_start_test_run, then end your turn; the completion resumes you. Never poll or sleep.' in the same single text so all agents receive one teaching (tm-uvsv).\n- delegation_mcp.rs tool description for termal_send_to_session (currently 'FIRE-AND-FORGET - there is no reply to await'): reword per tm-43f4.\n- docs/test.md: hosted agents use the tool; `node scripts/test-launcher.mjs full --detach --notify SESSION` remains for coordinators outside TermAl; summary/notify unchanged.\n- .claude/commands/review-changes.md: Step 2 becomes 'start a host run (preset full) and end the turn; on resume read the bounded summary; on failure apply the gate-failure protocol'; Step 3/4 (two reviewers) after the resume; keep the no-nesting rule.\n\nDEPENDS ON: tm-ncc6.4, .5, tm-43f4.\n\nREVIEW FIXES (F19): the termal_send_to_session rewording belongs to tm-43f4 slice 1 - removed from this task. DEPENDS ON tm-uvsv (shared guidance seam for non-Codex roots) in addition to tm-ncc6.4, .5 and tm-43f4.",
+  "acceptance": [
+    "- A test pins that the shared guidance contains the test-run rule exactly once and that every hosted root agent receives it (tm-uvsv seam).\n- review-changes.md describes the host-run flow (start, end turn, resume with summary, gate-failure protocol, then the two reviewers); a test or grep asserts no sleep/poll instruction remains in the command file.\n- docs/test.md documents both paths (tool inside TermAl, CLI outside) without contradiction; wake body unchanged (tm-2jql)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

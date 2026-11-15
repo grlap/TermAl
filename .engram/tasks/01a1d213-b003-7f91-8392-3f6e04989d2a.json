@@ -1,0 +1,28 @@
+{
+  "id": "01a1d213-b003-7f91-8392-3f6e04989d2a",
+  "external_ref": null,
+  "title": "Integrate combo76c on 42851443: c593 a07a70a3 (w-d8f2 retire relay notifications for removed recipients)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit a07a70a3623c712c4a72cb7504f64f5e8f920704 (tree 90685fc99cb94aa073b519e715a0258b6118b139) is on origin/master, where master was moved to it by a fast-forward from 428514430668bb7ec8808b5339a2d66a8059b3de.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 90685fc9 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the R1 pair Codex session 17675 and Claude session 17676 reviewed exactly this contribution (42851443 to a07a70a3, 3 paths) with no Medium or higher finding, its Lows filed.",
+    "The release binary built from tree 90685fc9 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a0ff0d-7b76-7c73-b0aa-5aa79f5c0654",
+  "external_ref": null,
+  "title": "Instructions: agents choose the moment of a TermAl restart, Greg performs it (CLAUDE.md and AGENTS.md authority text)",
+  "outcome": "Instructions: agents choose the moment of a TermAl restart, Greg performs it (CLAUDE.md and AGENTS.md authority text)",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md (Commit and push section) carry exactly the two agreed texts below in place of the current sentences, with no other change to authority text except w-3ba4cdac7fba's Beads retirement in the same concurred diff (sha256 2a8348a4382ebd83df55add83a44bf59a245c934d706eb707ee95e2dbe1ca9bd). Edit 1 replaces \"This rule grants no restart, deploy or global-configuration authority; those actions need Greg's explicit word.\" with: \"This rule grants no restart, deploy or global-configuration authority; those acts are Greg's and need his explicit word. The moment of a TermAl restart is the agents' decision (Greg, 2026-10-02: 'Wolę aby agenci zdecydowali na moment restaru Termal. Wtedy kiedy potrzebuja poprawek. To nie jest problem, nie chce przerywać pracy.'): when running sessions need a landed fix, the Engram and TermAl coordinators agree on a moment when running work can resume, and the TermAl coordinator sends Greg, through Engram::Advisor, 'restart now' with the build hash and reason. Greg performs the restart; no agent stops or starts the TermAl host. This covers the timing of TermAl restarts only.\" Edit 2 replaces \"Installing is not deploying: the running host keeps its build until Greg restarts it on the restart signal (build hash and reason). Nothing is installed outside the repository.\" with: \"Installing is not deploying: the running host keeps its build until Greg restarts TermAl at the moment the coordinators choose (as above); the landing report says whether running sessions need the new build, with its build hash and reason. Nothing is installed outside the repository.\"",
+    "Greg has been sent the exact wording and its consequence through Engram::Advisor before the landing, and no objection from him is recorded.",
+    "The /review-changes pair and the final-diff audit are recorded as passed, naming the input fingerprint, before the landing, on this item or on w-3ba4cdac7fba, the item of the same combined change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Restart-timing authority text landed in CLAUDE.md and AGENTS.md as master 8f3dab7, one concurred change together with w-3ba4cdac7fba (authority diff sha256 2a8348a4…1ca9bd). Edit 1 and Edit 2 are word for word. Conditions (a), (b) and (c) are recorded before the landing: concurrence by both coordinators; Greg sent the wording through Engram::Advisor (b9d13887 #194), with no objection; final-diff audit FULL PASS naming gate fingerprint bb64d1f7. Gate test-0fc814d7 passed. The pair had no Medium or higher (Codex 2824c90c, Claude 206ca939). Evaluation d3d24983 passed 3/3. Installed as 2b6aa967; no restart needed.",
+    "completed_at": "2026-10-03T05:05:11.050600900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

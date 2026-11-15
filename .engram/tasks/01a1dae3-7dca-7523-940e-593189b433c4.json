@@ -1,0 +1,30 @@
+{
+  "id": "01a1dae3-7dca-7523-940e-593189b433c4",
+  "external_ref": null,
+  "title": "Codex worker delegations that end their turn normally are reported with status \"failed\" (fan-in wait reports failed too)",
+  "outcome": "A worker delegation whose child ends its turn normally, with a result or with a question for its parent, is reported as completed (or as waiting for its parent), not failed. A refused child tool call, such as a child trying to mail its parent, does not by itself turn a normally ended turn into \"failed\". Fan-in waits report the same status.",
+  "acceptance": [
+    "Root cause identified with file:line for how a normally ended Codex worker turn becomes DelegationStatus::Failed (for example a refused tool call during the turn, or the child session's terminal status mapping).",
+    "Behavioural tests: a worker turn that ends normally with a result is reported completed; a worker turn that ends normally asking its parent a question is reported in a non-failed state that a follow-up can continue; a genuinely failed turn (runtime error, crash) is still reported failed; termal_resume_after_delegations / wait results agree with the delegation status.",
+    "Review pair clean and full gate green on the landing input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "status",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a14c4a-12a4-7353-9351-d7d3c4b6bbd2",
+  "external_ref": null,
+  "title": "Docs: README.md and test-runs.md still call declared test commands \"planned\", though they have been implemented since 2b1e3f85",
+  "outcome": "Docs: README.md and test-runs.md still call declared test commands \"planned\", though they have been implemented since 2b1e3f85",
+  "acceptance": [
+    "README.md (around line 51) and docs/features/test-runs.md (around line 12) describe declared test commands as implemented, linking docs/features/declared-test-commands.md, with no remaining 'planned' wording for them.",
+    "A docs-only review pair has no in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

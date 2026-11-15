@@ -1,0 +1,38 @@
+{
+  "id": "01a19bdf-6368-7bc2-97fe-175168b39180",
+  "external_ref": null,
+  "title": "w-3fe8 warning cleanup SET B: remaining production files (gating residue deletion, test-only isolation)",
+  "outcome": "w-3fe8 warning cleanup SET B: remaining production files (gating residue deletion, test-only isolation)",
+  "acceptance": [
+    "A source-only patch on baseline 728c0cc9 for exactly the SET B files in the integrator's #1902 (engram_check_recognition.rs, engram_build_checks.rs, engram_trx_artifact.rs, human_prompts.rs, human_queue_choices.rs, engram_source_roots.rs, engram_named_root_binding.rs, engram_root_authority.rs, test_runs.rs, prompt_delivery.rs, persist_fence.rs, mailboxes.rs, turn_lifecycle.rs, session_crud.rs, delegation_followup_admission.rs, api.rs, wire.rs, git.rs, test_run_history_store.rs, all under src/) is returned to Sol-03d4",
+    "Class A gating residue is physically deleted; class B test-only chains are put under cfg(test) consistently; there are no blanket allow attributes, no fake reads, and no restored executor; factual build, TRX and declared-check helpers are kept",
+    "Cross-set data-field dependencies are reported explicitly before the combined compile; no cargo"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 warning setB; scoped6419a41e return/interface confirmation179d0312. Source-only handoff reconciliation; ordinary cores retained.",
+    "completed_at": "2026-11-08T19:22:47.362692100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a173cf-2c9e-7c23-b688-616edd0409b9",
+  "external_ref": null,
+  "title": "UI-bootstrap interruption test cleanup fails with EPERM on Windows (\"locked UI\" fixture dir still in use after interruption), failing full gates",
+  "outcome": "UI-bootstrap interruption test cleanup fails with EPERM on Windows (\"locked UI\" fixture dir still in use after interruption), failing full gates",
+  "acceptance": [
+    "The cause of the EPERM in the after-hook rmSync of scripts/test-ui-bootstrap.test.mjs 'interrupting owned UI setup records interruption and leaves stages unrun' is diagnosed with falsifiable evidence (for example: a child or grandchild process still holds the fixture directory when cleanup runs)",
+    "The test or the shared fixture cleanup (scripts/test-fixture-cleanup.mjs) waits for actual release of the owned process tree or handle before removing the directory. It does not use retry loops, longer timeouts or swallowed errors, and the test's assertions are unchanged",
+    "A focused deterministic check reproduces the race before the fix (or proves the release ordering) and passes after it; a review pair has no outstanding Medium or higher; one complete READY goes to Merger2"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-blocker",
+    "launcher",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

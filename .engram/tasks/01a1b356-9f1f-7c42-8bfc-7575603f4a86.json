@@ -1,0 +1,29 @@
+{
+  "id": "01a1b356-9f1f-7c42-8bfc-7575603f4a86",
+  "external_ref": null,
+  "title": "Distinguish missing files from other not-found errors in diff refresh",
+  "outcome": "DiffPanel only reports a file deletion for an actual missing file and preserves an accurate error state when a session, project or route lookup fails.",
+  "acceptance": [
+    "A diff-refresh regression makes the backend report session/project/route not-found while the file exists and verifies that the panel does not clear a clean file or label it deleted.",
+    "A true missing-file regression still reports deletion, and dirty buffers remain preserved with existing reconciliation safeguards; error classification follows a typed API distinction or an equally specific file-read contract."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

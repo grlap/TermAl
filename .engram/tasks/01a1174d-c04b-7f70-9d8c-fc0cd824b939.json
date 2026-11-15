@@ -1,0 +1,27 @@
+{
+  "id": "01a1174d-c04b-7f70-9d8c-fc0cd824b939",
+  "external_ref": null,
+  "title": "Name Build checks correctly in shared-root credit diagnostics",
+  "outcome": "Use the recognized check's kind label in both shared-named-root host lines in note_engram_command_started (src/engram_turn_checks.rs:1371-1379); a Build currently says 'A recognised test' and tells the agent to run its test. Credit decisions are already kind-correct. Preserve Test wording and named-root credit behavior. Related internal kind-generic comments may be broadened to check.",
+  "acceptance": [
+    "Shared-root credit diagnostics correctly name a recognized Build as a build/check and do not tell the agent to run a test; Test diagnostics and credit disposition remain correct, with focused controls for both shared-root cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

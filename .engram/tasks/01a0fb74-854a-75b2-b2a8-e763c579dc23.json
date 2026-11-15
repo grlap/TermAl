@@ -1,0 +1,26 @@
+{
+  "id": "01a0fb74-854a-75b2-b2a8-e763c579dc23",
+  "external_ref": null,
+  "title": "Mixed-attribution grant reports can drop the change obligation for edits made before the first check, silently",
+  "outcome": "When mixed attribution suppresses a grant's first change observation, the suppression is recorded visibly (an unassigned observation or a host diagnostic naming the check), so a possibly missing change obligation can be seen until Engram's producer contract for observed turns can represent it.",
+  "acceptance": [
+    "Mixed-attribution grant reports can drop the change obligation for edits made before the first check, silently is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

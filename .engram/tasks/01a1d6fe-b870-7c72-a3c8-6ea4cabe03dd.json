@@ -1,0 +1,37 @@
+{
+  "id": "01a1d6fe-b870-7c72-a3c8-6ea4cabe03dd",
+  "external_ref": null,
+  "title": "Delayed closing capture of an unclaimed turn adopts the claim held at retry time, attributing turn N's observations to a later turn's work item",
+  "outcome": "A runtime closing report for a turn that ended without a claim is attributed only to a claim that was the session's binding for that turn. A capture retried after a successor turn has started, or after a claim taken later, never adopts that later claim; the job ends as Unclaimed (or scope-changed) instead.",
+  "acceptance": [
+    "A behavioural test: turn N ends unclaimed; its first closing capture fails transiently and backs off; turn N+1 starts and claims W2; the retried capture for turn N does NOT report to W2 (the job ends Unclaimed or scope-changed), and W2 receives no turn-N commands or check results",
+    "A behavioural test: an unclaimed turn whose capture succeeds before any successor turn or later claim still reports as today (no regression for the ordinary case)",
+    "The binding a delayed capture adopts is resolved at, or pinned to, the turn's terminal transition, or is accepted only when no successor turn exists and the claim predates the trace's end"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delayed unclaimed closing capture accepts only its original turn's retained opening association, so later claims cannot acquire turn-N observations. Landed byte-identically as 4eb42236 in combo100 d377696e. Current independent Claude/session18011 evaluation fa0a7137b59f49e4b5162ad60705161e at2026-11-14T08:41:55.270984600Z passes all3 unchangedcriteria on clean d377/treec45e3ef4. Author GREEN1 667/0, Codex+Claude whole4 review clean, exact-tree combo100 FULL test-debf8952 PASS. Complete evaluator arrays and full2573-byte output SHA/readback exported before completion.",
+    "completed_at": "2026-11-14T08:54:00.270699Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

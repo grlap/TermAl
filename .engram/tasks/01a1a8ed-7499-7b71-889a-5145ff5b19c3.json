@@ -1,0 +1,32 @@
+{
+  "id": "01a1a8ed-7499-7b71-889a-5145ff5b19c3",
+  "external_ref": null,
+  "title": "Investigate a rescan republishing a compacted test run and losing its retained registration",
+  "outcome": "Determine with a deterministic interleaving whether a rescan started before compaction installation can republish the run or overwrite retained registration metadata, and preserve installed evidence across any confirmed race using existing owners.",
+  "acceptance": [
+    "A deterministic rescan/compaction interleaving proves or refutes the reported stale-index publication and registration-loss trace, distinguishing source hypothesis from reproduced behavior.",
+    "If confirmed, retained original registration remains discoverable after compaction/rescan and a newer failed run cannot disappear from early selection; otherwise record the exact guard that rules out the trace. Any repair has focused regression and required review/gate evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "compaction",
+    "execution-observability",
+    "greg-directed",
+    "review-note",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1a838-dcf3-7ce2-addf-e66983e3d919",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1a956-b266-7fa1-b388-82dddddf83ff",
+  "disposal_reason": "Continue as independent pre-existing unreproduced compaction/rescan race investigation after parent w-e66983e3d919 completed on b408. Preserve exact R3 reviewer provenance and retention note c171347e77b544e1972e11728e40eed3. No claim or execution.",
+  "completion": null
+}

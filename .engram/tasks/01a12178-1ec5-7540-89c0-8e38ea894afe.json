@@ -1,0 +1,28 @@
+{
+  "id": "01a12178-1ec5-7540-89c0-8e38ea894afe",
+  "external_ref": null,
+  "title": "A begin-unknown hold whose begin met a routing-token-invalidating error has no way forward but Cancel: Resume resends under the dead token",
+  "outcome": "A head held because its begin got a structured error invalidating the routing token (control_session_not_bound and the rest of engram_code_invalidates_routing_token) has a safe way forward that does not discard a possibly begun prompt: a rebind-plus-status route that settles the grant. Or the docs state plainly that Resume repeats the dead-token begin and that only Cancel, or the restart path once boot reconstruction lands, ends it.",
+  "acceptance": [
+    "A begin-unknown hold whose begin met a routing-token-invalidating error has no way forward but Cancel: Resume resends under the dead token is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

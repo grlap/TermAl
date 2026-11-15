@@ -1,0 +1,34 @@
+{
+  "id": "01a1a614-7521-75f3-a26f-776305458d13",
+  "external_ref": null,
+  "title": "Edit then clean check in one turn is refused source_moved_after_check, because the change is first reported at close: precondition for permanent enforcement",
+  "outcome": "A worker who edits, commits and runs one clean registered check in the same turn earns evidence for it without a further turn, and a real edit after the check is still refused. Not a prerequisite for the first evaluation window; required before any permanent enforcement.",
+  "acceptance": [
+    "A deterministic test on the unchanged product, against a pinned real Engram: settled at X, then edit, commit and one clean registered check of Y in one turn, then close and evaluate, is refused source_moved_after_check.",
+    "After the fix, that same sequence earns evidence for the check with no further turn, on Linux and on Windows: the change is reported and its receipt accepted before the launcher starts any stage. Engram is unchanged.",
+    "A real edit after the check is still refused. Unchanged source, a run without committed input, and a session without a matching named root or with Execution Observability off send no report and behave as today.",
+    "If measuring or reporting fails or gets no receipt, the run still starts and doesn't hang, and registration of an ordinary run isn't refused because of it. A report Engram recorded before the check counts even if its reply was lost. If Engram never recorded it, a check that ended within the turn isn't credited, and a run that outlasts the turn follows the close's report, as it does today. A real-Engram test covers each of these three cases. The holder's next turn says what is known about the attempt, and that the evaluation decides when it isn't known.",
+    "No wait is added to a turn or a send, and no new assertion depends on real time."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "after-execution-observability",
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the simple rule Greg approved („tak”, 2026-11-04 about 20:19Z, memory rules-greg-eo-one-check-2026-11-04): Engram's w-633b5cacc42a decides from Git, so a report before a check isn't needed. Not landed. Branch opus3/7763-fix-12 (bf35098d) and evidence kept; see note 5ae96544.",
+  "completion": null
+}

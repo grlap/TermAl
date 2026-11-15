@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7ed-7f10-8173-b0644da10274",
+  "external_ref": "tm-y1by",
+  "title": "Make Rust path/persistence fixtures portable across Unix and WSL",
+  "outcome": "The required Rust gate was first invoked through WSL because PowerShell treated scripts/test-rust.sh as a non-executing file association. WSL ran 1,733 tests and exposed two test portability defects, while both focused tests pass through Git-for-Windows Bash against the native Windows Cargo toolchain.\n\n1. tests::project_creation_races::remote_session_create_publishes_prior_dirty_localization_recovery removes a fake database directory beneath std::env::temp_dir(), then persistence hardening attempts to chmod that path's parent. Under WSL the parent is root-owned /tmp, producing EPERM. The fixture must restore to a user-owned temp directory/file, never make /tmp itself the permission-hardening target.\n2. tests::projects::rejects_session_workdirs_outside_the_selected_project hard-codes /tmp and /Users. On Linux/WSL /Users is absent, so it returns '`/Users` is not a directory' before exercising containment. Build both existing project/outside directories under a temp root.\n\nAcceptance: both focused tests and the complete scripts/test-rust.sh gate pass under a supported Unix environment as well as native Windows; fixtures must not attempt chmod on a shared system temp root.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

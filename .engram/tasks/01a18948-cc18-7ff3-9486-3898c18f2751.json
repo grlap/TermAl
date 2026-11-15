@@ -1,0 +1,36 @@
+{
+  "id": "01a18948-cc18-7ff3-9486-3898c18f2751",
+  "external_ref": null,
+  "title": "Sessions panel: move the foreground/background split into the STATUS control ('Working sessions (3) · 1 foreground / 2 background')",
+  "outcome": "The working-session count shows its foreground/background split inside the STATUS control itself, as 'Working sessions (3) · 1 foreground / 2 background', with an accessible explanation (tooltip / aria description). The ambiguous standalone '1 foreground · 2 background' text next to the cards is removed. The counts and their meaning are unchanged.",
+  "acceptance": [
+    "The STATUS control renders 'Working sessions (N) · F foreground / B background' (or the compact '(F/B)' form at narrow widths, with the full text in a tooltip and accessible description); the separate standalone split text next to the cards is gone; covered by Vitest tests including zero-background and zero-foreground cases.",
+    "Counts and semantics are unchanged from master; `npx tsc --noEmit` is clean; affected Vitest suites pass; an independent review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "session-status",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed by evidence (closure batch A). Landed in ce2487a8, which is on master. The foreground/background split renders inside the Working sessions STATUS control (ui/src/working-sessions-chip.tsx) on master 57a762c8. Registered test-78e19f98 passed: vitest working-sessions-chip and App.control-panel. The independent evaluation (delegation-09d1f8ba) recorded both criteria as passed.",
+    "completed_at": "2026-11-13T05:14:15.404320200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

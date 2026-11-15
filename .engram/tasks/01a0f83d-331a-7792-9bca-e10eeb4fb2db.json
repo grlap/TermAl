@@ -1,0 +1,29 @@
+{
+  "id": "01a0f83d-331a-7792-9bca-e10eeb4fb2db",
+  "external_ref": null,
+  "title": "Accept a core inspect historical run when no active run exists",
+  "outcome": "Preserve canonical work identity without treating the legitimate latest historical run as an active run or malformed protocol when core inspect has active_run_id:null. Existing task eligibility should produce its accurate refusal or unavailable canonical-index result.",
+  "acceptance": [
+    "A request-path test uses the pinned core-inspect shape with active_run_id:null and a historical run for the same work; the host does not misclassify that shape as a malformed-identity 502, and a historical run for another work still fails closed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "repeated-problem",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f464-f38b-7f82-a402-e57a7f7e8da0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

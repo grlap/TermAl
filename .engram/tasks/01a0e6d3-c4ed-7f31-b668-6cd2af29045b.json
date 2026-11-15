@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4ed-7f31-b668-6cd2af29045b",
+  "external_ref": "tm-dp4n",
+  "title": "Synchronize Codex thread-action route test with request start",
+  "outcome": "The full Rust gate intermittently failed in tests::http_routes::codex_thread_action_routes_update_session_state because the mock runtime started its 1-second recv_timeout for the next action immediately after responding to the previous action. That window incorrectly included the previous handler's commit, response serialization, assertions, and scheduling before the next HTTP request began. Add an explicit per-request start handshake so each receive deadline begins only when the corresponding route request is issued; keep the bounded timeout and add no retries or timeout inflation.",
+  "acceptance": [
+    "The focused route test and the original scripts/test-rust.sh gate pass; each mock command timeout is armed only after its matching HTTP request starts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

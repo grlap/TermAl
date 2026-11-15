@@ -1,0 +1,28 @@
+{
+  "id": "01a10c9f-d326-7762-83a5-fb6c238b09dc",
+  "external_ref": null,
+  "title": "Paused-queue and retained cards: an Engram hold preview without resume or cancel wording gets no next-step hint",
+  "outcome": "An 'Engram…' preview that the cards classify as an Engram hold, but that carries no resume or cancel wording, still gets a correct next step: either a resume/cancel hint, or, where the backend retries it on its own (the source-observation withheld preview), automatic-retry wording.",
+  "acceptance": [
+    "Paused-queue and retained cards: an Engram hold preview without resume or cancel wording gets no next-step hint is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "retained-prompt",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

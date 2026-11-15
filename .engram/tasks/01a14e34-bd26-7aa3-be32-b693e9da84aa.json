@@ -1,0 +1,42 @@
+{
+  "id": "01a14e34-bd26-7aa3-be32-b693e9da84aa",
+  "external_ref": null,
+  "title": "M5 package B prep: bound ordinary-facade and remote send RED on the M2 candidate",
+  "outcome": "A separate frozen package B exercises the real M2-bound ordinary agent facade, including termal_send_to_session to an enrolled satellite target, without changing production behavior or claiming full M5 readiness.",
+  "acceptance": [
+    "A frozen test-only package B on the exact coordinator-assigned M2 candidate includes a real central-child and satellite-child scaffold with valid central-issued binding, ordinary facade parity/outage controls, raw-proxy HTTP refusal, unassociated-proxy tool refusal, raw-id collision and native-recreation controls; no production behavior changes or fabricated bindings. The positive proxy-tool-success RED is documented as deferred to w-fc620307cb7a and not asserted here. The scaffold runs entirely in local test fixtures: no live enrollment, no contact with a real remote host, and no remote delivery.",
+    "A manifest records the candidate branch, base commit/tree, package tree, exact M2/M3/M4/O1 interface dependencies and deferred limits, with the dependencies recorded on M5; source-only prep runs no tests before M2 lands, and any carry preserves and verifies the owned delta without rebase or importing unrelated changes.",
+    "After M2 lands and the coordinator releases the exact carried input, a focused run records each control's actual outcome with run id and unchanged before/after fingerprint; any control failure is classified as a product, fixture or environment cause rather than relabelled; no product GREEN or full M5 claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "prep",
+    "remote-foundations",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14bba-d1c2-7610-8c8e-8c0a4f62bbc0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered frozen local-fixture controls-only package B, tree29adbef504e6548e9b81d872148b0a86616f89ec on exact landed M2 tree072baa45. Authorized once-only focused run0306be05 passed all7controls; host verification45025187 PASS on exactsource, unchanged launcher before/afterd86086c4. Independent evaluation9c6e30f36dd94710abcdd216b2ad3ee6:3/3pass against revision3. Test-only prep: no commit, push, install or product/fullM5/live claim. Positive association-tool success remains deferred; fc62/d9f parked pendingO1.",
+    "completed_at": "2026-10-18T16:03:29.535252600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a19966-4085-76e0-8118-d3760dfc95bb",
+  "external_ref": null,
+  "title": "Full gate: run the UI test stage concurrently with Rust tests when host resources allow, keeping one exact-input gate",
+  "outcome": "Full gate: run the UI test stage concurrently with Rust tests when host resources allow, keeping one exact-input gate",
+  "acceptance": [
+    "The full gate can run the vitest stage concurrently with the rust-tests stage without changing either stage's selection or coverage, and the result still records one exact input with matching before and after fingerprints",
+    "A measured comparison on the same host and input shows the wall-time change and the CPU, RAM and I/O contention effects; no saving is claimed without that measurement",
+    "Fixture isolation holds under concurrency: no shared temp, port or store path between the stages, proven by a test or by the measured run's clean residual census",
+    "A failure in either stage is reported with that stage's own result, and the other stage's result is not lost"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "launcher",
+    "performance",
+    "test-durations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a13607-fb91-7673-8768-eabc0f9916e2",
+  "external_ref": null,
+  "title": "Import reconciliation F: host UI and protocol compatibility, and combined validation",
+  "outcome": "TermAl shows the import cause, the pending responsibility and the exact safe next action, without exposing secrets or promising that a timeout will solve it. Older peers stay on the stage-1 refusal. A deterministic integration test covers operator start through ready, apply and cancel.",
+  "acceptance": [
+    "Tests: an unavailable host, an unknown control outcome and missing coverage are each shown explicitly as pending; an unsupported older peer stays on the stage-1 refusal; standard Defer and unrelated admission are unchanged; no import starts on sync enablement, elapsed time, a restart or an arbitrary mailbox notice. Deterministic integration tests cover operator start through ready, apply and cancel, and historical evidence attribution. Active reconciliation is not closed on inactive-foundation tests alone.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a135ff-5979-7203-93d4-358040469407",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

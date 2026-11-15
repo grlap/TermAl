@@ -1,0 +1,28 @@
+{
+  "id": "01a1cb96-369a-70d0-92e2-79dc63f9c02e",
+  "external_ref": null,
+  "title": "Integrate combo60 (R15) on e6b8d2f7: a7bb 1ccbd174 (w-18a1 preserve Engram windows and async source fixture), direct child of combo59",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 1ccbd17407dd1f3e965b1e0b5463c9bb0f41e713 (tree 3cc84cb63837bfaed42f231989b9de9e09b365a0) is on origin/master, where master was moved to it by a fast-forward from e6b8d2f70609a85e815c4039d971ed2b963b6f4e.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 3cc84cb6 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the WHOLE-69 pair on tree e9c85ea8 (Codex session 17501, Claude session 17502) for the unchanged contribution, together with the scoped pair on 1ccbd174 itself (Codex session 17510, Claude session 17511), which covers the repaired terminalDiagnosticFixture in scripts/test-launcher.test.mjs and the identity of the other 68 paths.",
+    "The release binary built from tree 3cc84cb6 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1cc91-20ec-7941-9fd1-bd26162d13bc",
+  "disposal_reason": "R15 candidate 1ccbd174 failed its FULL (22 Rust tests, the 60 s floor). Its successor, R17 f210dd24, carried byte-identically onto master d27ef044 as e81c9787, is integrated as combo65 on w-bd26162d13bc.",
+  "completion": null
+}

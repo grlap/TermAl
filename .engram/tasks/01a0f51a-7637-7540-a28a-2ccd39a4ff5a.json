@@ -1,0 +1,37 @@
+{
+  "id": "01a0f51a-7637-7540-a28a-2ccd39a4ff5a",
+  "external_ref": null,
+  "title": "Provide per-session body sequence on body commits, reads and proxied events",
+  "outcome": "Provide per-session body sequence on body commits, reads and proxied events",
+  "acceptance": [
+    "Server implements S1–S5 of governing contract 9a7e6f43436b4385967202c448d296f7, with sessionSeq on body deltas and bodySeq on targeted reads/history/summary; per-session sequence is taken atomically with body mutation and snapshot capture.",
+    "Server tests pin contiguous body commits, metadata non-advancement, read-to-next-delta relation, SQLite page snapshot truth including a rollback during a history read, a rollback advancing the session's body sequence so that a client sees it as a discontinuity, and proxy pass-through including sequence omission from older peers.",
+    "The combined client/server input passes the full five-stage gate and independent Codex/Claude complete-branch reviews with no outstanding in-scope Medium-or-higher findings."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 0,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fe83-784b-72d1-add9-09bd524f385e",
+  "disposal_reason": "Greg closed the parent P0 w-1b692f268123 at about 21:25Z on 2026-10-02 (note 13ee75cf). This required child continues as standalone work in w-09bd524f385e, so it no longer blocks the parent. Coordinator: Termal::Fable2.",
+  "completion": null
+}

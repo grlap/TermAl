@@ -1,0 +1,27 @@
+{
+  "id": "01a121c2-44c4-71e1-ade1-7992b2fcb9e0",
+  "external_ref": null,
+  "title": "Run the fingerprint-tests stage inside a swept test run folder, so fixtures kept by failed launcher tests do not accumulate in user temp",
+  "outcome": "The fingerprint-tests stage runs with TERMAL_TEST_RUN_ROOT set to a marked termal/tests/run-* folder, as the Rust wrapper does through runInTestTemp. Fixture directories that failed or hung launcher tests keep for diagnosis then live in that run folder, are retained on failure, and are removed by the existing marked-run sweep, instead of piling up unswept in the product test folder under the user temp folder.",
+  "acceptance": [
+    "Run the fingerprint-tests stage inside a swept test run folder, so fixtures kept by failed launcher tests do not accumulate in user temp is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

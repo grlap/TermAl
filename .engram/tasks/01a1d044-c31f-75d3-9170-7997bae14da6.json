@@ -1,0 +1,35 @@
+{
+  "id": "01a1d044-c31f-75d3-9170-7997bae14da6",
+  "external_ref": null,
+  "title": "Integrate combo72 on e3970152: edfd 73f0fe27 (w-03b4 protected review tree scoping, byte-identical carry of c84a68f3)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 73f0fe278402ee1ea5d653ff9549f11292fedf22 (tree 20d9362b76f1820c0187f1352b618de842f37964) is on origin/master, where master was moved to it by a fast-forward from e39701529b15074fafddd8b781456cb9147900dd.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 20d9362b passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the fresh whole-5 R3 pair Codex session 17646 and Claude session 17648 reviewed 73f0fe27 against e3970152 with no Medium or higher finding (its Low filed as w-69a5e4bc895f).",
+    "The release binary built from tree 20d9362b was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo72 (Sol-edfd's w-03b4, 73f0fe27, a byte-identical carry of c84a68f3) is LANDED: master fast-forwarded e3970152 -> 73f0fe27 and pushed at 15:40:33Z, after the DL560 landing FULL test-c659a848 PASSED (rust 7703/0, vitest 5102/0) and a clean R3 review pair. The test ref is deleted. Installed on DL560 (e71abd2f, backup termal.35bbb790.bak) and Central (7d39db12, backup termal-before-73f0fe27-5e93f22c.exe), with no host restarted. The independent evaluation (Codex session-17664) passed all 3 criteria.",
+    "completed_at": "2026-11-12T16:48:32.862183500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

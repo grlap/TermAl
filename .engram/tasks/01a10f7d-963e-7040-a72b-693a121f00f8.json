@@ -1,0 +1,28 @@
+{
+  "id": "01a10f7d-963e-7040-a72b-693a121f00f8",
+  "external_ref": null,
+  "title": "A mailbox message reported deliveredToIdleSession did not wake the idle session for about 47 minutes",
+  "outcome": "A message whose send receipt says deliveredToIdleSession starts a turn in that idle session promptly, or the host records why it did not and keeps the wake pending.",
+  "acceptance": [
+    "A mailbox message reported deliveredToIdleSession did not wake the idle session for about 47 minutes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "mailbox",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Not a defect: a misreading by the reporter. Engram::Fable (TermAl mailbox ebe242f7 #804, 04:35Z) confirms that the '1735' it cited was the senderProcessedThrough field of its own send receipt for #1737, which is its cursor as the sender, not Opus's. Engram::Opus processed #1736 in a turn at 03:45Z (mailbox 587a65fb #165). No missed wake was observed. Cancelled by Termal::Fable2 (coordinator).",
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a18e69-f212-70c3-a71a-4d5a155f22aa",
+  "external_ref": null,
+  "title": "Make mailbox send-time dispatch and current wake/acknowledgement status clear",
+  "outcome": "One current-state lookup through the existing termal_read_mailbox_message / CLI read-message route, plus clear at-send receipt wording; not a new wake/retry feature",
+  "acceptance": [
+    "Send results and API/tool/CLI guidance explicitly distinguish the immutable at-send receipt from current state, and never equate durableButNotWoken with failed delivery or append success with recipient delivery.",
+    "The existing exact-message lookup returns a consistent, timestamped current wake/recipient-acknowledgement projection with shared plain-language meaning across supported local and remote routes; unavailable remote state stays explicitly unavailable, and no new lifecycle storage or mandatory extra read is introduced.",
+    "Tests using the actual existing producer/consumer paths demonstrate unchanged idempotent receipts after wake advancement, current lookup after queued/delivered/recipient-ACK transitions (including ACK without wake), sender-cursor isolation, remote-unavailable versus later supported read, and unchanged page-ACK/access controls; existing exact-input review and full-gate requirements apply."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "agent-ux",
+    "cross-machine",
+    "federation",
+    "greg-reported",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

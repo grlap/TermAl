@@ -1,0 +1,32 @@
+{
+  "id": "01a176f5-ceb6-7422-a1d0-002b151e7b26",
+  "external_ref": null,
+  "title": "TermAl release host aborted on an 8 MB allocation failure (0xc0000409) in the same second as two rustc processes, 2026-10-26 06:12:10Z",
+  "outcome": "The cause of the 06:12:10Z abort is identified from evidence (whole-machine commit exhaustion, TermAl's own memory growth, or both), the host and the build/test workload are kept below the machine's commit limit by a recorded, enforced rule or a fix, and the host no longer aborts under normal gate load.",
+  "acceptance": [
+    "A note records the read-only evidence (Application, System and WER events around 06:12:10Z, any dump or WER files, TermAl's own diagnostics, launcher run records showing which builds and tests were running, and Engram's diagnostics) and states whether it supports machine commit exhaustion, TermAl memory growth, or neither, naming what is missing.",
+    "A rule or fix keeps the host and the build/test workload below the commit limit, recorded and enforced through existing mechanisms (for example a commit-headroom preflight in the existing test launcher, or bounded build concurrency). No global or system configuration change is made without Greg's word.",
+    "If TermAl's own memory is implicated, its growth source is identified with file and line and fixed under a test, or filed with evidence; otherwise this item states that TermAl was a victim.",
+    "The independent review pair finds no Medium or higher, and the maintained full gate passes on the exact landed tree, for any code change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-incident",
+    "memory",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Cancelled under Greg's word of 2026-11-08 (Asistant #1015). Not fixed and the cause is unresolved. Per Sol-c593's sweep: a813f53a establishes shared allocation victims and a baseline contributor, not a leak or cause, and manual slots were the chosen response. If the allocation incident recurs, file a new item with fresh evidence.",
+  "completion": null
+}

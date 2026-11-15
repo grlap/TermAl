@@ -1,0 +1,62 @@
+{
+  "id": "01a0e6d3-c3b2-78a3-852c-60f7f9cc695c",
+  "external_ref": "tm-0uy0",
+  "title": "Avoid a redundant wait-repair fetch after another snapshot already repaired waits",
+  "outcome": "Review8 Claude Note: waitRepairRetry.complete currently runs only when the adopted resync carried waitRepair. An unrelated accepted snapshot can cover both wait projections while an existing retry timer remains armed and performs one extra fetch. Optimize only with explicit coverage of both server-scoped watermarks; do not cancel still-needed repair on unrelated SSE liveness. Add a focused regression before changing cancellation.",
+  "acceptance": [
+    "C1 (clear on explicit coverage of both projections).\n- When a full /api/state snapshot is ADOPTED by the transport's resync loop while a wait-repair retry is pending, and that snapshot covers BOTH wait watermarks (test-run waits and delegation waits) for the server the pending intent names, the pending retry is cleared and its timer cancelled.\n- The server named is `replacementServerInstanceId` when set, otherwise `observedServerInstanceId`.\n- This applies even if the adopted resync did not itself carry `waitRepair`.",
+    "C2 (otherwise the retry is kept).\n- The pending retry and its timer are kept when the adopted snapshot covers only one of the two watermarks, when it is stale (not adopted, or below either watermark), or when it comes from a server other than the one the intent names.\n- Adoption alone (`adopted === true`) and SSE liveness never clear it.\n- The existing behaviour when the resync carried `waitRepair` (complete on adoption, schedule on failure) is unchanged.",
+    "C3 (reuse, no new owner).\n- The change reuses `createWaitSnapshotRepairRetry` and `WaitDeltaWatermark`'s server-scoped `snapshotCovers`. No second retry owner or watermark is introduced.",
+    "C4 (tests).\n- Focused vitest regressions:\n  - positive: an unrelated adopted snapshot repairs both projections, so the retry is cleared and no redundant fetch fires when the timer would have elapsed;\n  - negative, each keeping the retry and the later fetch: partial coverage, a stale snapshot, and a wrong server.\n- `cd ui && npx tsc --noEmit` is clean. The existing wait-repair and live-state tests pass unchanged.",
+    "C5 (validation and landing).\n- The full gate passes on the exact tree submitted for landing.\n- The review pair has no outstanding finding of Medium or higher on it.\n- The item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

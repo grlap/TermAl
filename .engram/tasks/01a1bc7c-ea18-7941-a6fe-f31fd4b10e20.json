@@ -1,0 +1,28 @@
+{
+  "id": "01a1bc7c-ea18-7941-a6fe-f31fd4b10e20",
+  "external_ref": null,
+  "title": "Keep session scope selectors usable in narrow panels",
+  "outcome": "Project and Host menus remain usable as the Sessions panel narrows.",
+  "acceptance": [
+    "Narrow panels allow users to read/select Project and Host options without the two-column row squeezing their menus."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b4ac-b691-77a3-9373-2050f215638d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

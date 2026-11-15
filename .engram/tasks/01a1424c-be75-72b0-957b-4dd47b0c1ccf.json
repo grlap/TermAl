@@ -1,0 +1,27 @@
+{
+  "id": "01a1424c-be75-72b0-957b-4dd47b0c1ccf",
+  "external_ref": null,
+  "title": "Work view: an explicit server-side search of notes and outcomes, separate from the client-side display filters",
+  "outcome": "A deliberate, explicit Work-view action searches outcome, note and gate text on the server (as `engram ls --search` does). It is separate from the client-side display filters, which, after w-e803e7f5cb8c, match only loaded row fields and never refetch.",
+  "acceptance": [
+    "Work view: an explicit server-side search of notes and outcomes, separate from the client-side display filters is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

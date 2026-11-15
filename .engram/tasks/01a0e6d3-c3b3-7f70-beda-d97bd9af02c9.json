@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3b3-7f70-beda-d97bd9af02c9",
+  "external_ref": "tm-0wuw",
+  "title": "Content-only session summary can consume a pending prompt without adopting its message",
+  "outcome": "Delegated review found that ui/src/session-reconcile.ts content-only summary adoption intentionally ignores next-only messages but pending-prompt reconciliation still scans every next message. A next-only message can remove a matching pending prompt without entering the resident message list, hiding the prompt until later hydration. Deferred with the current scroll/reconcile work at the user's direction. Add an anomalous/index-inconsistent summary regression and reconcile pending prompts only against adopted messages.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. The three adoption modes exist in ui/src/session-reconcile.ts (preserve-head) on master.",
+  "completion": null
+}

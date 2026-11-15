@@ -1,0 +1,29 @@
+{
+  "id": "01a14aa4-7262-72b3-b9d1-a61eb0dfbd49",
+  "external_ref": null,
+  "title": "Bound automatic Engram retries on repeated control_request_expired/control_store_busy and escalate for diagnosis instead of retrying forever",
+  "outcome": "TermAl's automatic retries of a certified-non-applied Engram control call are bounded. When expiry repeats within the bound, the host keeps the exact request, key, report and earlier uncertainty and escalates visibly for diagnosis. It doesn't retry without limit, and it never changes the payload or key or takes a fresh grant or binding because of repeated expiry.",
+  "acceptance": [
+    "Automatic retries for certified-non-applied codes (and the other automatic retry codes, unless a reason to differ is recorded) stop after a stated bound. On exhaustion the host keeps the exact request, key, report and any earlier uncertainty, shows an explicit escalation state with a reason and next action, and never changes the payload or key or takes a fresh grant or binding. Tests cover repeated expiry to exhaustion, success before the bound, and restart mid-sequence.",
+    "The full gate plus a clean review pair on the exact input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1289b-cbdc-7e53-9715-ac230a24d0d8",
+  "disposal_reason": "Duplicate of the older Greg-directed item w-ac230a24d0d8, on Termal::Fable2's correction (TermAl mailbox df007e37 #157, 2026-10-17 17:13Z). Greg's 2026-10-11 timeout contract governs: one persisted 240 s automatic-recovery budget per admitted head, started at acceptance via w-cfcf10b68c9b's fields. It replaces this item's 8-attempt bound. The design is moved to w-ac230 and adjusted.",
+  "completion": null
+}

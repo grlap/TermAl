@@ -1,0 +1,35 @@
+{
+  "id": "01a13c0c-9bbb-72c2-a257-b23a351d24bd",
+  "external_ref": null,
+  "title": "Check successful freeze verification after creating the promisor regression's packed-object fixture",
+  "outcome": "The missing-promisor regression positively verifies the healthy mixed loose-and-packed repository before removing its HEAD blob, in addition to its guarded refusal and object-inventory assertions.",
+  "acceptance": [
+    "The regression asserts successful check_review_freeze after the independent pack/index fixture is created and before deleting the HEAD blob, without weakening the missing-promisor, no-helper, full object-inventory or inert-transport negative-control assertions.",
+    "Focused verification and the maintained gate pass on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "freeze-verification",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

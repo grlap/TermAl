@@ -1,0 +1,38 @@
+{
+  "id": "01a19bdc-7a49-7193-b11b-4f8efecf6ca8",
+  "external_ref": null,
+  "title": "w-3fe8 source slice: 4 mounted carried/retirement tests off the deleted launch-diagnostic surfaces",
+  "outcome": "w-3fe8 source slice: 4 mounted carried/retirement tests off the deleted launch-diagnostic surfaces",
+  "acceptance": [
+    "A source-only patch for exactly src/tests/engram_carried_credit_corrections.rs, engram_carried_credit_outcomes.rs, engram_delayed_retirement_order.rs and engram_launch_window_retirement.rs, on the integrator's current tree 728c0cc9, is returned to Sol-03d4; any extension (such as the description-window child) is requested before writing",
+    "The real ordinary no-borrow, late-retirement, old-EO identity, explicit-locator and native-negative controls are preserved, with a per-original disposition",
+    "No deleted types or aliases, no ignores, and no cargo"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered source-only exact4 TREE1fac3b499dfad65ee59e59592e53caba3a53e88c on728c0cc9 with47 original oracle and16 helper dispositions, current48 unexecuted test declarations, native full-index patch/exact blobs/limits to integrator12327. No old diagnostic types/aliases/ignores, no Cargo or tests. Source contribution only; parent independent intake/compile/runtime/gate/acceptance/landing remain open.",
+    "completed_at": "2026-11-02T11:19:15.502500700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

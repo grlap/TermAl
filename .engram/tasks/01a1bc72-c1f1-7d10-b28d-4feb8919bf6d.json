@@ -1,0 +1,30 @@
+{
+  "id": "01a1bc72-c1f1-7d10-b28d-4feb8919bf6d",
+  "external_ref": null,
+  "title": "Make shared mailbox directory recovery guidance match alias send and get-or-create operations",
+  "outcome": "A refusal from the shared directory-snapshot owner gives recovery applicable to the caller's original operation, without describing alias send or get-or-create as only a termal_list_sessions read.",
+  "acceptance": [
+    "Shared snapshot guidance is operation-neutral or list-specific wording is restricted to the list route, preserving original status, error kind, authority and retained operation identity.",
+    "Behavioral coverage exercises the refusal from alias send and get-or-create and proves no message append or authority change occurs before target resolution succeeds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "diagnostics",
+    "federation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b88a-c57e-7263-97e0-19cbb9ece8de",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

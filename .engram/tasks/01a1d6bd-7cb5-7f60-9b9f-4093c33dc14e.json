@@ -1,0 +1,29 @@
+{
+  "id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "external_ref": null,
+  "title": "Naming another held claim's source root rewrites the session's work_binding, including mid-turn, unowning the running turn's later checks",
+  "outcome": "Naming a source root for a different held claim never re-targets an established session binding mid-turn; the running turn keeps the root it began with, and focus alone decides later turns.",
+  "acceptance": [
+    "bind_fresh_engram_source_root_until keeps an established work_binding when naming a different held claim (as BASE did); it sets the binding only when the session has none, or switches it only between turns, with any change stamped and committed.",
+    "A regression test: a session bound to claim A opens a turn, names claim B's worktree mid-turn, and a later check in that same turn is still owned and reported under A; the name takes effect only at the session's next turn, which opens on B with the change stamped and committed. A control session bound to A in which no claim is named and focus does not change keeps opening its later turns on A."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

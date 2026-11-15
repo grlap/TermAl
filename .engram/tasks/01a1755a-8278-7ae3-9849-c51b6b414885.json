@@ -1,0 +1,30 @@
+{
+  "id": "01a1755a-8278-7ae3-9849-c51b6b414885",
+  "external_ref": null,
+  "title": "Launcher readiness aborts on registration GET ECONNRESET before any test stage",
+  "outcome": "Diagnose and repair the registration confirmation transport failure that prevented onReady in the preserved UI-bootstrap fixture, using deterministic request-level evidence and the existing registration client owner without deadline inflation or hidden replay.",
+  "acceptance": [
+    "A source and original-artifact diagnosis identifies the failing registration transport path, distinguishes a stale pooled-socket race from server teardown or another cause, and states whether production launcher registration shares the path.",
+    "An assertion-first deterministic regression demonstrates the confirmed transport defect and passes with a narrow fix in the existing owner, preserving exact registration identity, total deadline, no-stage-before-confirmation behavior and definitive error handling without unbounded retry or weakened assertions.",
+    "Focused transport, launcher-registration and UI-bootstrap regressions pass on the exact final candidate; independent Codex/Claude read-only reviews have no outstanding Medium-or-higher finding; complete source/test/review evidence is handed to Merger for its maintained full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "test-launcher",
+    "transport"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

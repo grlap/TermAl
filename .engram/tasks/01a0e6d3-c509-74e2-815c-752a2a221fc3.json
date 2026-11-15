@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c509-74e2-815c-752a2a221fc3",
+  "external_ref": "tm-g1e",
+  "title": "Recover delegation findings from severity-count summaries",
+  "outcome": "Delegated reviewers can emit a contradictory packet whose Summary says 'Found one High-severity fail-open condition' while Findings says None. Parser v4 only recognizes finding nouns such as issue/bug/risk, so it trusts the empty section and the parent fan-in loses an actionable finding. Add structural detection for found/identified/detected + positive count + severity, preserve resolved/clean negations, bump the parser version so retained completed children are reparsed, and add an exact regression test for the observed Codex wording.",
+  "acceptance": [
+    "The observed 'Found one High-severity fail-open condition' packet recovers its actionable preamble finding; clean/resolved summaries remain empty; retained terminal records with a recorded result are not reparsed after parser changes, reviewer terminal truth comes only from validated submission envelopes, and the prose parser serves ordinary explorer/worker children.",
+    "Summary diagnostics classify sentences with qualifying attached severities using the documented closed POSITIVE/CLEAN/UNRESOLVED contract. Non-clean sentences report the highest qualifying severity regardless of order; whole-sentence clean/resolved templates produce no contradiction diagnostic; unmatched mentions, including ambiguous negation, remain visible as diagnostics without inventing structured findings. Explicit structured findings and AsBefore preamble recovery are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

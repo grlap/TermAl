@@ -1,0 +1,30 @@
+{
+  "id": "01a1a42a-9d8e-79a2-938c-b29b21960878",
+  "external_ref": null,
+  "title": "Limit nonterminal launcher reply handling to focused mode and cover live-mode exclusion",
+  "outcome": "Nonterminal launcher forwarding and keep-open behavior follow the intended focused-only boundary, with an explicit live-mode control.",
+  "acceptance": [
+    "The recorder forwarding predicate and command keep-open guard apply only to the agreed focused launcher mode, preserving full and live behavior unless a separately approved contract explicitly includes them.",
+    "A live launcher NotFinished control checks its observation/closure behavior and proves no native verification credit is created."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a01f-522e-7d00-9d49-96480bbbe221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

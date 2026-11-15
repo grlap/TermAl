@@ -1,0 +1,27 @@
+{
+  "id": "01a0fe83-9734-7222-b4f0-898728fd3c64",
+  "external_ref": null,
+  "title": "Preserve remote history freshness conflicts when forwarding upstream body pairs",
+  "outcome": "Preserve remote history freshness conflicts when forwarding upstream body pairs",
+  "acceptance": [
+    "Preserve remote history freshness conflicts when forwarding upstream body pairs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "conversation-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

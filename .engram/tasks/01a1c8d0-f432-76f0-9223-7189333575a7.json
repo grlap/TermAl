@@ -1,0 +1,37 @@
+{
+  "id": "01a1c8d0-f432-76f0-9223-7189333575a7",
+  "external_ref": null,
+  "title": "Raise the named-root journal limit from 256 to 1024 (Greg's fixed maximum) as an immediate stopgap for w-4ac6",
+  "outcome": "ENGRAM_NAMED_ROOT_JOURNAL_LIMIT is 1024, Greg's stated maximum, so the running host has free journal slots for new-claim namings while the closing-job custody fix (w-4ac60649cb0e) lands. Retention rules, protections and the census are otherwise unchanged.",
+  "acceptance": [
+    "src/engram_named_root_binding.rs sets ENGRAM_NAMED_ROOT_JOURNAL_LIMIT to 1024, and every test, census text and doc that names the journal limit agrees; no retention predicate or protection changes.",
+    "Existing journal capacity and census behavioural tests pass with the new limit, plus one that admits a new naming past the old 256 bound.",
+    "After landing and a Central restart, a live census shows limit 1024 with free capacity, and one new-claim termal_name_source_root succeeds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "greg-directed",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Journal limit1024 delivered without retention/protection changes; landed3e178a6d and post-restartlivecensus1024/761free plus firstnaming3414 verified. Fresh independent evaluation90db5a4678d04a38ad98e4f0a2055872 passed3/3 at09:41:13.610160700Z on clean76b0/tree0b59. Native registeredTeste708 PASS6/0, record4348d4a3; primaryFULL96ea0011 and live/naming facts in41487b4a. Original1/3evaluation618b retained as history; no timeout or evaluator/testretry.",
+    "completed_at": "2026-11-11T09:43:51.594473100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

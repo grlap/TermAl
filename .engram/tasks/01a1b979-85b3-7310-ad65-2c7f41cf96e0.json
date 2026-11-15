@@ -1,0 +1,28 @@
+{
+  "id": "01a1b979-85b3-7310-ad65-2c7f41cf96e0",
+  "external_ref": null,
+  "title": "Read-only Claude reviewer policy refuses standalone `git rev-list --parents -n 1 HEAD`",
+  "outcome": "A read-only Claude reviewer can run the bounded form `git rev-list --parents -n 1 <rev>` (or a documented equivalent) to verify a commit's parents, with the same output and exec-sink protection as the other listing subcommands. The current allowlist in src/claude.rs (around line 1775) admits diff, log, show, blame, describe, ls-files, rev-parse, shortlog, status and patch-id, but not rev-list. So the policy refused it ('refused by TermAl read-only policy') for Engram 12329's R2 Claude reviewer (session-16809, delegation 091f8ba4) at both boundaries, while Codex ran it. The reviewer used the supported substitute `git show -s --format=\"%H %P\" HEAD`, so coverage was not lost. Either admit a narrow rev-list form or document the supported substitute in the reviewer guidance, so reviewers stop running into the refusal. Source: Engram::Coder-VerificationWorkspaceSol mailbox #294, 2026-11-08.",
+  "acceptance": [
+    "Read-only Claude reviewer policy refuses standalone `git rev-list --parents -n 1 HEAD` is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "read-only",
+    "reviewer-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

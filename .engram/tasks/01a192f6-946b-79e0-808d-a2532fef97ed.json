@@ -1,0 +1,37 @@
+{
+  "id": "01a192f6-946b-79e0-808d-a2532fef97ed",
+  "external_ref": null,
+  "title": "Route a carried Codex check's legacy terminal result before transcript turn filtering",
+  "outcome": "A carried Codex check receives its exact legacy terminal result on its original item and session thread even after a later turn starts, completes required closing capture, and a subsequent provider-reported own edit does not itself fence it. Independent watcher evidence with unknown write timing retains the conservative policy. This narrow repair does not establish the cause or resolution of the original live incidents.",
+  "acceptance": [
+    "A regression through the production Codex legacy terminal-result route shows that a carried check whose command has exited (the runtime has reported its exit code and complete output) observes that terminal result without waiting for an unrelated later event and completes its required closing capture. Once that capture is complete, a subsequent provider-reported own edit does not itself fence that finished check or get reported as made before it settled. Independent watcher evidence whose write timing is unknown remains governed by the existing conservative policy; this criterion does not claim that such evidence is exempted.",
+    "A check whose command has genuinely not exited still refuses credit for edits made while it runs; the fix does not settle on elapsed time alone, and it names how exit is observed for Codex exec sessions (write_stdin/terminal) versus Claude Bash background runs.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; aa4f2cf9; exact legacy terminal-result routing, Windows/Mac batch gates recorded; only old no-sighting evaluation refusal76d3aa0b.",
+    "completed_at": "2026-11-08T19:22:12.504230900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1671e-6c63-78d3-8569-19aac32508c3",
+  "external_ref": null,
+  "title": "Router tests do not cover the HostAfterUnowned observe arms that name a self-started Claude turn's own identity",
+  "outcome": "Router tests do not cover the HostAfterUnowned observe arms that name a self-started Claude turn's own identity",
+  "acceptance": [
+    "A router test opens a self-started turn under its own command identity, takes a waiting prompt up with that prompt's started, then feeds output naming only the self-started identity, output naming that identity and the prompt, and a repeated started of the self-started identity, asserting each is Unchanged and that the result settles the prompt as HostAfterUnowned (mixed)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "claude-runtime",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

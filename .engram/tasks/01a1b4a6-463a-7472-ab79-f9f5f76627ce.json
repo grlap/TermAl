@@ -1,0 +1,28 @@
+{
+  "id": "01a1b4a6-463a-7472-ab79-f9f5f76627ce",
+  "external_ref": null,
+  "title": "Commit rule: harmonize the push-check fallback ('validate and review the resulting input') with review adoption",
+  "outcome": "An integration owner whose push check fails because master moved without touching the candidate's paths reads the same rule as the candidate-commits bullet: an identical contribution adopts the review pair.",
+  "acceptance": [
+    "The push-check fallback sentence in the Commit and push section of CLAUDE.md and AGENTS.md (identical in both) names the candidate-commits bullet's adoption for a candidate committed afresh with an identical contribution, landed under the authority-text process (a), (b) and (c)",
+    "The wording only clarifies; it adds no mechanism, condition, proof format or gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "commit-rule",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,43 @@
+{
+  "id": "01a0f4ab-bde2-7b30-a9dc-bf01dfb87ef4",
+  "external_ref": null,
+  "title": "After a host restart, a session whose Engram authorization was interrupted needs the operator: only Cancel is offered, \"reconcile\" does not exist, and mailbox wakes queue behind the retained prompt",
+  "outcome": "A session whose Engram turn authorization was interrupted by a host restart recovers without the operator, or tells the operator exactly what to do, in wording that matches the controls offered. Found 2026-09-30 after the 23:31Z restart (reported by Engram::Fable, mailbox ebe242f7 #353). Engram::Opus (session-7284) showed \"Engram: Waiting/Unknown after interrupted authorization. Prompt retained; cancel or reconcile before continuing.\" It had just claimed an item and was starting work. Source, at 27bf0b6: when a restart catches a begun grant, TermAl cannot prove that the provider never saw the prompt. So it keeps the prompt, checkpoints the grant with Wait, blocks auto-dispatch and parks the session Idle (src/engram_queued_admission.rs about 571–631 and 727–797). That fail-closed choice is deliberate. But: (1) the \"Prompt retained\" card offers only Cancel (ui/src/panels/AgentSessionPanel.tsx about 1248–1279); no reconcile action exists, although the preview and the card both say \"cancel or reconcile\". (2) A mailbox wake is queued behind the retained head (src/mailboxes.rs about 785), so a peer cannot resume the session; only the operator can. (3) Cancel discards the prompt, which may never have reached the provider. By about 23:38Z the session was active again, presumably through the operator. Directions: offer the reconcile action the text promises (for example, re-deliver after showing the operator whether the transcript holds a provider response for that prompt), or change the wording to what exists. Also consider letting a new prompt or a mailbox wake resolve a retained prompt that provably has no provider response.",
+  "acceptance": [
+    "A session whose authorization was interrupted by a restart can continue without anyone editing its state by hand: either an offered action re-delivers or resolves the retained prompt, or a new prompt or mailbox message resolves it; a test covers the chosen path.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The retained-prompt card's wording names only actions the card offers; a test covers the interrupted card's wording and controls."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-interop",
+    "pilot",
+    "restart-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

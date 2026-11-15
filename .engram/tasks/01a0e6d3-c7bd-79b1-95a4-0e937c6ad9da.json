@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7bd-79b1-95a4-0e937c6ad9da",
+  "external_ref": "tm-wgz3",
+  "title": "Bound Cursor discovery-session lifetime across repeated refreshes",
+  "outcome": "Claude structured review session-6537 acp.rs:965. discovery_only omits both persisted ID and runtime current_session_id, allowing repeated pre-prompt refresh to allocate IDs without a cancellation target. Preserve non-persisted discovery ownership/reuse or explicit bounded disposal, without reviving invalid cross-process resume IDs. Parent qualification: AcpRuntimeHandle.stop_with_grace ultimately kills process, so this is NOT an unkillable-process claim. Verify repeated refresh and Stop/configure failure paths with bounded lifecycle tests. Follow-up to tm-tsxg distinct from selected-model overwrite. Candidate tracked6947209d..., HEAD0e7ab55; static inspection, no runtime reproduction yet.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

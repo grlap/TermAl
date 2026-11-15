@@ -1,0 +1,28 @@
+{
+  "id": "01a0f395-1705-7be3-988d-c9633a1e67e3",
+  "external_ref": null,
+  "title": "Reconcile divergent completed text across closed or split assistant bubbles",
+  "outcome": "A divergent full completion after an item switch or recorder boundary repairs its original segments without duplicating previously displayed text.",
+  "acceptance": [
+    "A real Codex/Claude regression asserts original transcript IDs/count and segment bodies for divergent completed text after an item switch or internal recorder boundary; fix is independently reviewed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fec5-34bb-71d0-97fe-459efee0b9b4",
+  "disposal_reason": "Coordinator (Termal::Fable2), 2026-10-02 about 22:40Z: parent P0 w-1b692f268123 completed at 22:37:58Z (seal 70882907). This optional follow-up continues as independent work. A later triage under Greg's no-legacy rule and w-5dae8178b905 (moving remote sessions onto the new path) may cancel items that the removal of the old hydration path makes moot.",
+  "completion": null
+}

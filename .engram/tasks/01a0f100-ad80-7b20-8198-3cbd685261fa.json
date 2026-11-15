@@ -1,0 +1,27 @@
+{
+  "id": "01a0f100-ad80-7b20-8198-3cbd685261fa",
+  "external_ref": null,
+  "title": "Restore the exact recorded-cwd assertion in the launcher stage-cwd test",
+  "outcome": "A Low from review delegation-5c032e6c on w-ae4b52018e7f. The CI alias fix also wrapped the recorded-cwd check in the stage-cwd test (scripts/test-launcher.test.mjs, `realpathSync.native(result.stages[0].cwd)` against `realpathSync.native(ui)`) in canonicalisation. The launcher records a lexical stageDirectory(request.root, \"ui\") from a resolve()d root, so the old exact comparison was not alias-sensitive. The canonical comparison weakens the pin that the launcher records the request-derived spelling.\nRestore `assert.equal(result.stages[0].cwd, ui)`, keeping the realpath comparisons for the child's process.cwd() and for the Git-derived run directory.",
+  "acceptance": [
+    "The stage-cwd test compares the recorded stage cwd with the request-derived ui path exactly, keeps the canonical comparison for the child's cwd, and the launcher tests pass on Windows (including under an 8.3 short-name temp) and in CI on macOS."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "ci",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

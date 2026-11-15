@@ -1,0 +1,44 @@
+{
+  "id": "01a133f5-207f-78a0-83d3-1144b0dd5f39",
+  "external_ref": null,
+  "title": "Share the current-runtime and worktree predicate for retained Codex test hazards",
+  "outcome": "The runtime/root match used by engram_carried_running_key and engram_other_writer_cause is defined once beside EngramRunningCodexTest, while preserving the same-session starting-key exclusion and counting equal keys from other sessions. Do not add grant/turn requirements or change hazard lifetime as part of this extraction.",
+  "acceptance": [
+    "Both overlap callers share the current-runtime and captured-worktree matching predicate, retaining their different same-session and cross-session key exclusions.",
+    "The existing same-session and cross-session overlap, post-end credit, runtime replacement and read-only controls pass.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1315c-966b-7c33-be9b-1bf3d434a624",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

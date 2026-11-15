@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4ba-7ad1-bdcf-12ba42c29a46",
+  "external_ref": "tm-asd5",
+  "title": "Clarify OpenCode approval suspension and delegation default contracts",
+  "outcome": "Consolidated Claude review session-6523: document that pending approval-card status suspends allow_once auto-approval during that pending-card window; decide/document this conservative behavior rather than silently broadening permissions. Document that app default also reaches agent-created write-capable OpenCode delegation children and readOnly OpenCode delegations are rejected. Update docs/features/slash-commands.md to include OpenCode /approvals and cross-link integration doc. Do not claim suspension lasts after the session returns Active without evidence. Pre-existing /effort doc drift is optional adjacent follow-up, not a new defect. Review candidate HEAD 0e7ab55, tracked diff SHA256 3715182cad09de8a53bc9104243875be7aeb23d4910f4bf0987c2626361adab9; searches included closed issues and found no exact existing item.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

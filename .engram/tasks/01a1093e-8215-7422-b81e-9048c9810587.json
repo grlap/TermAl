@@ -1,0 +1,28 @@
+{
+  "id": "01a1093e-8215-7422-b81e-9048c9810587",
+  "external_ref": null,
+  "title": "Consider a provider-neutral launcher for host-installed Engram MCP servers",
+  "outcome": "Evaluate a provider-neutral host launcher that preserves explicit Engram project/home/actor/session/store authority while placing provider-installed MCP processes outside the session worktree. Any implementation remains separate from the delegated-child cleanup item's termination guarantee.",
+  "acceptance": [
+    "Consider a provider-neutral launcher for host-installed Engram MCP servers is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

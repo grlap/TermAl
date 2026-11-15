@@ -1,0 +1,48 @@
+{
+  "id": "01a12877-d7c7-7d42-a5a2-6390a6248966",
+  "external_ref": null,
+  "title": "Drift after a historical root-move opening is not reported when the workspace returns to the last accounted revision",
+  "outcome": "Reasoned, untested (re-audit for w-83754500a736): when turn N's opening resolves as HistoricalRootMove, its close is not kept as the accounted baseline (engram_source_sightings.rs:473-476), but the continuity anchor advances to that close (engram_turn_continuity.rs:133-143). If the workspace then returns to the old accounted revision, the next opening compares Equal and sends no inter_turn_change, while continuity records Drifted. The store then never sees a change the host detected.",
+  "acceptance": [
+    "A reproducing test first drives an opening resolved as HistoricalRootMove, then a return to the last accounted revision before the next opening, and records whether continuity reports Drifted while no inter_turn_change is sent; the test is noted on this item with its result.",
+    "If the gap reproduces, the drift reaches the store as an inter_turn_change before the next provider handoff (or is explained by a recorded design ruling), and the test shows it; if it does not reproduce, the test stays as a regression witness and the item records why.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

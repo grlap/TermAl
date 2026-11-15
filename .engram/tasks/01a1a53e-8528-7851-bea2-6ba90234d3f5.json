@@ -1,0 +1,32 @@
+{
+  "id": "01a1a53e-8528-7851-bea2-6ba90234d3f5",
+  "external_ref": null,
+  "title": "Pin Windows Codex worker spawn environment, profile transitions and serialized profile spelling",
+  "outcome": "Focused regressions cover the worker-specific spawn PATH decision, thread-less profile reset and existing worker-home mode changes, and the persisted workspaceWriteSandbox spelling. Routing-harness expansion is separately tracked in w-53ab42df726c.",
+  "acceptance": [
+    "A regression exercises the production spawn environment decision for Default, ReadOnlySandbox and WorkspaceWriteSandbox, and would fail if the worker process stopped receiving the filtered PATH.",
+    "Regressions cover thread-less delegated profile changes requiring runtime reset, existing worker-home threads retaining their home during allowed sandbox changes, and a serde round trip pinning workspaceWriteSandbox."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation",
+    "host-feedback",
+    "review-followup",
+    "test-coverage",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a34d-da7b-7ee2-9210-27b684638221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

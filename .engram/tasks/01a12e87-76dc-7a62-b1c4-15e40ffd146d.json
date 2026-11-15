@@ -1,0 +1,37 @@
+{
+  "id": "01a12e87-76dc-7a62-b1c4-15e40ffd146d",
+  "external_ref": null,
+  "title": "Split the scratch and watcher-routing tests out of src/tests/engram_carried_checks.rs (over 5,000 lines)",
+  "outcome": "The scratch-exemption and watcher-routing tests (only_the_scratch_directory_at_its_own_worktree_root_is_scratch, a_scratch_write_under_tmp_..., the fixture-store tests and a_tmp_naming_path_that_fences_states_the_scratch_tests_inputs_in_the_cause) live in a sibling test module that reuses the carried-check fixture helpers, as a pure move, and src/tests/engram_carried_checks.rs is below 5,000 lines.",
+  "acceptance": [
+    "The listed tests are moved unchanged to a sibling module with the provenance header CLAUDE.md requires; no test is renamed or weakened.",
+    "src/tests/engram_carried_checks.rs is below 5,000 lines after the move.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "file-size",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

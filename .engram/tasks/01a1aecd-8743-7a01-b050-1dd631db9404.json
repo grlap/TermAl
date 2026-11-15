@@ -1,0 +1,30 @@
+{
+  "id": "01a1aecd-8743-7a01-b050-1dd631db9404",
+  "external_ref": null,
+  "title": "A note or child added to an item during a registered run silently voids that run's verification credit",
+  "outcome": "A writer is warned before an item write would move the work revision under an active registered run, or the refused verification record names the write that moved it, so credit isn't lost silently.",
+  "acceptance": [
+    "When an Engram item has an active registered test run, a note, update or child add on that item through TermAl's tools produces a visible warning naming the active run and the consequence, before or at the write.",
+    "A verification record refused with work_revision names the revision change: its writer, time and kind, so the cause is diagnosable without reconstruction.",
+    "Tests cover both the warning and the named refusal; no credit rule is relaxed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "test-runs",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

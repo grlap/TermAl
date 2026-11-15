@@ -1,0 +1,27 @@
+{
+  "id": "01a17453-939a-7821-a57e-7294d4215d1c",
+  "external_ref": null,
+  "title": "Remote wake operation view clones queued-prompt metadata under the state lock that no production reader uses",
+  "outcome": "Remote wake operation view clones queued-prompt metadata under the state lock that no production reader uses",
+  "acceptance": [
+    "Remote wake operation view clones queued-prompt metadata under the state lock that no production reader uses is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "federation-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

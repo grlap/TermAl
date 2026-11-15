@@ -1,0 +1,30 @@
+{
+  "id": "01a19802-660c-71c3-ae9f-2dffd5f24eba",
+  "external_ref": null,
+  "title": "Pin persistence isolation integration boundaries beyond the existing deterministic helper regressions",
+  "outcome": "Focused real-owner regressions pin the bounded unexercised worker, lifecycle, converted-store and dispatch interactions of session-local transcript rejection.",
+  "acceptance": [
+    "Add deterministic real-worker rejection coverage for retain before trim and watermark advance, including concurrent newer mutation, removal and hiding.",
+    "Pin rejected created and remote-created rows, diagnostics HTTP rejection output, checked shutdown with a live handle and join failure, and exact transcript UNIQUE2067 classification after table conversion.",
+    "Pin delegated Human follow-up, prepared or gated promotion, Send, Stop successor and migrated Engram owner error paths as scoped by the retained review findings; preserve exact authority fences and existing assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

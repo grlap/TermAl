@@ -1,0 +1,28 @@
+{
+  "id": "01a1d8d1-2865-71e2-a6ff-416d7e0a565d",
+  "external_ref": null,
+  "title": "Retire passive pre-cut-B retirement history under an approved reader floor",
+  "outcome": "persisted retirement history is retired only under an explicitly approved reader-floor transition that preserves historical evidence or refuses before mutation",
+  "acceptance": [
+    "Before any persisted ledger or type removal, the coordinator approves an exact reader-floor plan identifying the supported predecessor inventories, successor floor, treatment of nonempty historical retirement entries and original warnings, and rollback/refusal behavior. Historical evidence is not silently discarded or converted to revocation confirmation.",
+    "Under that approved plan, the active EngramRetiredWorkAuthorityGrant type, StateInner/PersistedState carrier and engramRetiredWorkAuthorityGrants metadata unit are retired together. Supported upgrades preserve the approved historical representation and unrelated state; unsupported or corrupt inputs and older readers refuse before mutation. A failed migration leaves the original header and data unchanged.",
+    "Disposable behavioral tests cover predecessor loading, empty and nonempty retirement history, preservation or explicit refusal under the approved policy, atomic migration failure, repeated restart, older-reader refusal and ordinary prompt delivery without any revoke/control invocation. Documentation describes the actual successor floor and historical-evidence treatment."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "persistence-migration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

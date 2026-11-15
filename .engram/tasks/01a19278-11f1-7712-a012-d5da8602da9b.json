@@ -1,0 +1,29 @@
+{
+  "id": "01a19278-11f1-7712-a012-d5da8602da9b",
+  "external_ref": null,
+  "title": "fix-bug.md says stash may run freely, contradicting CLAUDE.md's owned-path stash rule",
+  "outcome": "fix-bug.md says stash may run freely, contradicting CLAUDE.md's owned-path stash rule",
+  "acceptance": [
+    ".claude/commands/fix-bug.md no longer lists stash among git commands that 'may be executed freely'; it defers to CLAUDE.md's owned-path stash rule (git stash push -u -m <unique-tag> -- <owned-paths>, never bare git stash or git stash pop)",
+    "The change lands under the instruction-change conditions (a), (b) and (c), with a clean review pair and full gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "instructions",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

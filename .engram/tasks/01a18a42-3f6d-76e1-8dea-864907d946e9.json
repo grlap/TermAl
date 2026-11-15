@@ -1,0 +1,29 @@
+{
+  "id": "01a18a42-3f6d-76e1-8dea-864907d946e9",
+  "external_ref": null,
+  "title": "Kimi::Consultant showed a user message stuck in its queue under \"Agent is working\" after its previous turn had ended; the session record is now gone",
+  "outcome": "A root session's queued user prompt is dispatched once the previous turn has ended, or the session shows a typed, visible reason why it cannot be. \"Agent is working\" is never shown while no turn is actually running, and the evidence (turn end, queued prompt, delivery attempts) is retained so that such a stall can be diagnosed.",
+  "acceptance": [
+    "Kimi::Consultant showed a user message stuck in its queue under \"Agent is working\" after its previous turn had ended; the session record is now gone is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "kimi",
+    "queue",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

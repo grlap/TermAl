@@ -1,0 +1,70 @@
+{
+  "id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "external_ref": null,
+  "title": "K3: automatic qualified remote-run read and tree-bound admission",
+  "outcome": "The existing host-owned launcher/process and settlement owners automatically carry genuine native remote completion through the existing authenticated federation/mailbox path into existing custody and settlement. The single schema_version 1 remote_verification_record operation and remote_verification_record_v1 capability keep immutable origin facts separate from each genuine current destination association. Explicit committed_input and authorized_test_ref uses distinguish verification from landing_gate: ordinary verification requires exact tested commit and existing Git-input/disposition rules without a fingerprint or sighting condition; landing_gate additionally retains the actual before/after fingerprints and existing exact-commit or authorized-tree landing conditions. Missing or nonqualifying facts remain visible and uncredited under the final shared reason vocabulary, Unknown never occupies immutable terminal identity, and no local execution, RegisteredHostRun, grant, turn, sighting or ObservedCheck is fabricated. Existing owner-recorded remote landing remains available until K3 ships; implementation remains subject to the coordinator-owned actual Engram B-landing prerequisite.",
+  "acceptance": [
+    "Tests show the existing host-owned native launcher/process and settlement owners correlate completion with the actual retained run and original request. For use committed_input with purpose verification, a terminal native PASS (the launcher's verdict; the exit code is provenance only), in full OR focused mode, on the exact tested commit and meeting the existing gitignore-aware clean-input and disposition contract, is credited; no fingerprint is required for a Legacy input; for a SourceId input the source_id pair must be present and equal for either purpose. For purpose landing_gate, only a terminal full-mode native PASS (the launcher's verdict; the exit code is provenance only) with before and after fingerprints (the source_id pair for a SourceId input) present and equal is credited; a focused result there is not_full_mode. Credit never grants landing authority, and the existing review, acceptance, readiness and platform-coverage requirements are unchanged. Existing local focused-check contracts are unchanged. The single remote_verification_record operation and remote_verification_record_v1 capability use the exact shared schema_version 1 completion: origin host_id/runner_session_id, run_id, mode, native result verdict/terminal/exit/reason, existing input commit/tree/before_fingerprint/after_fingerprint when available, and actual finished_at when available; completion and destination association stay separate. Missing facts remain missing and essential missing facts prevent qualification. Stage/preflight counts, host generation/build, start time, toolchain, platform/target and already-retained Git-state/disposition details are optional provenance, never new probes or caller proof. Existing custody, input and interference checks remain applicable. No logs/bundle, results.json hash, source copy/scan, new measurement or manual capture is required; K1 raw results, mailbox prose, an agent-writable file, a full label or stage count alone cannot qualify evidence.",
+    "Tests show the existing authenticated federation/mailbox path carries the small completion automatically into existing custody and settlement, including bounded recovery for missed, duplicate, late and reordered delivery without a new model/import turn, mandatory pull, second transport or duplicate test run. The existing typed destination binding/root and association.use identify committed_input with expected_commit and purpose verification or landing_gate, or authorized_test_ref with ref_name, expected_tree and purpose landing_gate. Purpose is checked against the actual request/target/policy and grants no authority. One existing qualification owner applies the selected use: committed_input verification requires the actual tested/judged commit equality and existing gitignore-aware dirty-before/dirty-after/disposition contract, with no sighting or capture condition, and no fingerprint-equality condition for a Legacy input. Missing or differing optional fingerprints alone do not disqualify that use for a Legacy input. For a SourceId input, the source_id pair must be present and equal. Landing_gate additionally requires actual before AND after fingerprints present and equal, the existing expected-input comparison, and exact tested commit for committed_input or exact authorized tested tree for authorized_test_ref. All existing landing conditions remain applicable; missing support or essential facts stays visibly uncredited rather than triggering a new capture/retest.",
+    "Tests show existing canonical object/feed, work_operation_results and downstream evidence/matcher owners retain immutable remote facts separately from each local destination association and association time. Association requires genuine current destination project/store, work-run, claim fence, applicable root generation and existing cut/time/mutation/independence guards; ordinary committed-input use adds no measured sighting, and legacy contracts remain limited to their own lanes. Actual remote execution completion time, never late association time, feeds the genuine producer loader and admission/citation/obligation/completion matcher. No local execution/provider event, RegisteredHostRun, grant, turn, sighting, ObservedCheck or agent-gate verification credit is fabricated. Origin-host/run deduplicates facts and permits reuse across items only with each item's valid association. Exact replay validates connection/routing then returns the original receipt before renewed live-association validation; new associations validate current authority, and invalid authority writes nothing in another item's scope. Running/Unknown, delivery timeout and missing-result snapshots do not occupy immutable native-terminal identity; a later authoritative terminal for the same run settles normally. Genuine failed/interrupted terminals remain immutable failures; different authoritative terminal fact sets conflict. Identical retries keep intent/key/receipt; changed subsequent payload uses a distinct normal settlement intent/key.",
+    "Tests show nonqualifying outcomes remain visible without verification credit using the single shared vocabulary: commit_mismatch, tree_mismatch, source_id_missing_or_changed, not_full_mode (landing_gate use only), result_not_pass, result_conflict, producer_unsupported, association_stale, untracked_debris_pending_disposition, and invalid_request. Native verdict/terminal/exit/reason remain unchanged so pending/running/Unknown, incomplete plan, settled failure and interruption remain distinguishable; missing facts use precise details, not extra enum aliases, and malformed supplied values are invalid_request. Native new-untracked-only remains native FAIL, visibly uncredited as untracked_debris_pending_disposition: mailbox/agent disposition cannot promote it to native verification. Only the integration owner's separately authorized existing disposition plus run-referenced gate record can count that landing gate; failed stages or changed commit/tracked/preexisting input cannot be waived as debris. Missing disposition-consumption support is an explicit capability limitation. Federation enrollment/revocation/quarantine/link/protocol diagnostics remain with their existing owner. Platform/target metadata is optional and adds no automatic filter; the integration owner's relevant-platform/Windows coverage duty remains unchanged. Retained accepted facts survive a later failed delivery or build change; new reuse still validates applicable trust, policy and target association.\n\nThe existing Engram owner, shared by evaluate and committed_input_eligibility_read, applies the newest terminal test-result rule per item, claim association and exact judged commit, ordered by actual completion time rather than association time, without restricting that rule to a check fingerprint. A newer authoritative remote FAIL or Interrupted, including native debris FAIL unless the existing authorized run-referenced integration-owner disposition applies, yields newer_non_pass without minting verification evidence. A terminal result whose completion time is unavailable yields incomplete only when the owner genuinely cannot decide, and can settle when the missing fact arrives or a newer applicable PASS exists; provisional Running or Unknown never occupies terminal identity or vetoes a PASS. TermAl consumes this owner's decision without a separate currency calculation.",
+    "The exact final input that lands has a passing full gate and an independent review pair with no outstanding in-scope Medium-or-higher finding. Regression evidence exercises the genuine producer/consumer path, or provenance-preserved actual producer wire against the real consumer, including ordinary verification without fingerprints versus landing refusal without them; exact commit versus authorized test-ref tree; focused PASS credited for committed_input verification but refused as not_full_mode for landing_gate; failure and debris without automatic credit; Unknown delivery followed by authoritative completion; terminal conflict, exact replay, reuse and moved authority; genuine downstream guards and unchanged local/legacy contracts. Any necessary durable/derived shape change identifies its existing import/readiness/repair/cutover consequence before implementation. Existing owner-recorded remote landing remains usable under its current rules until K3 ships. These criteria grant no commit, push, install, restart or configuration authority and do not release the coordinator-owned actual B-landing prerequisite.",
+    "Documentation shows the sender's typed single-send request with independently validated target associations and the runner's explicit message selection; explains registered native clone-project binding versus standalone author evidence and failed-run replacement; and states that automatic K3 credit neither rewrites old evaluations, flips defaults, retroactively credits old runs nor replaces the existing integration-owner landing rules."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15218-5b21-7971-ba0a-c3f102d77999",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

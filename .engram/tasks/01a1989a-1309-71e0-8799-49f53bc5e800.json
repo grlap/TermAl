@@ -1,0 +1,31 @@
+{
+  "id": "01a1989a-1309-71e0-8799-49f53bc5e800",
+  "external_ref": null,
+  "title": "A test run on a remote host is executed and reported by the remote session, which notifies Central; Central never waits on or indexes a remote run",
+  "outcome": "Remote runs are owned end to end by the remote session: it executes the run and sends a durable notification to Central, which reliably wakes the owner; Central registers no wait and keeps no index for remote runs",
+  "acceptance": [
+    "The remote session that executes a run sends Central a durable notification of its terminal result (run id, host, input, result, fingerprints); the notification reliably wakes the owning session, proven by a test and by one live remote run",
+    "termal_resume_after_test_runs and other Central-side waits are not offered for remote runs: a call for a remote run id is refused immediately with a message that names the remote-notification route, instead of a 404 'not indexed'",
+    "No Central-side index, polling or forced rescan of remote runs is added; documentation and agent guidance say that remote runs are awaited through their END notification",
+    "The change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

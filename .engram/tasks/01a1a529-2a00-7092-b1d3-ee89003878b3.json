@@ -1,0 +1,31 @@
+{
+  "id": "01a1a529-2a00-7092-b1d3-ee89003878b3",
+  "external_ref": null,
+  "title": "Cover permanent immutable-association conflicts during relay page recovery",
+  "outcome": "A deterministic public-route regression ensures an immutable association conflict at the local remember stage remains a permanent 409 and is never rewritten as temporary home unavailability.",
+  "acceptance": [
+    "A controlled test reaches the local remember stage of first-read recovery with a conflicting immutable association and asserts 409, the original conflict message, no temporary retry advice, and unchanged durable association authority.",
+    "The test uses deterministic phase synchronization and passes with the existing relay controls without weakening the recovery fences or increasing timeouts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19bf3-553d-79c1-9164-009fe89b37b8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

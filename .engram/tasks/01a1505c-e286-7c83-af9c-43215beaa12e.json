@@ -1,0 +1,32 @@
+{
+  "id": "01a1505c-e286-7c83-af9c-43215beaa12e",
+  "external_ref": null,
+  "title": "Exercise the production federation stdio control bridge with a child process",
+  "outcome": "A two-process fixture verifies the production pipe-to-control bridge, bounded buffering, EOF propagation and thread cleanup through FederationSshProcess control-stream ownership.",
+  "acceptance": [
+    "An isolated child supplies piped stdin/stdout to federation_stdio_control and take_control_stream; proof, directional IO, EOF on child/local close and owned thread/process cleanup are observed without real SSH."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14d7d-ccb4-79f3-a4dd-06dfdd4ab87e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

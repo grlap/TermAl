@@ -1,0 +1,29 @@
+{
+  "id": "01a11bf8-445d-7803-9bab-89ba094a12e2",
+  "external_ref": null,
+  "title": "Mailbox reactivation undo can be dropped when the capped connection wait runs out, leaving left_at cleared on rows of an ineligible session",
+  "outcome": "restore_reactivated_session_rows_timed never silently abandons the undo of a reactivation because the read path's 5 s connection cap expired: the undo waits for the connection without that cap (or with a much longer one), or is retried, and a dropped undo is impossible or recorded durably rather than only printed.",
+  "acceptance": [
+    "A test holds the store connection past the connection-admission cap while a reactivation must be undone (second validate() fails) and asserts that the rows' left_at is restored once the connection is free, not left cleared; the undo path no longer gives up after the read path's cap.",
+    "cargo check is clean and the mailbox test module passes in the named root."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "correctness",
+    "mailboxes",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

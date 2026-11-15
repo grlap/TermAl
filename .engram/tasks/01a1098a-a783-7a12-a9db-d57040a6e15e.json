@@ -1,0 +1,27 @@
+{
+  "id": "01a1098a-a783-7a12-a9db-d57040a6e15e",
+  "external_ref": null,
+  "title": "The automatic retry tick thread has no panic boundary around the tick body, so a panic there stops every automatic retry for the life of the process",
+  "outcome": "The automatic retry tick thread has no panic boundary around the tick body, so a panic there stops every automatic retry for the life of the process",
+  "acceptance": [
+    "A panic inside one retry tick is logged and the retry tick thread keeps ticking; a test (or a factored loop step) shows a panicking tick followed by a normal tick that still runs due attempts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a1b4b4-e3e3-73b2-b7e4-7ebf80832c3f",
+  "external_ref": null,
+  "title": "Raise the source_id capture bound from 8 s to 30 s in TermAl (S0, after-capture, engram source invocation)",
+  "outcome": "Every TermAl budget that bounds a source_id capture (the native S0 capture, the after-run capture, the received-notice capture and the `engram source` invocation with its --timeout-ms) allows 30 s instead of 8 s. The S0 opening deadline leaves room for a 30 s capture plus the existing opening stages. Budgets that do not bound a source_id capture are unchanged. Engram's `engram source` accepts 30 s in the same window.",
+  "acceptance": [
+    "Every TermAl budget that bounds a source_id capture allows 30 s: the S0 capture, the after-run capture, the received-notice capture, the `engram source` subprocess budget, and the --timeout-ms value it passes (no longer capped at 8000). The S0 opening deadline allows such a capture plus the existing opening stages. Budgets unrelated to source_id capture are unchanged, and the change lists each site touched or deliberately left alone.",
+    "Behaviour tests show that a capture taking longer than 8 s and under 30 s is accepted, and that one exceeding 30 s still yields unavailable with no credit. Existing tests that pin 8 s are updated to the new bound, not removed. No test reads Markdown or instruction files.",
+    "The change lands under the standing rule (review pair, FULL on Windows and DL560), is installed, and runs after a TermAl restart. The paired Engram change (the `engram source` bound to 30 s) is landed and installed before or with it, so the two agree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Shared30s source_id bound delivered in landed/installed/running TermAl30ddf016 with pairedEngramfc749042; coordinator confirms C1-C3 and realconsumercredit.",
+    "completed_at": "2026-11-07T15:31:08.900426100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

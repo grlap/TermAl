@@ -1,0 +1,40 @@
+{
+  "id": "01a19cbe-2354-72b2-bc1e-e04f101fe3ba",
+  "external_ref": null,
+  "title": "w-3fe8: adopted Claude turns must keep their own top-level foreground Bash as theirs (source attribution)",
+  "outcome": "A runtime-started (adopted) Claude turn's own top-level foreground Bash is not a hazard. The turn keeps its source change and source sighting, as on master, while background, nested or stale-generation adopted work still marks the observation mixed.",
+  "acceptance": [
+    "claude_outstanding_work.rs is_hazard exempts Adopted work only when its turn_generation equals the active turn generation, adopted_claude_turn_generation == Some(active), and the work is neither background nor nested",
+    "A focused test shows an adopted turn's own top-level foreground Bash keeps source_change and the source_sighting",
+    "A focused test shows an adopted turn's background, nested or stale-generation Bash is still a hazard and marks the observation mixed",
+    "a_retained_hazard_before_report_install_is_sticky_after_its_work_ends_and_reload passes unchanged on the compile owner's run",
+    "docs/features/engram-host-adapter.md states the adopted-turn rule without contradiction between its attribution sentences"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 adopted-Claude foreground attribution, real current-generation/background/nested predicate present; source3c5b5b25 + regression handoff87e24f89. Link final tests/docs only.",
+    "completed_at": "2026-11-08T19:22:57.011713500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1c6f5-2e75-7df2-bafd-8bfa2f459aa0",
+  "external_ref": null,
+  "title": "Keep stepped activity animations aligned after keyed DOM moves",
+  "outcome": "Moving an already tracked visible activity indicator within the app preserves common step-phase alignment without per-frame JavaScript.",
+  "acceptance": [
+    "A behavioral reorder case moves an already tracked indicator or its ancestor and verifies its recreated activity animation aligns with the existing indicators.",
+    "Dynamic additions, removals, visibility changes and teardown retain their current behavior; no per-frame timer or animation-frame loop is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1c68a-0571-72f3-837d-3a0e510ee34c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c784-d16b-7182-ab4f-4875d028e5c1",
+  "disposal_reason": "Continue as independent work after parent w-3a0e510ee34c completed with evaluated seal89dd8d9aafc04e85a7bc24740581a1df; this unfixed Low remains open and must not be stranded under a completed parent.",
+  "completion": null
+}

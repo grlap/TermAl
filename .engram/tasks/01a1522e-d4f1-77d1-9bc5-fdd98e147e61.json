@@ -1,0 +1,43 @@
+{
+  "id": "01a1522e-d4f1-77d1-9bc5-fdd98e147e61",
+  "external_ref": null,
+  "title": "Bound repeated review identity object-store admission work and cover loose-object scale",
+  "outcome": "Measure and reduce redundant object/refs metadata admission where possible while retaining storage escape/refusal protections and unchanged observation budgets.",
+  "acceptance": [
+    "Measure and reduce redundant object/refs metadata admission where possible while retaining storage escape/refusal protections and unchanged observation budgets.",
+    "Focused verification appropriate to the change and the required independent review/exact-input full gate establish the final behavior without widening authority or increasing timeouts."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "beads-in-progress",
+    "beads-migrated",
+    "cross-project",
+    "greg-directed",
+    "host-platform",
+    "review",
+    "review-identity",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a150e9-cdc9-7a10-8ee9-f8169c6b1471",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

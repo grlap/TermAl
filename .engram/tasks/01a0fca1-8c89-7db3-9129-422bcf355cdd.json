@@ -1,0 +1,27 @@
+{
+  "id": "01a0fca1-8c89-7db3-9129-422bcf355cdd",
+  "external_ref": null,
+  "title": "Some publishers republish a changed snapshot without a revision bump (turn_lifecycle.rs:347, session_crud.rs:3597)",
+  "outcome": "Some publishers republish a changed snapshot without a revision bump (turn_lifecycle.rs:347, session_crud.rs:3597)",
+  "acceptance": [
+    "Some publishers republish a changed snapshot without a revision bump (turn_lifecycle.rs:347, session_crud.rs:3597) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "sse",
+    "state-broadcast"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

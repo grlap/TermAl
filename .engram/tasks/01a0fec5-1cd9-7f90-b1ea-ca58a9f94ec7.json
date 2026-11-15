@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-1cd9-7f90-b1ea-ca58a9f94ec7",
+  "external_ref": null,
+  "title": "Bound or document loaded-transcript forced-tail-repair retry steady state",
+  "outcome": "Bound or document loaded-transcript forced-tail-repair retry steady state",
+  "acceptance": [
+    "Bound or document loaded-transcript forced-tail-repair retry steady state with regression or contract evidence reviewed independently."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "low",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

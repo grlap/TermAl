@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c501-7381-ae27-51eb7c25b903",
+  "external_ref": "tm-fcn",
+  "title": "Read-only reviewers see a stale .beads/issues.jsonl and report live beads as non-existent",
+  "outcome": "Found by round-8 reviewers being WRONG in an instructive way.\n\nBoth delegated read-only reviewers ran 'bd show <id>' / 'bd search', which ERRORED in the child session. They fell back to grepping .beads/issues.jsonl — the passive export — and concluded that tm-xx3 'does not exist' and that the shared_codex.rs test-file split was 'untracked'. Both beads exist and are open (tm-xx3, tm-g41). The export was 2 DAYS stale (mtime 2026-07-10; the beads were created 2026-07-12).\n\nClaude escalated this into a Medium finding — 'the acknowledged debt is untracked, and the placeholder reads as real' — i.e. it accused a code comment of citing a fake bead id. The comment was correct and the reviewer was not.\n\nWHY IT MATTERS: a reviewer that cannot see the tracker produces confident false findings, and 'this bead is fake' is exactly the kind of finding a human acts on. It also silently inverts the value of citing bead ids in comments.\n\nFIX DIRECTIONS: (a) make bd queryable from read-only reviewer children (it is a read; find why it errors — likely a Dolt lock or cwd/env issue), and/or (b) re-export .beads/issues.jsonl on write so the passive export cannot lag by days, and/or (c) tell reviewers explicitly that issues.jsonl is a passive export and NOT the source of truth.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03 (CLAUDE.md; no .beads on master).",
+  "completion": null
+}

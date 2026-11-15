@@ -1,0 +1,29 @@
+{
+  "id": "01a16e6f-4a5f-7ff2-9424-a32d103434d5",
+  "external_ref": null,
+  "title": "Replay settlement: after grant_scope_mismatch, read the retained grant's stored state from control-session-inspect details (begun vs expired vs overdue) instead of parking",
+  "outcome": "When a replayed turn_begin is refused grant_scope_mismatch, TermAl reads the grant's stored state from Engram's additive control-session-inspect `details` and settles it: begun means applied; expired or superseded means never applied, so re-evaluate with a fresh grant; issued but overdue gets an explicit handling. The queue doesn't park as Waiting/Unknown for a manual cancel.",
+  "acceptance": [
+    "Replay settlement: after grant_scope_mismatch, read the retained grant's stored state from control-session-inspect details (begun vs expired vs overdue) instead of parking is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "admission",
+    "blocked-on-engram",
+    "engram-control"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

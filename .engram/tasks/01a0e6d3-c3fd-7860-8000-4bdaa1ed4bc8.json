@@ -1,0 +1,36 @@
+{
+  "id": "01a0e6d3-c3fd-7860-8000-4bdaa1ed4bc8",
+  "external_ref": "tm-5yi",
+  "title": "Support Fn-wheel zoom on Response Board",
+  "outcome": "Allow Response Board zoom with Fn plus mouse wheel when the browser exposes the Fn modifier, while preserving Ctrl-wheel/pinch zoom and ordinary unmodified scrolling behavior. Add focused UI coverage and rebuild the served bundle.",
+  "acceptance": [
+    "On master, a Response Board wheel event zooms when ctrlKey is set or the browser reports the Fn modifier (getModifierState('Fn')), and an unmodified wheel event is not intercepted.",
+    "UI tests on master cover Fn-wheel zoom, an unmodified wheel left unhandled, and ctrl-wheel zoom around the cursor.",
+    "docs/features/response-board.md states Fn-wheel zoom and that it depends on the browser exposing the Fn modifier."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verification-only closure. Fn-wheel zoom on the Response Board, delivered by f6e766d8 (an ancestor of master 1495e8d3). response-board-camera.ts zooms on ctrlKey or getModifierState('Fn') and leaves unmodified wheels alone. ResponseBoardPanel tests cover Fn, unmodified and ctrl-wheel. response-board.md documents the Fn dependency. Independent evaluation 3cb4cdd4 passed 3/3.",
+    "completed_at": "2026-10-15T15:30:44.742966800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

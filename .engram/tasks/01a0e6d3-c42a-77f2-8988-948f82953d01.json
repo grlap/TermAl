@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c42a-77f2-8988-948f82953d01",
+  "external_ref": "tm-8hh",
+  "title": "Delegation follow-up HTTP semantics: 200->202 + ApiError JSON rejection + route-level tests",
+  "outcome": "Review (both): POST /api/sessions/{id}/delegations/{delegation_id}/followup returns 200 for an async turn acceptance (should be 202 like send_message) and uses the default Axum Json rejection instead of the project's ApiError JSON mapping. Add: return 202, map JsonRejection via api_json_rejection, and add route-level + tool_followup_session MCP tests (mirror delegation_mcp_send_to_session_posts_message_to_target). src/api.rs:725.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

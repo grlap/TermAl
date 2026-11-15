@@ -1,0 +1,27 @@
+{
+  "id": "01a1d652-a3b8-7012-a4ca-7954e8ed8a5a",
+  "external_ref": null,
+  "title": "Integrate combo96 on 05062f47: d50d a33efa4b (w-38a0 same-path evaluation-root recovery)",
+  "outcome": "The w-38a0 candidate is on master as one commit, gated by a full launcher run on the exact tree, reviewed clean, and pushed.",
+  "acceptance": [
+    "Commit a33efa4b2ce84db84a03a08b2ec635eb90b40b95 (tree 7e53a75dd0210ad229790e4e5360b8dd78e9e7a1) is on origin/master, where master was moved to it by a fast-forward from 05062f47658d48fb656f00237f87145e61d73268.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 7e53a75d passed every stage, with equal source ids before and after and an eligible clean input; and Sol-d50d's R3 review pair (Codex 17880, Claude 17881) on exactly 05062f47..a33efa4b found no Medium or higher outstanding, with its Lows filed as their own item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

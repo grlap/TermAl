@@ -1,0 +1,37 @@
+{
+  "id": "01a14aa0-1a70-7c61-b143-52222f575b81",
+  "external_ref": null,
+  "title": "Named-root table stays full of unreclaimable stale roots (no canonical run association, naming session unknown); add a safe release path",
+  "outcome": "Roots of long-finished items no longer permanently occupy the 64-slot global named-root table. An operator or coordinator can see each retained root's naming session and the run lifecycle as last read canonically, and stale roots of completed items are released safely, automatically or through an explicit audited action. Parallel lanes aren't blocked by a full table of dead entries.",
+  "acceptance": [
+    "The 409 refusal and a read-only API both show, for each retained root, its naming session (or 'gone'), the lifecycle of its item's run as last read canonically ('unknown (not read)' when no canonical read was retained, since neither path spends a canonical or tracker read), and its reclamation status, so an operator can act. The item's tracker lifecycle is not shown here; that is follow-up w-df5ad385de47.",
+    "Roots whose item is completed or cancelled, or that have no canonical run association and whose naming session no longer exists, are released by a safe path (automatic or an audited operator action) without touching live claims. Tests cover a live claim staying retained, a completed item being released, and an unknown association being handled by the explicit action.",
+    "The full gate plus a clean review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-control",
+    "named-roots",
+    "throughput"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Named-root status view and safe release delivered:\n- GET /api/engram/named-roots, and the same rows in the full-table 409, show each retained root's naming session, claim binding, canonical association, reclamation state and run lifecycle as last read canonically.\n- POST /api/engram/named-roots/release performs an audited, exact-selection release:\n  - canonical route on the authority's proof, credited only for a retirement its own transition made;\n  - operator route for unassociated roots whose naming session is gone or quiet, with no live claim and no pending event;\n  - an intent-first audit, writer-confirmed, with a reserved slot until confirmed, resumable retries, and restore rules.\nReview pair R8 clean (Codex 07a086ad, Claude b274c9dc). Full gate test-bca8971b PASS on freeze 778ee0b1 over 776b8cff. Evaluation 0734a19c: 3/3 pass on revision 2. Follow-ups: w-df5ad385de47, w-ce9614fe5d4d, w-e118e24fd4b2, w-1add27adbcda, w-849ea13ed0c2, w-d27d7df74ac8 (superseded by this landing). Commit and handoff to the integration owner follow.",
+    "completed_at": "2026-10-18T19:55:25.687602700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

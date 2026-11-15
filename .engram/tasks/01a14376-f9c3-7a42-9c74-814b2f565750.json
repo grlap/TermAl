@@ -1,0 +1,37 @@
+{
+  "id": "01a14376-f9c3-7a42-9c74-814b2f565750",
+  "external_ref": null,
+  "title": "A host-observed test command whose process is gone stays Running while its session's runtime lives; no reconcile or operator mark-interrupted operation exists",
+  "outcome": "A host-observed test command whose process is gone stays Running while its session's runtime lives; no reconcile or operator mark-interrupted operation exists",
+  "acceptance": [
+    "A terminal Claude background-task notification ends only its exact session/runtime/tool observation as Unknown with a retained reason when no test verdict exists; unrelated/live/replaced-runtime/duplicate and detached launch-only controls preserve their truthful states and no credit is minted.",
+    "A supported evidence-retaining operator action can stop monitoring a specifically selected open host-observed row as Unknown/interrupted with an explicit operator reason, without deleting evidence, asserting process exit, killing work, changing a terminal verdict or touching a registered run.",
+    "Deterministic tests cover persistence/reload and those identity/idempotency/refusal boundaries, and documentation describes the difference between task completion and monitoring interruption."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "host-recording",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered exact-session/runtime/tool Claude terminal reconciliation and evidence-retaining operator monitoring interruption with deterministic persistence/idempotency/refusal coverage and documentation. Landed/pushed7eb731fc tree3fd594fa; original qualified remoteFULL1efa PASS5/5/equal797d5ab5 recordedf5e71870, unchanged clean authorpair adopted and Central357Rust+22UI focused evidence retained. Exact releasebinary built/installedSHA2564b6b6d55, newUI deployed/HTTP-byte-verified0ad9661a. Backend activation waits for Greg's own restart; no criterion requires running restart and none performed.",
+    "completed_at": "2026-11-05T09:37:13.212409100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a170de-026f-7ca2-8981-0571048015ee",
+  "external_ref": null,
+  "title": "Make the full-gate launcher bootstrap private UI dependencies from its lockfile",
+  "outcome": "A clean candidate worktree needs no manual ui/node_modules preparation: full launcher prepares declared locked UI dependencies before TypeScript/Vitest, and bootstrap failure has distinct terminal preflight setup evidence before any stage runs.",
+  "acceptance": [
+    "A full-gate invocation with no ui/node_modules prepares declared UI dependencies from the candidate's committed lockfile before TypeScript or Vitest stages, without manual Merger setup.",
+    "Bootstrap failure produces distinct terminal preflight setup evidence and does not start TypeScript/Vitest or claim a running/passed gate.",
+    "Focused fresh-worktree bootstrap ordering and failure regressions pass; a fresh independent review pair has no outstanding Medium-or-higher finding; exact package/test/review evidence is handed to Merger."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "test-bootstrap",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

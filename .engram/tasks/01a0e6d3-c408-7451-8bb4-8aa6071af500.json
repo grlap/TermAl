@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8aa6071af500",
+  "external_ref": "tm-7cu.36",
+  "title": "Do not replay transcript search jumps on content updates",
+  "outcome": "Scroll review through commit 856d5df. With Find open and a selected match, scroll away from that match and let new output arrive. The viewport jumps back despite remaining in STAY. SessionPaneView.tsx:535-560 rebuilds the search index and match objects when activeSession changes; SessionPaneView.scroll.ts:2998-3031 depends on the match object identity and unconditionally calls scrollIntoView, so an unchanged logical match is treated as new navigation. Earlier temporary hook probe reproduced top 120 -> user PageDown 290 -> unrelated assistant append 120, with unchanged itemKey but a new match object. The probe was removed; latest pass was code-only and confirmed this path unchanged. This violates the September 3 FOLLOW/STAY specification. Observe explicit query/Next/Previous navigation separately from content-driven recomputation.",
+  "acceptance": [
+    "With a selected search match, subsequent reader scrolling is preserved through streaming, new messages, status updates and history residency changes when the logical selection is unchanged. Explicit query changes and Next/Previous still navigate correctly. Add regression coverage exercising the real scroll hook rather than mocking it out; demonstrate failure before the fix. TypeScript and affected search/scroll suites pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

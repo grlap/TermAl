@@ -1,0 +1,49 @@
+{
+  "id": "01a12858-b00d-72e3-930d-83754500a736",
+  "external_ref": null,
+  "title": "Continuity drift reaches Engram before the no-edit turn's checkpoint (re-audit of the inter-turn path)",
+  "outcome": "Continuity drift reaches Engram before the no-edit turn's checkpoint (re-audit of the inter-turn path)",
+  "acceptance": [
+    "When a workspace's measured begin basis differs from the previous checkpoint's end basis for the same workspace and binding, the difference reaches the store as the inter_turn_change execution_observe recorded before the next turn's provider handoff, and that turn's checkpoint reporting source_changed=false is recorded after it, so the store explains the change the no-edit turn did not make. A test drives drift followed by a no-edit turn and shows the inter_turn_change, its accounted receipt and the source_changed=false checkpoint in that order, and shows no observation when nothing changed.",
+    "Every drift case the re-audit finds the inter-turn path does not report is either reported through inter_turn_change with a test, or filed as its own item with its reason, cited in this item's notes.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6c9-9c20-7ad3-8066-df1ef323efe9",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed on master by the integration owner, Termal::Opus2.\n\nCommit ebdfdbab6728489e61002bda4a347c1ca0ed6e0d (tree e98ac27c) was pushed to origin/master as a fast-forward from 9d7725fa, and ls-remote confirmed it at 20:10:30Z.\n\nPre-push checks:\n- 3 files, +226 −1, 0 CR; no authority or scripts paths.\n- Full gate test-b3a35b9a: PASS 5/5 (host record 119f208d). Its new-format staged hash ef7e2bd0 was reproduced exactly from a scratch index of the commit.\n- Review round 3: Codex d3e8d31a and Claude 5a274929, clean on the exact patch. The prior Medium was fixed and re-reviewed; the Lows are filed. The three paths were not edited upstream (last touched at a5ce6035).\n- Evaluation f9b6d9c5: 3/3, independent, not stale.\n\nThe install follows in Fable2's batched window.",
+    "completed_at": "2026-10-14T20:10:38.524231Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

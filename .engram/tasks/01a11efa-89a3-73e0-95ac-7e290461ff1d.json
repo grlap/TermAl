@@ -1,0 +1,27 @@
+{
+  "id": "01a11efa-89a3-73e0-95ac-7e290461ff1d",
+  "external_ref": null,
+  "title": "codex_reviewer_mcp_ready_continuation test bounds a worker continuation by a 3-second wall-clock wait and fails under parallel load",
+  "outcome": "src/tests/codex_reviewer_mcp_controls.rs next_command waits for the readiness continuation with input_rx.recv_timeout(Duration::from_secs(3)).expect(\"bounded worker continuation\"). The continuation comes from a worker thread, so the bound is a wall-clock deadline. Observed 2026-10-09 ~04:45Z in .tmp\\wt-stop-idle-wait-carry2-11466 (98ad64fd plus the idle-wait Stop change), during `cargo test --bin termal stop` (182 tests in parallel, 31.9s) while another session's full gate ran on the machine: tests::codex_reviewer_mcp_startup::lifecycle::codex_reviewer_mcp_ready_continuation_is_inert_after_stop_reset_and_replacement panicked at codex_reviewer_mcp_controls.rs:31:10, \"bounded worker continuation: Timeout\". It panicked in next_command, right after fixture.start() and respond_start(), before any per-cause step, on a path the idle-wait change doesn't touch. Alone on the same tree it passed all 8 causes in 0.62s, and the same 182-test filter passed on d9c13717 and on 53ee9c65 earlier the same night. Fix direction (CLAUDE.md: no retry, no larger timeout): make the wait event-driven, or block on the worker's completion signal, so contention can't fail it.",
+  "acceptance": [
+    "codex_reviewer_mcp_ready_continuation test bounds a worker continuation by a 3-second wall-clock wait and fails under parallel load is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a11f0b-17f7-7411-ab58-5f050b78456a",
+  "disposal_reason": "Same defect: the shared next_command helper's 3 s recv_timeout in src/tests/codex_reviewer_mcp_controls.rs:31. w-5f050b78456a (P1, claimed by Termal::CSharpProof) was widened at revision 4 to cover every reviewer-MCP test file, including next_command. Occurrences: this item's 04:45Z run; w-916c gate test-efe8c5d6; and w-462 regate test-e69bf068 (codex_reviewer_mcp_regression_fatal_reader_error_observes_before_archive; it passed alone in focused test-4d9f726a).",
+  "completion": null
+}

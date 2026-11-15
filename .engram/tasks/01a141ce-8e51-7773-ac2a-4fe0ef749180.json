@@ -1,0 +1,39 @@
+{
+  "id": "01a141ce-8e51-7773-ac2a-4fe0ef749180",
+  "external_ref": null,
+  "title": "Prefer citable acceptance evidence over verbose omission metadata in brief budgeting",
+  "outcome": "Prefer citable acceptance evidence over verbose omission metadata in brief budgeting",
+  "acceptance": [
+    "A bounded evaluator-brief regression shows a long unread continuation gives way before otherwise fitting citable evidence bodies and outcome text, with complete criteria and response evidenceOmissions unchanged.",
+    "The full gate passes on the master tree that contains the change."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f53c-dcd5-79b2-8b5e-e351b731cc84",
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: duplicate — Same omission-metadata-before-evidence budgeting defect; keep the earlier complete description. Source: src/acceptance_evaluation.rs:1762. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

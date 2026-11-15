@@ -1,0 +1,29 @@
+{
+  "id": "01a1cb44-6eee-7d13-820c-35c4de0eb3e0",
+  "external_ref": null,
+  "title": "Isolate the stderr capture fixture from inherited RUST_TEST_NOCAPTURE",
+  "outcome": "The isolated diagnostic capture fixture obeys its explicit capture-mode arguments even when the parent suite has RUST_TEST_NOCAPTURE enabled.",
+  "acceptance": [
+    "The self-exec stderr fixture's capture mode remains captured when its parent environment enables RUST_TEST_NOCAPTURE, while its explicit direct mode still exercises an actual failing stderr write.",
+    "Behavioral verification demonstrates the capture marker and successful zero-panic reporter completion under the inherited-environment condition without weakening the failed-write positive controls."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "logging",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

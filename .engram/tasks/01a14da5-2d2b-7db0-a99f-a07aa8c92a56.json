@@ -1,0 +1,27 @@
+{
+  "id": "01a14da5-2d2b-7db0-a99f-a07aa8c92a56",
+  "external_ref": null,
+  "title": "Decide whether a settled carrier member proof survives a later re-fence of the same claim holder",
+  "outcome": "Decide whether a settled carrier member proof survives a later re-fence of the same claim holder",
+  "acceptance": [
+    "Decide whether a settled carrier member proof survives a later re-fence of the same claim holder is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "design",
+    "handoff"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

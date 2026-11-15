@@ -1,0 +1,31 @@
+{
+  "id": "01a1daeb-a491-7563-8ba2-84988b5eeb58",
+  "external_ref": null,
+  "title": "Keep adopted predecessor reporting retryable during temporary stop and binding recovery",
+  "outcome": "Temporary stop, reset, binding recovery and unresolved authority do not permanently discard an adopted predecessor's uncertain report; genuine custody changes remain refused.",
+  "acceptance": [
+    "A deterministic adopted-successor regression encounters a temporary stop or binding-recovery state during predecessor capture and later retains the original predecessor report under its original association after that temporary state clears.",
+    "Real root, store, connection or exact-job custody changes remain refused without attributing the predecessor to its successor."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

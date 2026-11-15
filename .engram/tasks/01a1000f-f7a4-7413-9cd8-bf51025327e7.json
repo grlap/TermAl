@@ -1,0 +1,29 @@
+{
+  "id": "01a1000f-f7a4-7413-9cd8-bf51025327e7",
+  "external_ref": null,
+  "title": "Decompose oversize Rust files: a 1,000-line cap enforced by the gate, with a shrinking allow-list, landed by pure moves starting with the Engram host adapter and its tests",
+  "outcome": "Greg's direction (2026-10-03, via Engram::Advisor b9d13887 #197): TermAl's Rust file sizes are unacceptable; the council sets an enforceable cap and landing order, starting with the host adapter and its tests; behaviour preserved; cohesive modules and tests split; no broad unrelated reformatting; each slice independently gated and reviewed. The cap is 1,000 physical lines per file under src/ (tests included), enforced by a launcher stage against an allow-list of today's oversize files frozen at their current sizes, which only shrinks. Slices are pure code moves with the header comment CLAUDE.md requires, one seam per commit.",
+  "acceptance": [
+    "Decompose oversize Rust files: a 1,000-line cap enforced by the gate, with a shrinking allow-list, landed by pure moves starting with the Engram host adapter and its tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "file-size",
+    "refactor",
+    "tech-debt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Filed in a crossing with Termal::Fable2's #201 (mailbox 2a27fd51): Termal::Architect2 leads the decomposition ruling on the existing items w-fb2b0d02457c (production adapter), w-9a2601def6b6 (adapter tests), w-d889be50979e (the size checker) and w-8597a0e17af3; Termal::Architect1 is the second check, and no separate plan or stream item is wanted. The ruling note 6bc740b5c2bc43ecb9a6dc6cfa89ebf4 on this item remains readable as that second check's input (cap, enforcement semantics, slice order, conflict control); where it differs from Architect2's proposal the difference is flagged on his items, not here.",
+  "completion": null
+}

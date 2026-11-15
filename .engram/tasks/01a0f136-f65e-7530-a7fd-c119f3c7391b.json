@@ -1,0 +1,31 @@
+{
+  "id": "01a0f136-f65e-7530-a7fd-c119f3c7391b",
+  "external_ref": null,
+  "title": "Hold a same-turn acceptance evaluation request until the requesting turn's checkpoint is recorded",
+  "outcome": "Option (a) of Engram w-203304a1503a. When an agent asks for an evaluation in the same turn it ran host-recorded checks, TermAl holds the evaluator until that turn's closing checkpoint is recorded, so the evaluation's cut includes the turn's own checks.\nThis is REQUIRED, not optional, for Greg's rule of 2026-09-26 that an agent must not have to wait, where a criterion is bound to a check. A bound pass must cite an observed passed check at or before the evaluator's cut. A test run in the requesting turn lands after the cut, so without (a) the agent must run the test a turn before it asks. Engram cannot fix this on its side (Engram::Fable, TermAl mailbox ebe242f7 #273, from the design review in Codex explorer session-8981). Engram's own criterion 1 states the limit until this lands. Engram's exemption for passed checks (#269–#271) covers only unbound evidence.\nScheduled with the architecture stop (memory termal-architecture-stop-2026-09-30). It should consume the host event stream's \"checkpoint committed\" event, not add another hook, and may land early as a narrow fix if the stop is delayed.",
+  "acceptance": [
+    "A criterion bound to a test passes on an evaluation requested in the same turn that ran the passing test; an end-to-end test or a recorded live run shows it.",
+    "A request in a turn without checks starts immediately, as today.",
+    "An evaluation requested in the same turn as host-recorded checks starts only after that turn's checkpoint is recorded, and its basis includes those checks; a test covers it.",
+    "Each of these same-turn shapes records an evaluation that judges the turn's records instead of being voided by them, with a test for each: (a) test, then edit again, then ask; (b) a baseline test on the old revision before editing, then ask; (c) a failed or Unknown check in the turn, then ask."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "architecture-stop",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

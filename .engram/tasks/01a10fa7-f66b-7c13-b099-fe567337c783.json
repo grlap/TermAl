@@ -1,0 +1,28 @@
+{
+  "id": "01a10fa7-f66b-7c13-b099-fe567337c783",
+  "external_ref": null,
+  "title": "Focused check native failure is recorded as indeterminate with unknown producer outcome",
+  "outcome": "Focused check native failure is recorded as indeterminate with unknown producer outcome",
+  "acceptance": [
+    "Focused check native failure is recorded as indeterminate with unknown producer outcome is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

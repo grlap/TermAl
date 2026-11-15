@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-550807ac0c12",
+  "external_ref": "tm-m6r1.14",
+  "title": "Work list: read the Engram page and the Beads snapshot concurrently or as separate requests",
+  "outcome": "Review round 4 (Claude Low, work_visualizer.rs list handler): on a first page the Engram read and then the Beads admission wait (up to 21 s) plus snapshot (up to 20 s) run in series in one blocking worker, so a slow or locked Dolt store delays the Engram page by up to ~41 s whenever a .beads directory exists; errors are already isolated per source, latency is not. Follow-up: run the two reads concurrently in the list handler (two blocking workers, each with its own admission) or split the Beads snapshot into its own GET so the UI can render Engram rows first. Also consider sizing dep list / show batches by computed argv units instead of a fixed 80 ids and measuring against a real store. Filed by Fable; not started.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03; no \"beads\" remains in src/work_*.rs on master.",
+  "completion": null
+}

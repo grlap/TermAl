@@ -1,0 +1,33 @@
+{
+  "id": "01a1d8ef-48a5-7533-ab6d-12d9af7f8867",
+  "external_ref": null,
+  "title": "Document admitted Engram source warning stderr in the metadata probe contract",
+  "outcome": "Source-owner documentation describes the warning stderr admitted by the Rust metadata/schema and source probes, while distinguishing the strict version probe and unchanged refusal boundaries.",
+  "acceptance": [
+    "docs/test.md describes status-0-only admission of complete supported Engram slow-operation warning lines, the two supported operation forms, the 262144-byte payload bound and emission after successful validation.",
+    "The documentation makes clear that unsupported, malformed, mixed, oversized or non-zero-status stderr is refused, that executable/source/envelope/root guards remain independent, and that --version still refuses nonempty stderr.",
+    "The change is documentation only and adds no tests that read repository Markdown or instruction text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "engram-host-adapter",
+    "greg-directed",
+    "review-follow-up",
+    "source-identity",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d825-e07c-7d33-80df-e879e6155b1d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

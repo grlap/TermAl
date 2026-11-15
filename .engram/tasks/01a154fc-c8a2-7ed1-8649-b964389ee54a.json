@@ -1,0 +1,29 @@
+{
+  "id": "01a154fc-c8a2-7ed1-8649-b964389ee54a",
+  "external_ref": null,
+  "title": "After done, a completed work's retained source-root name cannot be retired by its former holder (\"holds no live claim\"), so it lingers until coordinated cleanup",
+  "outcome": "Reported by Engram::Coder-HostTestSplitFresh (session-11334, TermAl mailbox 50bdc9e4 #88, 2026-10-19 16:25Z), filed by Termal::Fable2. Both items on the shared presentation root were sealed: w-a25eceeda553 at 16:21:50 (seal 2556ded3…, generation 1528) and w-9944dbf6648d (seal 2b2879df…, former generation 1535). After done, termal_name_source_root({work:'w-9944dbf6648d'}) succeeded at 16:24:26 with generation 0, 'obsolete retained name retired with canonical authority; no producer event'. Immediately after, termal_name_source_root({work:'w-a25eceeda553'}) returned 409: 'this session holds no live claim on `w-a25eceeda553`; only the agent holding the claim names its source root'. So the same session could retire one completed work's obsolete name but not the other's. The difference appears to be whether the claim was still live at the call. Desired: a completed work's obsolete retained name can be retired by its former holder, or automatically at done, without reopening a claim or rewriting history.",
+  "acceptance": [
+    "A completed work's former holder can retire its own obsolete retained source-root name after done, or the host retires it automatically at done, with no claim reopened and no historical record changed; a test covers retiring after the claim ended.",
+    "The full five-stage gate passes on the exact reviewed input with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "engram-host",
+    "named-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

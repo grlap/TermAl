@@ -1,0 +1,36 @@
+{
+  "id": "01a17693-5a39-7b33-8796-134e2e21deb4",
+  "external_ref": null,
+  "title": "Ordinary verification/build subprocess scheduling: qualify scoped CPU and I/O policy",
+  "outcome": "Heavy owned verification/build trees yield resources to interactive TermAl under a measured Windows/macOS policy, with unchanged verification/cleanup semantics and an agreed bounded wall-time cost; if no candidate meets both goals, record rejection rather than silently applying it.",
+  "acceptance": [
+    "Record the current launch paths and an independently concurred platform policy/coverage matrix for full/focused stages, dependency bootstrap and landing release builds. State CPU versus IO mechanisms, application point before heavy code, effective descendant/fixture behavior, unsupported/error behavior and exact ownership boundary. No unrelated host/agent/global changes; existing concurrency/installation/restart authority remains.",
+    "Any approved implementation reuses existing process owner/launcher paths, preserves arguments/env/cwd/stage inventory/assertions/timeouts/retries/test-thread/worker/load bounds and native exits/artifacts/fingerprints. Records requested AND observed policy/capability and failure in run/build evidence. Guardians/control/result settlement stay responsive; no silent fallback, privilege escalation or unowned process mutation.",
+    "Native deterministic coverage on Windows/macOS checks policy application/readback, descendant ownership, unsupported/failure handling, interruption and sibling/host isolation. Timing/performance/stress oracles keep a relevant unchanged-load validation; old failed runs and original profile remain preserved and independently diagnosed, never closed because a lower-priority run passes.",
+    "BEFORE experiment, coordinator/Architect2 concur numeric responsiveness/slowdown budgets and a bounded comparable same-input/cache/load baseline/candidate plan covering full gate AND release build on each affected platform. Report phase/resource/cadence limits; no empirical benefit claimed from existing two ticks. Reject/defer adoption if goals cannot both be met; no retry-until-green or timeout inflation.",
+    "Relevant focused validation, independent pair with no Medium+, and exact-input maintained full gate precede any landing; document policy/platform/evidence limits and rollback through the existing owner. A priority policy does not repair logical lock/deadlock or persistence defects and does not waive S2/C3 release evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "control-plane",
+    "cross-project",
+    "gate-load",
+    "gating-removal-audited",
+    "greg-directive",
+    "performance",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16637-ea9c-7001-907d-0d2e12f303a8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

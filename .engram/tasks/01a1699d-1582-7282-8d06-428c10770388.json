@@ -1,0 +1,28 @@
+{
+  "id": "01a1699d-1582-7282-8d06-428c10770388",
+  "external_ref": null,
+  "title": "Uncarried-test closure: a closing-grant check with no reason falls back to the OtherGrant text, which would be false",
+  "outcome": "At a turn's close, a check of the closing grant for which engram_uncarried_reason finds no cause never gets the \"started under another turn's grant\" text: it gets a neutral fallback, or a debug assertion guards that the branch stays unreachable.",
+  "acceptance": [
+    "EngramCloseBoundary::uncarried at TurnClose, for a check of the closing grant whose engram_uncarried_reason is None, yields a reason that is true for it (for example UnresolvedClose or a neutral text) or is guarded by a debug_assert documenting that engram_uncarried_reason covers every condition engram_carry_running_codex_checks checks.",
+    "A unit test pins the chosen behaviour."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

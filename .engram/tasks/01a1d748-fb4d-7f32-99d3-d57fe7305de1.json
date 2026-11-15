@@ -1,0 +1,31 @@
+{
+  "id": "01a1d748-fb4d-7f32-99d3-d57fe7305de1",
+  "external_ref": null,
+  "title": "Native relay send to a session absent on the named host returns a generic 404 that names neither the host nor the session",
+  "outcome": "When termal_send_to_session targets host:<host UUID>::<native session-id> and that host has no such session (or the caller lacks membership), the refusal says which host and session were not found and points to the session listing for the exact route, without disclosing anything the caller isn't authorized to see. Delivery semantics are unchanged: the send is still refused, no message is saved and nothing falls back to another host.",
+  "acceptance": [
+    "A behavioural test: a send to host:<a real peer UUID>::<a session id that exists only on another host> is refused, saves no message, and its error names the addressed host id and session id and suggests the session listing's exact route",
+    "A behavioural test: a send whose membership is missing is still refused with no disclosure beyond what the caller may already list",
+    "The existing successful native relay send and exact-route tests stay unchanged and green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "error-message",
+    "federation",
+    "low",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1a00b-98fe-7330-8598-0a61926c8b31",
+  "external_ref": null,
+  "title": "Remote bounded-tail repair finds a newer revision without matching metadata and falls back to a full resync",
+  "outcome": "Bounded-tail repair of a remote session after a restart either succeeds or falls back for a documented, correct reason.",
+  "acceptance": [
+    "For the macbookpro session-6201 occurrence, the code path that found a newer revision without matching metadata is identified, and the cause is classified as a defect or expected behaviour.",
+    "A defect gets a fix with a regression test and a clean review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-reported",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

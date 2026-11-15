@@ -1,0 +1,27 @@
+{
+  "id": "01a1d628-f9be-73a0-bc98-fe16da72ee07",
+  "external_ref": null,
+  "title": "Integrate Combo X'' on combo96: a6071ef8 (EO 657d, AGY a7e5, ee04, w-152c doc links; X' 8306955c stacked on a33efa4b)",
+  "outcome": "The Combo X' squash candidate is on master as one commit, gated by a full launcher run on the exact tree plus its Windows leg, reviewed by one combined whole pair, and pushed.",
+  "acceptance": [
+    "Commit a6071ef883144756b785fec3ebe5a2125953b7e3 (tree 234da7ace9b7b7e9535178b2e8c0571204482e40, sole parent a33efa4b2ce84db84a03a08b2ec635eb90b40b95 = combo96) is on origin/master, where master was moved to it by a fast-forward from a33efa4b after combo96 landed; its contribution is byte-identical (git diff --raw --no-abbrev --no-renames) to X' 8306955c's contribution vs 05062f47, and each of the four member contributions (6649d4e1, b93e2eec, 84cd6333, 6c00ca82) is byte-identical to its author's commit, as recorded on this item.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 234da7ac passed every stage, with equal source ids before and after and an eligible clean input; the Windows leg on the exact candidate (acp_gemini, agent_readiness and project_environment tests on Central) passed; and X''s fresh combined whole review pair (Codex 17884, Claude 17885) on 05062f47..8306955c, adopted for the byte-identical contribution, found no Medium or higher outstanding, with its Low filed as its own item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1d1f9-db32-7b91-8aee-955ea49b6702",
+  "external_ref": null,
+  "title": "Integrate combo75b on 42851443: a7bb 3a060dbe (w-78ec retire legacy observations, byte-identical carry of 074c9c8f)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 3a060dbec3e496e1d498c37b60a84f5f4a1214da (tree c3da31187de265d7cc74285c0c3fe78017fb953e) is on origin/master, where master was moved to it by a fast-forward from 428514430668bb7ec8808b5339a2d66a8059b3de.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is c3da3118 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 42851443 is byte-identical (same 12 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 074c9c8f's contribution against 73f0fe27, which the whole-12 R1 pair Codex session 17673 and Claude session 17674 reviewed with no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree c3da3118 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d28b-d1d6-7e02-a2d6-7b36d586f992",
+  "disposal_reason": "combo75b failed its s4 FULL (test-71b09ee9: one test-migration defect in engram_verification_record, the_producers_quiet_sighting_is_neither_a_turn_nor_verification_credit). Sol-a7bb repaired it as 7650d16b (13-filter author 2592/0, delta pair clean), and that repair was carried byte-identically as 4a46b552, which is now combo79 (w-7b36d586f992), frozen on master a5b01576 with its DL560 FULL running. This carrier's input 3a060dbe is superseded and never landed; its test ref was deleted earlier.",
+  "completion": null
+}

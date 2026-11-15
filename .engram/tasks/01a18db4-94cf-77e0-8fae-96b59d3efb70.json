@@ -1,0 +1,30 @@
+{
+  "id": "01a18db4-94cf-77e0-8fae-96b59d3efb70",
+  "external_ref": null,
+  "title": "Unified Engram↔TermAl identifier and process contract: one producer-owned wire spec, reused validators, cross-project conformance tests",
+  "outcome": "Unified Engram↔TermAl identifier and process contract: one producer-owned wire spec, reused validators, cross-project conformance tests",
+  "acceptance": [
+    "A design note, concurred by Termal::Architect2 and Engram::Architect3, inventories every identifier and fingerprint crossing the Engram–TermAl boundary (producer, semantic kind, accepted forms, every validator on each side) and names one owner validator per kind on each side",
+    "The design states the producer-owned wire specification to be reused (no new runtime handshake, manual manifest or extra approval gate) and lists the concrete duplicate or divergent validators to retire, each as a linked implementation item",
+    "The design specifies producer/consumer conformance tests in the existing suites of both repositories, covering ordinary and recovery paths and project and host scope, each as a linked implementation item"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "cross-project",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d3-c6aa-7340-8ae6-a08b0320448f",
+  "disposal_reason": "Filed concurrently with Architect2's choice. Termal::Architect2 and Engram::Architect3 consolidated the joint Engram–TermAl identifier/process contract onto existing TermAl w-a08b0320448f (FINAL joint plan note there, 16:47Z) and Engram w-d7826c4f78ec; this duplicate is superseded to avoid a parallel record.",
+  "completion": null
+}

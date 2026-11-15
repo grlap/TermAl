@@ -1,0 +1,30 @@
+{
+  "id": "01a0f33c-5b69-7b31-ab24-ae35702a12e6",
+  "external_ref": null,
+  "title": "Two clean checkouts of one commit gave different content revisions (Engram's main checkout and a linked worktree at b5db805)",
+  "outcome": "The cause of the difference is named from a per-path comparison of the two trees, and either the content revision is made to agree for two trees that Git reports as identical and clean, or src/content_revision.rs says precisely which differences Git does not show move it, with a test for each.",
+  "acceptance": [
+    "A note names, from a per-path comparison of the two listings the revision hashes (path, mode, normalized content hash), which paths differed between the two trees and why.",
+    "If the cause is in the revision (line endings, mode, listing, path spelling), a test reproduces it and the fix makes two clean checkouts of one commit hash alike; if the trees really differed in content Git status does not show, the file's header comment states that case and a test pins it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "content-revision",
+    "engram-interop",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

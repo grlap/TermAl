@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c50a-7f43-868d-37d4a56d1478",
+  "external_ref": "tm-g9b",
+  "title": "New isTranscriptLoaded gate on the overview controller has no unit test",
+  "outcome": "conversation-overview-controller.ts gained an isTranscriptLoaded prop that gates shouldRenderRail (so a tail-first hydrated session shows the is-pending skeleton instead of drawing its 20-message tail as the whole conversation). conversation-overview-controller.test.tsx was not touched, so the gate has no controller-level coverage: nothing asserts shouldRenderRail is false while isTranscriptLoaded is false but shouldRender/isRailReady/layoutSnapshot are all satisfied.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

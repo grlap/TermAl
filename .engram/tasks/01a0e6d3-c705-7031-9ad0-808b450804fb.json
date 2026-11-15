@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c705-7031-9ad0-808b450804fb",
+  "external_ref": "tm-ncc6.3.3",
+  "title": "Admission: one run per worktree root",
+  "outcome": "Before spawning: refuse when a non-terminal record exists for the root, or when a non-terminal run dir holds execution.lock with a live pid; answer 409 with the active run_id. No host-side queue in this slice (documented).\n\nREVIEW FIXES (F5): execution.lock is per-run-dir, empty and never removed (launcher:415) - not a worktree lock. Admission: refuse (409 with the active run_id) when a non-terminal host record exists for the root, or when the disk index shows a results.json 'running' whose pid is alive with matching identity (CLI-started run). A dead-pid running results.json is unknown and never blocks; no explicit acknowledgement step.",
+  "acceptance": [
+    "- Concurrent start refused with the active run_id.\n- After completion/cancel a new start is accepted.\n- A CLI-started run with a live pid blocks; the same dir with a dead pid (unknown) does not block."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a426f8314ee",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

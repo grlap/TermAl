@@ -1,0 +1,25 @@
+{
+  "id": "01a1031c-c497-7e90-b346-50157e64a285",
+  "external_ref": null,
+  "title": "Compact-hook worker keeps the runtime's command Sender alive through its post-queue deadline sleep",
+  "outcome": "In src/claude_compact_hook.rs, answer_claude_hook_callback's worker drops the AppState before it sleeps until the answer deadline and calls hook.expire(). It still holds input_tx (a Sender of the runtime's command channel), plus token and session_id. run_claude_writer ends only when every Sender is gone. So after a stop or a runtime replacement, the writer thread and the child's stdin pipe it owns can linger for up to the answer budget (the command timeout plus 4 s) for each outstanding callback. Nothing is misdelivered, because every write path re-checks the runtime token. Fix: drop input_tx, token and session_id before the sleep, or run the expiry wait in a closure that captures only the hook and the request id. While there, also reword the file header's 'a cancellation revokes it at any point before the write' to 'before or during the write', to match the lifecycle (a Note from the same review).",
+  "acceptance": [
+    "The compact-hook worker holds no Sender of the runtime's command channel, nor the runtime token or session id, while it waits for the answer deadline; a test shows the writer loop ends once the runtime handle and the reader are gone while a callback's deadline wait is still pending, without waiting in real time.",
+    "The header of src/claude_compact_hook.rs says a cancellation or expiry revokes delivery before or during the write."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

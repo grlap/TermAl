@@ -1,0 +1,55 @@
+{
+  "id": "01a1399b-302a-7b82-9dbf-79dc48b36f27",
+  "external_ref": null,
+  "title": "A focused launcher run whose output contains a nested launcher run's \"results:\" line is recorded Unknown (path rejected): the host picks the LAST results: line",
+  "outcome": "For a focused launcher run, the host associates the run with its OWN results.json (the outer launcher's summary), even when the wrapped command's output includes a nested launcher run's summary lines. A nested fixture's later \"results:\" line can no longer make the host reject the outer run's path and record Unknown. It stays fail-closed: an output with no matching own results path is still Unknown.",
+  "acceptance": [
+    "For a recognized foreground focused launcher Test or Build, the host associates results.json with the outer launcher's first terminal verdict and run id even when later diagnostic output contains a nested launcher's results: line or verdict. Otherwise eligible outer test passes with validated positive counts remain succeeded; outer test/build native failures remain failed, without adopting the nested run's status or counts.",
+    "When the matching outer results path is missing, malformed, foreign, mismatched with that verdict, or ambiguously names conflicting artifacts, the host remains Unknown with a named validation reason. A nested run's record is never used as fallback evidence for the outer command.",
+    "Existing owner, root/path, invocation/argv, detached-mode, native-exit, interval, input/source, count and outcome guards are not relaxed. Pipe/compound refusal and legacy full/live stage rules remain intact; regression tests cover nested-summary association and ordinary valid and invalid focused records.",
+    "Preserve a fail-first witness on unchanged production code at 9d7725fa and passing focused regression evidence after the fix without weakening tests or increasing timeouts. Before completion and landing, the maintained full five-stage gate passes on the exact final carried input, a qualified independent Codex/Claude review pair is recorded, and a fresh independent acceptance evaluation is consumed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

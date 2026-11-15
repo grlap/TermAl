@@ -1,0 +1,28 @@
+{
+  "id": "01a0f525-192a-7af1-86db-439534cfa2d6",
+  "external_ref": null,
+  "title": "Codex sessions under TermAl get \"rejected: blocked by policy\" for a recursive delete inside the repository; find the source and document a sanctioned cleanup path",
+  "outcome": "Agents know why a Codex session is refused a recursive delete of its own scratch inside the repository, and have a documented, sanctioned way to clean that scratch. Reported by Engram::Fable (TermAl mailbox ebe242f7 #358, 2026-10-01): at about 01:46Z Engram::Coder (session-8581, a writable Codex root session) had a native PowerShell Remove-Item of disposable directories under C:/github/Personal/Engram/target/ refused by exec_command with \"rejected: blocked by policy\". He had resolved and checked each target path first, as the repository rule requires, and did not bypass the refusal. The string does not occur in TermAl's source (checked at 085e19c), so it most likely comes from Codex's own command-safety check: under approval policy never, Codex rejects commands it classifies as dangerous instead of asking. That is unverified. Both repositories' rules allow a recursive delete inside the repository after an absolute-path check, so with this block, scratch can only accumulate.",
+  "acceptance": [
+    "A sanctioned cleanup path for a Codex session's own scratch inside the repository is documented where agents read it (AGENTS.md or docs), or the item records why none is possible without Greg's word.",
+    "The source of the refusal is identified from Codex's code, its configuration, or TermAl's session settings, and recorded in a note with the evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "repo-folder-rule"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0ef55-2fb4-7120-aea5-c97f4e840563",
+  "disposal_reason": "Duplicate of the earlier w-c97f4e840563 (the Codex refusal 'blocked by policy' for a delete inside the worktree), where Termal::Opus2 already attached Engram::Coder's 01:46Z occurrence. Its criteria cover this item's: the layer named with evidence, and what an agent does instead. My observation that the string does not occur in TermAl's source at 085e19c carries over as a lead.",
+  "completion": null
+}

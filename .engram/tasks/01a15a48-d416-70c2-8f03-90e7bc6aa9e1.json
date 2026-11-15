@@ -1,0 +1,51 @@
+{
+  "id": "01a15a48-d416-70c2-8f03-90e7bc6aa9e1",
+  "external_ref": null,
+  "title": "Resume on a head withheld after an unacknowledged begin-preparation (turn_begin / begin_preparation_unacknowledged / not_started) is a silent no-op",
+  "outcome": "When a queued head's turn_begin fails with begin_preparation_unacknowledged (an 'Engram admission durability is unknown: Deadline' card, remoteApplication not_started) and the host withholds automatic continuation because 'retained authorization requires reconciliation', a Resume either recovers the head safely (delivered at most once) or returns a typed refusal naming the cancel route. It never returns a 200 that leaves the queue paused with no result.",
+  "acceptance": [
+    "The holder's note reconstructs the full retained record shape of this case from host state and source (the head and lineage fields, intent, grant and begin markers), names the exact path where today's Resume returns success unchanged, and states from the source whether nothing was sent to the provider. It correlates the 2026-10-20 17:02:34Z occurrence on Engram::Fable session-5135 (head message-1570953).",
+    "A fail-first test reproduces this record shape and shows today's silent no-op.",
+    "With the fix, Resume either recovers the head (with proof of at-most-once delivery, given begin_preparation_unacknowledged and not_started) or returns a typed durable refusal naming the cancel route. Tests cover the chosen outcome, plus the unchanged path where an automatic retry is scheduled. It does not regress the superseded-authority-image refusal from w-c4029bb2db90.",
+    "The full five-stage gate passes on the exact committed tree, and an independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "reliability",
+    "retained-prompt",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12188-9cc9-7b60-9301-b21c5132848c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

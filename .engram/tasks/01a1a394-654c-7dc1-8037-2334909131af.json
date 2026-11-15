@@ -1,0 +1,27 @@
+{
+  "id": "01a1a394-654c-7dc1-8037-2334909131af",
+  "external_ref": null,
+  "title": "Explain conservative rejection of nonredirecting reparse directories with variant spelling",
+  "outcome": "Content revision documentation and diagnostics state the nonredirecting reparse limitation accurately, or implementation distinguishes supported tags.",
+  "acceptance": [
+    "Document or safely distinguish nonredirecting reparse directories in the spelling-mismatch branch, preserving redirect refusal and old canonical-equality admission."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a31e-1803-7fa0-a1f5-81991023d2c1",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

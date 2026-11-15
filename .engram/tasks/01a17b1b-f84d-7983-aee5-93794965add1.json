@@ -1,0 +1,27 @@
+{
+  "id": "01a17b1b-f84d-7983-aee5-93794965add1",
+  "external_ref": null,
+  "title": "Bound the stateDiff alignment POST with a timeout so a stalled request cannot leave a tab ignoring diffs",
+  "outcome": "Bound the stateDiff alignment POST with a timeout so a stalled request cannot leave a tab ignoring diffs",
+  "acceptance": [
+    "The client's POST /api/events/full-state request is bounded (for example by AbortSignal.timeout). On timeout it takes the existing failed path: it clears the pending alignment and falls back to requestStateResync. A deterministic test with fake timers covers a stalled request."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "state-broadcast"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

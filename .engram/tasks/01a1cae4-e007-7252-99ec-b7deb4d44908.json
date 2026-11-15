@@ -1,0 +1,33 @@
+{
+  "id": "01a1cae4-e007-7252-99ec-b7deb4d44908",
+  "external_ref": null,
+  "title": "Integrate combo57 on 210f6518: d50d 6338adde (w-2bd7 legacy replay retirement), direct child of combo56",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 6338adde1e861563cfebfd788dc82c0c5ac96135 (tree eb65694a0e3a98b664bd93a484c4f34babaf46e4) is on origin/master, where master was moved to it by a fast-forward from 210f651872ff100704f323a90ab7a58e6403176f.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is eb65694a passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the scoped confirmation pair on 3cf69856 (sessions 17424 and 17425) together with the R4 foundation pair (sessions 17402 and 17403) for the unchanged rows, which 6338adde adopts because its contribution against 210f6518 is byte-identical to 3cf69856's against 28687c03 (raw diff sha256 33638993).",
+    "The release binary built from tree eb65694a was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo57 landed: master fast-forwarded 210f6518..6338adde (d50d acceptance-evaluation legacy replay retirement, byte-identical to reviewed 3cf69856) and pushed at 14:45:48Z after the DL560 FULL test-ad5506bb passed every stage (Rust 7637/0/114, vitest 5093/5093). The test ref is deleted. Installed on Central (3ccf7f77, backup 0ac66fb0) and DL560 (610325a9, backup 709858fc) with no restart. The independent evaluation (Codex 17489) passed 3/3.",
+    "completed_at": "2026-11-11T14:59:11.561194900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

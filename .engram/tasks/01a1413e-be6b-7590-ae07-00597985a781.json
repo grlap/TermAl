@@ -1,0 +1,34 @@
+{
+  "id": "01a1413e-be6b-7590-ae07-00597985a781",
+  "external_ref": null,
+  "title": "Live proof: a natural Claude compaction's first continuation carries the Engram work context through the SessionStart compact hook",
+  "outcome": "After the SessionStart compact hook lands, is installed and TermAl is restarted by Greg, a natural compaction in a Claude session shows the first continuation carrying the Engram work context. This is the live proof moved out of the parent's criteria (Fable2's amendment B, note 9b40ac0e), so the parent can complete on landing.",
+  "acceptance": [
+    "After install and restart, a natural compaction in a Claude session shows the first continuation carrying the Engram work context. A note records the session, the time, the build hash and the model. Delivery is judged by the hook_additional_context attachment on the post-compaction transcript chain, not by the model's own report."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Live proof recorded and evaluated. On host build TermAl 1495e8d3 (termal.exe sha256 4f34d1aa…59a2), which is after the compact-hook landing d6ea73c0, a natural auto compaction occurred at 2026-10-15T18:37:35.725Z in Termal::Opus3's Claude Code 2.1.300 session (session-9474, transcript a5d3088d…, model claude-opus-5-5). Its first continuation chain carries the SessionStart hook_additional_context attachment 25cd94a1… with the Engram work context (context_generation termal-c8e5f9a8-…-2). Delivery was judged by the attachment on the post-compaction chain. Engram::Fable's 10-06 observation (2cd30a37) is a second one. Independent evaluation befe5a7c1d0c43518cc461401a75bd10 passed 1/1.",
+    "completed_at": "2026-10-15T20:31:27.326436800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

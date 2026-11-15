@@ -1,0 +1,30 @@
+{
+  "id": "01a10735-2ded-73d3-846a-807fc852c371",
+  "external_ref": null,
+  "title": "Tie host-wake notice accounting to the prompt actually dispatched",
+  "outcome": "A manual ungated dispatch never consumes or marks an unrelated queued uncertainty notice as presented; reservation and notice accounting identify the dispatched prompt, not merely the queue head.",
+  "acceptance": [
+    "Tie host-wake notice accounting to the prompt actually dispatched is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-follow-up",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

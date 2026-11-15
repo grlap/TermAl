@@ -1,0 +1,30 @@
+{
+  "id": "01a14856-dabf-7152-8e56-a0d5ea6f0b50",
+  "external_ref": null,
+  "title": "Cover remaining narrow-observation fence and dirty-marker branches",
+  "outcome": "Deterministic observation controls isolate background fence-send failure, expected-image mismatch and unchanged background dirty markers, without polling, retries or weaker durability assertions.",
+  "acceptance": [
+    "A control queues persistence successfully, then causes the observation fence send to fail, and asserts factual Failed visibility, narrow publication and no durable acknowledgement.",
+    "A control isolates the expected-image comparison independently of execution-id waiter replacement and rejects obsolete acknowledgement.",
+    "A BackgroundQueued control asserts that the three dirty markers are not cleared; existing synchronous-success cleanup and publication controls remain passing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-followup",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

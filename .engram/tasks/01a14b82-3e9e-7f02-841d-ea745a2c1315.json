@@ -1,0 +1,29 @@
+{
+  "id": "01a14b82-3e9e-7f02-841d-ea745a2c1315",
+  "external_ref": null,
+  "title": "Document that an SSH remote's ~/.ssh/config Host stanza must match the configured host literally (an alias-only stanza does not apply)",
+  "outcome": "docs/features/project-scoped-remotes.md states that TermAl connects to `<user>@<host>` exactly as configured on the Remotes entry (src/remote_ssh.rs remote_ssh_target), so ssh options such as IdentityFile, IdentitiesOnly and StrictHostKeyChecking apply only from a ~/.ssh/config Host stanza whose pattern matches that literal host. An alias-only stanza (e.g. `Host pilot-mac`) is ignored. It gives the working pattern: list both the alias and the IP or hostname on the Host line.",
+  "acceptance": [
+    "project-scoped-remotes.md documents the literal-host matching behaviour, with a working `Host <alias> <ip>` example and the failure symptom (an initial proxy creation failure / authentication refusal with BatchMode).",
+    "The statement is verified against src/remote_ssh.rs remote_ssh_target and remote_ssh_command_args at the docs revision, with file:line in the review."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "multi-machine",
+    "remote"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

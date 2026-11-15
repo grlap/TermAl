@@ -1,0 +1,56 @@
+{
+  "id": "01a16b53-a7e2-70e2-ab44-b3dce5e682a8",
+  "external_ref": null,
+  "title": "Count retirement-notice occurrences inside merged check-credit text",
+  "outcome": "Retirement-notice regressions distinguish duplicate notice clauses after check-credit messages merge.",
+  "acceptance": [
+    "Retirement-notice assertions count complete retirement-notice clauses across the entire pending text, including multiple notices merged into one check-credit line, rather than counting lines.",
+    "A deterministic regression uses the production pending-line merge to show that two retirement clauses form one line and are counted as two; single-notice, no-notice and unrelated check-credit text controls distinguish the intended clause.",
+    "The change is confined to tests; original fingerprint/start checks, consumed-before-terminal repeated-start silence, both actual ACP retirement routes, matching liveness, ordinary-test silence and later-carry refusal remain covered.",
+    "Focused validation and an independent Codex/Claude review pair cover the exact input with no outstanding in-scope Medium or higher; Merger owns final combined carry audit, exact full gate and independent acceptance before landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

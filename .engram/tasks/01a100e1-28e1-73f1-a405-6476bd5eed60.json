@@ -1,0 +1,28 @@
+{
+  "id": "01a100e1-28e1-73f1-a405-6476bd5eed60",
+  "external_ref": null,
+  "title": "The readiness test seam copies the deadline-exceeded error text instead of sharing it with the real expiry branch, so its witness could pass after the product message drifts",
+  "outcome": "run_engram_diagnostic_args_until (src/engram_host_adapter.rs) builds the \"Engram {diagnostic} exceeded the {} second enablement deadline\" ApiError in one helper used by both the real Ok(None) expiry arm and the cfg(test) expiry seam, so the seam's witness tests assert the product's own message.",
+  "acceptance": [
+    "The deadline-exceeded ApiError is built in one function used by both the real expiry arm and the test seam branch; the seam no longer formats its own copy.",
+    "The readiness seam tests and the doctor and readiness deadline tests pass unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

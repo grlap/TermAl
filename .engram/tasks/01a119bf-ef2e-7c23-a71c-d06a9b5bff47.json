@@ -1,0 +1,47 @@
+{
+  "id": "01a119bf-ef2e-7c23-a71c-d06a9b5bff47",
+  "external_ref": null,
+  "title": "Prepare the harness-agnostic repair against current master in an isolated integration worktree",
+  "outcome": "Preserve the author freeze and reconcile its complete change onto an explicitly recorded current-master base in an isolated worktree, providing exact overlap/conflict evidence and an immutable validated integration candidate without publishing it.",
+  "acceptance": [
+    "Record the current-master commit and complete author base/tree/88-path packet identities; preserve the author freeze unchanged; report overlapping paths and actual conflicts/resolutions without modifying master.",
+    "Freeze the reconciled candidate with complete manifest and exact tree/input identities. A full gate passes on that candidate in its named source root with host verification cited; earlier author validation stays separately attributed.",
+    "Hand off owner, worktree, base, candidate, validation and remaining constraints. Under preparation authority do not dispatch reviewers, commit, push, install or restart. Actual Claude availability and a frozen candidate are prerequisites to later review/landing disposition."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "architecture",
+    "delegations",
+    "integration-preparation",
+    "no-landing",
+    "user-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a112e4-b83e-7a81-9fb7-7a5ea1183a8f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Prepared and independently accepted the isolated whole88 current-master integration: base0a59128b/tree3396ef5c/input7b10c2f, author Freeze2 preserved, sole EOF conflict resolved retaining master Build/Node plus author ownership registration, credited fullgateef2e1906 and immutable packetbeb55967 handed off to coordinator and author. Preparation only; no feature reviewer dispatch, feature acceptance, commit, push, install, restart or master mutation. Frozen roots/evidence retained for later owner disposition.",
+    "completed_at": "2026-10-08T05:32:59.887098Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

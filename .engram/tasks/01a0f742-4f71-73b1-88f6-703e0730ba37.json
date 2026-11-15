@@ -1,0 +1,28 @@
+{
+  "id": "01a0f742-4f71-73b1-88f6-703e0730ba37",
+  "external_ref": null,
+  "title": "Exercise criterion evidence forwarding through the MCP HTTP bridge",
+  "outcome": "Exercise criterion evidence forwarding through the MCP HTTP bridge",
+  "acceptance": [
+    "Exercise criterion evidence forwarding through the MCP HTTP bridge is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "repeated-problem",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f464-f38b-7f82-a402-e57a7f7e8da0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

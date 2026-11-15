@@ -1,0 +1,27 @@
+{
+  "id": "01a11d18-6b55-7b80-98c0-c5704a80efb9",
+  "external_ref": null,
+  "title": "Keep post-transmission causal diagnostics from falsely claiming the request never started",
+  "outcome": "For reply ownership loss and local reconciliation errors after transmission, retain unknown remote application and the correct existing hold code without changing control decisions.",
+  "acceptance": [
+    "Keep post-transmission causal diagnostics from falsely claiming the request never started is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-diagnostics",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a155f2-04c3-72d0-9e3b-fd54c2526ff3",
+  "external_ref": null,
+  "title": "Mac O1 preparation: verified host access, inactive settings and protected pair placement",
+  "outcome": "Agents complete the authorized A↔Mac O1 preparation under Greg's words via Advisor1298,1301,1303 and1306: verified Mac host key and SSH forwarding identity/options, A pin file and non-secret known-host reference, Mac toolchain launch PATH and inactive local federation settings, and identical protected pair placement on A and Mac with metadata-only verification and private FIFO cleanup. No secret value is disclosed or stored in source, argv, environment, logs, mail, history or Git. Only the separate post-real-O1 activation word remains Greg-only for the Mac path; Win2 remains outside this item.",
+  "acceptance": [
+    "A note records, per preparation step (host-key verification, authorized_keys and sshd forwarding check, A pin file, Mac launch PATH and toolchain, Mac local federation settings), what was done or verified, by which agent and session, with commands, outputs and times, or why the step was deferred as unsafe; no secret value is recorded.",
+    "A note records the authorized A↔Mac protected pair and A known-host reference placement, metadata-only verification and FIFO cleanup without secret disclosure, and identifies the separate post-O1 activation word as the only remaining Greg-only act for the Mac path; Win2 remains outside this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "greg-directed",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Authorized A↔Mac preparation and protected pair placement completed; metadata-only verification on both hosts, no secret disclosure, private FIFO artifacts removed. Fresh independent attempt2 evaluation429c7e06272443339eb194e33edd4ced passed2/2 on revision2, current/stale:null. Only separate post-real-O1 activation word remains Greg-only for Mac; Win2 untouched. Operational preparation only, no code landing or O1/gate claim. Public artifacts retained for open S2/cutover proof under e61547414d4948a683e660bd0f89360e; lasting facts recorded7a3e/822642/c39ca. Earlierdonewithauthorlinks was refused because this project consumes evaluator verdicts; now omits links per remedy.",
+    "completed_at": "2026-10-19T22:07:23.431804900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

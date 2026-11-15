@@ -1,0 +1,44 @@
+{
+  "id": "01a1d04a-ef4e-7751-a435-36d0e270de9d",
+  "external_ref": null,
+  "title": "Acceptance evaluator spawned after its claim's named root was re-named; Engram refused only the final submission as rebound",
+  "outcome": "When a task's claim has re-named its source root after the registered check, so the producer's binding at the evidence basis is an earlier root than the current local root, even at the same physical path and commit, termal_evaluate_acceptance refuses before spawning an evaluator or returning a brief. It names the conflict and the remedy (run a new registered check in the current root). An evaluator is never spawned whose submission Engram can only refuse as \"named root is unavailable or has been rebound\".",
+  "acceptance": [
+    "The retained native diagnostic and host state establish the registered check's root and the evaluator's later root, with any unavailable historical preflight trace explicitly recorded. Source analysis and a deterministic replay establish which admitting preflight branch permits that state and why binding_changed or root-mismatch checks do not catch it; an unobserved historical RPC result is not asserted as fact. The finding is recorded in a note.",
+    "A deterministic witness first fails on the unmodified host: a claim names root A, a registered check lands in A, the same claim then re-names its source root to B at the same path and commit, and termal_evaluate_acceptance spawns an evaluator or returns a brief.",
+    "With the fix, that witness refuses up front as a conflict, before any spawn or brief, naming both roots and asking for a new registered check in the current root. The existing sighting-present, sighting-absent, unknown and unchanged-root outcomes from w-837ea1a08c4e keep passing.",
+    "The full gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

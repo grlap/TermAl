@@ -1,0 +1,30 @@
+{
+  "id": "01a17620-8a81-72e1-954a-59864c846d9f",
+  "external_ref": null,
+  "title": "Avoid repeating full checkpoint-ledger compaction work for each session in a removal cascade",
+  "outcome": "A session/delegation/project removal cascade compacts eligible checkpoint history in bounded shared-owner work while preserving every unresolved, unlatched, linked, active and quarantined operation.",
+  "acceptance": [
+    "Use an existing removal or compaction owner to avoid repeated full-ledger clone/scan work proportional to both cascade length and retained history.",
+    "Show unchanged retention of unresolved, unlatched, linked, active-flight/receipt and quarantined persisted operations, plus continued cleanup of eligible deleted-session history.",
+    "Validate with representative cascade and no-op cases and obtain the required independent source reviews."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "performance",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

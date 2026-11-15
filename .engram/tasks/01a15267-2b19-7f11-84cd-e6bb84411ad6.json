@@ -1,0 +1,36 @@
+{
+  "id": "01a15267-2b19-7f11-84cd-e6bb84411ad6",
+  "external_ref": null,
+  "title": "Bound or document verbose check-ignore reply capacity relative to candidate input",
+  "outcome": "The review identity ignore-query capacity contract accounts for verbose reply expansion and keeps the existing resource ceilings and fail-closed behavior.",
+  "acceptance": [
+    "The per-level check-ignore query and verbose reply ceilings are documented consistently, or batches are bounded by a demonstrated safe reply budget without weakening limits or discovery completeness.",
+    "Focused regression coverage distinguishes a permitted candidate batch from an output-limit refusal, and full-gate/review evidence accompanies any implementation change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "beads-in-progress",
+    "beads-migrated",
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "host-platform",
+    "review",
+    "review-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a150e9-cdc9-7a10-8ee9-f8169c6b1471",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

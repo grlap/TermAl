@@ -1,0 +1,50 @@
+{
+  "id": "01a12251-a84a-79b0-9b56-49818f69a263",
+  "external_ref": null,
+  "title": "Test the ACP initialize deadline's own timeout branch, and word the expire_initialize fixture as equivalent rather than exact",
+  "outcome": "The timed branch of wait_for_acp_json_rpc_response (src/acp.rs) has its own deterministic test: a Some(timeout) wait that runs out removes the pending entry and returns the Transport \"timed out waiting for\" error. The doc of ProductionWorkerTree::expire_initialize and the name of dedicated_rework_acp_initialize_deadline_kills_fake_root no longer claim to apply \"exactly\" what the deadline does. They drive the untimed recv() Err branch, whose writer cleanup is the same.",
+  "acceptance": [
+    "A test reaches the Some(timeout) expiry branch of wait_for_acp_json_rpc_response and asserts that the pending entry is removed and that the error is a Transport \"timed out waiting for\" error, with no sleep beyond the bounded wait under test.",
+    "The expire_initialize doc and the reproduction test's name or comment describe it as equivalent to the deadline's effect, not as the deadline itself.",
+    "TEST_DEDICATED_ACP_INITIALIZE_UNTIMED is consumed even when spawn_acp_runtime returns early, or the fixture clears it after spawn.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed be2ed177735f657128f569191465dadb05fed5e6 on master as a fast-forward from 36a0ca7f, pushed to origin and verified with ls-remote. It adds a deterministic test of the ACP initialize wait's Some(timeout) expiry branch (pending entry removed, Transport \"timed out waiting for\" error), makes the untimed-initialize test seam consumed before any early return of spawn_acp_runtime (with a refused-spawn test), and rewords the expire_initialize fixture and reproduction test as an equivalent effect rather than the deadline itself. The commit diff equals the gated staged index b09da357; the full gate test-6d4cfb09 is host record fd19c5cb (passed, content-v1:02e4bb79); independent evaluation cc4df9ea passed 4/4. The Opus2 takeover from BarA1 was on coordinator assignment. No install: test-only release inputs aside from acp.rs ordering; the install is batched by the coordinator.",
+    "completed_at": "2026-10-10T23:54:06.422675400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

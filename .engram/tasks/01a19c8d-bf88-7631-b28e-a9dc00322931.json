@@ -1,0 +1,41 @@
+{
+  "id": "01a19c8d-bf88-7631-b28e-a9dc00322931",
+  "external_ref": null,
+  "title": "Diagnose five C2-pre Stop and Resume regressions against master",
+  "outcome": "Fable2333/message2e3cec21-e976-4f64-a13b-1a4f10decfe3 assigns 20-minute read-only diagnosis of five new test-51698ef7 failures at TREE94cbdd33 compared with master5dd and C1TREE0c00. Determine540f Stop receipt-proof vs H3 removed409 causality, test existence onmaster and master contract vs gate-era port assertion; report table. No source edits/runs.",
+  "acceptance": [
+    "Read failed assertions/logs and complete relevant test bodies at94cbdd33; compare master5dd and0c00 production/test paths, including whether each named test exists onmaster.",
+    "Report each of five failures with evidence-backed cause (receipt-owner Stop proof/H3 removed409/other), contract provenance and whether product or test needs correction; disclose any uncertainty without edits or reruns.",
+    "Deliver read-only table to Fable2 and integrator with exact source/log pointers and source-only limits; no source edits, Cargo/compiler/tests/parser/formatter/live/agents/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "engram-host-adapter",
+    "failed-check-investigation",
+    "gated-control",
+    "greg-directed",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only five-failure table delivered: three renamed gate-era Stop fixture ownership mismatches and two genuine ordinary Resume409 regressions caused by H3. Master test names/counterparts and ordinary-OFF guard verified; Fable2334 independently retracts H3. No source edits/reruns; v3 production fix separate.",
+    "completed_at": "2026-11-02T14:02:05.543756900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

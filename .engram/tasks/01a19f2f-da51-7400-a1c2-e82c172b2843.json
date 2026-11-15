@@ -1,0 +1,40 @@
+{
+  "id": "01a19f2f-da51-7400-a1c2-e82c172b2843",
+  "external_ref": null,
+  "title": "Refresh stale EO and verification documentation and owner comments",
+  "outcome": "Current architecture, verification sender descriptions and fragment comments describe Execution Observability and passive launch/bound history accurately, while preserving historical documentation.",
+  "acceptance": [
+    "Change only documentation in docs/architecture.md, docs/features/engram-host-adapter.md and docs/dev-team-pattern.md, and comments in src/engram_verification_bind.rs, src/engram_batch_binds.rs and src/engram_host_adapter.rs; remove or explicitly historicize obsolete current boot-recovery fields, distinguish current verification_record sends from passive bound records, and mark the completed watcher-ignore TODO historically complete.",
+    "Trace revised statements to current source/callers and retain historical persisted readers, protocol/data shapes, acceptance/evaluation behavior and incident history; no executable token changes. The exact clean candidate has an independent Codex/Claude read-only pair with no outstanding Medium or higher findings.",
+    "Hand exact base/commit/tree, source audit and review evidence to integration for the coordinated green-FULL queue; no landing is asserted without that gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "documentation",
+    "greg-directed",
+    "legacy-cleanup",
+    "legacy-scan",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a19ef2-54b4-7661-a602-1fd8f197b596",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only docs/comments cleanup delivered as fresh private candidate710c6123/tree132def86/base87f49ed0. Six approved paths; staticaudit proves Rust changes comments only, source traces verified, independent whole-range Codex/Claude pair has no Low or higher and earlierLow fixed. Final exact handoff to integration/Fable complete. Tests/FULL unrun; landing remains queued and is not asserted.",
+    "completed_at": "2026-11-03T02:28:43.478478800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

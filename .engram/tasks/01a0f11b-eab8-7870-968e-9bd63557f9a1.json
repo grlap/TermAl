@@ -1,0 +1,31 @@
+{
+  "id": "01a0f11b-eab8-7870-968e-9bd63557f9a1",
+  "external_ref": null,
+  "title": "Investigate copied executable image release before native-launch fixture scratch removal",
+  "outcome": "Investigate copied executable image release before native-launch fixture scratch removal",
+  "acceptance": [
+    "A recorded diagnostic distinguishes any image-release teardown race from other deletion failures; fixture files remain repository-local and successful cleanup leaves no binary copies.",
+    "The copied-node fixture's cleanup contract accounts for image-release availability after process signal and pipe EOF, using a bounded observable release condition if required."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "terminal",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

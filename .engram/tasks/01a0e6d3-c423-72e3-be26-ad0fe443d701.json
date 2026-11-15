@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c423-72e3-be26-ad0fe443d701",
+  "external_ref": "tm-85im",
+  "title": "Remove pre-field Engram queued-row compatibility paths (513018d)",
+  "outcome": "Post-audit (2026-09-05) regression against the no-legacy policy, introduced by commit 513018d (2026-09-22). Three load-time acceptance/migration paths for queued-prompt rows persisted by pre-field TermAl development builds: (1) src/engram_queued_admission.rs:141-159 and :524-535 parse legacy idempotency-key formats ('termal-evaluate:'/'termal-stale-reevaluate:'/'termal-reevaluate:') to recover an operation generation — comment literally says 'Compatibility for prepared rows written before the explicit field'; (2) src/persisted_state.rs:470-491 'Migrate older retained entries… missing legacy evidence' reconstructs promotion_disposition_known at load; its test src/tests/engram_retained_disposition.rs:2027-2089 rewrites stored SQLite JSON to remove the field then loads; (3) src/state_accessors.rs:655-656 retains the old embedded projection for 'legacy/test-local records' instead of rejecting. TermAl is unreleased: per the tm-7p9z policy these rows should be rejected with reset guidance, not reconstructed. Found in Kimi's no-legacy re-audit 2026-09-25 (session-7706).",
+  "acceptance": [
+    "The three load-time paths are removed; obsolete queued-row shapes fail closed with reset guidance; companion legacy-shape tests are deleted or converted to rejection tests; cargo check and cargo test --bin termal green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "legacy-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

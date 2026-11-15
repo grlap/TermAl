@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6ba-7bd1-bd78-9419c62fdfec",
+  "external_ref": "tm-rerc",
+  "title": "Verify and Save can block for minutes with no duration hint and no way to cancel",
+  "outcome": "Raising the enablement doctor deadline means a single Verify can now block for up to five minutes where it previously capped at five seconds, and Save repeats the same audit - so a healthy large store costs roughly four minutes of modal-blocked UI across Verify plus Save.\n\nMeasured context: the audit on the migrated store took 122.441 s; the deadline is 300 s.\n\nNothing bounds the wait: handleVerify in ui/src/EngramProjectSettingsPanel.tsx awaits verifyProjectEngramSettings with no AbortSignal, ui/src/api.ts sets no client-side fetch timeout, and the server has no TimeoutLayer. The panel shows only a static 'Verifying...' label. Buttons are correctly disabled while busy, so requests do not stack from this panel - but a user who assumes a hang and reloads leaves a five-minute spawn_blocking task running.\n\nFix direction: say so in the label or button ('this can take several minutes on large stores') and/or wire an AbortController so the wait can be cancelled. Raised by the Claude reviewer of the deadline change.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,40 @@
+{
+  "id": "01a19c76-93a8-76c2-aa9a-41e596e8f1d2",
+  "external_ref": null,
+  "title": "Repair five approved C1 remainder test and timeout-documentation ports",
+  "outcome": "Repair five approved C1 remainder test and timeout-documentation ports",
+  "acceptance": [
+    "Repair only the five T cases approved by Fable2588/2590: OpenCode disable fixture actual MCP descriptor; stale retired channel versus old Prompt; retained relay original immutability plus separate fresh User control; exact derived follow-up documentation196s; consistent promoted receipt generation and queue owner, retaining all four removal/Rejection/reload/zero-send assertions.",
+    "Return an immutable source-only patch from a separate fresh named root on0c00 after its naming turn, with exact per-case master discriminator and original guarantees preserved, composing only owned hunks with other C2 repairs; no Cargo."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gate-failure",
+    "gated-control",
+    "greg-directed",
+    "test-port"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the five approved C1 test/documentation ports as immutable source-only TREE035709e5893eeb11b9216316fe77a0968dfba85b, exact four-path patch and per-case provenance; scoped composition proof with earlier0a35249b sent to integrator and coordinator.",
+    "completed_at": "2026-11-02T13:46:02.430610Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

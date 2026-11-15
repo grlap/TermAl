@@ -1,0 +1,28 @@
+{
+  "id": "01a16884-0dce-7ee0-86a3-0b6e55449eb5",
+  "external_ref": null,
+  "title": "Validate prospective containment Bind/Evaluate and reason updates before publishing live state",
+  "outcome": "Containment rejects a Bind-to-Evaluate or reason update that exceeds ledger bounds before changing the live head or ledger; a later commit cannot persist an invalid partially published transition.",
+  "acceptance": [
+    "Validate prospective containment Bind/Evaluate and reason updates before publishing live state is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-control",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

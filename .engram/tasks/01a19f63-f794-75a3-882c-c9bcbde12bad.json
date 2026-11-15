@@ -1,0 +1,28 @@
+{
+  "id": "01a19f63-f794-75a3-882c-c9bcbde12bad",
+  "external_ref": null,
+  "title": "Windows live tests that build an embedded fixture with Cargo fail with LNK1104 when the test temp root is deep (output path over MAX_PATH)",
+  "outcome": "On Windows, tests that build a fixture under the test temp root either keep their output paths well under MAX_PATH whatever the temp root (short fixture labels or a short target dir inside the fixture), or fail fast before building with a clear message naming the computed path length and the temp-root setting to shorten. The repository-local temp root documented for agents is short enough by default.",
+  "acceptance": [
+    "Windows live tests that build an embedded fixture with Cargo fail with LNK1104 when the test temp root is deep (output path over MAX_PATH) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "long-path",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

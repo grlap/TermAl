@@ -1,0 +1,28 @@
+{
+  "id": "01a1bfac-4884-7822-960f-f1e4d0a813d7",
+  "external_ref": null,
+  "title": "Two claims naming one worktree refuse test registration, and the offered remedy may be unavailable",
+  "outcome": "A holder with two claims on one worktree knows beforehand that a run there won't register, or the run registers against the one claim that can be determined, with no credit granted on a guess.",
+  "acceptance": [
+    "It's decided from source whether naming a second claim onto a worktree already named should warn or refuse at naming time rather than failing a later run, and the decision is implemented with a behaviour test, a review pair with no Medium or higher and the normal gate; no run ever credits an ambiguous claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "named-root",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

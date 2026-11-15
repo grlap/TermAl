@@ -1,0 +1,27 @@
+{
+  "id": "01a1398a-00d7-77a3-bfe4-d8cf9a5072dc",
+  "external_ref": null,
+  "title": "Resolve a live-merged test observation ID through its exact artifact alias",
+  "outcome": "An exact known observation execution ID superseded by an indexed artifact resolves to the retained execution or canonical artifact detail; never-known identities still return 404.",
+  "acceptance": [
+    "Resolve a live-merged test observation ID through its exact artifact alias is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

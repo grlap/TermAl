@@ -1,0 +1,37 @@
+{
+  "id": "01a0f535-e1e7-7883-8800-380e6ea9951a",
+  "external_ref": null,
+  "title": "A read-only Codex child on Windows fails \"bash\" commands with Bash/Service/CreateInstance/E_ACCESSDENIED (likely the WSL launcher under the read-only sandbox)",
+  "outcome": "A read-only Codex child on Windows can run the read-only commands a review needs, and an agent knows which shell to use. If a bash request cannot work under the read-only sandbox, the failure says so plainly. Reported by Engram::Kimi (TermAl mailbox 38e17f30 #46, 2026-10-01 02:05Z). Read-only Codex reviewer delegation-c1cbcc49-7cc2-4519-b53f-07758a1e6b61 (child session-9264, gpt-6.1-sol, cwd C:/github/Personal/Engram/.worktrees/landing-values), 02:02–02:03Z: a plain `git rev-parse` via exec_command with shell bash, and again with an explicit Git Bash shell, both exited 1 with \"Access is denied. Error code: Bash/Service/CreateInstance/E_ACCESSDENIED\". The host's freeze checker succeeded. Four earlier read-only Codex children that day worked (sessions 9212, 9216, 9255, 9260). Hypothesis, unverified: \"Bash/Service/CreateInstance\" is the WSL launcher's error (C:\\Windows\\System32\\bash.exe), so the request resolved to WSL bash, which cannot create its service instance under the read-only sandbox's restricted token. The earlier children likely used the profile's default shell, Windows PowerShell 5.1 since 27bf0b6. Why the explicit Git Bash attempt gave the same error needs checking. Note: Codex has no separate Read/Grep/Glob tools; its file access is through the shell, so \"no file tools\" is not a separate defect. Related: w-4b1e11b6bfdc (the read-only profile) and w-5632f86d61c9 (PATH filtering).",
+  "acceptance": [
+    "A read-only Codex child on Windows either runs a bash-requested read-only command (for example `git rev-parse HEAD`) successfully, or gets a plain refusal naming the default shell to use; a test pins the chosen behaviour.",
+    "Reviewer guidance for read-only Codex children on Windows states which shell to use, where agents read it.",
+    "The cause is identified with evidence (which bash.exe was started, and why the explicit Git Bash request failed the same way) and recorded in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "read-only-delegation",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

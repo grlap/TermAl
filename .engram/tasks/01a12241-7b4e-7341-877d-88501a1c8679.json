@@ -1,0 +1,49 @@
+{
+  "id": "01a12241-7b4e-7341-877d-88501a1c8679",
+  "external_ref": null,
+  "title": "dedicated_rework_stop_cleans_acp_with_parked_admission panics with ConnectionReset (10054) releasing the fake runtime root under load",
+  "outcome": "The test synchronizes on the state it needs before it writes to the fake runtime's socket, so it is deterministic under host load. A peer that has already exited (for example, one the Stop path cleaned up) is handled as the expected state rather than as an unwrap panic, while any genuine product defect it covers still fails the test.",
+  "acceptance": [
+    "The holder's note identifies, with file:line, why the fake runtime root's socket can already be closed when release_root writes to it (src/tests/delegation_process_cleanup.rs:1570-1573, called from the test in tests::engram_host_adapter::root_dispatch::admission_retry), and whether the product or the fixture closes it. It decides whether the observed ordering is a valid product behaviour or a product defect, and records its reasoning.",
+    "A fail-first test or a deterministic reproduction (for example, delaying the release until after the peer's exit is observed) shows the ConnectionReset on unchanged code. After the fix it passes, with the test still asserting the cleanup property it exists for. No sleep, retry, ignored error or larger timeout is used.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "test-determinism"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The ACP worker-tree fixture no longer races the product's 15 s ACP initialize deadline.\n- Diagnosis: the product's designed handshake teardown killed the fake root under load, before the stop case's first socket write. The ordering was invalid in the fixture, not a product defect.\n- Fix: a cfg(all(test, windows)) one-shot seam, set only by ProductionWorkerTree::spawn, makes the fixture's initialize wait untimed. Each test ends it explicitly. Production keeps 15 s.\n- RED: deterministic, with ConnectionReset 10054 on unchanged code. The reproduction now asserts the product's kill: the tree is confirmed and every peer has exited.\n- Landed as 757327509d6df0988245ee1bf9ff8f6ccd23934e: gate test-09c2b7c4 passed (record 7232ea7c), the review pair was clean, and evaluation 12bdf2f9 passed 3/3.\n- The Low and the Note from the review were filed as w-49818f69a263.",
+    "completed_at": "2026-10-09T22:41:00.058899700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

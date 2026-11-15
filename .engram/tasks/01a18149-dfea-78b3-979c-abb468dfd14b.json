@@ -1,0 +1,31 @@
+{
+  "id": "01a18149-dfea-78b3-979c-abb468dfd14b",
+  "external_ref": null,
+  "title": "Kimi read-only reviewer delegations get \"user rejected the approval request\" on authorized read-only tools (Engram reads, Bash date)",
+  "outcome": "A Kimi review delegation started read-only can call the read-only tools its recovery needs, such as Engram read words (next --peek, memories, show) and harmless read-only shell commands, without an approval refusal. Writing tools and sandbox-escaping commands are still refused. If a read is refused, the child reports it as a host policy refusal, not as a user rejection.",
+  "acceptance": [
+    "The refusal is reproduced or explained from source: which TermAl layer turns a Kimi read-only child's tool call into the ACP approval answer \"the user rejected the approval request\", and why it applies to authorized read-only calls (mcp__engram__next peek, Bash date) and not to the same calls in Codex or Claude read-only reviewer children.",
+    "In a Kimi read-only review delegation, the Engram read words needed for recovery and a read-only shell command run without an approval refusal, while a writing tool or write command is still refused; a test covers the generated Kimi delegation configuration or permission path for both cases.",
+    "A refused call in a Kimi child is labelled as a host policy refusal rather than a user rejection, so reviewers and parents do not report a user denial that never happened."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "kimi-runtime",
+    "mcp",
+    "read-only",
+    "review-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

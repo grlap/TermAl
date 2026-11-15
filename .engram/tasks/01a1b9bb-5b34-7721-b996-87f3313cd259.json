@@ -1,0 +1,29 @@
+{
+  "id": "01a1b9bb-5b34-7721-b996-87f3313cd259",
+  "external_ref": null,
+  "title": "Preserve ACP native slash prompts when adding missing-environment notices",
+  "outcome": "Missing-environment notices do not alter ACP native slash commands; ordinary prompts still receive names-only notices.",
+  "acceptance": [
+    "ACP prompts beginning with '/' retain their original command payload; missing-environment notice is deferred or delivered separately without becoming slash-command arguments.",
+    "Behavioral ACP writer coverage exercises slash and ordinary prompts with missing and configured values."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "low",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

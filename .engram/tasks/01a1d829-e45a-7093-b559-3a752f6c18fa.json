@@ -1,0 +1,30 @@
+{
+  "id": "01a1d829-e45a-7093-b559-3a752f6c18fa",
+  "external_ref": null,
+  "title": "Launcher committed-input reader rejects valid engram source JSON when the owner emits its supported slow-operation stderr warning",
+  "outcome": "The launcher's committed-input source reader accepts a valid `engram source --root --json` result whose stderr carries only Engram's supported, bounded slow-operation warning lines, while still refusing malformed, unexpected, error or oversized stderr and every existing stdout schema check.",
+  "acceptance": [
+    "scripts/test-launcher-input.mjs no longer refuses a source observation solely because stderr contains Engram's supported slow-operation warning (the bounded warning grammar Engram documents for source observation / local git query, e.g. its 10 s warning); a node test with a stub owner that prints exactly that warning on stderr and a valid JSON envelope on stdout passes admission.",
+    "Any stderr that is not entirely the supported warning grammar (unknown text, an error line, a warning plus extra text, or stderr beyond a fixed byte bound) is still refused with ENGRAM_SOURCE_UNAVAILABLE; node tests cover each of these refusal cases.",
+    "No retry, no blanket stderr suppression, and the existing malformed/non-UTF-8/oversized stdout and exact-field schema refusals are unchanged; the full launcher node suite stays green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "launcher",
+    "source-capture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d825-e07c-7d33-80df-e879e6155b1d",
+  "disposal_reason": "Duplicate: the same launcher stderr defect (scripts/test-launcher-input.mjs:224-225 rejects any stderr from `engram source --json`) is already filed by Fable2 as w-e879e6155b1d, assigned to Sol-03d4 (ebe242f7 #7868). Engram::Fable #730 asked that the report be attached there instead. 11330's exact location and Engram's warning contract are noted on w-e879e6155b1d.",
+  "completion": null
+}

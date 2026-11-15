@@ -1,0 +1,27 @@
+{
+  "id": "01a169f8-2d4a-7b72-83c6-310ac0577233",
+  "external_ref": null,
+  "title": "Carried-binding refusal calls a current binding \"unbound\" when the host only filtered it out",
+  "outcome": "The pre-spawn carried-binding refusal (src/acceptance_evaluation_carried_binding.rs) describes the current binding as the host reads it. acceptance_criterion_bindings drops a binding whose kind is not a tracker word, and drops a pin that is not citable, so a criterion that is still bound in Engram can be called \"unbound\", or \"bound to `test`\" without its pin. The refusal itself stays correct, since the host cannot confirm the binding was kept, but the remedy tells the requester to restore something the tracker shows as present. Say \"unbound as the host reads it\", or name that the host could not read the current binding.",
+  "acceptance": [
+    "Carried-binding refusal calls a current binding \"unbound\" when the host only filtered it out is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

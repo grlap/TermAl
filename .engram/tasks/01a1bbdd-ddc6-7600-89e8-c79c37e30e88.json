@@ -1,0 +1,29 @@
+{
+  "id": "01a1bbdd-ddc6-7600-89e8-c79c37e30e88",
+  "external_ref": null,
+  "title": "Harden native relay refusal reason mapping and cover receipt/capacity reason codes",
+  "outcome": "Harden native relay refusal reason mapping and cover receipt/capacity reason codes",
+  "acceptance": [
+    "Reason classification uses shared constants or typed producer errors, or equivalent behavioral coverage makes supported mapping drift observable; unknown messages retain bounded reason-unavailable fallback without raw prose.",
+    "Behavioral assertions cover receipt-gap, unissued and foreign-receipt reason prefixes plus an RPC-capacity refusal while preserving status, authentication, receipt semantics and outcome uncertainty."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

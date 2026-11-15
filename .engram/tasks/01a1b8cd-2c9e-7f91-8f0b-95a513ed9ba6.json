@@ -1,0 +1,31 @@
+{
+  "id": "01a1b8cd-2c9e-7f91-8f0b-95a513ed9ba6",
+  "external_ref": null,
+  "title": "Allow interrupted declared settlement rows to leave compaction retention",
+  "outcome": "A producer proven gone cannot leave a declared settlement flag permanently preventing compaction of an absorbing launcher run.",
+  "acceptance": [
+    "On boot or proven producer loss, retain honest interrupted UNKNOWN semantics while making the unfinished settlement terminal for retention.",
+    "A deterministic fixture exercises a launcher run absorbing the observed alias and proves it becomes compactable after interruption; pending live producers remain protected."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "compaction",
+    "declared-commands",
+    "greg-reported",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1b889-1cb7-7ce2-bf94-2b4dccf4861d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1ba27-940a-7d73-b46b-0a9eec49ebf9",
+  "disposal_reason": "Continue as independent work after w-2b4dccf4861d completed on landed d3499b97. This optional Low/Note follow-up remains open and is not claimed fixed; preserve its evidence and acceptance.",
+  "completion": null
+}

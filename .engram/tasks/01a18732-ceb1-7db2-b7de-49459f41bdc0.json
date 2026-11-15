@@ -1,0 +1,28 @@
+{
+  "id": "01a18732-ceb1-7db2-b7de-49459f41bdc0",
+  "external_ref": null,
+  "title": "Verification-bind idempotency key omits the claim fence and root generation, so two owed binds can reuse one key with different intents",
+  "outcome": "A verification_bind's idempotency key identifies exactly one bind intent: two owed binds whose requests differ never share a key, so the host never itself produces control_operation_idempotency_conflict.",
+  "acceptance": [
+    "Verification-bind idempotency key omits the claim fence and root generation, so two owed binds can reuse one key with different intents is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "idempotency",
+    "lost-reply"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

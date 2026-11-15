@@ -1,0 +1,37 @@
+{
+  "id": "01a155bb-9678-7bf1-b2d1-99fbb5bf6aca",
+  "external_ref": null,
+  "title": "M6 second satellite: DESKTOP-9BFCGFI (Win2) O1 readiness precheck, reported separately from the Mac",
+  "outcome": "An evidence-backed, read-only O1 readiness report for the Windows satellite DESKTOP-9BFCGFI (192.168.50.57, remote session-13475), covering five areas, each marked ready, blocked or unknown with its evidence: (1) SSH reachability and authentication from central; (2) reverse (and forward) TCP forwarding admission in its sshd; (3) the satellite TermAl configuration (central host id 8c5466d3-f0ef-4a01-99e9-b7b60c82b896, generation 1); (4) credential-pair or capability-secret setup; (5) the PATH and toolchain the TermAl satellite launches with (git, cargo, rustc, node). It names the exact remaining acts only Greg can do, file or setting by host, and says whether Win2 is eligible as the second satellite after the Mac native exchange. It changes no config, service or credential, and does not delay the Mac M4→M6 path.",
+  "acceptance": [
+    "A note on this item records, for each of the five areas (SSH/auth, reverse forwarding, satellite TermAl configuration, credential-pair setup, PATH/toolchain), a verdict of ready, blocked or unknown with the observed evidence (commands and outputs or file locations, with times), gathered read-only without any config, service, credential or network-policy change on either host.",
+    "The note lists the exact remaining operator acts only Greg can perform (the host and file or setting for each), or states that none remain, and gives an eligibility verdict for Win2 as the second satellite after the Mac native exchange."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "greg-directed",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered read-only five-area Win2 O1 readiness report e2780c22219c426ab7dc8f9230026cd2 and exact Greg-owned actions; summary sent to Fable for Greg. Independent Claude Sonnet evaluation 0ed0db9ed562460ebb81343641e8f586 passed 2/2 at cut18, read fresh with stale=null. SSH/auth ready; forwarding, credential pairing and actual host PATH unknown; satellite configuration blocked. Win2 is NOT YET ELIGIBLE, not a claimed O1/native exchange pass. No source/config/service/credential/network-policy changes, build, test, enrollment or activation. Main-checkout source observation is unrelated shared state, not a product edit by this read-only task; no test coverage claimed. No raw report files created, landing or installation; lasting report/transcript evidence remains in tracker. Consume the independent evaluation directly; manual criterion links intentionally omitted under project policy.",
+    "completed_at": "2026-10-19T20:09:18.212695500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

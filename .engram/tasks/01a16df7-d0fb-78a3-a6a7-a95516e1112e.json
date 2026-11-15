@@ -1,0 +1,31 @@
+{
+  "id": "01a16df7-d0fb-78a3-a6a7-a95516e1112e",
+  "external_ref": null,
+  "title": "Keep writer-backed onboarding fixture configuration and enrollment outside queued setup fences",
+  "outcome": "Writer-backed onboarding fixtures configure and enroll disposable hosts before starting their queued writers; judged runtime operations retain real queued SQLite durability fences.",
+  "acceptance": [
+    "Keep writer-backed onboarding fixture configuration and enrollment outside queued setup fences is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox",
+    "review-low",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

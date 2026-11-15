@@ -1,0 +1,37 @@
+{
+  "id": "01a19bf5-7ffb-7ab3-a3c4-b98858dcf50d",
+  "external_ref": null,
+  "title": "w-3fe8 test compile closure SET A: budget, capacity and retry tests (8 paths, 54 diagnostics)",
+  "outcome": "w-3fe8 test compile closure SET A: budget, capacity and retry tests (8 paths, 54 diagnostics)",
+  "acceptance": [
+    "Source-only patch on 2faa6a33 for exactly: engram_budget_reader_controls.rs, engram_budget_unchosen_readers.rs, provider_capacity_retry.rs, load_sensitive_limits.rs, provider_capacity_terminal_ownership.rs, engram_admission_budget_bound.rs, engram_bind_backoff_retry.rs, engram_retry_hold_projection.rs (src/tests), resolving every b59846ef diagnostic in them, returned to Sol-03d4",
+    "Meaningful current-owner ports with an all-original disposition; no compatibility aliases, ignores, unmounts or assertion weakening; no cargo"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 test setA; corrected exact8 R2 import a7898ed7. Source-only ledger/handoff closure; original private-import FAIL remains historical.",
+    "completed_at": "2026-11-08T19:22:48.136449100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

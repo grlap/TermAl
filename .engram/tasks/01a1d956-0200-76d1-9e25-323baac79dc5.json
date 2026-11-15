@@ -1,0 +1,24 @@
+{
+  "id": "01a1d956-0200-76d1-9e25-323baac79dc5",
+  "external_ref": null,
+  "title": "Dismiss is offered on a receipt-less row its own turn is still handing off (human prompt / Engram promoted row)",
+  "outcome": "A queued row that the current turn still owns during its hand-off is not classified as settled delivery history and offers no Dismiss. This covers a human prompt with engram_ordinary_handoff set before provider enqueue (human_prompts.rs:724-730), and an Engram-bound promoted row kept queued across the off-lock admission and WAL window (turn_dispatch.rs:323-330). The fix excludes the turn-owned row (for example the human_prompt_turn owner, or promoted_message_index == active_turn_start_message_count while Active or Approval) from unreceipted_queued_prompt_is_history and from cancel_queued_prompt's history path, or refuses cancel for it, so a provably never-handed-over prompt is not recorded as Ambiguous. Covered by a test for a row in that window. Low from the Claude reviewer (delegation-9bf35347) of the historical-queue-row fix, round 2. The outcome there is conservative: no re-send, and Active status keeps the indicator and thread-action guard.",
+  "acceptance": [
+    "Dismiss is offered on a receipt-less row its own turn is still handing off (human prompt / Engram promoted row) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

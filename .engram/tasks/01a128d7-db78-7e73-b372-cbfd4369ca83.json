@@ -1,0 +1,65 @@
+{
+  "id": "01a128d7-db78-7e73-b372-cbfd4369ca83",
+  "external_ref": null,
+  "title": "Engram control sidecars from earlier host instances survive TermAl restarts and are never reaped (two orphans from Oct 4 and 5 still running)",
+  "outcome": "A host-started `engram control` sidecar never outlives the host instance that started it. On host exit or restart, its control children end with it (Windows Job object kill-on-close or equivalent), and a host that starts while orphans from an earlier instance remain finds and reports them without killing anything automatically, unless a safe rule says otherwise. The idle reap covers sidecars whose owning session is gone. A test covers host exit ending the sidecars, and the docs state the lifecycle.",
+  "acceptance": [
+    "A TermAl-started Engram control sidecar is a member of a kill-on-close job from creation (atomic PROC_THREAD_ATTRIBUTE_JOB_LIST, or windows_launch's fresh-lease suspended fallback). There is no moment when it runs or waits outside that job; containment Unavailable is reported in the host log. A test shows the child is in the job before its first resume.",
+    "Every failure between creation and the first resume terminates and reaps the child. A fail-first test injects a failure right after creation and observes the process exit. Today it stays alive and suspended, so the test is RED on master.",
+    "Ending the host's hold on the job (the effect of host exit) ends a running sidecar. A test shows it with a real child process.",
+    "At startup the host finds Engram control processes left by an earlier host instance and reports them (pid, start time, session), killing nothing. A test covers the detection over a process snapshot.",
+    "docs state the sidecar lifecycle: start, containment, the idle reap, host exit and orphan reporting.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-control-transport",
+    "field-report",
+    "host-hygiene",
+    "process-containment"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

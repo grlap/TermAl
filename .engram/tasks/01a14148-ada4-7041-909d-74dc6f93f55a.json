@@ -1,0 +1,53 @@
+{
+  "id": "01a14148-ada4-7041-909d-74dc6f93f55a",
+  "external_ref": null,
+  "title": "Capture the named-root begin fence before turn_begin transport",
+  "outcome": "Capture the named-root begin fence before turn_begin transport",
+  "acceptance": [
+    "A real Begin request held in flight after transmission, while an authorized clear of the claim's named root completes, cannot on release of its older Bound response republish the root as Bound, restore its naming authority, or reselect it as the work's source root; the cleared state or an explicit withholding stays current; src/tests/engram_root_begin_inflight_clear.rs shows it.",
+    "With no clear during the same held Begin, its released response leaves the named root Bound and current at its generation; the same file shows it.",
+    "With the pre-Begin root guard narrowly disabled (no guard passed to the Begin reconciliation), the test of (1) fails, and a host-recorded run and its output are cited in a note; or, if it still passes, the note names the protection that holds and the test is kept as added coverage.",
+    "The full five-stage launcher gate passes on a master tree that contains the test, cited by run directory and launcher fingerprint."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "control-plane",
+    "named-root",
+    "post-import",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Train-2 package landed at 9c80a234; acceptance evaluation b598e8c27aca4a24bc85bb2c351d1c8a passed 4/4.",
+    "completed_at": "2026-10-16T00:01:01.530100700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

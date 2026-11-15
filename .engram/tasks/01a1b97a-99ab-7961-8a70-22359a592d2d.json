@@ -1,0 +1,27 @@
+{
+  "id": "01a1b97a-99ab-7961-8a70-22359a592d2d",
+  "external_ref": null,
+  "title": "Distinguish unmeasured StateMutex counters from zero waits in fixture phase reports",
+  "outcome": "Fixture phase diagnostics explicitly identify whether they installed StateMutex instrumentation and describe release-phase attribution for both main and background whole holds.",
+  "acceptance": [
+    "A phase report from a test with no timed StateMutex identifies lock timing as unavailable rather than implying zero contention; instrumented reports distinguish measured counters, and wording explains that whole holds are assigned at release. Existing separate parallel-model lock reports and behavior remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-follow-up",
+    "test-diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

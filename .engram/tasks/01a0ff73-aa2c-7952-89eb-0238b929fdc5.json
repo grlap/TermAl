@@ -1,0 +1,30 @@
+{
+  "id": "01a0ff73-aa2c-7952-89eb-0238b929fdc5",
+  "external_ref": null,
+  "title": "Publication-gate stamp guard: test instance-reset clearing and older action or creation/fork responses",
+  "outcome": "Publication-gate stamp guard: test instance-reset clearing and older action or creation/fork responses",
+  "acceptance": [
+    "A test shows that after an accepted server-instance reset an incoming known-older stamp is no longer held back by the guard (the comparison domain is cleared).",
+    "A test shows that an older action StateResponse, and a response older than a creation or fork pairing, cannot roll back newer status, preview, idle, queue or stamp in ref, store or render.",
+    "The full five-stage gate passes; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

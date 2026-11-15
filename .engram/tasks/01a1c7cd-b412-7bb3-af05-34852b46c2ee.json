@@ -1,0 +1,38 @@
+{
+  "id": "01a1c7cd-b412-7bb3-af05-34852b46c2ee",
+  "external_ref": null,
+  "title": "Classify the exact test-temp-root wrapper around recognised tests in registered focused runs",
+  "outcome": "Registered focused runs through the exact repository test-temp-root wrapper preserve their original command and outcome while earning Test classification only when the inner command is already recognised as a real test.",
+  "acceptance": [
+    "A registered focused committed-input run through `node scripts/test-temp-root.mjs` followed by an already-recognised test command produces a Test verification record, preserves the actual wrapper argv, and preserves passing and failing outcomes.",
+    "Only that exact repository script spelling with a real Node executable and a recognised inner test command is read through; arbitrary or renamed scripts, Node wrappers or extra Node options, nested temp-root wrappers, missing inner commands, and commands that only list or compile tests remain unclassified.",
+    "Behavioural tests through production verification-record preparation and sending cover the accepted wrapper and refused variants, including passing and failing records without manufacturing Test credit from labels.",
+    "docs/test.md documents the supported registered focused wrapper form and the direct command alternative with a repo-local short TEMP; documentation is reviewed without Markdown-phrase tests."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "evaluation",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

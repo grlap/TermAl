@@ -1,0 +1,27 @@
+{
+  "id": "01a10d15-5f9a-74a0-8ef3-930e4d333f07",
+  "external_ref": null,
+  "title": "Triage TermAl's open backlog (about 1240 items): classify each KEEP-NOW, KEEP, CLOSE-DONE, CLOSE-DUP, CLOSE-OBSOLETE or HELD with evidence, then apply spot-checked closures",
+  "outcome": "Every open TermAl item is classified with a one-line reason and evidence. CLOSE-DONE cites the landed commit or the superseding item; CLOSE-DUP cites the surviving item; CLOSE-OBSOLETE cites the removed code, path or decision. Closures are applied by the coordinator after a spot check, each with its reason, never in bulk without evidence. KEEP-NOW items are aligned to Greg's pilot readiness bar (w-affe8a4dee48). The open count falls to what is really live, and the result is reported to Greg.",
+  "acceptance": [
+    "Triage TermAl's open backlog (about 1240 items): classify each KEEP-NOW, KEEP, CLOSE-DONE, CLOSE-DUP, CLOSE-OBSOLETE or HELD with evidence, then apply spot-checked closures is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "backlog-triage",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

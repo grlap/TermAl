@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c669-71b2-b96a-1ed2f1eac2a5",
+  "external_ref": "tm-nrao.29",
+  "title": "Acceptance evaluation: warn on source-changing turns bound to an item under evaluation; resubmit once after a 409 only for non-source observations",
+  "outcome": "Reported by Engram::Opus (mailbox #212 and #214; the Engram side is w-64a5f7f0a5e3). The evaluation of w-f0ca1bb7ef80 (delegation-40091648, session-7650) got HTTP 409 twice: 'the run changed after evidence basis 205'. Position 206 was an execution_observation (source_changed=true) for an unrelated doc edit, booked to w-f0ca because the session's binding had followed focus there (Engram's documented rule: a note targeting a work item establishes focus; TermAl's binding refresh behaved correctly). Agreed TermAl changes: (a) while TermAl has an evaluation in flight for item X, a source-changing turn in a session bound to X shows a visible warning; (b) on a 409 whose new feed entries are ALL non-source-changing host observations, the evaluator refreshes its evidence basis and resubmits once. Never resubmit when any new entry has source_changed=true: the verdict would be about files the evaluator never saw.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c668-7032-a387-eb4b41f2d431",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

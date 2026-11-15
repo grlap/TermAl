@@ -1,0 +1,32 @@
+{
+  "id": "01a1c784-d3fb-75a3-8846-f3867be84715",
+  "external_ref": null,
+  "title": "Reap activity guard Chrome children and remove disposable profiles",
+  "outcome": "The activity-indicator browser guard waits for owned Chrome children to exit and releases its own disposable profiles while preserving useful diagnostic evidence.",
+  "acceptance": [
+    "Normal and failure paths await the owned browser child exit with bounded hang handling, then attempt cleanup only of resolved profile paths inside this run's repository-local scratch root.",
+    "JSON/PNG/log evidence remains available; cleanup failures identify retained owned profiles and never delete another run's files.",
+    "Command documentation distinguishes visible stepped timelines, paused offscreen motion and static transcript/strip, and states runtime prerequisites accurately."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "greg-reported",
+    "performance",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

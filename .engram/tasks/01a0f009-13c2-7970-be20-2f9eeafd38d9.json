@@ -1,0 +1,39 @@
+{
+  "id": "01a0f009-13c2-7970-be20-2f9eeafd38d9",
+  "external_ref": null,
+  "title": "Mirror Greg's 2026-09-30 word on blocking findings into TermAl's standing rule: Notes and trivial Lows no longer block a landing, Medium and higher must be fixed",
+  "outcome": "TermAl's standing commit rule in CLAUDE.md and AGENTS.md says which review findings block a landing as Greg decided on 2026-09-30: Medium and higher must be fixed and reviewed again; a Low need not be fixed and may be filed for later; a Note never blocks.",
+  "acceptance": [
+    "Greg was sent the exact wording and its consequence before the landing, and no objection from him is recorded.",
+    "The Commit and push section of CLAUDE.md and AGENTS.md cites Greg's words of 2026-09-30 verbatim with their source, and states which findings block a landing, in wording that both coordinators concurred on word for word in recorded messages.",
+    "The agent-command tests pin the new wording in both files, and the two files' Commit and push sections stay identical.",
+    "The final-diff audit is recorded on the item as passed before the landing, by the coordinator who did not write the change.",
+    "The full gate passes on the exact reviewed tree, and the review pair has no outstanding finding that blocks under the rule in force when the pair runs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "instructions",
+    "widening"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "TermAl's standing commit rule in CLAUDE.md and AGENTS.md now blocks a landing only on in-scope findings of Medium or higher. A Low or a Note need not be fixed, and an unfixed Low is filed as its own item; the rule cites Greg's 2026-09-30 words with their source. /fix-bug Step 5 matches: Critical, High and Medium are fixed; a Low is filed, or fixed and re-gated and re-reviewed. An agent-command test pins the wording. Landed as bf216ee: gate test-301fd307, review round 2 with nothing of Medium or higher, (a) both coordinators concurred, (b) Greg was sent the final wording before the landing, (c) the final-diff audit passed by Engram::Fable. The acceptance evaluation passed all five criteria.",
+    "completed_at": "2026-09-30T05:57:43.122553Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

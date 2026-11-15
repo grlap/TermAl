@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3bd-7ee1-b69a-0236d5fe7edb",
+  "external_ref": "tm-1vkp",
+  "title": "Add persistent human-readable labels to workspace views",
+  "outcome": "User abandons unsuccessful bulk-tab restore and requests labels to identify saved workspaces. Add an editable label in the Workspace menu, display it in the current workspace control and browser title, and persist it on the server across restarts. Preserve stable workspace URLs and pane layouts, support clearing a label, and ensure ordinary layout autosaves cannot erase labels. Remove the uncommitted bulk-restore UI from the previous attempt; keep tm-cya7 unresolved with evidence.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Workspace labels shipped: src/main.rs:308 PATCH /api/workspaces/{id}/label on master f7db2c58. Closed by evidence.",
+  "completion": null
+}

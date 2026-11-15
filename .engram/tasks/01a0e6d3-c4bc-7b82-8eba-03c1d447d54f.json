@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4bc-7b82-8eba-03c1d447d54f",
+  "external_ref": "tm-axrx",
+  "title": "Preserve newer-origin wait replacement hints when merging an older retry",
+  "outcome": "Review7 Claude Note: requestStateResync merges a scheduled wait retry into pending options before the fresh request. An older-origin retry rearmed by an in-flight failure can overwrite pending newer-origin replacement evidence; a fresh hintless request then loses the newer hint. Normal SSE reconnect still recovers. First reproduce with origin change during an in-flight wait repair and assert preservation of the current-origin hint. Keep retired-origin adoption guards. This is separate from the main wait-ordering fix and is not a confirmed blocking defect.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

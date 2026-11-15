@@ -1,0 +1,27 @@
+{
+  "id": "01a1543f-bb5f-7742-9964-bbd25201f9c6",
+  "external_ref": null,
+  "title": "Owed batch binds of an idle session fenced after a restart wait for the 30-minute cap, because the tick never starts lazy boot recovery",
+  "outcome": "After a restart, an idle session that eager boot recovery left fenced (out of budget, deferred to the retry cap, or during an Engram outage) and that holds owed batch binds has its capped lazy boot recovery started by the owed-binds tick, or the limit is documented in docs/features/batch-full-gates.md. Today the tick skips sessions with engram_boot_recovery_pending and never starts recovery. Their members then wait for the 30-minute cap and are told \"unconfirmed\" or \"not recorded\", although they were bindable once Engram returned.",
+  "acceptance": [
+    "Owed batch binds of an idle session fenced after a restart wait for the 30-minute cap, because the tick never starts lazy boot recovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

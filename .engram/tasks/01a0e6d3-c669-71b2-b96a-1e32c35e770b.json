@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c669-71b2-b96a-1e32c35e770b",
+  "external_ref": "tm-nrao.19",
+  "title": "Validate persisted acceptance replay identity at execution boundary",
+  "outcome": "Review 7059 Low defence-in-depth proposal. Original actor/context are restored from persisted host-private argv; consider explicit bounded identity validation before spawn. Parent inspection: validate_work_read_target validates binary/path/store, NOT identity, so blindly calling it again would not address this proposal. Define actual identity constraints and malformed persisted-argument tests. No current exploit established; argv-only local trusted persistence. Keep scoped away from confirmed near-limit retry blocker in .16.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c668-7032-a387-eb4b41f2d431",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

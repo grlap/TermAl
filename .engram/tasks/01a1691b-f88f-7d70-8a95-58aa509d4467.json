@@ -1,0 +1,50 @@
+{
+  "id": "01a1691b-f88f-7d70-8a95-58aa509d4467",
+  "external_ref": null,
+  "title": "Acceptance revise accepts dropping a criterion's check binding, but the evaluator then fails that criterion for the removal",
+  "outcome": "A request to evaluate after a revision that dropped or changed a binding a failing evaluation judged is refused before any evaluator is spawned, naming the criterion, both bindings and the rule; no evaluation is wasted on it.",
+  "acceptance": [
+    "termal_evaluate_acceptance refuses a request before spawning any evaluator when a carried or newest failing evaluation judged a criterion whose binding the current contract drops or changes; the refusal names the criterion, the judged and current bindings, and the rule, no delegation is created and no evaluation is recorded. A test shows it and fails on the unchanged code.",
+    "When every judged binding is present and unchanged in the current contract, the request proceeds exactly as before, and the brief's carried-failure sentence (a revision that drops part of the outcome, or a binding, fails that criterion) is unchanged at Full and Compact detail. Tests show it.",
+    "The Carried failure paragraph of docs/features/engram-host-adapter.md documents the pre-spawn refusal and states that TermAl's rule is deliberately stricter than Engram's R11 carried-failure rule in docs/features/acceptance-evaluation.md.",
+    "The full gate passes on the landed input.",
+    "The /review-changes pair has no outstanding in-scope Medium or higher finding on the reviewed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

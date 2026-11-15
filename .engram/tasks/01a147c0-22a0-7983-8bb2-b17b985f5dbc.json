@@ -1,0 +1,28 @@
+{
+  "id": "01a147c0-22a0-7983-8bb2-b17b985f5dbc",
+  "external_ref": null,
+  "title": "The host carries ~5,700 sessions, mostly finished, inflating every full-state build and broadcast",
+  "outcome": "Finished sessions (especially completed delegation children) no longer inflate live state. They're archived or excluded from the live state projection under a documented retention rule, and stay retrievable on demand.",
+  "acceptance": [
+    "A read-only measurement note breaks down the host's sessions by kind and status (root vs delegation child; active, idle, finished or archived) and their share of the full-state snapshot bytes, on the live host count.",
+    "A documented retention rule moves unobserved quiescent finished sessions out of the live state projection (archived or hidden, still retrievable via existing history/detail routes), covered by tests that an unwatched quiescent finished child disappears from the live snapshot while its result and transcript stay readable and its parent's delegation record still resolves; a watched one stays an ordinary member until its last watch ends, then disappears the same way provided it is still quiescent.",
+    "On the same session set the full-state snapshot size drops by the measured share, recorded in a note, and cargo test --bin termal plus the UI vitest suite are green; no deletion of transcripts or results."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

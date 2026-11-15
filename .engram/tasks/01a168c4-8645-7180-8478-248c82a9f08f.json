@@ -1,0 +1,29 @@
+{
+  "id": "01a168c4-8645-7180-8478-248c82a9f08f",
+  "external_ref": null,
+  "title": "A crash can make a delegation reuse a review submission attempt number whose result slot is already taken",
+  "outcome": "A review submission attempt number is never reused across a crash: an attempt whose result was durably appended to the mailbox is discovered at boot (or before the next rearm), and a new attempt gets a number whose idempotency slot is free.",
+  "acceptance": [
+    "A regression with the write-behind persistence worker connected: attempt N+1 is rearmed and its result durably appended, the host crashes before the rearm reaches disk, and the next follow-up gets an attempt number other than N+1 (or the orphaned N+1 result is reconciled), so its own result can be published.",
+    "No result of a new attempt is answered with an earlier attempt's accepted result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "durability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,42 @@
+{
+  "id": "01a16637-ea9c-7001-907d-0d2e12f303a8",
+  "external_ref": null,
+  "title": "Gated control is unusable (Greg, 2026-10-23): repair it, then enable it in BOTH projects, with a checkable release condition",
+  "outcome": "Turn-gated Engram control is repaired so that ordinary work never stalls on it, and it is enabled again in both the TermAl and the Engram projects immediately after the repair lands. Until then the current gated-control route stays STOPPED: no enable, verification or content attempts are made on it.",
+  "acceptance": [
+    "Every repair this item lists as a prerequisite is completed: landed on master, pushed, and installed from the gated tree.",
+    "After Greg restarts TermAl on the installed build, the host API shows Engram control enabled:true and turnGatedControl:true for the TermAl project records project-6 ('TermAl 2') and project-1 (both with root C:\\github\\Personal\\TermAl) and for the Engram project record. The note records the exact responses with timestamps and project ids.",
+    "With gating enabled for the TermAl project records project-6 ('TermAl 2') and project-1, and for the Engram project, a recorded uninterrupted 30-minute observation under normal lane load (at least 5 active Termal:: or Engram:: root sessions), sampled at least once a minute from /api/state and correlated with the affected prompt/admission records, shows:\n(a) no session idle with queuePaused=true and pending>0 for more than 2 minutes without a supported disposition. An exception must identify an intentional Stop/operator pause, an explicit policy Refuse/Defer, or genuine unresolved delivery/authority with its exact retained identity, truthful typed reason and supported next action. A generic waiting/error label, an abandoned recovery, or a retry whose due time or bounded recovery window has passed does not qualify.\n(b) no 'waiting for admission' retry card on an ordinary prompt outlives its original admission window; automatic retries do not reset that window. Exhaustion produces the specified truthful disposition and supported next action.\n(c) every observed ordinary user or mailbox prompt is admitted, sent without a grant under w-a108efba750a's certified-NotStarted contract with all its guards, still making progress inside its bounded admission window, or has a supported disposition under (a), with no unexplained stall. Unknown application never becomes NotStarted, and local persistence uncertainty, retained grant or prepared/possibly-sent Begin is not bypassed to satisfy this criterion.\n(d) the record includes actual ordinary provider handoffs in both logical projects during the observation, identifies which enabled project record each belongs to, and records outcomes for both user and mailbox prompt sources. A period consisting only of stopped or unresolved heads does not establish availability.\nSamples, correlated outcome evidence and exact enabled project identities are kept under .evidence/ and summarized on this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 3,
+  "labels": [
+    "control-plane",
+    "cross-project",
+    "gated-control",
+    "greg-directive"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a1289b-cbdc-7e53-9715-ac230a24d0d8",
+    "01a1486b-afae-7192-a5f3-7635e5349aab",
+    "01a15102-d358-7642-acdd-1fcaa9b93d12",
+    "01a15431-7c90-7d63-96ca-33f4cde5413c",
+    "01a164fe-6291-7020-9a4d-06fb930cac38",
+    "01a164fe-ad7d-7622-98bb-260d2528bc15",
+    "01a164ff-dc1b-71f3-bda3-de6021f4b32f",
+    "01a16500-237d-7433-add7-9a356000735e",
+    "01a16519-1276-7c53-8bf5-a108efba750a",
+    "01a165c6-1666-75e1-95db-b9b17d9735ad"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

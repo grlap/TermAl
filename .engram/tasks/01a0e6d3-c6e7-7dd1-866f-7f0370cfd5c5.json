@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6e7-7dd1-866f-7f0370cfd5c5",
+  "external_ref": "tm-u4k8",
+  "title": "Engram turn-check tests exceed the 20 s freeze budget under direct cargo test at full parallelism",
+  "outcome": "Found during tm-winf round 7. A focused run that invoked cargo test directly (bypassing scripts/test-rust.sh, so libtest used 24 threads on a 24-logical-CPU Windows machine) failed 12 of the turn-check tests on two identical runs (test-ba3b371b..., test-55afdb57..., retained under .git/worktrees/TermAl-wt-winf-r6/review-runs). Cause: about 20 CheckedTurn tests set up Git repos and take review-freeze snapshots at once; each freeze runs 8 Git commands under the shared 20 s REVIEW_FREEZE_TIMEOUT, and in the first wave the commands before ls-files --others used about 18 s, so the check snapshot is missing, the check is withheld, and assertions read the turn's own observation. A load sample showed CPU at 24-37% with about 24 Git processes alive (one per thread) for about 40 s: blocked, not CPU-starved. One test alone passes; the documented wrapper (4 threads) is the gate contract. docs/test.md says direct cargo test is supported (without the wrapper's containment), so direct runs on many-core machines fail deterministically. Options: serialize the git-heavy CheckedTurn setup and snapshots in tests (a shared test semaphore), or document that direct runs of these tests need RUST_TEST_THREADS <= N. Do not raise the product timeout. Accept: cargo test --bin termal -- turn_checks with default threads passes on a 24-thread machine, or the limit is documented and enforced.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

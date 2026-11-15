@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7d1-7e03-ae5b-d39914d78919",
+  "external_ref": "tm-wyyy",
+  "title": "Use themed dropdowns throughout Engram settings",
+  "outcome": "Replace native Windows select popups in Engram project and acceptance settings with the existing session-list themed combobox. Preserve accessibility, disabled options and busy/recovery restrictions; add regression coverage.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

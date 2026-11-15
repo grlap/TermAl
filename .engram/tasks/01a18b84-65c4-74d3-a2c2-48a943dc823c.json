@@ -1,0 +1,38 @@
+{
+  "id": "01a18b84-65c4-74d3-a2c2-48a943dc823c",
+  "external_ref": null,
+  "title": "Make acceptance-request Candidate recovery refusals actionable without weakening authority fences",
+  "outcome": "Request-side Candidate recovery refusals explain their cause and available retry/remedy, preserve durability-boundary reporting, and safely handle already-confirmed concurrent publication only through existing exact-owner/image checks.",
+  "acceptance": [
+    "Refused request-side Candidate recovery gives cause-and-remedy wording and preserves existing pending-durability/refusal semantics without admitting unconfirmed, superseded or expired authority; any same-owner concurrent-publication handling preserves the existing exact-image/current-authority checks."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "check-credit",
+    "control-plane",
+    "request-refusal",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18b2f-32ed-7a12-8c16-c7e091c65727",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

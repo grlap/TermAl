@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6b4-71f0-9917-13be8163b87f",
+  "external_ref": "tm-r8ry.4",
+  "title": "Verify deferred activation latch across post-mount render preference changes",
+  "outcome": "Adjudicated Claude7558 Medium from final scroll review. Claimed delayed collapse of warm restored cards is not supported by current lifecycle: inactive virtualized list unmounts cards; restored true preference is present at remount and initializes isActivated=true. Do not record that specific scenario as proven. Separately DeferredHeavyContent does not latch a false->true preference transition after mount, unlike its documented monotonic-visible expectation; test same mounted wrapper false->true->false with viewport activation disabled, and extend detached warm-return coverage past measuring timers/frames. Establish whether reachable product use needs latching before modifying behavior. Preserve expansion measurement and direct-scroll authority. No executed reproduction yet; current full gate ee232913 PASS is not proof of this additional contract.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c6b2-7de1-9153-5df973f60ae2",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

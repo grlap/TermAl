@@ -1,0 +1,37 @@
+{
+  "id": "01a12e71-e85b-7041-bb09-34c2dcec2d36",
+  "external_ref": null,
+  "title": "Extract the check-notice machinery and its silent_check_outcome tests out of engram_turn_checks.rs and its test file",
+  "outcome": "The holder-notice machinery (engram_unrecorded_check_line, EngramUnendedClosure, engram_close_unended_checks, engram_late_end_line, engram_check_settlement_notices, engram_publish_check_notice) lives in its own module (for example engram_check_notices.rs), and its silent_check_outcome_* tests in their own test file, as a pure code move, so engram_turn_checks.rs and src/tests/engram_turn_checks.rs fall back below the architecture lens's size thresholds.",
+  "acceptance": [
+    "The listed notice functions and EngramUnendedClosure are moved, unchanged, to a new module with the provenance header CLAUDE.md requires, and the silent_check_outcome_* tests to a new test file; no behaviour, name or signature changes.",
+    "src/engram_turn_checks.rs is below 3000 lines and src/tests/engram_turn_checks.rs below 5000 lines after the move.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "file-size",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

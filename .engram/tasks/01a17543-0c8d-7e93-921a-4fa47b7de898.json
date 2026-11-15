@@ -1,0 +1,37 @@
+{
+  "id": "01a17543-0c8d-7e93-921a-4fa47b7de898",
+  "external_ref": null,
+  "title": "Federation security child exits before readiness with discarded startup diagnostics",
+  "outcome": "Resolve the original unexplained early child termination or an independently accepted bounded disposition, with retained diagnostic evidence; a later pass alone does not identify its cause.",
+  "acceptance": [
+    "The original test-5ad673e1-28e7-4419-ae98-0007b6cd4ddd early Disconnected failure is preserved and investigated with child startup, pipe and exit evidence or an independently concurred bounded unresolved disposition; later passing tests are not called a diagnosis.",
+    "The test-only bounded and pair-key-redacted startup transcript remains in the reviewed candidate, with an executed deliberate child-failure control demonstrating useful error evidence without secret disclosure.",
+    "The final exact-input full gate includes the pre-existing two-process security control; any recurrence is investigated using the new transcript rather than retried unchanged. Remaining original-cause uncertainty is explicit in READY and this item is not silently closed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a161d4-c882-7b71-b84c-a8af3a34d80a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

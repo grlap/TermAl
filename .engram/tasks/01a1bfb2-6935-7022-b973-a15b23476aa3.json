@@ -1,0 +1,39 @@
+{
+  "id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "external_ref": null,
+  "title": "Stage B direct prompt: primary queue, handoff receipts and compact retained identity",
+  "outcome": "Integrate the unmounted direct-prompt foundation with the existing primary queue and PromptDelivery owner, preserving durable exact identity and truthful handoff/runtime outcomes without activating live remote delivery.",
+  "acceptance": [
+    "The existing primary queue and PromptDelivery/TurnDispatch owner retain an exact direct-prompt operation association across queue insertion, content durability, provider write-ahead, positively correlated acceptance, completion, cancellation and unknown outcomes; no second lifecycle or automatic resend is introduced.",
+    "The actual owner supplies the compact-retention contract required by w-d870259bd249: original source/key/operation/digest and required history survive pruning/reload, while terminally unneeded body/evidence can retire with bounded live bytes, no TTL identity eviction or permanent lifetime prompt count.",
+    "Deterministic behavior tests cover two-store crash cuts, changed intent conflicts, duplicates/reload, old receipts, Stop/pause/revocation and authority changes at queue and final handoff cuts using real primary owner seams; schema and reader compatibility follow the current ledger.",
+    "The exact frozen candidate passes meaningful focused checks, an independent Codex/Claude review pair with no in-scope Medium or higher, and the maintained full gate before landing. Routes/facades and live delivery remain unmounted until their separately authorized later stages; no Stage E observation or grant is claimed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a161d4-c882-7b71-b84c-a8af3a34d80a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

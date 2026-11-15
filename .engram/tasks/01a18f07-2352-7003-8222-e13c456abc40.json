@@ -1,0 +1,31 @@
+{
+  "id": "01a18f07-2352-7003-8222-e13c456abc40",
+  "external_ref": null,
+  "title": "A root session's delegation wait never resumes it after the awaited delegation completes",
+  "outcome": "A wait registered by termal_resume_after_delegations wakes its root session with the fan-in prompt once its awaited delegations reach a terminal state, or reports a typed failure that the session can see. It never silently strands the session.",
+  "acceptance": [
+    "The cause of the missed resume for delegation-wait-81173fa2-7ac3-4a09-af54-7cb964e6a6ae (session-7284, delegation-993a6a15-6a32-433e-a191-230e600f2d1a, which completed at 22:01:30Z on host 9de63fcb) is identified from host state and logs, and recorded on this item",
+    "A regression test reproduces that cause, and with the fix the waiting root session receives exactly one fan-in prompt once the awaited delegation completes",
+    "When the resume cannot be dispatched, the wait reports a typed failure that the owner can read through its status, instead of staying silently pending",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "delegation-waits",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

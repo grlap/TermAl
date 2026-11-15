@@ -1,0 +1,27 @@
+{
+  "id": "01a0f3ad-a715-77a0-86a0-7797ae5cfddf",
+  "external_ref": null,
+  "title": "Test that a Claude evaluator child's real spawn path passes --strict-mcp-config, not only the argument builder",
+  "outcome": "Low from the round-2 Claude review (delegation-af9f32d5-f27e-4f72-ae00-c155e3df3029) of the evaluator tool-access change, left unfixed at landing under the Low rule. The test a_claude_evaluator_child_starts_on_the_host_mcp_configuration_alone (src/tests/evaluator_tool_access.rs) rebuilds the launch arguments in a closure from claude_cli_mcp_config_args and session_is_acceptance_evaluator_child_locked. It does not show that the real spawn sites pass the flag: the three start_turn_on_record callers in turn_dispatch.rs and the model-options spawn in session_config.rs. An edit that passes false at one site would pass every test while a Claude evaluator again loads servers from the user's, project's and local Claude settings. Assert the flag at a real dispatch site, for example through a spawn-argument capture hook or by checking the value start_turn_on_record receives when an evaluator child's queued turn is dispatched.",
+  "acceptance": [
+    "A test dispatches a queued turn for a Claude acceptance-evaluator child through the real dispatch path and observes --strict-mcp-config in the launch arguments or the flag reaching spawn_claude_runtime, and observes its absence for a reviewer child; the test fails if any spawn site passes false for the evaluator."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

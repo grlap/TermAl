@@ -1,0 +1,29 @@
+{
+  "id": "01a1ca60-807d-71d3-9dbd-81194d712676",
+  "external_ref": null,
+  "title": "Document local retirement exceptions in acceptance unknown-write recovery",
+  "outcome": "Document local retirement exceptions in acceptance unknown-write recovery",
+  "acceptance": [
+    "The adapter documentation consistently states that locally retired historical fingerprint writes remain unknown and are not resent, including None-state descriptions and immutable-argument retry guidance.",
+    "The correction preserves current SourceId replay and producer-refusal contracts and changes no runtime or authority behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "documentation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

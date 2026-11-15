@@ -1,0 +1,28 @@
+{
+  "id": "01a16b61-c484-7b91-beb5-114219f6911b",
+  "external_ref": null,
+  "title": "A superseded queue owner records a never-sent (NotStarted) Begin, including an expired one at the send boundary, as an uncertain possibly-begun grant",
+  "outcome": "When the queue owner is superseded while a Begin is still unsent (cause NotStarted, such as a guard failure, budget exhaustion, or the expired-grant check at the send boundary), the superseded-owner branch does not record that grant as uncertain or possibly begun, so no replay hold is created for a begin that provably never left the host.",
+  "acceptance": [
+    "A superseded queue owner records a never-sent (NotStarted) Begin, including an expired one at the send boundary, as an uncertain possibly-begun grant is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "admission",
+    "engram-host-adapter",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Working as designed; coordinator decision by Termal::Fable2, TermAl mailbox df007e37 #546.\n(1) It predates w-34ecbd409e5f: base 0f1ec27d src/engram_host_adapter.rs:5788 already has the superseded-owner branch's `_ => uncertain_grant_id = Some(grant_id)`.\n(2) It is redundant with the intended design. The Begin-requested mark (mark_engram_begin_requested_if_current) is set before the durable re-acknowledgement, the named-root guard and the superseded-owner check. A Cancel in that window records the grant as uncertain from the mark (dropped_engram_intent_grant / record_dropped_engram_intent) before the branch runs, so the branch's own marking changes nothing.\n(3) The consequence is bounded and tested. a_prepared_begin_acknowledged_after_owner_supersession_sends_nothing (src/tests/engram_begin_preparation_retry.rs) asserts that the old grant is kept for settlement by the next bind, then settled as never begun (session_status, the old grant's checkpoint refused, bind, evaluate, begin), and that the successor is delivered once. Nothing gets stuck; an expired grant settles the same way.\n(4) The mark must stay before the guard and the RPC: it is the durable possibly-sent proof across a Cancel or crash during transmission. A NotStarted-only tweak in the superseded branch would save nothing.\nNo code change.",
+  "completion": null
+}

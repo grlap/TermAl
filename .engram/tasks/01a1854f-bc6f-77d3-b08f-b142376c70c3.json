@@ -1,0 +1,29 @@
+{
+  "id": "01a1854f-bc6f-77d3-b08f-b142376c70c3",
+  "external_ref": null,
+  "title": "Remote test-ref runs from an independent clone are refused at registration (run directory outside the project's run directories)",
+  "outcome": "A remote runner following the test-ref procedure can launch the standard full gate on the exact test ref without a registration refusal, and the procedure text says which placement the host accepts.",
+  "acceptance": [
+    "The test-ref runner procedure (CLAUDE.md test-ref bullet and docs/test.md) states the supported placement: a fresh detached worktree of the project's registered repository on the runner host, or the host accepts an independent clone's run directory; the two no longer disagree.",
+    "A remote full gate launched exactly as the documented procedure says registers successfully on a host with the current build."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "remote-gate",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

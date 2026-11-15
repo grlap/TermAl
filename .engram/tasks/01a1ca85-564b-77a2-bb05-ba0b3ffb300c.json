@@ -1,0 +1,30 @@
+{
+  "id": "01a1ca85-564b-77a2-bb05-ba0b3ffb300c",
+  "external_ref": null,
+  "title": "Give removed-session root journal maintenance a reachable production owner",
+  "outcome": "Claim-less removed-session root journal maintenance runs through an existing bounded production owner instead of relying on an optional naming branch that cannot be funded by production control allowance.",
+  "acceptance": [
+    "A production-reachable existing lifecycle owner admits the claim-less removed-root sweep and its retained authority recovery without consuming naming's mandatory control allowance or adding a parallel registry or scheduler.",
+    "A deterministic production-configuration fixture leaves a NamingSessionRemoved journal after its naming session disappears, invokes the real owner, and observes the canonical lifecycle settlement or a retained typed refusal; no synthetic larger naming allowance or real minute wait is used.",
+    "Issued Engram calls retain the minimum operation window, fair cursor progress and current store/run/fence guards; the source review and exact-input validation cover the changed owner."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-adapter",
+    "maintenance",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

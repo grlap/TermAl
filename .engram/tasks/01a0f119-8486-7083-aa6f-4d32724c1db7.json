@@ -1,0 +1,27 @@
+{
+  "id": "01a0f119-8486-7083-aa6f-4d32724c1db7",
+  "external_ref": null,
+  "title": "Carried gates: review-round-7 Lows — same-turn ordering, sweep of unbound holders, watcher fence after run end, refused report, named-root instruction, test gaps",
+  "outcome": "Carried gates: review-round-7 Lows — same-turn ordering, sweep of unbound holders, watcher fence after run end, refused report, named-root instruction, test gaps",
+  "acceptance": [
+    "Carried gates: review-round-7 Lows — same-turn ordering, sweep of unbound holders, watcher fence after run end, refused report, named-root instruction, test gaps is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

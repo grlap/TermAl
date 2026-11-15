@@ -1,0 +1,33 @@
+{
+  "id": "01a1ca5b-8874-7481-bc15-660051882bee",
+  "external_ref": null,
+  "title": "Integrate combo54 on 11115551: edfd 5acc932b (w-d9c949e8a44e journal custody pre-index), direct child of combo53",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 5acc932b4d94dbf7c98a5d3f56e01b34848816fe (tree 3c31dfe51be6cb294842b1e7875926604ef07cec) is on origin/master, where master was moved to it by a fast-forward from 111155511aa1a4af26babe8fe6e0ee33f08e807f.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 3c31dfe5 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the whole-6 pair on 9f0a5f94 (Codex delegation cb320a0b, Claude delegation 4e97e236), which 5acc932b adopts because its contribution against 11115551 is byte-identical to 9f0a5f94's against cfc4516f (raw diff sha256 da9d0109).",
+    "The release binary built from tree 3c31dfe5 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo54 landed: master fast-forwarded 11115551 -> 5acc932b4d94dbf7c98a5d3f56e01b34848816fe (tree 3c31dfe5) and pushed at 12:06:46Z. It was gated by DL560 FULL test-053b95f9 (all stages passed; rust 7613/0/113, vitest 5093/5093; equal source ids) on test ref 46aad8de, which is now deleted. It adopts the 9f0a5f94 review pair (byte-identical contribution). Installed on Central (476c3cfa; backup termal-before-5acc932b-d120240c.exe) and DL560 (f147e29d; backup termal.bc9d71e5.bak), with no restart. Independent evaluation by Codex 17443 (delegation eea4a27d) passed 3/3.",
+    "completed_at": "2026-11-11T12:25:22.131234400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

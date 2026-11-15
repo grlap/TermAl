@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3b8-74b2-b398-36b76a54c347",
+  "external_ref": "tm-1imh",
+  "title": "Remove UI legacy fallback for remotes omitting queueProjectionHash (513018d)",
+  "outcome": "Post-audit regression introduced by commit 513018d (2026-09-22): ui/src/app-live-state-transport-events.ts:331-338 — 'Older remotes that omit the hash keep the bounded legacy fallback'. This is cross-version wire acceptance between TermAl builds, which tm-7p9z.5 ('one current TermAl-to-TermAl remote protocol') was supposed to eliminate: mismatched remotes are unsupported until upgraded via POST /api/remotes/{id}/upgrade. Remove the fallback; an older remote omitting queueProjectionHash should be a protocol break, not a heuristic fallback. Found in Kimi's no-legacy re-audit 2026-09-25 (session-7706).",
+  "acceptance": [
+    "The legacy fallback branch is removed; snapshots from remotes missing queueProjectionHash follow the normal protocol-error/resync path; cd ui && npx tsc --noEmit clean and npx vitest run green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-migrated",
+    "legacy-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

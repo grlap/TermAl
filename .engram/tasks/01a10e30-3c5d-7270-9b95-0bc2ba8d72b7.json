@@ -1,0 +1,55 @@
+{
+  "id": "01a10e30-3c5d-7270-9b95-0bc2ba8d72b7",
+  "external_ref": null,
+  "title": "The Test Runs button in the control-panel rail shows an empty square: give it a drawn icon like the other rail buttons",
+  "outcome": "The rail's Open Test Runs button shows a drawn SVG icon in the same 20x20 stroke style as the other rail buttons, instead of a text check glyph that renders as an empty square. Its label, position and behaviour are unchanged.",
+  "acceptance": [
+    "A test renders the control-panel rail with test runs available and asserts that the Open Test Runs button contains an SVG icon and no text glyph, keeping its accessible name.",
+    "The existing test that opens Test Runs from the rail button still passes.",
+    "The full gate passes on the exact reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The control-panel rail's Open Test Runs button now draws a flask SVG in the rail's 20x20 stroke style instead of a text check glyph. The rail's icon box sets font-size to 0, so the glyph had rendered as an empty square. Label, position and behaviour are unchanged; a witness checks for the drawn icon. Landed as d0f33aca (a fast-forward onto f476060e, tree fc97dd32 = the gated tree; gate test-34fd6563 passed; pair clean; evaluation 798a6926 3/3). UI deployed to ui/dist (index.html ecc05637, bundle index-YlrR5lwC.js 6b1a8926; backup index.html.a547b3e1.bak), verified as served by the live host. No restart needed; it is visible after a browser reload.",
+    "completed_at": "2026-10-06T00:08:05.591072200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

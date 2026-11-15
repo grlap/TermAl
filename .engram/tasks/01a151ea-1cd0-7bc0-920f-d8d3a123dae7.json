@@ -1,0 +1,27 @@
+{
+  "id": "01a151ea-1cd0-7bc0-920f-d8d3a123dae7",
+  "external_ref": null,
+  "title": "A carried batch gate's launch reads held claims synchronously on the command-finished recorder path, for up to six seconds",
+  "outcome": "Recording a carried batch gate's launch does not hold up the session's later runtime events while Engram's held claims are read. Either the read moves off the recorder thread, or members are recorded with the fences of their root entries and checked at settlement. Each member is still recorded with the fence its claim had at the launch, or told why it was not.",
+  "acceptance": [
+    "A carried batch gate's launch reads held claims synchronously on the command-finished recorder path, for up to six seconds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

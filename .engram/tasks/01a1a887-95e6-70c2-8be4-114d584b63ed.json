@@ -1,0 +1,29 @@
+{
+  "id": "01a1a887-95e6-70c2-8be4-114d584b63ed",
+  "external_ref": null,
+  "title": "Reject non-drive extended Windows paths in cleanup-report retention containment",
+  "outcome": "The read-only cleanup report rejects or leaves non-matching Windows namespace spellings whose extended prefix is not followed by a drive-absolute path, rather than resolving them relative to cwd.",
+  "acceptance": [
+    "Retention validation rejects non-drive extended namespace forms including \\\\?\\Volume{...}, \\\\?\\GLOBALROOT and corresponding //?/ spellings, while supported drive-absolute forms and ordinary repository-relative paths retain their documented meaning.",
+    "Focused regression tests cover these forms and show that they cannot create a repository-contained retention solely because the report runs inside the checkout."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup-report",
+    "review-followup",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

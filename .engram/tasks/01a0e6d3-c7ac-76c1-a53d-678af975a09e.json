@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7ac-76c1-a53d-678af975a09e",
+  "external_ref": "tm-w1e",
+  "title": "Complete remaining OpenCode live lifecycle smoke",
+  "outcome": "The real OpenCode 1.18.8 tm-6ty smoke proved readiness, session spawn, streaming, external-session continuity, live model options, and the TermAl MCP bridge. Two lifecycle paths remain unverified against the real binary: (1) stop while a genuinely long prompt is still streaming, proving session/cancel plus bounded settlement; and (2) restart TermAl with a persisted OpenCode externalSessionId, proving session/resume preserves the same conversation. Unit coverage exists, and no defect is currently observed; this task records empirical verification rather than a known bug.",
+  "acceptance": [
+    "A real OpenCode prompt is canceled while still active and settles within the documented contract with its external session id retained; after a real TermAl restart, the same persisted OpenCode session resumes and answers a follow-up without replacement continuity."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

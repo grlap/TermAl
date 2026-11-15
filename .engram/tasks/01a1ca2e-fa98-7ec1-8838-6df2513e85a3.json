@@ -1,0 +1,33 @@
+{
+  "id": "01a1ca2e-fa98-7ec1-8838-6df2513e85a3",
+  "external_ref": null,
+  "title": "Integrate combo53 on cff10811: 8e1f 11115551 (w-5c92 30 fps activity animation), direct child of combo52",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 111155511aa1a4af26babe8fe6e0ee33f08e807f (tree ed1cf7f51bb4be209bdaafda2bb146fbc208c5b5) is on origin/master, where master was moved to it by a fast-forward from cff10811ff290762688a776eb35a8f1699ccbbd5.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is ed1cf7f5 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the whole-6 pair on bbfff696 (Codex delegation 702d577c, Claude delegation 01e426dc), which 11115551 adopts because its contribution against cff10811 is byte-identical to bbfff696's against cfc4516f (raw diff sha256 6803f7cf).",
+    "The release binary built from tree ed1cf7f5 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo53 landed: master fast-forwarded cff10811 -> 111155511aa1a4af26babe8fe6e0ee33f08e807f (tree ed1cf7f5) and pushed at 11:25:24Z. It was gated by DL560 FULL test-70932cbd (all stages passed, equal source ids) on test ref dac5625a, which is now deleted. It adopts the bbfff696 review pair (byte-identical contribution). Installed on DL560 and Central; both binaries are byte-identical to the prior build because the change is UI-only, with backups kept aside and no restart. Independent evaluation by Codex 17434 (delegation b569a1e8) passed 3/3.",
+    "completed_at": "2026-11-11T11:38:34.042933900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

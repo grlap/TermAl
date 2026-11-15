@@ -1,0 +1,28 @@
+{
+  "id": "01a18504-25f8-7fb3-b7d4-2765bfc64599",
+  "external_ref": null,
+  "title": "Extract the read-only Bash quote-aware splitter and pattern-reader eligibility from claude.rs (2797 lines, near the 3000 threshold)",
+  "outcome": "claude_bash_top_level_segments, claude_bash_segment_may_hold_quoted_separator, claude_bash_tokens_read_patterns, claude_git_log_separators_are_grep_patterns and claude_bash_strip_stderr_discard move from src/claude.rs into their own module. The move is pure, with a provenance header. claude.rs falls well below the 3000-line threshold for Rust modules.",
+  "acceptance": [
+    "Extract the read-only Bash quote-aware splitter and pattern-reader eligibility from claude.rs (2797 lines, near the 3000 threshold) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "file-size",
+    "read-only-checker",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

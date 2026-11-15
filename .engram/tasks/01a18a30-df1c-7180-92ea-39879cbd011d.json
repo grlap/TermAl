@@ -1,0 +1,28 @@
+{
+  "id": "01a18a30-df1c-7180-92ea-39879cbd011d",
+  "external_ref": null,
+  "title": "Remote full gates doc describes a recognized check-record import that does not exist",
+  "outcome": "docs/features/remote-full-gates.md states accurately that no typed importer of a remote run as a recognized check record exists today, that remote full gates are evidence under the evidence-only procedure, and that landing gates and test-bound acceptance credit come from the evaluating host's own recorded checks; the doc names the missing capability as future work instead of describing it as available.",
+  "acceptance": [
+    "Remote full gates doc describes a recognized check-record import that does not exist is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "docs",
+    "remote-gates"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

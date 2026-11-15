@@ -1,0 +1,28 @@
+{
+  "id": "01a105d9-342c-7b82-a59a-9059ead2ae16",
+  "external_ref": null,
+  "title": "Qualify acceptance ordinal-key and resubmit-refresh guidance by evaluator mode",
+  "outcome": "Documentation and tool guidance distinguish canonical IndependentSession ordinal keys and automatic refresh from SubAgent delegation-ID keys and terminal resubmit refusals.",
+  "acceptance": [
+    "Qualify acceptance ordinal-key and resubmit-refresh guidance by evaluator mode is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

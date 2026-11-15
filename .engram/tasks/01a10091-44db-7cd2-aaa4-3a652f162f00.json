@@ -1,0 +1,53 @@
+{
+  "id": "01a10091-44db-7cd2-aaa4-3a652f162f00",
+  "external_ref": null,
+  "title": "Budget-clock migration B1: engram_host_adapter.rs first region (to about line 4100)",
+  "outcome": "An audited migration, through the state-owned clock boundary from slice 1, of the fixtures in src/tests/engram_host_adapter.rs up to about line 4100. Navigation counts at 593c783: 16 enable_test_project_engram calls, including the budget-isolation wrapper at :1521, and direct deadline_ms sites :2394, :3742, :3815 and :4103. Most of the budget and dispatch expiry tests are here. For each converted test, the batch lists its deadline, elapsed and wait sources and its assertions, adds focused boundary controls, and keeps the separate negative scheduling and timeout assertions. It inventories the transitive test callers of every changed shared fixture, including indirect clock selection and existing time hooks. A full run validates the batch; it does not classify it. No blanket Real declarations, no weakened expectations, no production change. The decomposition is note 7c38dafc37c5410391ab42881615461a on the parent, with Architect2's f842da36050949b3ba884f5884c64766. Criteria are to be agreed before this batch starts.",
+  "acceptance": [
+    "Each test in src/tests/engram_host_adapter.rs's B1 region reaches an Engram budget through enable_test_project_engram (including the budget-isolation wrapper) or a direct deadline_ms site. Each such test chooses its clock through the slice-1 boundary before Engram is enabled and before any target or worker snapshot: either the shared scripted clock, or a declared Real with its reason in a comment. The region is the start of the file up to a named boundary test recorded in the inventory note at the freeze. The region contains at least every site this item's outcome names at 593c783 (the 16 enable_test_project_engram calls including the wrapper at :1521, and the direct deadline_ms sites :2394, :3742, :3815 and :4103), and the inventory note maps each to its position at the batch's base.",
+    "A note lists, for each converted test, its deadline, elapsed and wait sources and its assertions. A note inventories the transitive test callers of every shared fixture the batch changes, including indirect clock selection and existing time hooks (for example test_engram_dispatch_budget).",
+    "Every converted expiry test does one of two things. Either it advances the same scripted clock across the causal boundary, with an unadvanced positive control asserted in that test, or it declares Real. The separate negative scheduling and timeout assertions are kept, and no expectation is weakened.",
+    "No blanket Real declarations. No production change. No change to enable_test_project_engram's default, since the shared-default flip belongs to FINAL. Edits stay within the B1 region and the fixtures it owns.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a10069-95fe-7623-a4e5-8f9988de4cb3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "B1 landed in train 25. The first region of src/tests/engram_host_adapter.rs now chooses its budget clock explicitly: 16 ordering tests on the shared scripted clock; the two expiry tests advance the clock past the dispatch budget, each with an unadvanced positive control; the live end-to-end test declares Real; and six settings-only tests assert the budget clock unread. Branch commit da2b6e9 was merged onto 98ff008 as landing d6b9442 (octopus with 5f23b12), under integration gate rerun test-e7aebc3d and integration pair Codex 458afba7 / Claude e9c93dd4. Acceptance evaluation fb3236cf passed 5/5.",
+    "completed_at": "2026-10-03T15:57:07.571124500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

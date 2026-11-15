@@ -1,0 +1,37 @@
+{
+  "id": "01a1a242-50a6-7291-b3f7-c7e344197d8e",
+  "external_ref": null,
+  "title": "Runtime closing report for a worktree whose content basis is permanently refused (e.g. gitlinks) is retained and retried instead of being settled with a reason",
+  "outcome": "When the closing source of a turn cannot ever be measured because the basis is refused definitively, not transiently, the runtime closing delivery is settled once. It is delivered with an explicit unmeasured-source reason, or retired with that reason. It is not kept and retried indefinitely. Transient measurement failures keep today's retry.",
+  "acceptance": [
+    "A definitive content-basis refusal (for example a gitlink without submodule support, or a Git filter or LFS) at closing settles the runtime closing delivery once, with the refusal reason recorded and visible; it is not retried on later turns.",
+    "A transient measurement failure (for example a deadline or a racy capture) keeps the existing retained-and-retried behaviour; tests distinguish the two cases.",
+    "The local Test Runs row and the declared artifact verdict are unchanged in both cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "declared-tests",
+    "engram-host-adapter",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed and pushed on master as5e1fd9a4588aae9bf1109758a1368c21cc3f7a51. Definitive closing-source refusals settle once with their original visible/durable reason; transient absence retains retries; local Test Runs and declared artifact verdicts are unchanged. Reviewed implementation/tests match37503a70; historical Windows native focused31 and owner final Windows fullgate passed, no outstandingMedium+. Optional named-root filesystem-swap Low remains open separately.",
+    "completed_at": "2026-11-04T12:10:31.761164400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

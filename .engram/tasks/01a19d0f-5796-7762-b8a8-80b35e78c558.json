@@ -1,0 +1,30 @@
+{
+  "id": "01a19d0f-5796-7762-b8a8-80b35e78c558",
+  "external_ref": null,
+  "title": "Make the federation EOF liveness witness explicitly half-close its control socket",
+  "outcome": "The EOF witness establishes a graceful write-half shutdown while retaining the socket until peer EOF/withdrawal, without weakening diagnostic classification or owner fences.",
+  "acceptance": [
+    "Keep the original lease fencing, zero availability, stage=control, reason=controlEof and failure-counter assertions; make the EOF stimulus explicit rather than relying on dropping a TCP socket.",
+    "Discriminate controlled write-half shutdown with retained socket from abortive/drop transport behavior; preserve product connectionReset→controlReadIo distinction.",
+    "Record exact-input focused validation and review before landing; preserve original c9d619a1 failure and source-only diagnosis provenance."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "nondeterminism",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

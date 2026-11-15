@@ -1,0 +1,24 @@
+{
+  "id": "01a1bf5b-64fc-7f03-b6e4-1a0b4bc34500",
+  "external_ref": null,
+  "title": "Before mounting prompt routes: compare full target identity in the central placement check and cover the untested operator surface",
+  "outcome": "Before the prompt routes are mounted: federation_prompt_source_placement_locked compares creation id as well as host and session (src/federation_prompt_policy_current.rs:227); behaviour tests cover GET prompt-permissions, confirm-revocation, the GET references route, nextAfter paging and the 16 KiB page bound; read_remote_prompt_source_operation is tested or removed; the scope check stops walking all sessions (line 286). Found by review of combo25, unreachable while routes stay unmounted.",
+  "acceptance": [
+    "Before mounting prompt routes: compare full target identity in the central placement check and cover the untested operator surface is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

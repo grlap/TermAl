@@ -1,0 +1,28 @@
+{
+  "id": "01a16826-be4c-71c2-a59d-b543eea3e991",
+  "external_ref": null,
+  "title": "Describe and type the API recovery view for sessions excluded by Engram containment",
+  "outcome": "The engramControlRecovery API projection has a matching optional TypeScript contract and an explicit documented UI presentation decision.",
+  "acceptance": [
+    "Describe and type the API recovery view for sessions excluded by Engram containment is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "api-contract",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

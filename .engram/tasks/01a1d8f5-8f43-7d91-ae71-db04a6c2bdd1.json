@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8f5-8f43-7d91-ae71-db04a6c2bdd1",
+  "external_ref": null,
+  "title": "Assert exact artifact and original outcomes in positive retired-check disposition coverage",
+  "outcome": "Positive disposition tests distinguish artifactOutcome unknown from immutable original verification outcome and receipt outcome through parsed disclosure, rather than prompt substrings.",
+  "acceptance": [
+    "Passed, failed and missing-artifact cases assert the exact parsed artifactOutcome and originalVerification.run.outcome values independently.",
+    "The original registration, acknowledgement, verification-body and no-credit assertions remain strict and observable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d595-9e1d-76d0-9955-2ecb0cb4d6e6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

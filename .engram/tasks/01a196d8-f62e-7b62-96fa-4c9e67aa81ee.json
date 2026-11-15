@@ -1,0 +1,25 @@
+{
+  "id": "01a196d8-f62e-7b62-96fa-4c9e67aa81ee",
+  "external_ref": null,
+  "title": "Test-ref flow: the review-freeze fingerprint hashes HEAD, so a test commit of the same tree never reproduces it",
+  "outcome": "The test-ref rule and its dispatch packets state an identity check that a test-ref gate can actually meet. The check is tree-id equality plus the runner's own fingerprint matching before and after its run. A cross-commit fingerprint equality is never required when the fingerprint binds HEAD.",
+  "acceptance": [
+    "docs/test.md (or the test-ref section it points to) states which fingerprint names the ref and which checks bind the runner's input identity, and notes that scripts/review-freeze-fingerprint.mjs includes HEAD, so a detached test commit of the same tree has a different fingerprint.",
+    "The packet template or guidance that integration owners use for test-ref dispatch asks for tree-id equality and the runner's own before/after fingerprint equality, not equality with the reviewer's fingerprint."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

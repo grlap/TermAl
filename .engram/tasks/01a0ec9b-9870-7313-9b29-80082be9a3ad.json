@@ -1,0 +1,28 @@
+{
+  "id": "01a0ec9b-9870-7313-9b29-80082be9a3ad",
+  "external_ref": null,
+  "title": "An acceptance evaluation requested in the turn that carries a credited check is always overtaken by that check",
+  "outcome": "termal_evaluate_acceptance never spends an evaluator on a basis that a check already run in the caller's turn will overtake: either the host records the turn's pending checks before it takes the evaluation's basis, or it refuses the request up front and names the pending check and the turn to request in.",
+  "acceptance": [
+    "An acceptance evaluation requested in the turn that carries a credited check is always overtaken by that check is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

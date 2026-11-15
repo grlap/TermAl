@@ -1,0 +1,29 @@
+{
+  "id": "01a11cff-74c2-7701-8de4-2f252feb7c04",
+  "external_ref": null,
+  "title": "The session UI keeps showing \"Authorization is held …\" after the server has no retained prompt; a manual refresh clears it",
+  "outcome": "The session view shows a held-authorization label only while the server actually holds a retained prompt, and clears it without a manual refresh once the server state changes.",
+  "acceptance": [
+    "The cause is classified with evidence: whether the label came from a stale client projection (a missed update) or from the generic fallback being applied to a preview that is not a hold.",
+    "The label appears only when the server state holds a retained prompt and clears on the next state update without a manual refresh; a UI test drives a held then released session and asserts the label's appearance and removal, and that a non-hold preview never shows the hold wording."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "session-status",
+    "stale-projection",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1518c-17b8-7540-ab29-3ba3f6d3aee4",
+  "external_ref": null,
+  "title": "Test-run evidence never settles a real checkpoint receipt: its record-id check accepts only 64-hex ids, not Engram's 32-hex verification ids",
+  "outcome": "settle_test_run_verification_receipt (src/test_run_evidence.rs) accepts the verification record ids Engram actually mints (32 lowercase hex digits, as is_engram_record_id accepts; 64 for older ids), so a test run's evidence association records its verification record id and the restart-risk projection clears as designed; a regression uses a 32-hex receipt.",
+  "acceptance": [
+    "settle_test_run_verification_receipt_locked validates the receipt checkpoint id and every verification record id with is_engram_record_id (32 or 64 lowercase hex); the launcher expectedFingerprint keeps its 64-hex SHA-256 validator; every other receipt and association predicate is unchanged.",
+    "Deterministic tests cover 32/32, mixed and legacy-64 settlement, settled-id survival across reload and projection, refusal of malformed, duplicate and mismatched receipts, and an unchanged fingerprint rule; they fail at master 4200a0fc and pass on the fix.",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding.",
+    "The fix is committed on master and installed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a11107-b141-71d0-b3e5-5c7adfd6fdb4",
+  "external_ref": null,
+  "title": "Null-redirect strip's start boundary ignores quotes: `'x'2>/dev/null` is stripped though bash reads a real redirection (target still /dev/null)",
+  "outcome": "Null-redirect strip's start boundary ignores quotes: `'x'2>/dev/null` is stripped though bash reads a real redirection (target still /dev/null)",
+  "acceptance": [
+    "Null-redirect strip's start boundary ignores quotes: `'x'2>/dev/null` is stripped though bash reads a real redirection (target still /dev/null) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "claude",
+    "read-only-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

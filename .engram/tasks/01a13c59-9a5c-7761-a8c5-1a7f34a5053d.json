@@ -1,0 +1,28 @@
+{
+  "id": "01a13c59-9a5c-7761-a8c5-1a7f34a5053d",
+  "external_ref": null,
+  "title": "Coordination can stall silently when every session waits on a message nobody is due to send",
+  "outcome": "TermAl work does not sit idle for long stretches because every session is waiting on a message that no session is due to send; such a stall is either prevented or surfaced to the coordinator within a bounded time.",
+  "acceptance": [
+    "Coordination can stall silently when every session waits on a message nobody is due to send is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "coordination",
+    "incident"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10d4d-90fb-7472-a635-5043851f081f",
+  "disposal_reason": "Duplicate. The product question (a wake for coordinators when every session waits on a message nobody is due to send) is already designed and parked as w-5043851f081f (registered wait conditions). The 2026-10-14 20:58-21:32Z incident is recorded there by Sol-a7bb (note 7c8bda99). The protocol mitigation is in force (memory coordinator-silent-worker-check, revision 5). Closed under Greg's 2026-10-15 net-reduction directive (Advisor #808); the evidence is this item's own note 43c8b767.",
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a19b09-a76c-70f1-9e29-43f00f77c160",
+  "external_ref": null,
+  "title": "With Engram control OFF, session removal is still refused by control_settlement_unconfirmed",
+  "outcome": "Under positive Engram control OFF, a stopped or idle session that holds retained old control state (retained head, unconfirmed checkpoint debt) can be removed by its operator; old unknown-outcome records stay preserved as data and never block removal.",
+  "acceptance": [
+    "A source-cited diagnosis names the exact removal guard path that returns control_settlement_unconfirmed for a positive-OFF session on build 4133967c, and why the w-ba8d session-removal narrowing did not cover it",
+    "With Engram control OFF, removing a session that holds a retained head and unconfirmed checkpoint debt succeeds without Resume, settlement or any other recovery step, shown by a test driving such a session",
+    "Removal preserves old unknown-outcome operation records and their evidence as data (no erasure of historical evidence), shown by the same or a companion test",
+    "Behaviour with control ON is unchanged unless w-3fe8f4472e5d has already deleted the guard, in which case the fix is folded into that removal and recorded here",
+    "Runtime evidence after install: Greg can remove the affected stopped session (reported: Engram::Coder session-8581) on the running build"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "No longer needed, on Greg's words (Asistant 588693a8 #1039): 'Jak usuwam sesje to razem z delegacjami. Nie chce jakiejs historii.', with instruction to close it per the facts. Facts: the removal guard was physically deleted in 87f49ed0, and removing session-8581 on the running 2e03d1a9 build succeeded at 2026-11-08T23:12:31Z with no refusal, by HTTP on Greg's word, not by Greg in the UI. That removal also deleted 633 further sessions in its delegation tree (634 in persist tick 2004), which Greg says is what he expects. Not closed as done: this item's two test-bound criteria were not verified here, so nothing is claimed as tested. No recovery was attempted, and the live store was not opened or copied.",
+  "completion": null
+}

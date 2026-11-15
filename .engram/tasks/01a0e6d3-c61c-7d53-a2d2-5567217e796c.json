@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-5567217e796c",
+  "external_ref": "tm-m6r1.2",
+  "title": "Work reads: prevent abandoned CLI requests from starving the current view",
+  "outcome": "Round-1 Claude Medium, work_visualizer.rs:224: the two process-wide semaphore permits move into blocking CLI reads and remain until exit even after client abort. Rapid A/B/C project switches, details reads or multiple windows can get 429 while obsolete reads run up to the 6-second deadline. Source-inspection finding, not a live reproduction. Distinct from doctor concurrency tm-kwu8 and dispatch work-binding latency tm-pl7k. Reproduce under real HTTP cancellation semantics; choose cancellation ownership, bounded admission waiting, or an explicitly bounded retry policy without unbounded queued processes. Transport helper reuse, post-exit pipe cleanup and misleading doctor diagnostics may be addressed in the same path if warranted.",
+  "acceptance": [
+    "Deterministic slow-CLI/HTTP regression covering quick project switches and current request recovery; demonstrate bounded process/reader ownership and request latency; genuine overload remains explicit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

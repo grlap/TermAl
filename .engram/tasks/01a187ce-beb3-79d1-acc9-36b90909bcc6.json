@@ -1,0 +1,27 @@
+{
+  "id": "01a187ce-beb3-79d1-acc9-36b90909bcc6",
+  "external_ref": null,
+  "title": "Attach coordinated severity adjectives to their finding noun in summary diagnostics",
+  "outcome": "For ordinary child summary diagnostics, decide and implement how coordinated severity adjectives such as 'Found Critical and Low issues.' and 'Found High- and Low-severity issues.' attach to the following finding noun. Preserve diagnostic-only authority, explicit findings, AsBefore recovery, and the closed CLEAN contract. Add targeted controls for the intended highest qualifying severity.",
+  "acceptance": [
+    "Attach coordinated severity adjectives to their finding noun in summary diagnostics is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c509-74e2-815c-752a2a221fc3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

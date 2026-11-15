@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c551-7741-8fef-96c178a44008",
+  "external_ref": "tm-kxku",
+  "title": "Decouple Engram base MCP/context from opt-in turn-gated control",
+  "outcome": "Implement Greg's approved two-tier Engram product model after explicit go. BASE: every declared and host-authorized project receives the injected Engram MCP server and a SessionStart/PostCompact context nudge from engram work next, independent of control enforcement. PREMIUM: existing bind/evaluate/begin/checkpoint withholding remains behind a separate per-project Turn-gated control switch, default off. Current integration must remain unchanged while this item is on hold; do not enable Phoenix or alter project settings before approval.",
+  "acceptance": [
+    "After explicit approval: declared+authorized projects receive Engram MCP regardless of premium control; SessionStart and PostCompact inject engram work next context with home, actor termal, session id and grant supplied only through the host environment; the settings UI separates derived Engram base enablement from a default-off Turn-gated control toggle; control-off sessions never bind or withhold; existing control E2E remains the premium test; focused and full quality gates pass; TermAl and Phoenix base activation is performed only when Greg explicitly requests it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

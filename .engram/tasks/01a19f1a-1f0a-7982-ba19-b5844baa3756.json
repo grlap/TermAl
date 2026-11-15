@@ -1,0 +1,27 @@
+{
+  "id": "01a19f1a-1f0a-7982-ba19-b5844baa3756",
+  "external_ref": null,
+  "title": "Test launcher ends a run as FAIL/UNRUN when registration returns 503 durability_pending, although the registration later commits",
+  "outcome": "When run registration returns 503 durability_pending ('may still commit'), the launcher resolves the original registration itself, re-sending the unchanged request with the same key and digest within its budget, and continues the run once registration is confirmed. It reports a definitive refusal only when the registration is definitively not committed. Tests are never left unexecuted behind a registration that succeeded.",
+  "acceptance": [
+    "Test launcher ends a run as FAIL/UNRUN when registration returns 503 durability_pending, although the registration later commits is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

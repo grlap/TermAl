@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7e8-7040-9ab0-37cdc2ec4574",
+  "external_ref": "tm-xx3",
+  "title": "Coalescing a parked Codex prompt silently discards a user prompt that is already in the transcript",
+  "outcome": "Round-7 review (Claude N1). Not a regression — the old superseded-waiter path dropped it too — but the parking rule makes it a DELIBERATE design point, so it should be a decision, not an accident.\n\nsrc/codex.rs:904-917: when a second prompt arrives during an in-flight thread setup, it REPLACES the one parked on the setup. The first prompt never reaches Codex. But its Message::Text was already pushed to the session and its turn already 'started' (src/turn_dispatch.rs:362-371).\n\nUser-visible result: their message sits in the transcript with no answer, no error, and no retry. The only trace is an eprintln! on stderr.\n\nOPTIONS: (a) fail that turn with a visible error, or (b) re-queue the superseded prompt onto queued_prompts so it runs after the setup completes. (b) is probably right — the user typed it, they meant it.\n\nRelated: tm-3nd (parked prompt has no independent timeout / no 'waiting for thread setup' affordance) — same UX surface, different mechanism.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

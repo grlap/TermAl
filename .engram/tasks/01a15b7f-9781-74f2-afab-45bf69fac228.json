@@ -1,0 +1,37 @@
+{
+  "id": "01a15b7f-9781-74f2-afab-45bf69fac228",
+  "external_ref": null,
+  "title": "Commit rule: a landing-only acceptance criterion must not block a fully reviewed, gated and evaluated changeset (twin of Engram w-f2c3ec2de83c)",
+  "outcome": "TermAl's commit rule treats a criterion that only the landing itself can satisfy (committed, pushed, on master or installed) as carried for condition 3, under the exact twin wording agreed with Engram, landed only with Greg's verbatim approval and a passed final-diff audit.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md each replace the line \"3. The tasks carry the evidence needed to close them.\" with exactly the agreed twin text (Engram w-f2c3ec2de83c note 342cc101, TermAl Fable2 #4238), and nothing else in either file changes.",
+    "Greg's verbatim approval of this exact wording, with its source, is recorded on this item before the landing; both coordinators' concurrence is recorded in this item's notes; and the final-diff audit that /review-changes requires is recorded on the item as passed and names the reviewed input fingerprint.",
+    "The Markdown-only checks (link check and the AGENTS/CLAUDE identity check) pass, as a host-recorded check, on the exact frozen input that lands (freeze a0b2f32a4a2ccfff5aa68bc489c0f6b470e566f624f881243987d505375641ae, tree 1fe3e7d9607b75f2e30d7f83075ad09018f1b7c2)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "authority-policy",
+    "docs",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The twin condition-3 wording landed in CLAUDE.md and AGENTS.md. A criterion that only the landing itself can satisfy now counts as carried when conditions 1 and 2 hold and an independent evaluation of the frozen tree passes every other criterion; the item then completes after a post-landing evaluation. The landed commit is 4eb9b914 (tree 1fe3e7d9, parent 52252238), pushed by Opus2 at 02:38:37Z as a fast-forward and verified with ls-remote. The landing passed all three authority-text conditions:\n- (a) both coordinators concurred;\n- (b) Greg was sent the wording and gave his verbatim word, \"Tak. Potwierdzam. Tak samo ma działać termal.\";\n- (c) the final-diff audit by Engram::Fable passed on a0b2f32a, checker-bracketed.\nIt also had the clean review pair r1, the full gate test-1b29a64e, the Markdown check test-f37814fb, and evaluation c7b4e233, 3/3. The change is docs-only, so running sessions need no restart.",
+    "completed_at": "2026-10-21T02:39:21.050775Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

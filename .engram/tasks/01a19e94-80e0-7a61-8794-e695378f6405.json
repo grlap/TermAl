@@ -1,0 +1,32 @@
+{
+  "id": "01a19e94-80e0-7a61-8794-e695378f6405",
+  "external_ref": null,
+  "title": "Instruction change (TermAl and Engram): Greg's word relayed verbatim by Engram::Asistant carries commit/push authority without re-typing in the acting session",
+  "outcome": "AGENTS.md and CLAUDE.md in TermAl, and the matching Engram instructions, say that a decision Greg states in the Engram::Asistant session (or the session he names), relayed verbatim with its source by mailbox, carries the same commit, push and landing authority as his word typed in the acting session. Agents no longer send Greg to the executing session to repeat a decision. The change landed through the authority-file procedure.",
+  "acceptance": [
+    "TermAl AGENTS.md and CLAUDE.md contain the exact approved relay paragraph from b702e562, with no other authority-text changes.",
+    "agent_commands pins the replacement rule and its focused regression passes on the final candidate.",
+    "The item records both coordinators' concurrence, Greg's sourced word and delivery of exact wording/consequence, and Engram::Fable's final-diff audit PASS on the exact landing input.",
+    "The final input has no outstanding in-scope Medium-or-higher review finding, passes FULL, and is landed/pushed to master by the integration owner, with matching Engram instruction change linked by its recorded counterpart evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "authority",
+    "cross-project",
+    "greg-directed",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

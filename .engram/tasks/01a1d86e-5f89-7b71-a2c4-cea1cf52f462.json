@@ -1,0 +1,33 @@
+{
+  "id": "01a1d86e-5f89-7b71-a2c4-cea1cf52f462",
+  "external_ref": null,
+  "title": "Discriminate source warning-stderr refusal reasons and prevent payload echo in tests",
+  "outcome": "Behavioral source-warning refusal tests distinguish the stderr gate and verify private or control payloads never appear in the refusal diagnostic.",
+  "acceptance": [
+    "Unsupported warning-stderr cases assert the stderr-specific refusal reason and absence of private content, BOM and terminal escapes from errors.",
+    "An exit-1 well-formed unavailable envelope plus a supported warning distinguishes the status-0-only warning gate; the completed-envelope exit control does not stand in for this case.",
+    "Existing valid-warning admission and malformed-envelope refusal behavior remains covered without tests of repository Markdown or instruction text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "greg-directed",
+    "review-follow-up",
+    "source-identity",
+    "test-launcher",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d825-e07c-7d33-80df-e879e6155b1d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

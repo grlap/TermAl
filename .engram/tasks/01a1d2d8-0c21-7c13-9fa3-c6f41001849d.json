@@ -1,0 +1,28 @@
+{
+  "id": "01a1d2d8-0c21-7c13-9fa3-c6f41001849d",
+  "external_ref": null,
+  "title": "Integrate combo81 on 8ed9af6a: c593 4d5ac4b4 (w-a994 keep Work lists and details reachable in short panes, byte-identical carry of 6b243f54)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 4d5ac4b45815302df30f80525da9c943b701b301 (tree 4bba70ba43c6fff6484f57a4cc318dcc3c2db0ce) is on origin/master, where master was moved to it by a fast-forward from 8ed9af6afe36ecb8976a197ab4f4dc1c66c575f1.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 4bba70ba passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 8ed9af6a is byte-identical (same 3 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 6b243f54's contribution against 53e57b9c, which the R2 pair Codex session 17709 and Claude session 17710 reviewed with no Medium or higher finding (its optional Low filed as w-79eb730068a9), and the candidate adopts that pair.",
+    "The release binary built from tree 4bba70ba was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1a53e-d89e-7d72-ba47-6e736b71555b",
+  "external_ref": null,
+  "title": "Decide and document declared-test recognition for Windows Codex PowerShell 5.1 workers",
+  "outcome": "The declared-test contract explicitly states the supported behavior for Windows Codex workers using powershell.exe, with source and product-envelope evidence before any recognizer expansion. Unsupported wrappers remain fail-closed.",
+  "acceptance": [
+    "Record source-cited current wrapper recognition and a real product worker envelope when an authorized installed-build proof is available; distinguish missing observation from a failed test and from verification credit.",
+    "Document the PowerShell 5.1 limitation or implement a separately reviewed narrow route with positive and refusal tests, preserving exact declared-command and argument semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "declared-tests",
+    "delegation",
+    "host-feedback",
+    "review-followup",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a34d-da7b-7ee2-9210-27b684638221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

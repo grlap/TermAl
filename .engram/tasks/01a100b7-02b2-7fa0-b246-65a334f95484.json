@@ -1,0 +1,28 @@
+{
+  "id": "01a100b7-02b2-7fa0-b246-65a334f95484",
+  "external_ref": null,
+  "title": "Decide: should TermAl's named_root_sighting_read parser refuse any answer field it does not know (exact re-serialize), or tolerate additive fields?",
+  "outcome": "parse_engram_named_root_sighting_read (src/acceptance_named_root_sighting.rs, landing with w-837ea1a08c4e) accepts Engram's answer only when it re-serializes to exactly the value received. Serde ignores deny_unknown_fields inside internally tagged variants, which is why the check exists. As a result, any field Engram adds to named_root_sighting_read, even an additive one under the same schema_version, makes every TermAl acceptance evaluation refuse as unknown until TermAl ships a matching change. That fails closed, but Engram lands several times a day. An architect decides between two options:\n(a) Keep the strict check, plus a cross-project coordination rule: Engram bumps schema_version, or warns TermAl, before changing the result's field set.\n(b) Tolerate unknown additive fields while still validating every known field, the tags and the version.\nThe decision, and any code change, is recorded here; the change itself is a separate slice.",
+  "acceptance": [
+    "Decide: should TermAl's named_root_sighting_read parser refuse any answer field it does not know (exact re-serialize), or tolerate additive fields? is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "architecture-decision",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

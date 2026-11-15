@@ -1,0 +1,30 @@
+{
+  "id": "01a1d253-0aff-7510-b1b8-7952cb17ab3c",
+  "external_ref": null,
+  "title": "Cover root-rebound refusal priority and retained-registration edge cases",
+  "outcome": "Behavioral tests pin root-rebound refusal priority for current-root runs and old acknowledgments retained through compaction, including rejected acknowledgments.",
+  "acceptance": [
+    "Cover root-rebound refusal priority and retained-registration edge cases is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "engram-host",
+    "review-follow-up",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d04a-ef4e-7751-a435-36d0e270de9d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

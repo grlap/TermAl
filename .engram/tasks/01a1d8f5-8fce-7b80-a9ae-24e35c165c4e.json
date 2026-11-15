@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8f5-8fce-7b80-a9ae-24e35c165c4e",
+  "external_ref": null,
+  "title": "Support or explicitly bound mixed same-path and different-path retired-check selections",
+  "outcome": "A mixed set of individually retired checks either qualifies with selection-aware same-path checks or returns an intentional documented limitation, preserving current admissible evidence and no-credit rules.",
+  "acceptance": [
+    "Behavioral coverage combines an older same-path root-rebound check and a newer different-path retired check in one request and verifies the chosen explicit policy.",
+    "Current admissible checks cannot be excluded, each selected run is authenticated independently, and request-local audited disclosure remains complete."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d595-9e1d-76d0-9955-2ecb0cb4d6e6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1bdfd-bf67-7c32-9f12-df5e078ee309",
+  "external_ref": null,
+  "title": "Exercise complete judged source identity in dirty-source closure regression",
+  "outcome": "Exercise complete judged source identity in dirty-source closure regression",
+  "acceptance": [
+    "Dirty root and child cases exercise full shared source comparison and discriminate a faulty identity comparison; an explicit legacy compatibility case remains."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "source-identity",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

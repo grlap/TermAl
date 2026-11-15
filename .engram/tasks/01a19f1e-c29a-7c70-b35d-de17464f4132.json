@@ -1,0 +1,28 @@
+{
+  "id": "01a19f1e-c29a-7c70-b35d-de17464f4132",
+  "external_ref": null,
+  "title": "Named sessions lose source-root confirmation after every host restart until they re-name (named_root is not persisted or reconciled)",
+  "outcome": "After a host restart, a session whose source root Engram still holds as Bound at the same generation opens its next turn confirmed, without the agent re-naming. Confirmation is restored by a persisted binding or a bounded canonical reconcile, with no unbounded RPC on the turn-opening path. A restart regression test proves it.",
+  "acceptance": [
+    "Named sessions lose source-root confirmation after every host restart until they re-name (named_root is not persisted or reconciled) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "restart",
+    "source-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

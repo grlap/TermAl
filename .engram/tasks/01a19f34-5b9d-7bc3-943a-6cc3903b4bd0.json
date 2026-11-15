@@ -1,0 +1,30 @@
+{
+  "id": "01a19f34-5b9d-7bc3-943a-6cc3903b4bd0",
+  "external_ref": null,
+  "title": "A peer in federation runtime quarantine can only be recovered by restarting Central; no supervised recovery path exists",
+  "outcome": "When a satellite's attestation worker enters runtimeQuarantine over an unresolved OS operation, Central has a supervised recovery path. For example, once the owned SSH process or cleanup is proven finished, the quarantine clears and the peer is retried, without restarting Central and without weakening the quarantine for operations whose ownership is genuinely unknown. A test covers late cleanup success leading to recovery, and unknown ownership staying quarantined.",
+  "acceptance": [
+    "Read-only analysis on 87f49ed0998ec5b9b7d949f76757d18d3b5cdcc4 identifies the concrete owned-SSH/forward-port hazard and the limits of the asynchronous deadline, distinguishes cleanup proof from diagnostics or port probes, and records the proposed recovery owner without mutating live state.",
+    "One supervised recovery owner backs automatic peer retry and the first local federation operator recover/re-arm API action. It permits replacement only after the exact prior OS operation proves successful owned-child cleanup and the prior worker/listener is settled. Pending, unknown or failed ownership receives a typed refusal and stays quarantined; current enrollment, transport generation, cancellation and shutdown fences remain authoritative, and operator actions are audited.",
+    "Preserved RED then GREEN evidence and focused tests on the exact candidate cover late cleanup leading to retry, the API success and typed refusal paths, no replacement while cleanup is pending or ownership is unknown, and stale completion/cancellation boundaries. No test weakening, new skips or timeout inflation; landing still requires the normal independent review pair and exact full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a15cb8-da1c-79c3-994d-62605c4d61e7",
+  "disposal_reason": "This is the same problem: a federation runtime quarantine that only a Central restart clears. The canonical item is now w-62605c4d61e7, rev 2, with criteria concurred at 07:50Z and owned by Sol-edfd. Those criteria cover AUTOMATIC recovery after owned SSH cleanup, with no operator API (Greg #787/#789: simplify, self-recovery, after Unified EO). This item's operator recover/re-arm API is dropped. Its unlanded Nov 3 work (RED b53ba5ee, GREEN 58/0 test-1177c607, frozen candidate 48cb6aa6 on parent 47fdba2f) is kept as reusable input for w-62605. Decided by Termal::Fable2, coordinator, under the one-owner rule, so the implementation isn't duplicated.",
+  "completion": null
+}

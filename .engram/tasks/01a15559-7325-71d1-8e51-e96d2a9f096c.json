@@ -1,0 +1,29 @@
+{
+  "id": "01a15559-7325-71d1-8e51-e96d2a9f096c",
+  "external_ref": null,
+  "title": "No producer exists for check_kind=review records, so any acceptance criterion bound to \"review\" can never be satisfied",
+  "outcome": "Found on w-edb79ddbf033 (Opus3, TermAl mailbox 03723eab #3166, 2026-10-19 18:07Z), filed by Termal::Fable2. Engram lets a criterion be bound to check_kind=review and then raises an action-required obligation (\"acceptance_criterion_requires_verification:N (review): run the credited check or obtain an authorized waiver before evaluation\"). TermAl records only test checks: the /review-changes pair's delegations produce no host-recorded check, and nothing in src/ emits check_kind=review. So a review binding blocks evaluation forever. The only exit is to revise the binding away, which was done on w-edb7. Either TermAl records a typed review check from a completed /review-changes pair (both reviewers read-only, distinct vendors, frozen input fingerprint, findings below Medium), or binding a criterion to review should be refused or warned at revise time while no producer exists.",
+  "acceptance": [
+    "Either a completed independent read-only review pair on a frozen input is recorded by the host as a typed check_kind=review verification bound to that input's revision, satisfying a review-bound criterion at that revision; or TermAl/Engram refuses or clearly warns when a criterion is bound to review while no producer exists. A test covers the chosen behavior.",
+    "The full five-stage gate passes on the exact input with an independent Codex plus Claude review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

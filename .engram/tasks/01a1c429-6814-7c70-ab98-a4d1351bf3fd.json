@@ -1,0 +1,28 @@
+{
+  "id": "01a1c429-6814-7c70-ab98-a4d1351bf3fd",
+  "external_ref": null,
+  "title": "Acceptance submission in-flight guard runs lifecycle/card refresh while unwinding from a panic",
+  "outcome": "Dropping AcceptanceEvaluationSubmissionInFlight during a panic unwind still removes its map entry but doesn't run work that commits, persists or publishes, so a second panic can't abort the process.",
+  "acceptance": [
+    "When the thread is unwinding from a panic, AcceptanceEvaluationSubmissionInFlight::drop removes its entry without running refresh_delegation_for_child_session or refresh_acceptance_evaluation_card, shown by a behavioural test",
+    "A child completion observed during a normal submission is still settled when the guard releases, shown by the existing behaviour tests"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

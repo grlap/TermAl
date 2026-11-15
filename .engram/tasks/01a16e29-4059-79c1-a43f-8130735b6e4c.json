@@ -1,0 +1,28 @@
+{
+  "id": "01a16e29-4059-79c1-a43f-8130735b6e4c",
+  "external_ref": null,
+  "title": "Link launch-window watcher provenance to the displayed refusal suffix",
+  "outcome": "Link launch-window watcher provenance to the displayed refusal suffix",
+  "acceptance": [
+    "A launch-window source-file watcher diagnostic identifies its launch/carried phase or clearly documents which exact unsuffixed cause its digest covers, with a regression proving the linkage without changing credit eligibility."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16d74-2d08-7260-836f-757f2f324d75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

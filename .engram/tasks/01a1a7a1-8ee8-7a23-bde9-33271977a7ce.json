@@ -1,0 +1,28 @@
+{
+  "id": "01a1a7a1-8ee8-7a23-bde9-33271977a7ce",
+  "external_ref": null,
+  "title": "Test gaps in the source change report before a registered check",
+  "outcome": "The report before a registered check (src/engram_report_before_check.rs) has tests for the paths its review rounds found unpinned, so a later change to the close or the scope can't break them silently.",
+  "acceptance": [
+    "A Claude foreground launcher's test runs through the close: no source change at close after an accepted report, and a parallel foreground Bash edit after registration is reported from the moved baseline.",
+    "claude_session_work_restricts is pinned by a case that doesn't also mark the trace uncertain.",
+    "A real close during a report is driven, asserting the close's baseline stands and what both report.",
+    "An audit-only receipt, an invalid receipt after the send, and a minimum budget before the send each have a test.",
+    "a_report_inside_its_share_takes_no_time_from_registration is renamed to what it spends (past the fence, inside fence and share), and a spend at the share has a test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

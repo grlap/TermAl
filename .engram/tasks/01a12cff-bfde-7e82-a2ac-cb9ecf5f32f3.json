@@ -1,0 +1,27 @@
+{
+  "id": "01a12cff-bfde-7e82-a2ac-cb9ecf5f32f3",
+  "external_ref": null,
+  "title": "A held queued prompt changed in place waits out its fence budget before it is re-fenced",
+  "outcome": "A held queued prompt changed in place waits out its fence budget before it is re-fenced",
+  "acceptance": [
+    "A held queued prompt changed in place waits out its fence budget before it is re-fenced is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "delivery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

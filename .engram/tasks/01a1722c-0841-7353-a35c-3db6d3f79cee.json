@@ -1,0 +1,28 @@
+{
+  "id": "01a1722c-0841-7353-a35c-3db6d3f79cee",
+  "external_ref": null,
+  "title": "A write to the launcher's own modules before a lagging launch stamp is neither fenced nor re-judged",
+  "outcome": "A write to the launcher's own modules before a lagging launch stamp is neither fenced nor re-judged",
+  "acceptance": [
+    "A write to the launcher's own modules before a lagging launch stamp is neither fenced nor re-judged is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

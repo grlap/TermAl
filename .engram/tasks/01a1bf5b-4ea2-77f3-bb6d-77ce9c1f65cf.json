@@ -1,0 +1,24 @@
+{
+  "id": "01a1bf5b-4ea2-77f3-bb6d-77ce9c1f65cf",
+  "external_ref": null,
+  "title": "Direct-prompt policy-presence refusals omit the standard reset guidance",
+  "outcome": "A predecessor store containing federation.promptPermissions is refused through reject_unsupported_state_schema, with the standard move-or-delete guidance, at both presence branches of src/persist_direct_prompt.rs (lines 43 and 65 in combo25). Found by review.",
+  "acceptance": [
+    "Direct-prompt policy-presence refusals omit the standard reset guidance is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

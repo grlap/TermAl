@@ -1,0 +1,71 @@
+{
+  "id": "01a12942-73eb-7da3-9508-a99b6f007afe",
+  "external_ref": null,
+  "title": "State lock: reclamation eligibility without building full binding targets or root read fences under the global lock (package 2)",
+  "outcome": "Per Greg's direction (memory greg-decision-2026-10-11-scope-freeze-state-lock, #615) and the joint architecture briefs (Termal::Architect2, TermAl mailbox 3d06f738 #619/#620 package 2; Engram::Architect1, eba21fd2 #17 package B): named-root reclamation no longer builds a full EngramBindingTarget or EngramRootReadFence (which clones all roots, journals and project stores) merely to answer boolean eligibility or current-owner questions under the global state lock. First slice: a narrow, side-effect-free eligibility projection that preserves root-versus-child authority, parent/delegation availability, reset, local/enabled and routing/store checks, used for the reclamation scans. The full transport target is built only for the selected operation. Outcome formatting and stderr emission move after the guard is released. Optional second slice, only if still needed: reserve the single-flight before unlock, plan and sort off-lock, then exactly revalidate root/journal/store/run/claim/settings/runtime-owner identity before apply (a root generation alone is insufficient). Invariants: UNKNOWN or live entries remain; unpublished retirement retains capacity; the same recovery owner; ACK before release; fairness, cooldown, read cap and no provider dispatch are preserved; no durable or wire format change; no timeout increase.",
+  "acceptance": [
+    "A parity test compares the old and new eligibility over root/child, missing parent, reset, tokenless/wrong-store/restored owner and the other existing target predicates, and they agree.",
+    "A witness shows that the reclamation boolean scan constructs no EngramRootReadFence and no full binding target, and that outcome and retirement stderr emission happen after the global guard is released.",
+    "The existing reclamation tests pass unchanged: exact_selection_and_pending_journal_races_are_fenced, reader_authority_change_during_read_retains_the_entry, failed_candidate_commit_reserves_capacity_then_restart_acks_once, other_store_frees_global_capacity_and_rotation_is_fair, and pending_bound_ended_and_root_invalid_remain_with_the_owner.",
+    "If the second (off-lock planning) slice is included, a barrier race test shows that a concurrent root/journal/owner change during planning is detected by exact revalidation and never applied.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "greg-direction",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the reclamation eligibility package in commit 7fa8101f1842e2bcdeac82a3bfc58c989e87adb4 (tree 8cf05cca670356fb41e575354a76d7062204d907). Full gate test-dc741c1f passed on the exact committed tree; independent acceptance evaluation f4052b62c96d40a19ca40243c92b5822 passed all five criteria. Commit remains for integration owner; no push performed.",
+    "completed_at": "2026-10-11T20:19:16.934587300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

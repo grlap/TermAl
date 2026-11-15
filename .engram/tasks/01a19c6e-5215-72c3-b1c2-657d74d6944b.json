@@ -1,0 +1,34 @@
+{
+  "id": "01a19c6e-5215-72c3-b1c2-657d74d6944b",
+  "external_ref": null,
+  "title": "Ordinary Resume: reconcile the proven-unsent shutdown carrier repair",
+  "outcome": "After a host shutdown restores an unsent carrier (receipt Pending, no turn generation, fresh exact content hold acknowledged by reload, transcript position kept), Resume dispatches it exactly once and may continue only its same explicitly owned HandingOff attempt, while every unknown, unowned handing-off, ambiguous or historical entry stays non-runnable.",
+  "acceptance": [
+    "The ordinary runnable predicate accepts a promoted entry with known promotion disposition and no Engram ordinary hand-off only when it either (a) has a Pending receipt, no turn generation, no started federation hand-off, an Untracked runtime write, and an acknowledged, failure-free durability hold of exactly its content, or (b) continues the same explicit Resume-owned HandingOff attempt with matching queued head, content, promoted position, attempt, write-ahead, active-turn, Stop and pause identities, any capacity nonce still owned, no Stop in progress, no turn generation or started federation hand-off, and an Untracked runtime write; unknown, ambiguous, historical and otherwise unowned promoted entries remain non-runnable; file:line.",
+    "federation_executor_delivery::recovery_regressions::round_five::federation_m4_round_five_shutdown_restored_carrier_recovers_its_exact_content_hold passes on the exact candidate (the Resume at about :360 delivers once)",
+    "The existing unknown-effect negative tests stay unchanged and green, including the 'promoted' case of unknown_queue_history_projects_uncertainty_and_only_resumes_a_known_unsent_successor"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-directed",
+    "persistence",
+    "remote-credit-workaround",
+    "w-3fe8-regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a14da1-ad79-77b2-96a7-bd15479bd6c2",
+  "external_ref": null,
+  "title": "Clarify hidden review-result history during domain binding and bound-parent review submission",
+  "outcome": "Domain enrollment reports bounded, understandable history diagnostics and explicitly defines hidden structured-review-result control mail versus routine domain mail, without migrating or adopting existing history.",
+  "acceptance": [
+    "Document and implement whether hidden review-result mailbox rows block a raw-to-qualified binding transition, with design concurrence.",
+    "The refusal reports total history count and a bounded set of mailbox references, explaining hidden control rows without bodies.",
+    "Review-result submissions to bound parents have an explicit guarded route or documented control-channel exemption, with regression coverage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "delegations",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-9864-78b1-809a-1ceeda90644c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

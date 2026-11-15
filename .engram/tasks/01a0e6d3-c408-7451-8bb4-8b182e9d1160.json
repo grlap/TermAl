@@ -1,0 +1,29 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8b182e9d1160",
+  "external_ref": "tm-hna.1",
+  "title": "Audit summary-vs-full session projection field coverage for other silently dropped fields",
+  "outcome": "SPAWNED BY tm-hna's root cause (2026-07-30). The tail projection (state_accessors.rs:398-412) is built by calling wire_session_summary_from_record and then overwriting only messages/messages_loaded. Any field the SUMMARY deliberately blanks for metadata-only /api/state purposes is therefore also blanked in the TARGETED tail response — silently, with no compile error and no test failure, because both projections satisfy the same type.\n\npendingPrompts is the instance we found because Greg noticed a missing card. The pattern predicts others: any field intentionally emptied or reduced in the summary builder is now equally absent from the tail responses the UI depends on since tm-9sf slices A+B replaced full hydration with tail hydration.\n\nTASK: diff the three projections field by field — wire_session_summary_from_record, wire_session_tail_from_record, wire_session_from_record — and list every field where summary differs from full. For each, decide deliberately whether the tail (a TARGETED response) should carry the full value or the reduced one, and record the decision at the code site. Candidates to check explicitly: markers, queued/pending prompt metadata, delegation links, model option lists, opencode mode options, external session id, and anything added since the summary builder was written.\n\nSTRUCTURAL FIX PREFERRED over field-by-field patching: make targeted responses start from the FULL projection and narrow explicitly (tail = full minus older messages), so a newly added field defaults to present-in-targeted rather than absent. The current inheritance direction makes omission the silent default, which is how tm-hna happened.\n\nVerification per tm-qt5: assertions must read the serialized HTTP response, not in-process state.",
+  "acceptance": [
+    "The audit records a complete field inventory and explicit full/summary/tail policy for every current Session field, including UI consumers and serialized prompt redaction, with source locators and the distinction between confirmed code-path defects and intentional omissions.",
+    "Authoritative changes to queuePaused, providerCapacityWaiting and sourceTrackingRecovery are adopted by existing UI full, partial-tail and summary reconciliation when only those flags differ, including absent and equal mutation stamps; unchanged flags preserve sharing. Body-sequence proof ownership and targeted transcript/history residency remain unchanged.",
+    "Serialized HTTP tests enforce the intentional projection boundary: targeted tails retain populated non-transcript metadata, prompt history and pending prompt content; broad summaries exclude transcript, prompt-history, queued-body and targeted diagnostic keys while preserving documented bounded liveActivity hints. Deliberate mailbox-hint, body-pair and query-filter differences are explicit, and the existing full-to-tail inheritance remains intact.",
+    "Fail-first regressions demonstrate the confirmed omissions before repair; affected UI tests, TypeScript and authorized Rust HTTP/projection checks pass on the repaired input, and the independent Codex/Claude pair has no outstanding Medium-or-higher finding. The integration owner runs the required exact-input full gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

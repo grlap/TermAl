@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c555-7ce1-b27c-3cd3cf5787b7",
+  "external_ref": "tm-l1r0",
+  "title": "Extract delegation wait and server-instance recovery from frontend command facade",
+  "outcome": "Current-tree audit 2026-09-22: ui/src/delegation-commands.ts is 1,800 lines and combines composer request policy, spawn/reviewer batches, basic commands, bounded polling waits, backend resume registration and server-instance recovery grouping. Extract waitDelegationsWithTransport with fetchStatusBatchWithDeadline and its status-batch/recovery helpers into an owning module, with matching deadline/cancellation/restart tests from delegation-commands.test.ts. Keep backend-scheduled resume waits distinct from polling and preserve createDelegationCommands public facade. No existing open task covers this frontend boundary; tm-kds and tm-rl10 cover backend result subsystems.",
+  "acceptance": [
+    "Pure move plus module wiring, stable exported command/result contracts and ordering. Preserve overall deadline, abort propagation, mixed-instance recovery, partial results and zero duplicate requests. No new polling or changed timeout constants. Focused tests preserve inventory and pass via maintained launcher; document module ownership and avoid circular dependency through the facade."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,64 @@
+{
+  "id": "01a183bd-a8cb-7f22-a511-600257272d37",
+  "external_ref": null,
+  "title": "Launcher focused runs bind to a stale work item the session no longer holds, not to its current Engram focus or claim",
+  "outcome": "A focused launcher run in a named source root is bound to the session's current Engram focus or claimed item for that root. It is never bound to a stale earlier item that the session has handed off and that another holder now holds.",
+  "acceptance": [
+    "C1. For a new launcher registration and matching host command observation, work attribution comes from a current held claim with its effective named source root matching the actual validated execution worktree. A stale cached binding for a handed-off item or another root is never attached; shared-root selection uses the unambiguous focused carrier and preserves existing batch-member rules.",
+    "C2. A failed, timed-out, incomplete, ambiguous or raced claim/root validation attaches no work binding and reports that uncertainty. It never falls back to a stale cache or declares an Engram-configured project safely unbound. Validation uses the existing read-only held-claims and root owners off StateInner and revalidates local ownership before publication.",
+    "C3. Registration and host-observation summary enrichment agree on attribution. Retries preserve the first immutable run association; deferred command descriptions and completions do not adopt later claims. Existing historical run identities/artifacts are preserved.",
+    "C4. Attribution refresh performs no forced session bind, control toggle, grant/debt mutation or new verification-credit issuance. Eligible prospective checks settle only through the existing authority, source-root, exact-input and writer-fencing owners; ineligible or uncertain checks remain uncredited with an explicit reason. Scripted tests cover C1-C4, including Base/OFF and gated sessions and concurrent handoff/root changes.",
+    "C5. The independent review pair has no outstanding in-scope Medium-or-higher finding and the standard full gate passes on the exact landing input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "test-credit",
+    "verification-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Current-holder committed-input launcher attribution landed in Combo25 fa26ee07. No acceptance evaluation exists. Exact-tree dual-host FULLs and final independent pair support C1-C5; historical failures and severities remain preserved, optional Lows filed.",
+    "completed_at": "2026-11-09T09:44:04.370132300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

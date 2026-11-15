@@ -1,0 +1,49 @@
+{
+  "id": "01a18392-6119-79e3-b3f4-af679d72db22",
+  "external_ref": null,
+  "title": "B16 adapt fifteen historical recovery scenarios to original-result settlement",
+  "outcome": "B16 adapt fifteen historical recovery scenarios to original-result settlement",
+  "acceptance": [
+    "All fifteen historical scenario triggers and negative invariants are preserved with the full immutable original checkpoint request, idempotency key and report, and actual SQLite reload evidence; expectations are not repaired merely by reducing wire counts or deleting assertions.",
+    "Every eligible Unknown scenario reaches exact-original canonical recovery with Accepted/Confirmed settlement, local acknowledgement and release of only the original exclusion through a supported trigger, without fallback Bind/Evaluate/Begin or provider replay; Refuse, authority and owner holds remain truthful and preserve unresolved custody.",
+    "Deletion and absent-session scenarios prove durable canonical debt with the actual engramControlRecovery projection and later permissible settlement, while independent duties and healthy provider progress remain protected."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "control-plane",
+    "engram-control",
+    "gated-control"
+  ],
+  "assigned_to": "session-13170",
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete gated-control path deleted by87f49ed0 and absent on649d77d5; The fifteen-scenario canonical recovery/Accepted-Confirmed replay/engramControlRecovery target was removed. Remaining similarly named fixtures cover historical metadata retention, ordinary settings/delivery and SQLite compatibility; they do not implement the original replay/settlement scenarios. Preserve original worker/precomposition/combined-run limitations and custody; no reduction of wire-count or assertion deletion is claimed as fulfillment. Fable2#1347 and sweep5954218a provenance recorded. Withdrawn as obsolete, not fixed/tested or newly credited.",
+  "completion": null
+}

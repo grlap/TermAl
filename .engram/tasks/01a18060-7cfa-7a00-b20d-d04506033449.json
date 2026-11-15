@@ -1,0 +1,34 @@
+{
+  "id": "01a18060-7cfa-7a00-b20d-d04506033449",
+  "external_ref": null,
+  "title": "Apply test-run and Work page budgets before whole-index materialization and client page draining",
+  "outcome": "Test-run and Work browsing retain bounded server and client working sets using the existing paged APIs.",
+  "acceptance": [
+    "Test-run list filtering/paging occurs without cloning all summaries and includes a byte budget for nested stage/error/history data; state integration coordinates live projection work.",
+    "UI consumes existing paged test-run and Engram Work APIs on demand without draining all pages into one list; loading/search completeness is explicit.",
+    "Reuse Work transport8MiB cap, existing proposed Engram page-bytes integration and current test log/card bounds; no duplicate paging protocol.",
+    "Tests cover many records with bounded pages, filters and continuation, and independently reviewed/full-gated implementation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "design-pending",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "panic",
+    "response-size"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18052-8b84-7e10-8213-9af00ebbaa71",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

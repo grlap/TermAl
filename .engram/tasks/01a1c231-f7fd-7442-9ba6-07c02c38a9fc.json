@@ -1,0 +1,28 @@
+{
+  "id": "01a1c231-f7fd-7442-9ba6-07c02c38a9fc",
+  "external_ref": null,
+  "title": "Cover missing acceptance workdir capture with an owner-not-called regression",
+  "outcome": "Directly verify acceptance_shared_source_capture refuses a removed Workdir without walking into an enclosing repository or invoking the configured source owner.",
+  "acceptance": [
+    "A behavior test has a positive existing-root owner capture and then a missing Workdir negative control returning unavailable with zero owner calls; no local source fallback is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

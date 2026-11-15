@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6c4-70f0-91bb-1f57787e773a",
+  "external_ref": "tm-rokb",
+  "title": "Report how source_changed was established (reported_source_change) on execution observations",
+  "outcome": "Host side of Engram w-edfb5092acc7. The design is by Codex and Engram::Fable (Greg delegated it to them, ~06:25Z 2026-09-27, 'jezeli trzeba zmienic kontrakt, trudno'), sent to Termal::Opus in mailbox-703fddd4 #56 and reviewed in #57.\nField: an optional reported_source_change on the execution observation, sent only with source_changed true. Values:\n- content_comparison;\n- assumed_missing_baseline;\n- watcher_only.\nAbsent = no provenance.\nTermAl producers after 0d54fd1:\n(a) the pre-check change in engram_turn_report: content_comparison with a begin basis, assumed_missing_baseline without one;\n(b) the turn's own observation after a reported check, with a closing basis: content_comparison;\n(c) reported, no closing basis: watcher_only;\n(d) no check, both bases: content_comparison;\n(e) no check, no begin basis, a closing basis, a mutation grant: assumed_missing_baseline;\n(f) no closing basis: watcher_only.\nCompute the value where the report is built and cache it with the report; retries and a rebind's recovery resend it verbatim. A post-restart recovery has no cached report and sends nothing. The evaluator brief shows it as 'host source observation' context once Engram's show carries it in note rows.\nEngram lands its side first and accepts the field as optional. A between-turns change is NOT sent this way: it is a separate Engram record kind (tm-5gi4 option A'). Order: proposed after tm-5gi4 phase 2's backend; Greg decides.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

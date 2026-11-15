@@ -1,0 +1,33 @@
+{
+  "id": "01a1663c-e63b-7c62-ade7-1bca771dfe78",
+  "external_ref": null,
+  "title": "Pin lagged-marker delivery before broadcaster shutdown drain",
+  "outcome": "A deterministic broadcaster lifecycle regression proves that a pending lagged marker is forwarded before shutdown drains and stops, while preserving final retained publication ordering.",
+  "acceptance": [
+    "A deterministic test enters Closing with a pending lagged flag and retained work, proves Lagged is forwarded before the final drain, and proves shutdown joins without losing retained work or spinning.",
+    "Focused lifecycle and overflow tests pass without timing sleeps or relaxed ordering, and the required review pair confirms the test exercises production mailbox/worker behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "greg-reported",
+    "host-persistence",
+    "p0-profiling-2026-10-22",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a164ff-dc1b-71f3-bda3-de6021f4b32f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

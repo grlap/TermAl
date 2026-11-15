@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7e9-72e1-9df2-29870fa576f4",
+  "external_ref": "tm-xxkt",
+  "title": "Drop a refused Engram turn report only when the refusal concerns the payload",
+  "outcome": "Follow-up from the tm-winf step-1 round-4 review (Claude /review-code, Low). forget_refused_engram_turn_report (src/engram_turn_observations.rs) empties a grant's cached execution-observation report on ANY Remote-kind answer to a checkpoint that carried it, on the turn's own close and on a rebind's recovery checkpoint. That is the safe default (a refused report resent forever holds the grant and the session's queued prompts until a restart), but it over-drops: (a) a transient server-side Remote error discards evidence Engram would have accepted on retry; (b) a refusal about grant state (for example the grant already closed because an earlier timed-out attempt was accepted) drops a report whose evidence is already recorded, and the next attempt goes bare under a different key. Fix direction: ask Engram for the refusal codes that concern the observation/evidence payload (control_projection_invalid, observation_scope_mismatch, the evidence-gate invalid_control_session / work_claim_mismatch, environment_* once step 2 sends environment evidence) and the codes that are transient; drop only on payload codes, keep the report on transient ones with a bounded retry, and keep drop-on-unknown as the fallback so an unrecognized payload refusal can never pin the grant. Add refuse-then-accept tests per class.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a1584b-0079-79b0-9ed7-3f69ea932f7e",
+  "external_ref": null,
+  "title": "Cover federation journal refusal envelopes and stale scan observation boundaries",
+  "outcome": "Focused journal regressions cover refusal code/restart/role fields, identity-unavailable503, cursor domain changes, incomplete scan prefixes, replaced/deleted cached obligations and bounded metadata branches.",
+  "acceptance": [
+    "Focused journal regressions assert refusal code/restart/role fields, identity-unavailable 503, cursor-domain changes and final basis revalidation, incomplete scan prefixes, cached-obligation deletion/replacement/retargeting, and the 4096-byte binding and 16384-byte sender/topic metadata boundaries, without exposing private values or mutating production read behavior.",
+    "The combined follow-up input has a passing maintained five-stage full gate and an independent Codex plus Claude read-only review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "remote-mailbox",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

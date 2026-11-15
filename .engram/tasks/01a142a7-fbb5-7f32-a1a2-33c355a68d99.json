@@ -1,0 +1,45 @@
+{
+  "id": "01a142a7-fbb5-7f32-a1a2-33c355a68d99",
+  "external_ref": null,
+  "title": "Work view crashes with \"Maximum update depth exceeded\" in the row-window hook",
+  "outcome": "Work view crashes with \"Maximum update depth exceeded\" in the row-window hook",
+  "acceptance": [
+    "The Work view's table, tree and labels views render a project with more than WORK_WINDOW_ROWS rows without React's \"Maximum update depth exceeded\" error, including after scrolling to the end of the list and after the viewport is resized.",
+    "A regression test reproduces the update loop on the pre-fix code (a recorded RED) and passes on the fixed code (a host-recorded passing check).",
+    "The existing Work panel and use-work-window tests stay green, and `npx tsc --noEmit` stays clean."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "regression",
+    "ui",
+    "work-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed Work table/window feedback that exhausted React update depth. Stable column allocation and visible-row projection preserve measured anchors, threshold transitions and reveals across table/tree/labels. Recorded RED, repaired anchor regression, Chrome replay, independent Codex/Claude review and current five-stage full gate pass. Commit48be4f5710f0a1b65bcb7fc3acc8bcc860443ea4 on dae4bfd9; producer has not pushed or installed.",
+    "completed_at": "2026-10-16T16:22:39.131123900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

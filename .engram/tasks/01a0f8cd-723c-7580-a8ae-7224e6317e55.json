@@ -1,0 +1,76 @@
+{
+  "id": "01a0f8cd-723c-7580-a8ae-7224e6317e55",
+  "external_ref": null,
+  "title": "A parked Engram admission after an unknown evaluate or an unavailable control is never retried automatically; re-admit it on the common recovery schedule",
+  "outcome": "A retained head parked after an unknown evaluate (deadline_exceeded, or a transport failure after the evaluate was persisted, with no grant begun) or after control_unavailable, control_circuit_open, control_backoff or dispatch_budget_exhausted is re-admitted automatically on the common recovery schedule. The exact retained intent is replayed with the same key, one attempt per head, under a host-wide cap; the hold says it is retrying, and the schedule survives a restart. Reconcile dispositions (including a begin unknown), refusals, policy and principal changes, Stop/Cancel, operator pauses and superseded owners stay held. A known Defer's retry_after and wake_condition, and the durable per-attempt diagnostic record, are tracked by this item's children.",
+  "acceptance": [
+    "C1 (UNBOUND fail-first): At dccf38f, a test drives an evaluate to deadline_exceeded before any grant, the transport then recovers, and the tick runs past about 2.4 s: the retained prompt is not delivered without Resume. A holder note cites the host-recorded failed check, its log path and sha256.",
+    "C2: For an unknown evaluate (deadline_exceeded, or a transport failure after the evaluate request was persisted, with no grant begun) and for control_unavailable, control_circuit_open, control_backoff and dispatch_budget_exhausted, the retained head is re-admitted automatically, without Resume, a new message or a restart. Each attempt replays the exact retained intent with the same evaluate idempotency key. The first is due 2 s after the park and later ones at 5, 10, 20 and 30 s, then every 60 s, each with up to 20% positive jitter and never earlier than the circuit deadline or the bind backoff. There is one attempt per head. A timeout keeps the key unresolved and schedules the next attempt, no new key is sent while the outcome is unresolved, and a Defer returned by a replay ends that evaluation and parks as a Defer does today. A slow-Engram test that recovers delivers the prompt to the provider exactly once.",
+    "C3: While attempts are scheduled, the head's preview reads \"Engram: waiting for admission; retrying automatically, attempt n, next at T\"; \"resume to retry or cancel\" appears only for a hold that is not retry-eligible or is operator-paused. The UI change is limited to types and this preview string.",
+    "C4: None of these enters the schedule, and each keeps today's preview and hold, one test each: a Reconcile disposition, including a begin unknown (uncertain_grant_id); Refuse; control_disabled or a fatal disabled_reason; Stop or Cancel; changed settings or principal; an operator queue pause, which carries its own marker distinct from the park; a superseded owner.",
+    "C5: After a restart, once the retry record's persistence is acknowledged, boot rebuilds it, runs one reconciliation per eligible head, and continues the cadence from the persisted attempt index, without a new wake. Before that acknowledgement the hold stays. A bind retry left on a retained or recovered head gets the same durable retry record and the same boot reconstruction.",
+    "C6: Host-wide, at most K attempts (a small named constant) are in flight, counting the automatic attempts of every retry kind (admission, abort and bind) and each parked admission's boot reconciliation. Attempts run in due-time order, a slot is released on completion including a timeout, and a deferral by the cap logs a diagnostic line and changes neither the attempt index nor the first-held time. A test with more than K parked heads covers it. An abort retry's boot recovery keeps its existing path outside the cap, as C7 requires; extending the cap to it is tracked as its own item.",
+    "C7: One retry mechanism: the delays, the jitter, the tick and the one-attempt-per-head guard are shared with the abort and bind retries by extraction, not a third copy. w-25b4f98cec5f's abort retry, the bind retry, the held mailbox disposition, Resume and Cancel behave as before, and their existing tests pass. No provider handoff is retried by this item.",
+    "C8: docs/features/engram-host-adapter.md (\"Authorization timeout and retained prompts\", \"Retained prompt recovery\") describes the automatic re-admission, its schedule, the cap and what stays held.",
+    "C9: The full gate passes on the exact reviewed tree.",
+    "C10: Independent verification: the review pair has no outstanding Medium or higher; an acceptance evaluation is made by an evaluator that never held the item; and a live check after install and restart is recorded in a note with the installed build's hash."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 9,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "mailbox",
+    "pilot",
+    "retained-prompt",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f629-2ff8-7570-9872-25b4f98cec5f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

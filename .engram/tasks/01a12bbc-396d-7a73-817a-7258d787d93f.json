@@ -1,0 +1,26 @@
+{
+  "id": "01a12bbc-396d-7a73-817a-7258d787d93f",
+  "external_ref": null,
+  "title": "Move the begin-preparation outcome classification out of the engram_host_adapter.rs dispatch loop",
+  "outcome": "Move the begin-preparation decision in the Grant branch of the engram_host_adapter.rs dispatch loop into a function in src/engram_begin_preparation_retry.rs. The decision covers preparation_kind, kept_pending, preparation_late, preparation_possibly_sent and kept_pending_unsent. The function returns a small outcome enum, so the loop makes one call. This is a pure code move with behaviour unchanged, under the split rules in CLAUDE.md.",
+  "acceptance": [
+    "Move the begin-preparation outcome classification out of the engram_host_adapter.rs dispatch loop is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a12d9a-ff57-7bd1-877c-75dde64f5bc5",
+  "disposal_reason": "Duplicate of w-75dde64f5bc5: the same Grant-branch begin-preparation outcome extraction (preparation_kind, kept_pending, late, possibly-sent, kept_pending_unsent) from src/engram_host_adapter.rs to src/engram_begin_preparation_retry.rs, with common provenance w-cfcf10b68c9b (notes 8dcf1d9e and 54526bb6). The extraction is NOT claimed delivered; the scope continues on the survivor, whose real criteria govern. Evidence: Sol-a7bb's triage (f59d4581 #344, item 16), under Greg's net-reduction directive.",
+  "completion": null
+}

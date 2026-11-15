@@ -1,0 +1,31 @@
+{
+  "id": "01a1881a-12e2-78b0-894f-eb326f9bff52",
+  "external_ref": null,
+  "title": "Expose supported unregistered detached builds as owned background work in Sessions",
+  "outcome": "Supported background builds that are not indexed launcher/test runs have authoritative owner and lifecycle evidence available to the Sessions busy projection, without inferring liveness from transcript history or adding a parallel lifecycle registry.",
+  "acceptance": [
+    "An independently concurred design identifies which unregistered detached build executions have authoritative owner and liveness evidence, and explicitly documents unsupported cases and uncertainty.",
+    "For the supported executions, Sessions shows owned background work through start, active, completion and uncertainty transitions using the existing command/session ownership mechanism; tests cover owner vs notification recipient and foreground/background combinations without transcript-based liveness inference.",
+    "The final implementation satisfies the project's required independent review and validation before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "background-work",
+    "greg-reported",
+    "session-status",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18814-2386-7a41-aae1-aa3d5636c295",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

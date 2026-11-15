@@ -1,0 +1,30 @@
+{
+  "id": "01a18566-dd31-7942-a27a-6994dbf9c44b",
+  "external_ref": null,
+  "title": "Replace a vacuous standalone renewed-metadata assertion in the gated receipt test",
+  "outcome": "The gated receipt regression contains only discriminating renewal assertions; actual original-versus-renewed artifact join and recorder receipt coverage remain intact.",
+  "acceptance": [
+    "Replace a vacuous standalone renewed-metadata assertion in the gated receipt test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-followup",
+    "test-credit",
+    "testing",
+    "verification-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a183bd-a8cb-7f22-a511-600257272d37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

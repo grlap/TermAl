@@ -1,0 +1,29 @@
+{
+  "id": "01a1c3f4-049f-7343-82f1-f278f2ea2f95",
+  "external_ref": null,
+  "title": "Read-only Git log/show/branch arms still accept signature-verifier routes",
+  "outcome": "Read-only reviewer Git classification refuses signature verification on log, show and branch the same way it now does on rev-list and for-each-ref.",
+  "acceptance": [
+    "`git log --show-signature`, `git log`/`git show` with a `--pretty`/`--format` value that uses a %G placeholder (including magic-prefix forms) or a configured pretty alias that resolves to one, and `git branch --format=`/`--sort=` with signature atoms or sort keys are refused by the read-only classifier, shown by behavioural classifier tests",
+    "Ordinary read-only log, show and branch forms stay admitted"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "read-only-gate",
+    "review-low",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

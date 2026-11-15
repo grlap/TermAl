@@ -1,0 +1,30 @@
+{
+  "id": "01a19f9a-a17b-77a2-8db6-f7ca31c36411",
+  "external_ref": null,
+  "title": "Resolve or document permanent summary/store divergence in the isolated switch preview",
+  "outcome": "Resolve or document permanent summary/store divergence in the isolated switch preview",
+  "acceptance": [
+    "The isolated preview either resolves summary-versus-hydrated lookup divergence after the intended transient render, or explicitly documents that its content-scroll effects remain deferred.",
+    "Measurements distinguish the limited static fixture from settled App behavior and do not claim live scroll-restoration coverage from a permanently deferred effect."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f45-4449-7d20-86da-ee3a64e5d7d0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

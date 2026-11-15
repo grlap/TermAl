@@ -1,0 +1,37 @@
+{
+  "id": "01a1c3f1-6532-7ea3-97c5-acbab5ffd07a",
+  "external_ref": null,
+  "title": "Exercise remaining primary direct-prompt refusal and hold boundaries",
+  "outcome": "Exercise remaining primary direct-prompt refusal and hold boundaries",
+  "acceptance": [
+    "Behavior controls discriminate attachment/expanded-text/source/hold/legacy-operation/state/session mismatch refusals without mutation, real explicit Resume and runtime-write holds, snake-case and version-two raw-key refusals, and pre-handoff cancellation retention, using actual primary and persistence owners."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "review-low",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

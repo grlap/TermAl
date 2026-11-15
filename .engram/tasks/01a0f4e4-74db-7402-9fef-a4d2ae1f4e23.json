@@ -1,0 +1,28 @@
+{
+  "id": "01a0f4e4-74db-7402-9fef-a4d2ae1f4e23",
+  "external_ref": null,
+  "title": "A holder's chained read-only check (cd DIR && node freeze-check --check; cat | head) refuses its carried gate's credit, and the refusal names only `cd`",
+  "outcome": "Reported by Engram::Opus (session-7284) through TermAl mailbox 37bcca97, message #149, at 2026-10-01T00:36Z.\n\nThe background full gate test-135b9d02 (check 30df78b70c110a95ef667c31d934d171e827d6dd0e68ed4a29c284c0e0cfe5a3) was launched at 2026-10-01T00:30:41.108Z in C:\\github\\Personal\\Engram\\.worktrees\\named-root-assessment. It got no credit, with the reason \"the host saw something that may have written in its worktree before it settled: this session ran a `cd` command there (line 25527b5f4484)\".\n\nThe holder's command was `cd <worktree> && node scripts/review-freeze-fingerprint.mjs --check <freeze json>; echo; cat <results.json> | head`. It only reads, and the fingerprint was unchanged.\n\nThis is the documented behaviour, so not a misattribution. A holder's own command in the worktree refuses credit unless it is a provably read-only Claude command, and a `node` script cannot be proven read-only.\n\nTwo gaps remain:\n- The refusal names only the first word, `cd`, not the segment that could not be classified (`node …`). A reader cannot tell what to avoid.\n- There is no way to mark a known read-only check script, such as a freeze `--check`, as a read. Whether to add an allowlist entry, or to tell holders to run such checks only after the gate settles, is a design decision for the host owner.\n\nWorkaround: run reads such as the freeze check after the gate settles, or rely on the launcher's own freeze check at completion.",
+  "acceptance": [
+    "Either a documented, tested way exists to run a known read-only check script (such as a freeze-fingerprint --check) in a worktree with a carried gate without refusing its credit, or docs/test.md tells holders to run such checks only after the gate settles.",
+    "The refusal line for a holder's chained command names the segment that could not be classified as read-only (for example `node`), not only the first word of the chain; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "read-only-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

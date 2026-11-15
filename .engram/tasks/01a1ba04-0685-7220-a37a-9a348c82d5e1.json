@@ -1,0 +1,27 @@
+{
+  "id": "01a1ba04-0685-7220-a37a-9a348c82d5e1",
+  "external_ref": null,
+  "title": "Assert each local session workdir refusal has its own cause",
+  "outcome": "The local session workdir test distinguishes the containment failure of an existing outside directory from the directory-resolution failure of a missing path.",
+  "acceptance": [
+    "The local explicit-workdir regression pairs the outside-root existing directory with a containment error and the missing directory with the directory-resolution error, while preserving BAD_REQUEST, no session creation and no readiness-validator execution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "api",
+    "cross-machine"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b843-f9d1-7c23-bffe-754d28ce9267",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

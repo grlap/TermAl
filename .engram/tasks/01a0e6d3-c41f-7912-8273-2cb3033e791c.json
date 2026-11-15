@@ -1,0 +1,30 @@
+{
+  "id": "01a0e6d3-c41f-7912-8273-2cb3033e791c",
+  "external_ref": "tm-7p9z.7.1",
+  "title": "Enforce explicit resident-session history metadata at the client boundary",
+  "outcome": "Consolidated tm-7p9z.7 dual review on fingerprint aa6562ad4be15ca3909715c5cc0517eb71292d2b64974f13b4e8b0b55ebc30af: Codex found no defect; Claude identified a type-enforcement gap after resolveHasOlderSessionHistory began trusting only explicit hasOlderHistory. Every inspected current normalizer supplies the flags, so this is preventive type hardening, not a reproduced paging regression or P1 bug. ui/src/types.ts:408 currently makes hasOlderHistory/hasNewerHistory optional. IMPORTANT: Rust Session in src/wire.rs does not serialize these client-only window fields, and the TypeScript Session type is reused for raw targeted responses. Introduce a clear normalized resident-session contract (or equivalent constructor/producer invariant) requiring both booleans after admission, while keeping the raw wire shape honest. Preserve no-inference pagination, FOLLOW/STAY and stale-response ordering. Related tm-jzce already fixes complete-window overlap flag values; it does not cover this type-boundary gap and must not be reopened as the same defect.",
+  "acceptance": [
+    "Normalized resident sessions require explicit older/newer history booleans; raw API responses are not falsely typed as containing client-only fields. Summary materialization, targeted hydration, history merges and reconciliation produce the required shape with focused coverage. Missing untrusted fields do not restore count/messagesLoaded fallback paging. TypeScript and current history/navigation regression tests pass without changing scroll gestures or stale-response admission."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "architecture",
+    "beads-migrated",
+    "frontend",
+    "legacy-cleanup",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

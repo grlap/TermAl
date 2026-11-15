@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6da-3dac-78f0-bbd1-953886618d6d",
+  "external_ref": null,
+  "title": "A test Claude runs through its PowerShell tool is not recorded at all (no check, no evidence, no host line)",
+  "outcome": "A test Claude runs through its PowerShell tool is not recorded at all (no check, no evidence, no host line)",
+  "acceptance": [
+    "A test Claude runs through its PowerShell tool is not recorded at all (no check, no evidence, no host line) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-29",
+    "host-recording",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a13607-c7d4-79b2-b0b1-506494a31675",
+  "external_ref": null,
+  "title": "Import reconciliation C: G1 responsibility coverage and restart retention",
+  "outcome": "The host durably covers every responsibility class for a held scope, including old, released and removed owners. It persists unresolved obligations before existing clear or removal paths forget them, and keeps unknown as pending. Credit policy and process handling are unchanged.",
+  "acceptance": [
+    "Tests seed each of the six parent classes individually, including a source worker, an owed close, root cleanup, and an old, released or removed owner; each blocks Ready with its exact cause. The end or refusal of check credit while the process still runs does not clear the process obligation. Runtime disappearance or a restart with no positive end keeps unknown. A retained-head retirement keeps the intent audit and does not lose a possibly sent responsibility. Two owners sharing a root, or an unknown owner, cannot be silently omitted. Each positive terminal case removes only its exact entry and keeps its proof. A complete, positively settled inventory can become ready; empty legacy state cannot. No process is killed and credit policy does not change.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a135ff-5979-7203-93d4-358040469407",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

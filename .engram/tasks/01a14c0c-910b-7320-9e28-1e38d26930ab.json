@@ -1,0 +1,33 @@
+{
+  "id": "01a14c0c-910b-7320-9e28-1e38d26930ab",
+  "external_ref": null,
+  "title": "Require an unambiguous leading character for opaque federation references",
+  "outcome": "Federation lookup references reject dot-only and option-like tokens, with the L1 credential namespace contract preserved.",
+  "acceptance": [
+    "Validate reference tokens with a leading ASCII alphanumeric and the documented bounded suffix alphabet, rejecting '.', '..', leading '-' and leading '.'.",
+    "Cover references in enrollment/endpoint/admission inputs and ensure no paths, raw secrets or global credential writes are introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-3740-7bc3-8f26-14c782d0d16f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a1c3f1-64d6-7cf1-b6ff-d34e68f87951",
+  "external_ref": null,
+  "title": "Report terminal status for direct prompts cancelled before handoff",
+  "outcome": "Report terminal status for direct prompts cancelled before handoff",
+  "acceptance": [
+    "A direct-prompt receipt whose primary owner definitively cancels its queue entry before any provider write retains its exact immutable identity and a truthful never-sent terminal status through duplicate requests, pruning and reload; uncertainty is not treated as cancellation or retirement authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "review-low",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

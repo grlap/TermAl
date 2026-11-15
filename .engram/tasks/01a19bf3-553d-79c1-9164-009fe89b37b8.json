@@ -1,0 +1,37 @@
+{
+  "id": "01a19bf3-553d-79c1-9164-009fe89b37b8",
+  "external_ref": null,
+  "title": "Relay mailbox page read returns misleading home-unavailable 409 despite a successful listing",
+  "outcome": "A relay mailbox page read that lacks its saved association reports the actual local or remote home/peer state and recovery limits. The reported historical list-then-read failure is diagnosed without assuming a same-pair exact-message read succeeded.",
+  "acceptance": [
+    "A source-cited diagnosis explains why termal_read_mailbox on a relay mailbox homed on a remote runner returns 409 'original native mailbox home is unavailable' while termal_send_to_session, termal_read_mailbox_message and termal_list_mailboxes for the same pairs succeed, and names whether the cause is the federation channel or authority state of the caller, the home-host availability projection, or a defect",
+    "If the remote home is reachable, the page read succeeds; if it is not, the refusal names the actual cause and states whether it self-clears, consistently with read_mailbox_message",
+    "A deterministic test covers a relay-mailbox page read with an available and with an unavailable remote home"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed relay page-read diagnostics and source-cited recovery/availability coverage in combined fdd8d035. Own registered focused PASS23 on42d; combined review0Medium+, whole-binary focused green onfdd8, WindowsB and DL560 exact-tree FULLs green. Original criteria disposition per Fable2873; newer exact-locator/home-local discrepancy remains unsolved in separate w-8e9863bf342d. No acceptance evaluation exists.",
+    "completed_at": "2026-11-08T01:08:11.408575700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

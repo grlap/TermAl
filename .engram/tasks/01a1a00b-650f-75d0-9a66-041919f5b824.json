@@ -1,0 +1,30 @@
+{
+  "id": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "external_ref": null,
+  "title": "Central first start after restart #3 took 100 s to open its listener, with admission and forwarding load failures",
+  "outcome": "A Central restart opens its listener promptly and loads every subsystem without admission or load timeouts. The root cause of the slow, partly failed first start on 2026-11-03 at about 06:08Z is identified and fixed.",
+  "acceptance": [
+    "The cause of each reported symptom (100337 ms to listener, delegation inventory writer admission timeout of 14383 ms with loadFailed, telegram forwarding loadFailed, federation peer 423/500 with authority changed, 14639 ms persist tick with 11378 ms of statements) is identified with quoted log lines and the code path that produced it, and classified as product defect, environment or expected behaviour.",
+    "Each product defect has a fix with a regression test and a clean review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "post-restart",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a109b5-8dc7-7ba0-b8ad-f5fee7fec93e",
+  "external_ref": "engram:src/verbs/verification_assessment.rs",
+  "title": "Engram `show --note` assessment view: compact status-grouped summary with every open or mismatch row in full, full history optional",
+  "outcome": "A holder or evaluator reading a verification record through Engram's own `work show --note` (CLI or MCP) sees a compact, status-grouped summary of the record's obligation assessment first: the total row count, the record and cut positions, one count per (status, left-out or mismatch reason, recorded) group, and every open, mismatch or matches row in full. Rows closed by another record are counted, not listed. The exhaustive oldest-first history stays available on request at the same stable cut. This is the Engram half of the TermAl item w-6616fbef4689: TermAl summarises assessments in its evaluator brief, but holders read them only through Engram's output, which TermAl passes through untouched.",
+  "acceptance": [
+    "Engram `show --note` assessment view: compact status-grouped summary with every open or mismatch row in full, full history optional is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "engram-follow-up",
+    "greg-approved-2026-10-04"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

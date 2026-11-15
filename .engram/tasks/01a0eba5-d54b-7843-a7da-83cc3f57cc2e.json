@@ -1,0 +1,26 @@
+{
+  "id": "01a0eba5-d54b-7843-a7da-83cc3f57cc2e",
+  "external_ref": null,
+  "title": "A worktree's emptied folder stays \"busy\" after all its TermAl delegation children completed, so git worktree remove cannot finish",
+  "outcome": "Reported by Engram::Opus in mailbox-37bcca97 #82 (2026-09-29 05:28Z). `git worktree remove C:\\github\\Personal\\Engram\\.worktrees\\standing-approval-stand-in` unregistered the worktree and emptied the folder, then failed with \"failed to delete …: Permission denied\". A later rmdir of the empty folder fails with \"Device or resource busy\", also on a retry minutes later. Delegation children had run there: Claude and Kimi reviewers session-8465…8478, and acceptance evaluators session-8479 and session-8482, which ran there because it was the named source root of w-879c75f6e604 (now completed). The same removal worked for .worktrees/named-root-state, whose reviewers had finished longer ago.\nDiagnosis by Termal::Opus2 at about 05:35Z, read-only:\n- Ruled out a lingering agent process: none of the Claude or Kimi child processes of those sessions remain among termal.exe's children.\n- Ruled out Engram control processes: session-8482's `engram control` (pid 63956) is still alive, but a delegation child's connection uses project.root_path, the main checkout, as its current directory (engram_host_adapter.rs:5357/5369; engram_control_transport.rs:286), not the worktree.\n- Ruled out Git's fsmonitor daemon: no git.exe is running, and core.fsmonitor is unset.\n- The workspace watcher watches every local session's workdir, but prunes roots nested under a watched project root (workspace_watch.rs prune_nested_workspace_file_watch_roots), and Engram is a local project.\nRemaining suspect: the host (termal.exe) holding a handle, via the watcher or source-root measurement. Unconfirmed. Resource Monitor's Associated Handles search for \"standing-approval-stand-in\", or Sysinternals handle.exe (not installed), would name the holder. Greg's pending host restart is a natural test: if rmdir succeeds after it, the host held the folder. termal_name_source_root also refuses to clear the name once the claim is gone (\"this session holds no live claim\"), so a completed item's named root cannot be un-named by its former holder.",
+  "acceptance": [
+    "After a work item's delegation children complete (and its claim ends), TermAl holds no handle or working directory on that worktree, so git worktree remove succeeds; the holder found in this report is identified and released, with a test or a documented manual check"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

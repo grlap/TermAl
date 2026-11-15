@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4c2-7bb1-ae21-5acc935a360e",
+  "external_ref": "tm-bimd",
+  "title": "Bind an Engram session on its first gated prompt, not when its delegation is created",
+  "outcome": "Turn-gate simplification Greg adopted 25 Sep (Engram::Opus relay, mailbox #200; assessment docs/features/turn-gate-assessment.md in the Engram worktree). Today TermAl binds at delegation creation: 642 of 913 bound sessions never asked for a turn. Binding lazily on the first gated prompt removes those binds and most of the rebind fan-out after a restart (see tm-56ga serial post-commit rebinding; tm-b8cw lazy bind after a released boot-recovery binding). Acceptance: no session_bind before the first gated prompt; the first gated prompt binds then evaluates; restart rebinds only sessions that had bound; existing binding-absence recovery (tm-cnsv) still holds. Engram side needs no change.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

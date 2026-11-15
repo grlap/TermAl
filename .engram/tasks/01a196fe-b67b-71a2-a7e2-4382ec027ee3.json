@@ -1,0 +1,31 @@
+{
+  "id": "01a196fe-b67b-71a2-a7e2-4382ec027ee3",
+  "external_ref": null,
+  "title": "Test the named-root refusal remedy's own changed-token fence in the post-read window",
+  "outcome": "A test changes the reporting session's routing token after the refusal handler's authority read has validated it and before engram_named_root_refusal_remedy_locked takes the state lock. It asserts that nothing is flagged and that the 409 says the binding changed while the naming was in flight. The test-model refusal callback documents its lock order (named-roots model mutex, then the state lock) or runs after the model lock is released.",
+  "acceptance": [
+    "a test exercises engram_named_root_refusal_remedy_locked's token-not-held branch through a hook in the window between the authority read's post-check and the remedy's lock, asserting no flag and the 'binding changed while this naming was in flight' message",
+    "on_inactive_refusal in src/engram_named_root_test_transport.rs documents its lock order or runs outside the model lock",
+    "the change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "found-by-review",
+    "named-root",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

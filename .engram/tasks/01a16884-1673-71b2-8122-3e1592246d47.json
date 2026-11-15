@@ -1,0 +1,28 @@
+{
+  "id": "01a16884-1673-71b2-8122-3e1592246d47",
+  "external_ref": null,
+  "title": "Make retained-disposition regression select its expected containment branch from the input",
+  "outcome": "The retained begun receipt disable test explicitly asserts containment for same-connection gating OFF and strict reset for host disable, so unexpected checkpoint fallback cannot satisfy either branch.",
+  "acceptance": [
+    "Make retained-disposition regression select its expected containment branch from the input is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-control",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

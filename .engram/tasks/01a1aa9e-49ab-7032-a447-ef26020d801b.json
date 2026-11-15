@@ -1,0 +1,41 @@
+{
+  "id": "01a1aa9e-49ab-7032-a447-ef26020d801b",
+  "external_ref": null,
+  "title": "Same-root naming retains an old claim fence and committed-input test registration still refuses after the prescribed refresh",
+  "outcome": "Official same-root naming reconciles the live claim fence used by committed-input registration, so a clean check on the current named root can register without clearing the root, bypassing verification or retrying a stale binding.",
+  "acceptance": [
+    "When a live claim on the same work run has a newer fence, official naming of the same root reconciles the retained registration authority; a clean committed-input run can register under the current canonical claim. Existing work/store/run/root/generation fences and release or displacement refusals remain enforced.",
+    "Regression coverage exercises the stale-fence refusal, official same-root refresh and subsequent registration through production entry points, and negative controls prevent a released, displaced, foreign or stale run from borrowing the refreshed authority. The fix does not mutate historical evaluations, verification records or seals.",
+    "The exact repaired candidate has the required independent source-review pair and green full gate before landing; the tracker records the original Windows registration refusals separately from any later validation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "execution-observability",
+    "greg-directed",
+    "host-recording",
+    "named-source-root",
+    "registration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1a74f-2eb1-7712-9834-5f8e183e1f97",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Exact repaired tree landed/pushed as master0d4d8061 after independent pair and qualified originalFULL63002; clean release installed. Same-root naming reconciles current claim fence and preserves strict controls. Runtime activation/WindowsEO50 remain on openparent.",
+    "completed_at": "2026-11-05T11:16:03.605990500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1b861-74b8-78b2-a9da-1958c9f156b9",
+  "external_ref": null,
+  "title": "Update federation-link.md and satellite-onboarding.md for the SSH-settlement recovery contract",
+  "outcome": "docs/features/federation-link.md (around lines 104-108) and docs/features/satellite-onboarding.md (around lines 63-66) describe the landed SSH-settlement behaviour from federation_ssh_settlement.rs: the worker keeps the exact owned child, retries a failed cleanup on supervisor ticks, and releases the runtime quarantine and reconnects once the reap is proven, with no restart. They also list the stages sshStartSettlement, sshCleanupPending and sshCleanupRetry and the recoveryReason field, instead of saying an unresolved SSH operation quarantines the peer until restart. Source: Low from the Claude review (delegation-c1de4827) of the combined candidate fdd8d035; behaviour is correct, only the docs are stale.",
+  "acceptance": [
+    "Update federation-link.md and satellite-onboarding.md for the SSH-settlement recovery contract is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

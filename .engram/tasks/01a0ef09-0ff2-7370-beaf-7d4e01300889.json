@@ -1,0 +1,30 @@
+{
+  "id": "01a0ef09-0ff2-7370-beaf-7d4e01300889",
+  "external_ref": null,
+  "title": "A focused launcher run is never credited as a passed check, though instructions name it as the way to run a focused test",
+  "outcome": "An agent that follows the instructions for a focused test gets a check the host can credit, or the instructions say plainly which form is credited and which is diagnostic only.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md say, where they name the launcher's focused mode, that a check meant to satisfy a criterion bound to a test is run directly in the worktree and that a focused launcher run is recorded as unknown; or the launcher's focused summary carries the wrapped runner's passed and failed totals and the host credits it, with a test that shows a focused run of a passing cargo test recorded as passed.",
+    "The verification note the host writes for a check it recorded as unknown says unknown and why, not only the launcher's 'focused: passed' line; a test pins the text.",
+    "docs/features/engram-host-adapter.md and docs/test.md describe the chosen behaviour and agree with each other."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "test-launcher",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

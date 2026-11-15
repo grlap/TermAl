@@ -1,0 +1,37 @@
+{
+  "id": "01a1b8a0-dcfe-73c3-a992-7c7ce88f419a",
+  "external_ref": null,
+  "title": "Launcher run registration POST returns 503 \"registration persistence is not yet acknowledged (durability_wait, deadline)\"; the run loses native wait and host credit while still running",
+  "outcome": "A launcher run's host registration either commits and is acknowledged, or the launcher and its caller get a definite outcome they can act on. An acknowledgement that is slow only because the persistence writer is queued does not leave a running test without native wait or host credit, and does not leave its commit status uncertain.\n\nObserved 2026-11-08 at about 00:46Z on Central by Engram::Merger: `node scripts/test-launcher.mjs focused --input commit -- cargo build --release --bin engram -j 2` in C:\\github\\Personal\\Engram\\.worktrees\\central-readiness-0c012df9. The launcher printed STARTED (run test-0e7c8f4e-9a6d-477d-9877-fc64eba3dced, pid 118684), then \"registration unconfirmed; native-wait unavailable; use --notify; not host check credit\". The POST returned HTTP 503: `test run registration persistence is not yet acknowledged; the operation may still commit; retry the unchanged original request; phase=durability_wait; category=deadline; elapsedMs=5226; phaseElapsedMs=5012; stateInnerWaitMs=4; stateInnerHoldMs=196; writerProgress=queued for the writer; fenceError=Deadline; attemptId=277cb6ff-c4fd-4111-a5e4-b5843b6c03fc`. The build kept running. The caller rightly did not retry, because the commit status was uncertain.\n\nContext: Central was under memory pressure from other applications at the time (free virtual memory had dropped to about 8–20 GB). The writer queue wait was about 5 s; the StateInner hold was 196 ms.",
+  "acceptance": [
+    "The cause of the 5 s writer-queue wait is recorded from evidence: what the persistence writer was busy with, and whether the 5 s durability deadline is appropriate for this phase. It names whether this is product behavior (writer starvation or a deadline too tight for one registration) or an environment effect.",
+    "The registration outcome becomes definite for the launcher. One option: the launcher itself re-sends the unchanged original request with the same attempt identity, exactly as the 503 instructs, until the outcome is known within a bounded budget, so that a committed registration is recovered and a running test keeps native wait and credit. Another: the host acknowledges a queued registration without a deadline refusal. No duplicate registration, no change to test semantics, and no blind retry of the test itself. Deterministic tests cover a delayed writer acknowledgement that later commits, and one that never commits.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "launcher",
+    "persistence",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed bounded same-identity registration recovery in bf7ff309, preserving typed pending on every unconfirmed recovery exit. Exact author42PASS, R2 pair no Medium+, final integration FULLs reported eligible by Opus781. Historical writer detail gap and actionable pending semantics explicitly concurred by Fable2660/2662/2664; optional printed-guidance Low remains w-f0b67638f5e5.",
+    "completed_at": "2026-11-08T18:17:04.030529200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

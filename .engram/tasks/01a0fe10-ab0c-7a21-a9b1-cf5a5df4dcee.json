@@ -1,0 +1,50 @@
+{
+  "id": "01a0fe10-ab0c-7a21-a9b1-cf5a5df4dcee",
+  "external_ref": null,
+  "title": "False \"Engram no longer confirms this claim's local source-root selection\" prompt after tracker acts that do not change the naming record",
+  "outcome": "The host asks an agent to re-name a claim's worktree only when Engram's naming record for that claim actually stopped confirming the local selection, not after unrelated tracker acts. A re-name that returns the same generation does not follow a needless prompt.",
+  "acceptance": [
+    "Record the causal distinction between warning issuance after actual canonical selection loss and stale delivery after normal naming restores or changes the selected claim; preserve fail-first and attribute historical tracker observations without asserting an unobserved trigger.",
+    "A production-path regression proves a fresh confirmed opening after normal naming, including a same-path retry that keeps the generation, omits the obsolete rename warning; controls retain a current warning when selection is genuinely unconfirmed and preserve user text and historical check evidence.",
+    "The full maintained gate passes on the exact final input, and the independent Codex/Claude read-only review pair leaves no outstanding in-scope Medium-or-higher finding; deferred Lows are filed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "source-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Replace stale plain rename status with shared scoped runtime notices rechecked at owner-checked provider handoff. Preserve real loss warnings, immutable opening/evidence, user quotes/history, exact-instance accepted-send acknowledgement and intentional clear semantics. Independent Claude9958 evaluationdd7e325539c5481db9d0faf33efc6476 is fresh3/3PASS revision2/content-v1:b895b3c7; full0480 crediteddece9896 all5PASS and complete14 pair9956/9957 noMedium+, twoLows filedw-db11917fc4c7/w-c92fdb5fb227. Exact frozen14 tree4487e9f6 verification stillpasses; historical tracker trigger remains inference. Feature commit/integration handoff follows under standing rule; no landing claimed yet.",
+    "completed_at": "2026-10-02T23:25:04.791513600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

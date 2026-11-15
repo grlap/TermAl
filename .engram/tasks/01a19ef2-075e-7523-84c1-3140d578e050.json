@@ -1,0 +1,38 @@
+{
+  "id": "01a19ef2-075e-7523-84c1-3140d578e050",
+  "external_ref": null,
+  "title": "Restore Mac routine mailbox relay after restart with current authenticated recovery evidence",
+  "outcome": "Routine mailbox relay from Central to the existing Mac runner principal works again, supported by current authenticated-link, native session-directory and recipient/wake evidence. The build, process-start and transport failure/recovery chronology is recorded without presuming enrollment loss; existing peer identity, enrollment and authentication protections remain intact.",
+  "acceptance": [
+    "After the Mac host starts, timestamped read-only evidence shows the existing enrolled host identity/generation authenticated again and its native root session directory available.",
+    "An already authorized sender's Mac relay receipt and current recipient/wake evidence show routine mailbox delivery recovered, naming the exact principal/message and running host identity; historical verification passes alone do not satisfy this.",
+    "The failure/recovery chronology distinguishes observed build, process-start and transport stages; any remaining cause uncertainty is explicit, enrollment/authentication fences are preserved, and no unapproved configuration change, re-enrollment, remote command, restart or install is used."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-machine",
+    "cross-project",
+    "federation",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Mac routine relay recovered: current authenticated same host/enrollment identity and native directory, followed by authorized probe123 and actual recipient reply124 at01:18:57.843Z. All coordinator-concurred criteria evidenced; no enrollment/config mutation, remote commands, agent install/restart, or fabricated evaluation. Exact forwarding cause uncertainty retained; no source change or landing claimed.",
+    "completed_at": "2026-11-03T01:21:14.381662700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

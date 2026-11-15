@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4d8-7893-8b20-c5d7c374c92e",
+  "external_ref": "tm-cqs5",
+  "title": "Repair deterministic near-bottom live-follow test failure",
+  "outcome": "The existing UI quality gate test App.scroll-behavior.test.tsx > keeps a growing near-bottom send inside one live follow deterministically fails because no auto scrollTo write is observed after send growth. Reproduced both in the current worktree and from an isolated git archive of clean HEAD c3397e8, proving it predates the exact long-message offset fix. Diagnose implementation-vs-test contract and restore the full Vitest gate.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. Its note says resolved upstream, in 4e47eb9 and 2e0e7b1 (ancestors of master).",
+  "completion": null
+}

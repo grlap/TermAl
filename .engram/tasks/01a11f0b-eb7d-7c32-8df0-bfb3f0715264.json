@@ -1,0 +1,28 @@
+{
+  "id": "01a11f0b-eb7d-7c32-8df0-bfb3f0715264",
+  "external_ref": null,
+  "title": "Strengthen the crash-restart drill: real dispatch after the restart, and the restart-notice variant per session",
+  "outcome": "The crash-restart drill shows through the real dispatch path that a prompt sent after a crash restart is not queued behind the interrupted turn. It also asserts which restart notice each session gets: 'waiting for approval or input' plus '1 queued prompt remains saved.' for the Approval session, and 'before this turn finished' for the Active one.",
+  "acceptance": [
+    "Strengthen the crash-restart drill: real dispatch after the restart, and the restart-notice variant per session is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-boot",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a12279-10d4-7bc0-9089-029d9276dfe7",
+  "external_ref": null,
+  "title": "Make the held-settlement regression test discriminate without scheduling luck or a fixed 6 s sleep",
+  "outcome": "codex_reviewer_mcp_archive_wait_outlasts_a_settlement_held_past_the_old_bound (src/tests/codex_reviewer_mcp_settlement_controls.rs) proves its scenario independently of test-thread scheduling: the receiver's waiting phase and the release are observable or controllable, so an old short-bound wait reliably fails. It costs no fixed wall-clock sleep, or it is replaced by a product-property check (no archive queued while the hook is held, then the archive after release).",
+  "acceptance": [
+    "Make the held-settlement regression test discriminate without scheduling luck or a fixed 6 s sleep is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex-reviewer-mcp",
+    "review-low",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

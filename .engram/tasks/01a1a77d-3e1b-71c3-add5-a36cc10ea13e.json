@@ -1,0 +1,38 @@
+{
+  "id": "01a1a77d-3e1b-71c3-add5-a36cc10ea13e",
+  "external_ref": null,
+  "title": "Report ordinary turn outcomes and checks when submodule source cannot be measured",
+  "outcome": "An ordinary turn in a repository with gitlinks reports its observed outcome and host-judged checks to Engram even when content-v1 refuses source measurement, with source attribution explicitly unavailable and no source-state, freshness or test-credit claim. A coordinated real Questly run confirms the reporting behavior after the relevant build is running. The supported consumer test-credit route is a separate deliverable.",
+  "acceptance": [
+    "An ordinary turn in a Git worktree whose closing content-v1 capture refuses UnsupportedGitlinks reports its observed outcome and host-judged checks to Engram through the existing fenced durable reporting path, including a declared check, with source attribution explicitly unavailable.",
+    "Such a report creates no source revision, source change, source sighting, checkpoint, verification record or test credit, never claims the submodule source is unchanged, and preserves the default capture policy and other refusal/fencing behavior; deterministic regression tests cover those controls.",
+    "The supported reporting behavior and remaining consumer-credit limitation are documented, and after the relevant build is running a coordinated real Questly declared-command run confirms an outcome/check-only Engram observation, with its limits recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "execution-observability",
+    "greg-directed",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Outcome/check-only reporting for gitlink source refusal is landed and running. Real Questly ordinary declared Flutter run is recorded by Engram as succeeded with reported-passed check, uncredited and without measured source; exact host diagnostic independently read. Remaining C3 met with stated normal-view limits. Source/docs/regression, review pair and FULL evidence are retained in the item's history.",
+    "completed_at": "2026-11-05T15:45:34.805392600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

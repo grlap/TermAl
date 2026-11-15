@@ -1,0 +1,30 @@
+{
+  "id": "01a177cc-aa1e-7972-8d58-be90f2942b12",
+  "external_ref": null,
+  "title": "Test-run display-name owner resolution classifies delegation children while inventory is unknown",
+  "outcome": "Name-based owner and notification resolution remains unknown while delegation inventory is Loading or Failed, then re-evaluates after full publication without misattributing child or ambiguous root names.",
+  "acceptance": [
+    "Test-run display-name owner resolution classifies delegation children while inventory is unknown is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "review-follow-up",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

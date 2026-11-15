@@ -1,0 +1,38 @@
+{
+  "id": "01a19c66-91d3-7172-89cf-3d0113c95318",
+  "external_ref": null,
+  "title": "Classify C1 root_dispatch failure inventory against known C2 fixes and master",
+  "outcome": "Source-only pre-diagnosis of all 30 root_dispatch failures from complete C1 inventory684d7866, grouped by first panic and classified K/T/P with source evidence, without edits or runs.",
+  "acceptance": [
+    "All30 assigned root_dispatch failures are inventoried individually by first meaningful panic/assertion and grouped into a compact cluster/count/class/evidence table returned to Fable2.",
+    "K classifications cite an already-fixed C2 product regression; T classifications include the master/source discriminator; any NEW product regression is stopped and reported with both sides.",
+    "No source edits, Cargo/tests or commands in peer roots; original C1 run/logs preserved; C2-pre run owns actual residue."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed source-only census of all30 assigned root_dispatch failures from original C1 run684d7866, zero missing first-panic records. Complete19-cluster table and all30 individual pid+seq/location/message/class/evidence rows returned Fable2061, independently accepted as complete/careful in Fable2062. Final classification K8/T21/P-preexisting1; coverage P initially STOP-reported with master/current sides, independently reclassified known86e9bae9 in Fable2058; content-bearing mailbox exposure STOP-reported with both sides, independently filed w-a2ceaa6bceb6 in Fable2060. All T classes have native master/source discriminator in .evidence/w-3d0113c95318/root-dispatch30.json and evidence cdc58746f9ac48a3984d691fac9c6630. No source edit/run/Cargo/compiler or peer-root command for this research item. Separate authorized repair task w-dd1ba4c93179 returned855c14f7 and completed after source intake; original C1 artifacts unchanged. K explanation is not current-input PASS; actual C2-pre residue belongs to parent. Evidence retained for open parent C2 diagnosis/integration, no independent evaluation or product closure asserted.",
+    "completed_at": "2026-11-02T13:48:05.476186200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a16805-64ef-76a1-a34f-b413e13ab8ac",
+  "external_ref": null,
+  "title": "Run rustfmt on src/tests/delegation_read_only_matrix.rs (two long assert lines)",
+  "outcome": "src/tests/delegation_read_only_matrix.rs is rustfmt-clean: the two single-line assert!(accepted.iter().any(...)) calls near its end are reflowed as cargo fmt would.",
+  "acceptance": [
+    "rustfmt --check reports no difference for src/tests/delegation_read_only_matrix.rs, with no behaviour change to the test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "formatting",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

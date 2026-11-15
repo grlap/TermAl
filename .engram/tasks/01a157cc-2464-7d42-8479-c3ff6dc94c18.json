@@ -1,0 +1,37 @@
+{
+  "id": "01a157cc-2464-7d42-8479-c3ff6dc94c18",
+  "external_ref": null,
+  "title": "O1 S3: prove native Windows–Mac mailbox coordination before the pilot task-folder exchange",
+  "outcome": "Before any S3 pilot task-folder exchange (Engram S3 step list, step 0), a live native mailbox exchange between the Windows TermAl host and the greg-run Mac TermAl host, on the final installed S3 builds after Greg's restart, is proven in both directions with durable receipts and validated acknowledgements, under the landed S3 authority and without enrolling any operational store. Narrow step-0 proof only; the broad M6 reconnect/restart/disable matrix stays with w-e41b7112372a.",
+  "acceptance": [
+    "A reviewed, exact O1 procedure is recorded on this item before execution: the roles, both endpoints and participants, the federation binding, the authority it acts under, the evidence it captures, and its stop conditions.",
+    "Before execution, the item records that the S3-final TermAl build is installed and that Greg has restarted onto it, with the build identity on both hosts (Windows installed hash, Mac running build).",
+    "Both directions are proven: for each direction the original message identity, its durable authoritative mailbox append at the central host, the receive and wake observation on the target host, the issued read receipt and the validated acknowledgement are recorded separately; a satellite target also has its durable executor receive evidence recorded separately. No operational store is enrolled or replicated. At most one controlled exact-key retry is made in the whole proof, only where the procedure approves it.",
+    "The evidence limits, the classification of any failure, and what is left to the parent M6 matrix (w-e41b7112372a) are recorded; nothing beyond this step-0 proof is claimed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "s3-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "O1 S3 step-0 native Windows–Mac mailbox proof completed on certified A13930↔Mac6192 bindings and actual running S3 builds after Greg restarts. Frozen F1 run O1-20261020-1630-7c53c9a4: Aseq5 plus the sole identical-key duplicate; Breplyseq6; both real native wakes, issued full-page reads and unchanged validated ACKs; final both cursors6/unread0. Separate satellite durable receive/runtime/processed journal evidence and central mirror retained. No operational store enrollment/replication or pilot-folder exchange. Fable2 coordinatorPASS and independent Sonnet evaluation31a8b5ee5c1a4018a4cbba07137cf6a9, all4criteria judgmentPASS on revision2. Parent M6 fault matrix stays open.",
+    "completed_at": "2026-10-20T16:42:57.728480600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

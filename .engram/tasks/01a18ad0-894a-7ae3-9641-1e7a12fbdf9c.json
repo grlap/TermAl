@@ -1,0 +1,30 @@
+{
+  "id": "01a18ad0-894a-7ae3-9641-1e7a12fbdf9c",
+  "external_ref": null,
+  "title": "Reconcile Sol-c593's ten retained worktrees before its errored session is retired",
+  "outcome": "Reconcile Sol-c593's ten retained worktrees before its errored session is retired",
+  "acceptance": [
+    "For each worktree under .tmp/ named for session-13170 (wt-allocator-927a, wt-health-ab6c, wt-orphan-debt-041a, wt-persist-metadata-6c2d, wt-pmac-c1af, wt-reclamation-856f, wt-recovery-fifteen-af67, wt-registration-9ca5, wt-review-attempts-ea2e, wt-ui-duration-ec02, plus the o1-* and pmac-c1af roots), a note records read-only whether its staged or uncommitted content is already on master, superseded, tracked by an open item, or orphaned work that needs an owner.",
+    "Orphaned work is attached to an open item, or explicitly recorded as abandoned with the coordinator's concurrence, before anything is removed.",
+    "Only after that are the worktrees removed with path checks, and the coordinator recommends to Greg whether session-13170 can be deleted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "greg-directed",
+    "worktrees"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

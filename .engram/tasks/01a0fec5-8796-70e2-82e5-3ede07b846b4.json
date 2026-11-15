@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-8796-70e2-82e5-3ede07b846b4",
+  "external_ref": null,
+  "title": "Give delegation halt update deltas the message count at their own sequence",
+  "outcome": "Give delegation halt update deltas the message count at their own sequence",
+  "acceptance": [
+    "Give delegation halt update deltas the message count at their own sequence is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

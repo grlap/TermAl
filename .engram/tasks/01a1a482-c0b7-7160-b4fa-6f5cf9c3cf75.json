@@ -1,0 +1,24 @@
+{
+  "id": "01a1a482-c0b7-7160-b4fa-6f5cf9c3cf75",
+  "external_ref": null,
+  "title": "Host guidance on noContinuation omits that native relay mailboxes refuse it",
+  "outcome": "An agent reading the host guidance or the acknowledge tool description knows that noContinuation is refused on native relay mailboxes, so it doesn't send a refused acknowledgement or conclude something is broken.",
+  "acceptance": [
+    "src/coordination_instructions.rs and the termal_acknowledge_mailbox description in src/delegation_mcp.rs say native relay mailboxes refuse noContinuation, alongside the central-domain mailboxes they already name, and a test pins that wording; the refusal itself at src/mailbox_relay_routes.rs:682 stays as it is"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

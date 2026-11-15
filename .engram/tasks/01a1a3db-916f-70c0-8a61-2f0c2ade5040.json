@@ -1,0 +1,30 @@
+{
+  "id": "01a1a3db-916f-70c0-8a61-2f0c2ade5040",
+  "external_ref": null,
+  "title": "Assert session membership invalidation and fresh stamps through both rollback callers",
+  "outcome": "Direct failure-path regressions prove that delegation follow-up parent rollback and remote delta rollback reject an earlier session runtime cut and preserve required mutation stamping.",
+  "acceptance": [
+    "A regression drives the delegation follow-up parent rollback path and proves the prior session capture no longer validates and the restored parent carries a fresh mutation stamp while existing rollback behavior remains correct.",
+    "A regression drives remote delta rollback and proves the prior session capture is invalidated, including an equal-record or same-length restoration.",
+    "Relevant focused regressions pass on the exact changed input; the change follows the repository's standing review and gate rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "session-runtime-capture",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

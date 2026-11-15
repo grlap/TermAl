@@ -1,0 +1,32 @@
+{
+  "id": "01a1722b-390f-71d2-8086-9025f394743e",
+  "external_ref": null,
+  "title": "Relay mailbox listing performs redundant association writes and can hide local results on writer contention",
+  "outcome": "Listing already verified relay history avoids redundant coordination writes and does not discard independently available mailbox results because optional association caching is busy.",
+  "acceptance": [
+    "A repeated listing with an unchanged association does not need a writer transaction for that association.",
+    "Focused controls distinguish authoritative home/list refusal from optional association-cache contention, retaining independent available history truthfully."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "contention",
+    "cross-host",
+    "greg-reported",
+    "mailbox",
+    "mailbox-relay",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1711f-eab5-7671-a7e1-559787f77f80",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

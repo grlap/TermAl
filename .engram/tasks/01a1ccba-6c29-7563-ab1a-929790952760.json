@@ -1,0 +1,35 @@
+{
+  "id": "01a1ccba-6c29-7563-ab1a-929790952760",
+  "external_ref": null,
+  "title": "Integrate combo66 on e81c9787: Website 5a907f23 (accessible website redesign carry), direct child of combo65",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 5a907f23de23b6182de96fc1c12a883da9bd69cd (tree 40586971daa8a1573e93490b84f356c60450b4f1) is on origin/master, where master was moved to it by a fast-forward from e81c97877913f6eb4c9edbce82bccafbaa7ceb40.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 40586971 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against e81c9787 is byte-identical (same 5 website/ paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 72317370's contribution against d27ef044, which the R6 pair Codex session 17567 and Claude session 17568 reviewed with no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree 40586971 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo66 (Website 5a907f23, accessible website redesign carry) landed on master by fast-forward from e81c9787, pushed at 23:12:00Z. The DL560 FULL test-5ccca7e2 on test ref 11bb1a64 (tree 40586971) passed all 6 stages with an eligible clean input, and the R6 pair 17567/17568 was adopted under byte-identical contribution. Installed on Central (9e2a730f) and DL560 (8abf2284) with the previous binaries kept aside and no restart; a website-only change leaves the binary unchanged. Independent evaluation delegation-d919241f (Codex 17576) passed 3/3.",
+    "completed_at": "2026-11-11T23:18:55.632135300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

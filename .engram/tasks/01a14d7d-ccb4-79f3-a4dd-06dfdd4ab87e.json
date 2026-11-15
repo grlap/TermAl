@@ -1,0 +1,41 @@
+{
+  "id": "01a14d7d-ccb4-79f3-a4dd-06dfdd4ab87e",
+  "external_ref": null,
+  "title": "Prove local federation forward ownership before sending the pair capability",
+  "outcome": "Prevent a local port squatter from receiving a federation pair capability during SSH forward startup, using an ownership/proof boundary without a UI relay.",
+  "acceptance": [
+    "The runtime pair key is never transmitted, over the link or to any local process, including one that occupies or replaces the selected forward port or relays proof responses; enrollment provisioning is separate. Peers authenticate over the SSH-owned byte stream as specified by design addendum A1 at the hash Architect2 concurs.",
+    "Tests discriminate a squatter and delayed cleanup from a genuine link, preserve one central-initiated OpenSSH session with loopback local/reverse forwards, and retain existing authentication/incarnation bounds.",
+    "Exact-input focused/full gate and independent review pair accompany the fix."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered A1 mutual control-stream attestation and per-request MAC without runtime pair-key transmission; preserved authenticated native-binding and mailbox unknown-outcome semantics. Exact-input 116 focused tests and all five full-gate stages passed; independent acceptance passed 3/3.",
+    "completed_at": "2026-10-19T21:18:55.835848100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a10c9d-8bea-7a21-b0ff-65c411a8600e",
+  "external_ref": null,
+  "title": "Investigate Engram admission and control projections during uncertain dedicated runtime cleanup",
+  "outcome": "Investigate Engram admission and control projections during uncertain dedicated runtime cleanup",
+  "acceptance": [
+    "Prove or refute with a runtime witness whether the inventoried Engram admission and control projections can overwrite cleanup uncertainty or remove the public Stop retry route; guard any demonstrated path and preserve healthy admission behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "agent-workflow",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

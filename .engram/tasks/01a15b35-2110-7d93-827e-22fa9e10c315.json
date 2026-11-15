@@ -1,0 +1,31 @@
+{
+  "id": "01a15b35-2110-7d93-827e-22fa9e10c315",
+  "external_ref": null,
+  "title": "Bound native mailbox wake recovery scans by pending work instead of lifetime history",
+  "outcome": "Native wake fallback and kick recovery avoid rescanning every completed obligation while retaining recovery for all pending or held rows.",
+  "acceptance": [
+    "Bound native mailbox wake recovery scans by pending work instead of lifetime history is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "gate-load",
+    "greg-directed",
+    "mailbox",
+    "performance",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15a23-842a-7c72-b323-c931b0f63084",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

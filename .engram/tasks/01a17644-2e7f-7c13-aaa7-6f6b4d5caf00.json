@@ -1,0 +1,31 @@
+{
+  "id": "01a17644-2e7f-7c13-aaa7-6f6b4d5caf00",
+  "external_ref": null,
+  "title": "Preserve parser-specific mailbox alias refusals through public availability checks",
+  "outcome": "Healthy-directory parser errors report an actionable grammar refusal instead of a false inventory-outage diagnosis, while actual unavailable-host and incomplete-legacy checks remain fail closed.",
+  "acceptance": [
+    "Public backend and MCP paths distinguish unavailable inventory from reserved, empty and known-host-prefix grammar errors without changing recipient selection.",
+    "Focused public-path controls pin the refusal status and actionable exact-id/name:/host: guidance for both healthy and unavailable directory snapshots."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "mailbox-alias",
+    "pre-existing",
+    "review-follow-up",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a174c9-ea52-79e1-a235-8837ca2accca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

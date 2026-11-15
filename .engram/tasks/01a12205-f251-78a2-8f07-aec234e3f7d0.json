@@ -1,0 +1,52 @@
+{
+  "id": "01a12205-f251-78a2-8f07-aec234e3f7d0",
+  "external_ref": null,
+  "title": "A recognised check can end with neither a host record nor a holder-visible line (silent drop paths in check resolution and settlement)",
+  "outcome": "Every test command the host recognises in a session's named root ends with exactly one holder-visible outcome on the item: a verification record, or a refusal or withheld line that names its cause. No recognised check is dropped silently, and the cause is never reported only on the host's stderr.",
+  "acceptance": [
+    "The holder's note lists, with file:line, the host paths that can end a recognised check with neither a verification record nor a holder-visible line, including at least: (a) the check's start or finish source capture is missing, failed or different when it is resolved (engram_turn_checks.rs:632-675), including captures still pending when the shared closing-settlement deadline is spent (engram_host_adapter.rs:4603-4618); (b) the capture-worker cap or the retained-check cap refuses the check at start (engram_turn_checks.rs:1782-1796), so its finish finds no check (:2265); (c) a completion that arrives while settlement runs off-lock and is cleared at checkpoint (engram_host_adapter.rs:4761). For the reported occurrences, the note says whether retained evidence can attribute them to a path; today host stderr is not persisted. Further paths found are listed and tracked in w-f02f2d487487.",
+    "For each of paths (a), (b) and (c), a fail-first test shows that on unchanged code a recognised check ending in that path yields no record and no holder line, and after the fix yields either the verification record or a holder-visible line naming the cause. A check whose capture later becomes available is not lost to a cached empty-check report.",
+    "The full gate passes on the exact committed tree: the host-recorded passed full-gate test verification for that tree, recorded on w-67d248c998ef (which lands in the same commit), is cited in a holder note on this item with its record id, source revision and run id, and that source revision matches this item's judged revision. One-time exception granted by Greg on 2026-10-13 (Advisor b9d13887 #713).",
+    "A recognised check that the host saw start but whose end is never reported is closed with outcome Unknown and a holder-visible notice saying no end was reported for that command; it is never dropped silently and never recorded as passed. The trigger is the turn's closing checkpoint, or at the latest the session's next turn boundary, with no new timer, poller or watchdog. A check the host deliberately carries past its turn (a background-launched run, such as a full gate in Bash background mode or --detach) is exempt until its own carrying ends. A fail-first test drives a started foreground check with no end event through the closing checkpoint and shows no record and no holder line on unchanged code, and after the fix the Unknown closure and the notice. An end event that arrives after the closure adds no second outcome for that check, but is recorded as a holder-visible late-end observation linked to the Unknown closure, with its exit status; one outcome per check, and no silent discard."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "cross-project",
+    "diagnostics",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed triple commit 23e77889dd2f2f2eeb4ba650e9bfb7c342773e80 on origin/master, fast-forward from bd839153; exact-tree gate, review pair, and fresh acceptance evaluation are recorded.",
+    "completed_at": "2026-10-13T05:12:01.308577600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "id": "01a15442-6dee-7463-b5a7-30bb95c55587",
+  "external_ref": null,
+  "title": "Owed-close recovery: keep the original unknown closing operation, and let only an explicit, trusted recovery origin replay or settle it",
+  "outcome": "Retain and exclusively own the exact original unknown closing checkpoint operation across local lifecycle changes. Only an explicitly trusted recovery origin may replay it under the existing original-grant, authority, report-coverage and lifecycle checks. Automatic capacity retry, admission, rebind, exit and restore never enter its manual replay or local-settlement path and never promote provider work through an unresolved duty. An accepted matching receipt is retained through local settlement and coherent owner/session durability confirmation; failures retry only local work, preserve newer or other facts, and release the barrier last. Keep ordinary capacity, same-scope and never-named behavior unchanged. This is a required local prerequisite of the root-clear parent, not universal Engram completion protection. Parent C1/C2 remain unchanged and the composition cannot land or complete before both items satisfy review, tests and acceptance.",
+  "acceptance": [
+    "C1 — Trusted origin: B recovery permission is carried explicitly from actual production callers, never inferred from a helper name, absent nonce or session state. Only the explicit session queue-Resume action and its own still-valid continuation may enter B replay or local settlement. Automatic capacity retry, automatic admission/rebind/retry/exit/restore, delegation Resume and removal/reset/cleanup do not gain that permission. A regression drives a real typed provider-capacity terminal failure followed by an unknown closing checkpoint and the actual capacity tick, with empty and non-empty queues: no B checkpoint replay, local B settlement/barrier release or provider dispatch occurs. Production API, delegation and lifecycle caller paths are audited against the finite origin x phase table.",
+    "C2 — Exact manual recovery: an explicit permitted recovery attempt replays only the retained original checkpoint request, key, report and next intent, with single-flight ownership and the original store/session/work/run/claim/root-execution/run-generation, mirrored grant, report coverage and current lifecycle checks. The status must prove that exact grant open and begun. The positive control settles the original duty; closed-plus-unknown, issued or missing begun state, mismatched identity, definitive refusal and lost eligibility remain held without a replacement operation or inferred receipt. Refusal and retained-versus-missing-operation diagnostics are truthful.",
+    "C3 — Retention and isolation: first-unknown B requests and saved receipts remain exclusively owned outside generic automatic checkpoint/rebind/terminal replay. Ordinary certified-not-applied operations retain their existing behavior. Unrelated owner-version/observation compaction preserves the same covered duty, but newer duties, other grants and successor bindings are never overwritten or cleared. Real reload coverage preserves durable owed facts; actual loss of memory-only operation/receipt state after restart is diagnosed as historical recovery, not unchanged/accounted or a new durable/canonical completion guarantee.",
+    "C4 — Receipt and durability phases: save the matching accepted receipt before local settlement. After receipt acceptance every retry is local-only and issues no further checkpoint RPC. Stamp final session cleanup and confirm the intended source-owner and session mirror together using the existing coherent durability/readback boundary before removing the recovery barrier last. Regressions cover source-settlement and final mirror write/readback failures, a writer watermark already caught up, actual SQLite readback, and later explicit local retry with zero repeat RPC. Failure never discards the saved receipt/request or falsely reports settlement.",
+    "C5 — Lifecycle and queue separation: a newly queued head alone cannot permanently invalidate accepted-receipt local settlement, while changes of runtime/generation/owner or a newer duty never authorize clearing successor state or dispatching successor work. Clear uncertain-grant slots only when owned by the settled operation. Deferred deletion must not self-deadlock solely because its deletion-request flag also prohibits the recovery it requires: it either remains explicitly recoverable without provider dispatch or completes a fact-preserving removal; deletion/reset/cleanup never substitutes for accounting or erases available original request/receipt/duty facts. Ordinary retained checkpoints with no B duty do not acquire a new target-construction failure. Regressions exercise each boundary.",
+    "C6 — Existing behavior and composition controls: passing and failing NoScope checks remain diagnostic-only; never-named and same-scope Unconfirmed/unmeasured work retain their prior source behavior. Ordinary typed-capacity retry, empty-queue unpause, held-delegation Resume and unrelated certified replay retain their existing contracts when no B duty is present. Broader source-root naming, acceptance, admission/capacity and removal suites exercise the shared begun-state fixture change. Parent C1/C2 attribution and evaluation-binding semantics are unchanged; no universal direct Engram completion protection is claimed.",
+    "C7 — Exact-input validation: the resulting B-plus-parent composition has a green maintained five-stage gate on the exact committed input and a qualifying independent read-only Codex/Claude review pair with no outstanding in-scope Medium-or-higher finding. The parent and required B child each carry the passed host-recorded verification required by their test-bound criteria at the judged revision and applicable source-root association; neither is marked clean or landed by splitting the defect into optional work."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host-adapter",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a14b0b-2268-76a2-a5ba-f1b8868a7ba7",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — Required child specifies live turn-grant status/begun and checkpoint replay. Those RPCs and replay authority were physically removed; retained historical facts remain read-only, not silently discarded or accepted. Source: docs/features/engram-host-adapter.md:3283; src/main.rs. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a179b7-d63e-72f3-b38f-7619a5647836",
+  "external_ref": null,
+  "title": "Restore the disabled-policy hold assertion in the retained relay wake regression",
+  "outcome": "The retained relay wake regression directly observes no mailbox prompt while federation policy is disabled, before observing delivery after re-enable.",
+  "acceptance": [
+    "The public retained-head relay regression runs the wake batch while federation policy is disabled and asserts the runtime input channel is empty before enabling federation.",
+    "The same test retains successful head delivery and following user-work ordering after re-enable without adding a verification or activation prerequisite."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

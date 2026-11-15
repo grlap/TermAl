@@ -1,0 +1,27 @@
+{
+  "id": "01a0fe83-a24b-7770-904a-b8a34a48b9e3",
+  "external_ref": null,
+  "title": "Route owner-originated tail-read retries through current demand and the shared gate",
+  "outcome": "Route owner-originated tail-read retries through current demand and the shared gate",
+  "acceptance": [
+    "Route owner-originated tail-read retries through current demand and the shared gate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "conversation-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

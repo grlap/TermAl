@@ -1,0 +1,27 @@
+{
+  "id": "01a0f5fd-187a-7cf3-b418-a3faf53c9d50",
+  "external_ref": null,
+  "title": "Bound-criteria brief tests: cover a verification record without a usable revision, the compact list with no bindings, and a verification kind without its typed object",
+  "outcome": "Low from the Claude reviewer of landing train 9 (delegation-cb3e5d57-1662-41b2-9ad8-5c441f5f9388), against w-51dab1c2faab's change.\n\nThree paths have no test:\n(1) A verification record whose source_revision is missing or fails the charset filter should be labelled `verification test passed`, with no ` at ` suffix, in both briefs.\n(2) Same-session Compact detail with verification records but no bindings: the compact list is empty and the brief should fall back to \"the host read N and lists none to fit the brief\".\n(3) A record of kind `verification`, family `notes`, without its `verification` object should be labelled plain `verification`.\n\nThe reviewer's Notes on the same change are recorded here too.\n- The shared admission rule refers to \"the evidence list\", which the same-session brief lacks, and the `show --notes --gates` hint omits the work ref.\n- The fixed rule text and the binding lines lower the headroom under the 64 KiB bound.\n- validate_bindings duplicates Engram's ObservedBasisRequired check (citations.rs:69-80) and could drift from it.",
+  "acceptance": [
+    "Tests cover the three paths: a verification marker without a revision suffix in both briefs, the same-session compact fallback line with no bindings, and the plain verification label without the typed object; the same-session admission-rule wording and show hint name the right list and the work ref."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

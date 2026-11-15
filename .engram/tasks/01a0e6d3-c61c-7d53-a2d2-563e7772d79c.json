@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-563e7772d79c",
+  "external_ref": "tm-m6r1.36",
+  "title": "Work memories: handle Beads schema_version key collision",
+  "outcome": "Consolidated Claude reviewer session-7010 Low at src/work_memories.rs:160. Decoder unconditionally removes schema_version and requires numeric 1, so a string-valued user memory with that key invalidates the whole listing. Source-level edge case, not reproduced by writing a real user memory. Verify reserved-key behavior of supported bd first; distinguish numeric metadata from string memory content if the CLI exposes it. Add receipt regression and disclose upstream limitations rather than inventing recovery.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03; no \"beads\" remains in src/work_*.rs on master.",
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a17a19-fef1-7940-adea-e42f6b850a2d",
+  "external_ref": null,
+  "title": "Record production federation terminal reasons in the existing attestation observation",
+  "outcome": "Record production federation terminal reasons in the existing attestation observation",
+  "acceptance": [
+    "The existing read-only attestation projection retains the first terminal event of the current authenticated context as a bounded structured record containing role, stage, reason, ioKind and incarnation, plus the last accepted heartbeat sequence and the elapsed milliseconds from that accepted frame to the terminal event; absent accepted frames are represented explicitly without fabricated values.",
+    "Only authenticated, fresh and accepted heartbeat frames update the accepted sequence/time pair on either role. Rejected, replayed or mismatched frames and ordinary RPC traffic do not refresh it; the terminal snapshot remains stable after teardown.",
+    "Existing owner/context fences, authority decisions, timers and routing behavior remain unchanged. Focused regressions cover both roles, rejected-frame non-refresh, first-event preservation and stale-context exclusion, and the final candidate receives the standard independent review pair and required exact-input validation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-reported",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1796a-82e5-7763-be05-b0a159b49c7a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

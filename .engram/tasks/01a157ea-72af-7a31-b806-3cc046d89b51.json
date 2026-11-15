@@ -1,0 +1,30 @@
+{
+  "id": "01a157ea-72af-7a31-b806-3cc046d89b51",
+  "external_ref": null,
+  "title": "Make M5 composition no-PREPARE assertions observe PREPARE attempts",
+  "outcome": "Make the no-PREPARE claim in the native provisioning-to-reference composition test falsifiable, without changing production authority or installer behavior.",
+  "acceptance": [
+    "The composition either separately records PREPARE attempts and asserts no additional attempts during proof/reference/resolve/send, or explicitly narrows the asserted claim and documentation to INSTALL-only coverage.",
+    "A focused test check passes and the review evidence distinguishes observed PREPARE coverage from unchanged placement/intent counts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

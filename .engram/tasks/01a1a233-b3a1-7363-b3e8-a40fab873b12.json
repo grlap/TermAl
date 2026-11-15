@@ -1,0 +1,30 @@
+{
+  "id": "01a1a233-b3a1-7363-b3e8-a40fab873b12",
+  "external_ref": null,
+  "title": "Enforce scheduling guards for future review_identity CLI fixture tests",
+  "outcome": "New or modified review_identity CLI fixture tests cannot silently omit, misorder or prematurely drop the required scheduling guard.",
+  "acceptance": [
+    "A fixture-test wrapper or equivalent automated check rejects fixture work without the required first named scheduling guard, including an immediately dropped `let _ =` guard.",
+    "The current exclusive ownership of every review_identity CLI fixture test through cleanup, real CLI execution and unchanged production timeout remain covered."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gate-flake",
+    "review-followup",
+    "review-identity",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

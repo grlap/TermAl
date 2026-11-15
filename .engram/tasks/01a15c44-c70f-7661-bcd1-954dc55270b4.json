@@ -1,0 +1,35 @@
+{
+  "id": "01a15c44-c70f-7661-bcd1-954dc55270b4",
+  "external_ref": null,
+  "title": "Cover remaining test-ref validation and retirement edge paths",
+  "outcome": "Focused regression cases cover currently unexercised test-ref refusals and repeat retirement without weakening persistence assertions.",
+  "acceptance": [
+    "Table-driven route tests verify missing registration on DELETE, ambiguous root, ref-name prefix/shape errors, immutable request conflicts, registry-cap refusal, source-selection change, and repeated retirement; refusals leave the registry unchanged.",
+    "The app-settings owner-key rejection test asserts its intended status and message."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a15bc9-b220-7451-bf78-d2f3c6199d27",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the automatic remote-result design (Greg, Advisor #2639; Fable2 #4079): no operator owner key, REGISTER TEST REF or registration registry.",
+  "completion": null
+}

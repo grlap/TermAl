@@ -1,0 +1,28 @@
+{
+  "id": "01a13920-cd19-7682-aeb4-38ce6eddd809",
+  "external_ref": null,
+  "title": "Show an exactly matched running carried check as pending restart evidence before terminal digest",
+  "outcome": "src/test_run_registration.rs:437 currently requires a terminal digest before reporting TRUE. An exact pending carried check with proven locator/request ownership must report pending restart evidence while running, without guessing by PID/time or weakening terminal digest matching. Keep Unknown when exact correlation is unavailable.",
+  "acceptance": [
+    "Show an exactly matched running carried check as pending restart evidence before terminal digest is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "review-follow-up",
+    "stage-1-registry",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

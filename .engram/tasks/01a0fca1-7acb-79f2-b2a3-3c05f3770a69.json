@@ -1,0 +1,28 @@
+{
+  "id": "01a0fca1-7acb-79f2-b2a3-3c05f3770a69",
+  "external_ref": null,
+  "title": "SSE per-client filter drops deltas AT the snapshot revision; the \"snapshot at R contains every delta of R\" premise is false for transcript bodies",
+  "outcome": "SSE per-client filter drops deltas AT the snapshot revision; the \"snapshot at R contains every delta of R\" premise is false for transcript bodies",
+  "acceptance": [
+    "SSE per-client filter drops deltas AT the snapshot revision; the \"snapshot at R contains every delta of R\" premise is false for transcript bodies is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "conversation-view",
+    "sse",
+    "state-broadcast"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Answered and fixed within w-72e7daa92a6a. Architect1 corrected his ruling (w-72e7 note f45ebd02) to strictly-below for both deltas and states: events at the last state revision R pass, so same-revision deltas carrying transcript detail reach the client, and the client's replay path stays. The corrected filter, comment and docs sentence are in w-72e7's re-freeze 90b8069653c9282a861a5b41f5704162b3d68429cd5e0f4cc7f3babbafc5ccf7, pinned by S3 (a same-revision batch passes) and S6 (a republished snapshot passes).",
+  "completion": null
+}

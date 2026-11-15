@@ -1,0 +1,28 @@
+{
+  "id": "01a0f359-2c46-7e20-b155-1cfdea69fa4f",
+  "external_ref": null,
+  "title": "Witness the Work list handler's pre-admission abandonment check",
+  "outcome": "Add discriminating coverage of an already-abandoned Work list request before it asks for admission; preserve after-admission cancellation and explicit 499/no-CLI behavior. Keep the test's claims aligned with the boundary it actually exercises.",
+  "acceptance": [
+    "Witness the Work list handler's pre-admission abandonment check is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-removal",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2d2-0c6c-7590-93e9-78f1b409aeca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

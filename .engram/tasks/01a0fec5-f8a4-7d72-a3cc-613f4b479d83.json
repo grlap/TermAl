@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-f8a4-7d72-a3cc-613f4b479d83",
+  "external_ref": null,
+  "title": "Bound retained body-delta payloads after tail adoption",
+  "outcome": "Bound retained body-delta payloads after tail adoption",
+  "acceptance": [
+    "Bound retained body-delta payloads after tail adoption is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

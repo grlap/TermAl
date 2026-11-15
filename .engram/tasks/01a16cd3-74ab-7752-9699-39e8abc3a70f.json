@@ -1,0 +1,35 @@
+{
+  "id": "01a16cd3-74ab-7752-9699-39e8abc3a70f",
+  "external_ref": null,
+  "title": "Carry stack fix: delayed diagnostic retirement after a second carry must not let older carries borrow or credit the first run",
+  "outcome": "Carry stack fix: delayed diagnostic retirement after a second carry must not let older carries borrow or credit the first run",
+  "acceptance": [
+    "When a diagnostic retirement is applied after a second carry exists, every existing carry inherits the new ambiguous window, so no carry can borrow or be credited from the first run; a RED-first regression test reproduces the review scenario on tree 590ddac3 and passes after the fix.",
+    "The fix is delivered as a patch onto Merger's carry tree 590ddac3; focused carried_checks tests pass on the patched input, and a fresh read-only Codex+Claude pair on the fix hunks has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "carried-checks",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered delayed-retirement carry repair as the frozen R2 patch onto Merger tree590ddac3 (final tree dc99396f/raw018a). RED-first witnesses reproduced the original defect and both R1 Medium interleavings; qualified own carried_checks:: medium_repair_ check passed245/0. Fresh Codex full8 plus Claude R1full/R2delta pair closes Mediums; two remaining Lows filed separately. Independent Sonnet14415 evaluation f711fad61e5841adb8b4c339a316798d passed2/2, fresh at completion.",
+    "completed_at": "2026-10-24T09:17:55.494524900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a17c75-d822-7b80-9d38-3b73cbc6c198",
+  "external_ref": null,
+  "title": "Read-only Claude Bash check refuses a read-only grep whose quoted regex contains `|`",
+  "outcome": "A read-only Claude delegation was refused this command, which only reads:\n`grep -n -o -i \".\\{0,200\\}\\(on demand\\|note text\\|note/gate\\).\\{0,200\\}\" docs/shipped.md`\nThe refusal text was \"this shell syntax is refused: variables, globs, subshells, braces and unbalanced quotes cannot be checked.\" A near-identical grep with only escaped braces, and no `\\|` alternation, was allowed.\n\nLikely cause: the line is split on `|` before quotes are considered. src/claude_read_only_refusal.rs:171-172 does this: it rewrites `&&`/`||` to `|`, then runs split('|'). A `|` inside a quoted argument therefore cuts the segment, leaving unbalanced quotes, and tokenizing fails. The allow/deny decision path needs checking for the same quote-unaware split.\n\nThe fix is a quote-aware separator scan. Then a quoted `|` (including `\\|` in a regex) is literal, and the decision and the explainer agree.\n\nWorkaround: the Grep tool. No result was lost.",
+  "acceptance": [
+    "A read-only command whose quoted argument contains `|` or `\\|` (for example a grep alternation regex) is allowed when its unquoted parts are read-only, and a test covers it.",
+    "An unquoted `|`, `&&` or `||` is still treated as a separator; existing refusal tests still pass, and the refusal explainer names the same rule the decision applied for such lines.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "read-only",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a10998-76aa-7a03-b188-07dca1a93d8f",
+  "external_ref": "engram:w-69451d2235db",
+  "title": "Alert on an overdue registered continuation or a possible stall with no registered resumption",
+  "outcome": "Design pending: alert on (a) a registered continuation passing its deadline without release or (b) an eligible idle root session's possible stall, due at the earlier of 10 minutes of continuous idle with no recorded resumption and 5 minutes before its live focused claim expires. Reconcile every 60 seconds while operating. Coverage is bounded to checked registries; peer-reply waits and non-indexed processes are not tracked. Missing or failed checked reads are Unknown, never absence, and produce truthful operator diagnostics and bounded notices. Deliver to the owning session's FIFO through the existing host-owned notice path, under ordinary admission and Stop, and expose the same disposition in the existing operator state response without new UI. One notice per stall episode: real non-host prompt admission or recorded delegation/test/wake/resumption ends an episode; the alert's own turn, renewal or restart does not. Recheck facts and identity before dispatch. Notices can wake the owner but do not execute completion, renew/reclaim claims, replay provider work or override paused queues. Coordinator routing is separate w-173a6576b9c5. Keep the existing host-owned wake prerequisite; precise joint design and coordinator-concurred acceptance criteria remain required before implementation.",
+  "acceptance": [
+    "Acceptance criteria are pending joint design and coordinator concurrence; this placeholder does not authorize evaluation or completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "agent-workflow",
+    "continuation",
+    "design-pending"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10415-c6fa-7000-921b-1df557dae3ac"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

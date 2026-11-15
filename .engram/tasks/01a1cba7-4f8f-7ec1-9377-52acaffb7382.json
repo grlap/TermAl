@@ -1,0 +1,30 @@
+{
+  "id": "01a1cba7-4f8f-7ec1-9377-52acaffb7382",
+  "external_ref": null,
+  "title": "Restore a bounded cross-thread deadlock guard for the publication busy-state regression",
+  "outcome": "A regression to blocking StateInner acquisition fails the busy-state publication test with a bounded diagnosis instead of self-deadlocking.",
+  "acceptance": [
+    "The busy-state publication test holds contention from another thread or runs publication under the established DEADLOCK_GUARD while retaining injected-clock wait assertions.",
+    "The fixture still verifies custody release and state progress under contention; it does not use real60s sleeps or weaken the existing busy/error behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "limits",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a19f55-0ae5-7360-b061-c28729e4db4c",
+  "external_ref": null,
+  "title": "Unconfirmed source-root opening notice names the failing check (diagnostic step toward the restart #2 unconfirmed-root cause)",
+  "outcome": "The host's unconfirmed-source-root opening notice states which confirmation check failed, so the next live occurrence on a root session identifies its own cause, without changing which roots are confirmed.",
+  "acceptance": [
+    "When a turn opens with an unconfirmed source root, the opening notice names the check that failed, in one bounded sentence that contains no path, store, id or secret.",
+    "Every Unconfirmed branch of the root capture and of the work-authority check has a test showing its reason. Each test also shows that the explained capture agrees with the unexplained one, so which roots are confirmed is unchanged.",
+    "The existing source-root naming, opening and authority tests pass on the candidate. Only signature-forced call-site edits are made to existing tests: false becomes None."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "engram-host-adapter",
+    "execution-observability",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a19ef7-c9f6-75a2-a139-426dcbda4467",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1acd2-6fd6-7b82-b54d-9bb72efc9f4c",
+  "disposal_reason": "Its parent w-426dcbda4467 completed while this optional child's change was still riding the core; detaching so it can be completed on its own landing in master 47fdba2f.",
+  "completion": null
+}

@@ -1,0 +1,52 @@
+{
+  "id": "01a0f685-9b41-7701-9972-3bd74078208d",
+  "external_ref": null,
+  "title": "A mailbox wake queued behind an active turn is cancelled when the agent acknowledges that mail in the same turn, so no next turn starts (Engram::Coder idle 87 min and ~2 h, Termal::Coder ~1 h 48 min, 2026-10-01)",
+  "outcome": "A mailbox wake the host accepted for a message that arrived while its target's turn was active starts exactly one turn after that turn ends, even when the agent read and acknowledged the message during that turn. Acknowledging the data never discharges the wake. Only a turn-start handoff that covers its sequence does, or an explicit Cancel; Stop and holds suspend it but do not discharge it. The message's notificationState never says queued when no wake for it remains, and says delivered only once a real handoff covers it.\n\nDiagnosed cause (holder note 140704b6; architecture decision A by Architect2, mailbox fa8a2c70 #2). In all three incidents the message arrived mid-turn, so the receipt queuedBehindActiveTurn was true. The agent then read and acknowledged that page in the same turn, and the acknowledge route's remove_acknowledged_mailbox_wakeups deleted the queued wake. The turn ended normally with an empty queue (Engram checkpoint intent \"wait\"), so no turn followed. The later deliveredToIdleSession came from the next message's real handoff, which covers every row through its own sequence; meanwhile the row wrongly kept saying queuedBehindActiveTurn. It was not a turn-end race or an errored-turn latch.\n\nOriginal report (provenance): Engram::Fable, TermAl mailbox ebe242f7 #375, 08:12Z. Engram::Coder (session-8581) idle 06:48–08:11Z after b0237f77 #289 (06:44:20.6Z), and again 08:46–10:56Z after #314 (08:45:52.8Z), each time losing a claim. Termal::Coder (session-7422) idle 16:06–17:53Z after 241329fa #155 (16:05:11.8Z), reported by Fable2. Opened as \"A mail wake queued behind an ending turn is marked deliveredToIdleSession but starts no turn\"; the first framing (a race between turn end and queue drain) was disproved by the diagnosis. Distinct from w-25b4f98cec5f (admission park).",
+  "acceptance": [
+    "1. A mailbox message appended while its target's turn is active starts exactly one turn after that turn ends successfully, even when the target read and acknowledged it during that turn; a test reproduces this sequence (append mid-turn, in-turn read and acknowledgement, successful turn end) and fails before the fix.",
+    "2. While the wake of a message acknowledged mid-turn is queued, the message reads queuedBehindActiveTurn (or heldBehindPausedQueue while the queue is paused), and it reads deliveredToIdleSession only once that wake's runtime handoff covers it; the queued wake's text names the mailbox and boundary and says the mail was already acknowledged instead of claiming unread mail; tests cover each.",
+    "3. The follow-up wake is bounded and respects barriers: one coalesced wake per mailbox however many messages arrived or were acknowledged during the turn; a wake turn's acknowledgement of messages at or below its own dispatched boundary queues nothing further; Stop, a paused queue and a user prompt ahead in FIFO still hold it; tests cover each.",
+    "4. The cause is identified from the host's state for session-8581 (06:44–06:49Z, 08:45–08:47Z) and session-7422 (16:05–16:07Z) and recorded in a note.",
+    "5. The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note.",
+    "6. Independent verification: the /review-changes pair has no outstanding Medium or higher finding on the reviewed input; the acceptance evaluation is by an evaluator that never held this item; and after the build is installed and the host restarted, a note records a live check that a message sent to a session mid-turn and acknowledged in that turn started a turn after it ended."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "mailbox",
+    "turn-dispatch",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

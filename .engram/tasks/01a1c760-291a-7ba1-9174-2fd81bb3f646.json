@@ -1,0 +1,30 @@
+{
+  "id": "01a1c760-291a-7ba1-9174-2fd81bb3f646",
+  "external_ref": null,
+  "title": "Central: a PowerShell session crashed with 0xC0000005 in AmsiUtils.WinUninitialize during shutdown, after a read-only command",
+  "outcome": "Central: a PowerShell session crashed with 0xC0000005 in AmsiUtils.WinUninitialize during shutdown, after a read-only command",
+  "acceptance": [
+    "Recurrences on Central are counted on this item with time, command shape and exit code; if a second occurrence appears, read-only WER/System event evidence for both is recorded and the likely layer (PowerShell/AMSI provider vs host hardware) is stated with that evidence.",
+    "Any remedy that changes system configuration, security software or hardware is proposed to Greg and applied only on his word; no agent changes them."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "central-host",
+    "environment",
+    "needs-diagnosis",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1dd28-0263-7991-ad67-9d49e4e7f2de",
+  "external_ref": null,
+  "title": "Tighten the task-sync data-branch rule wording in both projects (define MAIN, merge and push kind, export-only, never another remote) and fix stale approval summaries",
+  "outcome": "The data-branch rule in TermAl and Engram states its limits precisely and identically, and command/skill/doc summaries of commit authority match the instruction files.",
+  "acceptance": [
+    "In both projects the task-sync data-branch bullet defines the data worktree location without the undefined 'MAIN', names the allowed merge kind and that the push is a fast-forward of origin's engram-data, limits commits to export files, and says never another remote; the two projects' bullets stay identical.",
+    "TermAl review-changes.md 'never pushed' names the author-test-ref exception, and pre-existing approval-only summaries in skills/docs name the same exceptions as CLAUDE.md; list formatting and line length are tidied.",
+    "Lands under the authority-file rule (both coordinators, Greg notice, final-diff audit) as a clarification; no test reads the instruction files."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "authority-file",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

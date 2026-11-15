@@ -1,0 +1,27 @@
+{
+  "id": "01a11c05-3f96-7a42-9bf7-7f54cb9a8649",
+  "external_ref": null,
+  "title": "Read-only shell check: admit `git merge-base` (a read-only Git query) to the allow-list",
+  "outcome": "Read-only reviewers and evaluators can run `git merge-base` (for example `--is-ancestor A B` to check that a commit is in a branch) without a refusal, with the same safety rules as the other admitted read-only Git subcommands.",
+  "acceptance": [
+    "`git merge-base` with its read-only forms (`A B`, `--is-ancestor A B`, `--all`, `--octopus`, `--independent`, `--fork-point`) is admitted by the read-only check, under the same rules as other admitted Git subcommands (no -C or --git-dir unless those are admitted, no redirection to files); a test covers admitted and refused forms."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "read-only-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,48 @@
+{
+  "id": "01a10d72-e351-7671-971c-af6e748250f9",
+  "external_ref": null,
+  "title": "The owed-close durability fence and the combined checkpoint deadline have no witness with a live persistence writer",
+  "outcome": "A test drives a turn's close with a live or scripted persistence receiver that delays the fence acknowledgement. It shows two things. First, the owed close is on disk when the checkpoint request leaves only because of the fence. Second, the checkpoint request's timeout is reduced by the elapsed fence time, and the checkpoint card's latency includes that wait. It also covers the fence's Deadline and WriteFailed outcomes, where the host logs and proceeds.",
+  "acceptance": [
+    "A test with a live or scripted persistence writer fails when the confirm_engram_owed_close_durable call is removed from the closing path, and passes with it.",
+    "A test asserts that the checkpoint request receives call_timeout minus the elapsed fence time, and that the checkpoint card's latency includes the fence wait.",
+    "Tests cover the fence's Deadline and WriteFailed outcomes: the close stays owed in memory, and the checkpoint is still sent within the one call bound."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "source-observation",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

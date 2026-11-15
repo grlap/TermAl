@@ -1,0 +1,24 @@
+{
+  "id": "01a1926f-c425-7bd3-a71b-c82f6b973d2f",
+  "external_ref": null,
+  "title": "Document the committed-input contracts in docs/features: named-root registration binding, the verification_record sender, and the committed acceptance flow",
+  "outcome": "docs/features/test-runs.md and the acceptance-evaluation feature doc describe, cross-linked both ways with docs/test.md:\n- committed-input registrations bind from the initiating session's named-root naming proof rather than the session binding;\n- the host's Engram verification_record sender: capability gating on verification_record_v1, the frozen body checked against the host rebuild, the termal-run:<run_id> operation key, the host-owned Received/Settled/Rejected acknowledgment, delivery only with existing valid Base credentials, and the reload limit;\n- acceptance evaluation switches to the committed flow once a started committed-input run is registered for the claim: no sighting fallback, plus the typed refusals.\nProvenance: w-decd61d62831 review round 4 Low (Claude delegation 8e895e93).",
+  "acceptance": [
+    "Document the committed-input contracts in docs/features: named-root registration binding, the verification_record sender, and the committed acceptance flow is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

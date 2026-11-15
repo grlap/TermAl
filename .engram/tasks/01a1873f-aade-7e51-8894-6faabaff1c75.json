@@ -1,0 +1,31 @@
+{
+  "id": "01a1873f-aade-7e51-8894-6faabaff1c75",
+  "external_ref": null,
+  "title": "w-c205 slice C-floor: restart-safe custody of a non-admission session_bind under a coordinated reader floor",
+  "outcome": "A non-admission SessionBind whose outcome is unknown keeps its exact original request (session, idempotency key, intent) durably across a host crash or restart. It is persisted under a coordinated semantic reader floor and migration, or in an existing representation proven to preserve it through every supported writer, so boot recovery replays it identically instead of minting a new key.",
+  "acceptance": [
+    "w-c205 slice C-floor: restart-safe custody of a non-admission session_bind under a coordinated reader floor is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "engram-interop",
+    "lost-reply",
+    "reader-floor",
+    "w-c205-slice"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18617-8de1-79e3-b1cb-c205c0fecb44",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

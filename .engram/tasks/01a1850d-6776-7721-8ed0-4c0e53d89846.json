@@ -1,0 +1,40 @@
+{
+  "id": "01a1850d-6776-7721-8ed0-4c0e53d89846",
+  "external_ref": null,
+  "title": "Back off repeated original-checkpoint failures before attempt allocation",
+  "outcome": "Repeated unsent recovery failures reach the existing slow cadence without inventing durable attempts or delaying failed Accepted accounting proofs.",
+  "acceptance": [
+    "Non-Accepted recovery uses the existing scheduler with a saturating local pre-allocation failure counter and max(durable attempt count, local failures); by eight consecutive failed passes it uses the existing 600–720 second class. Only genuine durable progress/resolution resets local failures; automatic entry paths respect due times and stale completion cannot overwrite a concurrent Accepted transition.",
+    "Deterministic tests cover repeated early failures without allocation/send, later preflight failure after successful probes, recovery and fairness, repeated triggers/owner drift, local restart grace with durable-slow preservation, concurrent Accepted progress, and the separate fast failed-proof versus slow proved-hold accounting classes.",
+    "The final exact input has independent clean required review and the required gate before landing; documentation states the bounded per-process restart grace."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "b16",
+    "checkpoint-recovery",
+    "control-plane",
+    "engram-control",
+    "gated-control",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete removed-feature path; not fixed or tested by this sweep. Fable2722/message43b9a7df-11b7-403a-a0d1-1e21100b4562 authorizes disposition. Full original outcome/criteria read; retained note provenance dba2d431cadc4afcab2ae57093440e4f, 2560a955ef374b23b9306697e9304c98, 39f0aeb526cb4aa6b0c367796589a9e1, b5bdf4d072834269bb0d75a5a2bbe52a. At current master2e03d1a9f0357862cf26e4c6a4f8ddccdadeff00, landed87f49ed0 deleted active admission/begin/replay, containment/reset and checkpoint result-recovery owners (native deleted-path diff inspected). src/engram_session_obligations.rs and engram_containment_checkpoint.rs explicitly retain only passive validated historical records, never restore active exclusion/replay/accounting/admission. The specific old behavior in this item's title/criteria is therefore no longer an executable product contract. Current ordinary delivery/queue/transport/SQLite compatibility concerns were separately preserved in the sweep; this cancels no such behavior. Historical failures, unknown incident causes and existing delivered-work/credit caveats remain unchanged. No source edit, Cargo/test, new verification, old experiment execution or acceptance PASS claimed; keep raw evidence while other open items still cite it.",
+  "completion": null
+}

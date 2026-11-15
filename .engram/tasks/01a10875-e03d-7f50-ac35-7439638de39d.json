@@ -1,0 +1,27 @@
+{
+  "id": "01a10875-e03d-7f50-ac35-7439638de39d",
+  "external_ref": null,
+  "title": "An admission retry replaced by a bind or abort retry for the same prompt loses its first-held time and attempt index",
+  "outcome": "An admission retry replaced by a bind or abort retry for the same prompt loses its first-held time and attempt index",
+  "acceptance": [
+    "When a bind retry or an abort retry replaces an admission retry for the same prompt, the new record keeps the admission retry's held_since, and a test shows the delegation hold's heldSince does not move backwards across the handoff."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a1c0ec-0650-7a83-8c76-3abefef4160c",
+  "external_ref": null,
+  "title": "Work view sends --page-bytes unconditionally, so an older Engram breaks the whole view",
+  "outcome": "The docs and error text state the minimum Engram version for --page-bytes (the docs name 8fc84451), or the Work view falls back when the flag is rejected, so an older binary gives a clear result instead of a bad-gateway error on every list read. Source: Claude session-17047 review of 8f544b45, src/work_visualizer_types.rs:58. Current Engram source supports the flag; installed binaries on each host weren't checked.",
+  "acceptance": [
+    "Work view sends --page-bytes unconditionally, so an older Engram breaks the whole view is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

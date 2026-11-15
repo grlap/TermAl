@@ -1,0 +1,30 @@
+{
+  "id": "01a1108c-ae56-72a2-914b-854705ca1cf4",
+  "external_ref": null,
+  "title": "Codex exec on Windows refuses an over-long command with a misleading \"filename or extension is too long\" (os error 206) and no length diagnostic",
+  "outcome": "An agent whose Codex exec command exceeds the Windows command-line limit learns the real cause (the payload length and the limit) and a supported route for large content, instead of a generic filename error.",
+  "acceptance": [
+    "The cause is classified with evidence: whether the refusal text comes from the Codex runtime's unified exec (upstream) or from a TermAl layer, and what the effective limit is (the Windows CreateProcess limit is 32767 UTF-16 characters, including the PowerShell wrapper).",
+    "If TermAl can observe the failed exec through the app-server event stream, it annotates an os error 206 exec failure with a line naming the command-line length as the likely cause and pointing to a file-based route (writing the script with apply_patch or a file write, then running it); a test covers the annotation.",
+    "If the refusal is upstream only, the classification and the suggested upstream report are recorded on this item, and agent-facing guidance (docs/test.md or the Codex runtime notes) says to put large payloads in a file under .tmp instead of inline in the command."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-runtime",
+    "diagnostics",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

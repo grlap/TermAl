@@ -1,0 +1,27 @@
+{
+  "id": "01a1ca07-cd6b-7f12-998d-82e10020c248",
+  "external_ref": null,
+  "title": "Update the stale status-badge comment to describe 30 updates per second",
+  "outcome": "The comment above status-badge spinner rules accurately describes their 30 updates per second and shared phase, without changing animation behavior.",
+  "acceptance": [
+    "The comment above the status-agent-badge spinner rules states the intended 30 updates per second and the visibility controller's shared step boundaries; animation behavior is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "review-follow-up",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

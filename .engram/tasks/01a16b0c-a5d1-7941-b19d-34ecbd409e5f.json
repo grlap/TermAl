@@ -1,0 +1,70 @@
+{
+  "id": "01a16b0c-a5d1-7941-b19d-34ecbd409e5f",
+  "external_ref": null,
+  "title": "Host keeps resending a retained prepared Begin after its Engram grant has expired, so the session is never re-admitted until someone cancels the head",
+  "outcome": "A retained prepared Begin whose grant is expired, or provably unusable, is discarded or refreshed with a fresh evaluate, without operator action, while preserving every exactly-once and possibly-sent-Begin safety guarantee. A session is never stuck retrying a Begin that can never succeed.",
+  "acceptance": [
+    "A kept prepared Begin that is provably never sent (its pending marker names its grant) and whose grant has passed the expiry turn_evaluate reported is never re-sent: the host's next automatic admission attempt withdraws it and runs a fresh turn_evaluate, whose new grant and new Begin key admit the head without Resume or cancel; a test covers it.",
+    "Resume of such a head likewise re-admits it through a fresh turn_evaluate instead of re-preparing the expired Begin; a test covers it.",
+    "A prepared Begin that may have been sent (no pending marker: after a restart, in a Begin replay, or with a Begin request in flight) is never withdrawn or re-keyed because of its grant's age; it keeps replaying the exact Begin, and only an Engram refusal proving it never began leads to a fresh evaluate; a test covers a possibly-sent Begin past its expiry being resent unchanged.",
+    "A kept prepared Begin whose grant has not expired, or whose expiry is unknown, behaves exactly as before; no case delivers a prompt to the provider twice; tests cover both.",
+    "Focused tests covering the change and its new tests pass in the item's named worktree, and the full gate is green on the frozen input.",
+    "The review pair (Codex and Claude, read-only) has no outstanding Medium-or-higher finding on the frozen input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "review"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "admission",
+    "control-plane",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

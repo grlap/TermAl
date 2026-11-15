@@ -1,0 +1,31 @@
+{
+  "id": "01a1a956-7ded-7c10-bc4f-768199b424a7",
+  "external_ref": null,
+  "title": "Define the early-reader remedy for terminal launcher failures before input capture",
+  "outcome": "The early committed-input reader explicitly classifies real launcher terminal failures with no input key and no stage run, and gives an actionable refusal or preserves the never-started path without weakening malformed-input refusal.",
+  "acceptance": [
+    "Actual startupFailureResult and status-before-input-capture shapes have discriminating reader tests. The chosen policy either treats absent-input Failed/all-unrun results as NotStarted or deliberately retains Unknown with a rerun remedy; present null or malformed input remains Unknown.",
+    "The remedy is documented in the typed refusal or nearby contract and does not admit a newer failed stage result through an older PASS."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability",
+    "greg-directed",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1109b-d1fb-7320-b1cd-e1a447b90750",
+  "external_ref": null,
+  "title": "Make recovery terminal proof distinguish incomplete transcript input",
+  "outcome": "Before live callers, terminal proof exposes incomplete input separately or checks complete transcript metadata, retaining exact persisted-message lookup and full hydration controls.",
+  "acceptance": [
+    "Make recovery terminal proof distinguish incomplete transcript input is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "begin-recovery",
+    "review-residual"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

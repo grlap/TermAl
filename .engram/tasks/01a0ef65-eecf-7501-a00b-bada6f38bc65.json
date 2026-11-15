@@ -1,0 +1,30 @@
+{
+  "id": "01a0ef65-eecf-7501-a00b-bada6f38bc65",
+  "external_ref": null,
+  "title": "Host's unknown-run notice tells every project to run the launcher's recover command, which only TermAl's launcher has",
+  "outcome": "The notice for a run whose launcher process is gone names a command that the project's own launcher supports, or says what to do when it does not.",
+  "acceptance": [
+    "A test covers the notice text for both cases.",
+    "The host's notice for an UNKNOWN (process gone) run does not recommend `recover` for a run directory whose project launcher lacks that command; it either detects the launcher's capability or words the advice so that it holds for any launcher version (for example: settle the run with the project's launcher if it supports `recover`, otherwise record it as interrupted).",
+    "docs/test.md says which launcher commands the host's notices rely on and from which launcher version they exist."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "test-launcher",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

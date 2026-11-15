@@ -1,0 +1,44 @@
+{
+  "id": "01a1d14d-0755-7da1-a0a1-968c9d17dda2",
+  "external_ref": null,
+  "title": "Small UTC clock bar at the bottom of the side panel, with local time",
+  "outcome": "Greg sees the current UTC time, clearly labelled UTC, with his local time beside it, in a small unobtrusive bar at the bottom of the left side panel. Agents' UTC times can then be read without mental conversion. It changes no deadline rules.",
+  "acceptance": [
+    "A small bar at the bottom of the side panel shows the current time clearly labelled UTC (HH:MM, 24-hour), plus the browser's local time and zone abbreviation (for example PST). It updates at minute boundaries, from one timer aligned to the next minute rather than a per-second render loop, and stops updating while the page is hidden.",
+    "A behavioural test with a controlled clock shows the rendered UTC and local text for a fixed instant, the change at the next minute boundary, and that no update is scheduled while the document is hidden.",
+    "The bar works at narrow, normal and wide panel sizes without covering or shifting the panel's filters and controls. It has an accessible text equivalent (for example a <time> element with a datetime attribute and an aria-label naming UTC). It is checked in the running UI on a real browser.",
+    "A clean review pair, a green full gate, and an independent acceptance evaluation."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "greg-requested"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "UTC and browser-local clock footer delivered with one shared minute-aligned timer, hidden suspension and accessible ISO time. Landed a5b01576; reviewed R1+R2 and byte-identical carry; exact-tree UTC FULL passed. Own registered typecheck and16/16 clock/control-panel tests passed. Historical six-case real-browser trial covers unchanged production source. Original independent evaluationbc247b2ce71840f381520c328346fbdb passed all4criteria and is archived before completion. Filed Lows remain separate.",
+    "completed_at": "2026-11-13T01:56:21.907621400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

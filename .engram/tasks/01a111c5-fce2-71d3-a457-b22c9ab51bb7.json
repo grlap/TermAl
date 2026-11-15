@@ -1,0 +1,37 @@
+{
+  "id": "01a111c5-fce2-71d3-a457-b22c9ab51bb7",
+  "external_ref": null,
+  "title": "B — STRICT PERSISTENCE AND LOAD BOUNDARY",
+  "outcome": "B — STRICT PERSISTENCE AND LOAD BOUNDARY",
+  "acceptance": [
+    "B — STRICT PERSISTENCE AND LOAD BOUNDARY, cap +550. Depends on A. Add registry/logical identity fields to both metadata builders and reconstruction plus an explicit required-row image operation within the primary writer. No production identity preparation or rotation caller. The strict operation validates all required session/delegation/metadata rows, exact content revision and ACK/readback; later ordinary snapshots must not overwrite committed identity state or resurrect retired operational fields. Unrelated persistence keeps its existing behavior. Acceptance subset: I3 load/missing/corrupt mapping; I4 partial write/commit/ACK/restart controls; I5 required-row retention; I7 closed disposable fixture. A failing required session must prevent the handled acknowledgement from committing. Include stale generic snapshot and session-deletion races. If this requires more than 550, divide storage/load from strict transaction machinery before proceeding; do not omit the latter."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-backup",
+    "engram-host",
+    "identity-stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0fa84-7f43-7782-b76d-47338f8245e3",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a111c5-fca2-7d71-a3b2-d3e6910a9679"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

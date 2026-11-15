@@ -1,0 +1,29 @@
+{
+  "id": "01a183bd-d4df-7630-ab2d-24ddbc15f630",
+  "external_ref": null,
+  "title": "Registration diagnostics fields() drops correlation fields when lock timings are unavailable",
+  "outcome": "Registration diagnostics fields() drops correlation fields when lock timings are unavailable",
+  "acceptance": [
+    "When lock_timings is unavailable (busy or poisoned), the registration diagnostic marks only the wait/hold/locks timing fields UNKNOWN and still includes runId, operationId, attemptId, category, httpStatus, phase and requestDigest in both the console line and the error text.",
+    "A regression covers the unavailable-timings path, and the review pair finds no Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "registration",
+    "review-low",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

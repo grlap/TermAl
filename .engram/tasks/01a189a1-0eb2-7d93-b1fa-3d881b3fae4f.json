@@ -1,0 +1,30 @@
+{
+  "id": "01a189a1-0eb2-7d93-b1fa-3d881b3fae4f",
+  "external_ref": null,
+  "title": "EngramContainmentAdmissionScope::drop double-panics on a poisoned StateInner during unwind",
+  "outcome": "Unwinding a failure while holding StateInner preserves the original error without a second panic from the containment admission guard; exact admission ownership remains safe.",
+  "acceptance": [
+    "A deterministic regression exercises the containment admission guard during unwinding after StateInner is poisoned, preserves the original failure, and does not abort the process.",
+    "The normal non-panicking path preserves exact-owner admission cleanup and does not clear a different owner's state; the fix follows existing panic-safety ownership patterns."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "abort",
+    "engram-host-adapter",
+    "panic-safety",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

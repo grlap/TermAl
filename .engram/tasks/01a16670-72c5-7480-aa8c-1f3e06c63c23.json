@@ -1,0 +1,28 @@
+{
+  "id": "01a16670-72c5-7480-aa8c-1f3e06c63c23",
+  "external_ref": null,
+  "title": "Submit-tool description hard-codes the in-flight retry count (\"three\") instead of deriving it from ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRIES",
+  "outcome": "The termal_submit_acceptance_evaluation tool description states the in-flight retry bound from the same constant the evaluator brief uses, so the two cannot drift apart.",
+  "acceptance": [
+    "TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION (acceptance_evaluation_api.rs) states the retry bound derived from ACCEPTANCE_EVALUATION_IN_FLIGHT_RETRIES rather than a hard-coded word; it is built at definition time if a const string cannot interpolate.",
+    "The existing brief and tool-description contract test still pins the wording and passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

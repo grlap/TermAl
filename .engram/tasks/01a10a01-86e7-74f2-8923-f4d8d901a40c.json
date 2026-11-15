@@ -1,0 +1,28 @@
+{
+  "id": "01a10a01-86e7-74f2-8923-f4d8d901a40c",
+  "external_ref": null,
+  "title": "Exercise production Claude and ACP waiters with pipe-owning process descendants",
+  "outcome": "Disposable protocol fixtures exercise actual Claude/ACP worker wiring, natural root exit, cleanup failure/retry and a Stop/waiter race, while captured native handles prove descendants exit. Direct two-terminator controls state their narrower scope.",
+  "acceptance": [
+    "Exercise production Claude and ACP waiters with pipe-owning process descendants is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

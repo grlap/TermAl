@@ -1,0 +1,33 @@
+{
+  "id": "01a14d7d-ce9f-7a82-8c88-3f3091ca87c4",
+  "external_ref": null,
+  "title": "Recover federation workers after cooperative credential-read cancellation",
+  "outcome": "A configuration stop during a side-effect-free credential read does not permanently quarantine the peer after the owned operation completes; unresolved SSH ownership remains fenced.",
+  "acceptance": [
+    "Reconfiguration during a held credential read permits a successor after the read settles, without host restart or duplicate unresolved OS operations.",
+    "Cancellation and timeout are distinguished while preserving late-child exact cleanup; regressions prove re-enable recovery and genuine cleanup uncertainty remains quarantined."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

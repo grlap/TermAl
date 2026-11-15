@@ -1,0 +1,65 @@
+{
+  "id": "01a15a00-db8e-7831-8625-aa8908269d97",
+  "external_ref": null,
+  "title": "Preserve bounded redacted federation SSH failure diagnostics",
+  "outcome": "The existing federation diagnostic surface exposes bounded redacted SSH termination evidence and current per-peer attempt/park state so an agent can distinguish a fresh fast-failing attempt from historical startup failure or runtime quarantine without reading secrets or changing peer authority.",
+  "acceptance": [
+    "Deterministic child-failure tests expose SSH exit status and a bounded fixed stderr classification through the existing diagnostic owner; the diagnostics distinguish DNS/connect/authentication/host-key/forward or other SSH failure classes to the extent observed, with an explicit unknown class when evidence is insufficient.",
+    "Deterministic worker lifecycle tests distinguish a current attempt, ordinary bounded retry, material-change park and runtime quarantine, including current attempt stage/time and its peer/basis attribution; a stale prior-basis startupExpired or lastObserved value is not presented as a fresh attempt.",
+    "Negative tests verify strict diagnostic size bounds and redaction: no credential material, pair secret, control/MAC payload, arbitrary request body or unrestricted raw stderr is exposed; child cleanup, no-overlap and every authentication/material/authority fence remain unchanged.",
+    "The exact final input passes the required independent review pair and full five-stage gate, with records naming the classified failure, park-state and redaction tests actually executed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-machine",
+    "diagnostics",
+    "federation",
+    "p0-recovery",
+    "worker-state"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Bounded redacted SSH diagnostics already landed3fc1372554acd5272c413f87953c242d8338bc83/tree661c94876945f9945c11cc17d655250dfe115f23, retained in masterfdbb53c8. Audit4/4MET in b19a9bb3; original exact FULL test-3574268d-4eba-4a2e-a7fa-22a40e6f66bf PASS5/5 and independent Codexb317c1d6/Claudeb5283ae3 pair0Medium+. New registered focused test-b22d93ad-4cdc-46a0-8349-170bf96f6727 PASS12/0/0 on cleanfdbb53c802f0058ce36669e035c8bde0dda8390b; nativeverification883601443f254ab6870878a42e71e659 matchesall5 historicalobligations, checkpoint501dd9b106c14cbb82daf2968b6b5b0f acknowledgesreceipt. No acceptance evaluation exists. No new source changes, no liveSSH/rootcauseclaim; closure under Fable2625/2627 and currentevaluationOFFdirection.",
+    "completed_at": "2026-11-07T22:37:40.701394100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

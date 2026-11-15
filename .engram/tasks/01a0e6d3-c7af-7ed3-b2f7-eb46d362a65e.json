@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7af-7ed3-b2f7-eb46d362a65e",
+  "external_ref": "tm-w8if",
+  "title": "Restructure the Test evidence bullets in engram-host-adapter.md into sub-bullets per rule",
+  "outcome": "Round-15 and round-17 reviews (Claude, tm-winf steps 2+3). The Test evidence section of docs/features/engram-host-adapter.md packs many interacting rules into very long single bullets (Which worktree, Overlap), which makes the contract hard to audit against the code and to update. Split into sub-bullets or a table per rule (recognition, crediting, shell tracking, overlap sources, outcome, freshness), naming the owning functions (engram_check_recognition.rs, engram_check_paths.rs, engram_turn_checks.rs).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

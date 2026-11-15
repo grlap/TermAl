@@ -1,0 +1,27 @@
+{
+  "id": "01a10d3d-222d-7ac3-9592-e727b36b2f56",
+  "external_ref": null,
+  "title": "With two claims named to one shared source root, host test credit always routes to the first claim (w-24055) even after the focus is moved to the second (w-4fea) before the command and the checkpoint",
+  "outcome": "When one session holds two claims whose named source roots are the same worktree, a recognised check is credited to the claim that holds the session focus when the command starts. Or the host refuses the shared naming up front with a clear notice. It never silently credits the other claim, and the host's notice names which claim received the record and why.",
+  "acceptance": [
+    "With two claims named to one shared source root, host test credit always routes to the first claim (w-24055) even after the focus is moved to the second (w-4fea) before the command and the checkpoint is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

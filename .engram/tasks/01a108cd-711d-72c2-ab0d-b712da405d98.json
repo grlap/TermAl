@@ -1,0 +1,27 @@
+{
+  "id": "01a108cd-711d-72c2-ab0d-b712da405d98",
+  "external_ref": null,
+  "title": "Automatic retry attempts run on the test-run index tick thread, so an Engram outage stalls carried-gate polling and test-run indexing",
+  "outcome": "Automatic retry attempts run on the test-run index tick thread, so an Engram outage stalls carried-gate polling and test-run indexing",
+  "acceptance": [
+    "The retry tick dispatches due attempts to workers that own their retry slot and returns without waiting for their admission. A test shows the tick returning while an attempt is blocked in admission, with the cap, due order, panic boundary and one-attempt-per-head guard unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

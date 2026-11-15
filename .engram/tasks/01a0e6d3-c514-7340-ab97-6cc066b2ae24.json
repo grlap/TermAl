@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c514-7340-ab97-6cc066b2ae24",
+  "external_ref": "tm-gsii",
+  "title": "Anchor Engram doctor assurance parsing to the policy record",
+  "outcome": "The doctor parser accepts the first required= token anywhere in stdout or stderr. Unrelated diagnostics can shadow the actual control-policy assurance and cause an incorrect enable/deny result.",
+  "acceptance": [
+    "Only the intended control-policy assurance record is parsed; unrelated required= text is ignored; Advisory, TurnGated, ActionGated, missing, and conflicting-output cases are covered."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

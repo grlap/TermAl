@@ -1,0 +1,50 @@
+{
+  "id": "01a15134-5dab-7fa2-9463-710ffd401cdd",
+  "external_ref": null,
+  "title": "P-mac foundation: portable target policy and unattached dedicated cleanup contract",
+  "outcome": "P-mac foundation: portable target policy and unattached dedicated cleanup contract",
+  "acceptance": [
+    "Pure Windows, macOS and Linux target policies can be inspected and tested on any compiling host; unknown targets fail closed. Native Windows probing keeps cmd.exe /d /s /c echo TERMAL_PROBE_WAKE and the existing 2-second deadline and 4-KiB output bound unchanged.",
+    "The common dedicated-runtime cleanup-lease contract retains the exact backend Arc and RuntimeToken while held, preserves pending ownership on Unresolved or error, refuses shared Codex ownership, and rejects foreign-token or foreign-owner completion.",
+    "Platform adapters and the common cleanup contract remain unattached to production runtime lifecycle and M4 dispatch. This slice makes no native macOS execution, Unix process-group cleanup, real Mac O1 verification or remote/pilot-readiness claim; the parent's native-Mac criteria remain open.",
+    "Portable focused tests pass with host-recorded evidence for this child's exact input in its named source root.",
+    "The maintained five-stage full gate passes on the exact landing input, and an independent Codex/Claude read-only review pair on that input has no outstanding in-scope Medium-or-higher finding; any unfixed Low is tracked separately."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "foundation",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-eca0-70a0-b9a7-c1af4362f3ef",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

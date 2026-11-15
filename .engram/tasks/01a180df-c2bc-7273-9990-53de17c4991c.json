@@ -1,0 +1,29 @@
+{
+  "id": "01a180df-c2bc-7273-9990-53de17c4991c",
+  "external_ref": null,
+  "title": "ResultSlotOccupied refusal tells a read-only reviewer to report status failed, but its own submission path refuses that packet",
+  "outcome": "When a reviewer's attempt result slot is already occupied, the recovery guidance in the ResultSlotOccupied refusal names an action the reviewer can actually take. Today it says \"report status: failed without findings\", but verify_review_input_for_submission (src/delegation_review_input.rs ~646-650) checks the existing envelope and returns the same refusal before the failed-without-findings exemption (~657), so following the instruction loops on refused tool calls. Keep the slot immutable, and direct the child to end its failed turn so the parent can start a fresh attempt.",
+  "acceptance": [
+    "The ResultSlotOccupied refusal no longer instructs the reviewer to submit into the occupied slot. It tells the child to end its turn and the parent to start a fresh attempt, and the result slot stays immutable.",
+    "A test drives the occupied-slot case, follows the refusal's own guidance, and shows no further submission is required or refused in a loop."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "read-only",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a155a0-262c-7800-8970-574269147730",
+  "external_ref": null,
+  "title": "M6 first native exchange: one message each way through C with native wake on the Mac",
+  "outcome": "Step S5 of the critical path (Architect1 note 3817a957 on w-e41b; Greg's direction #1286): the first NATIVE two-way remote mailbox exchange. Scope is the proof only: no reconnect/restart/disable matrix and no relay retirement. Prerequisites: S1 (M4 increment 2, w-01da) landed; S2 (P-mac admission minimum) landed; S3 both hosts installed and restarted on the landed build (Greg); S4 the Mac onboarded as a satellite, O1 checklist VERIFIED, and Greg's explicit word making it ACTIVE. Steps: start a root session on the Mac by existing means; place it centrally (M1) and install its binding (M2 command); opt in a root session on A; A→Mac via termal_send_to_session to the Mac root's canonical participant id → M3 append and obligation at C → M4 wake on the Mac → the Mac session reads and acknowledges via C; Mac→A reply through the Mac's ordinary facade → A's local wake.",
+  "acceptance": [
+    "One message A→Mac and one reply Mac→A, both through the central host C, with the Mac session natively woken (no prompt/transcript bridge): evidence recorded on this item includes C's append receipt, the wake obligation settled with its central mirror, the Mac journal row progressing received→queued→runtime_accepted→processed, A's read of the reply, and both hosts' build hashes.",
+    "The capability was explicitly enabled by Greg for the Mac satellite (his recorded word, verbatim with source) before the exchange; no host restart, install or SSH change in the proof was performed by an agent."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "pilot",
+    "remote-foundations",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-f18c-7630-91af-e41b7112372a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

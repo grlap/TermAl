@@ -1,0 +1,37 @@
+{
+  "id": "01a19e2f-50b2-7f23-b9e3-fb1439ff0611",
+  "external_ref": null,
+  "title": "Queue drains still wait up to ~7 s on a synchronous Engram read in prepare_engram_context_nudge_off_lock",
+  "outcome": "Ordinary queue drains, including those started from runtime reader or callback threads, do not wait on a synchronous Engram read for context-nudge preparation. The nudge is prepared from local state, or confirmed asynchronously after send, so that docs/features/execution-observability.md can state without exception that sends never wait for Engram.",
+  "acceptance": [
+    "Direct prompt sends and ordinary queue drains, including first prompts and prompts after compaction, do not synchronously invoke Engram or wait for context-nudge reads or refresh ownership before provider enqueue; they use available local context or leave an advisory refresh to an owned background path.",
+    "Deterministic tests through the real direct-send and queue-drain paths show that provider delivery proceeds while the context transport is parked; cached/current context remains usable, failed or superseded reads do not block or lose prompts, and context publication and local delivery acknowledgement retain their generation and owner fences without acknowledging Engram delivery pages.",
+    "Execution Observability documentation removes the synchronous context-nudge exception and accurately describes local or asynchronous advisory preparation and its failure behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "latency"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Direct prompt sends and ordinary queue drains now prepare Engram context through an owned background observer without waiting before provider enqueue. Pending refreshes survive failed and superseded reads; MCP declaration configuration and exact compact-hook/local-delivery fences are preserved. Landed in N9 with clean independent review, 47 focused tests and the full Windows gate passing.",
+    "completed_at": "2026-11-04T12:08:39.548790900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

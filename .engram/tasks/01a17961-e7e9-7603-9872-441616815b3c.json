@@ -1,0 +1,31 @@
+{
+  "id": "01a17961-e7e9-7603-9872-441616815b3c",
+  "external_ref": null,
+  "title": "Test-run thread re-runs the compaction selection under StateInner on every 2 s tick after any revision change (~250 ms holds post-LOCK)",
+  "outcome": "Whether the compaction selection pass and the test-run list handler should hold StateInner for about 250-360 ms on an active host is decided from measurement, and any fix reuses the existing projection-cut pattern from the scan path.",
+  "acceptance": [
+    "Lock-hold cost is attributed by measurement: live rescan phase traces (test_runs.rs locked commit p50 about 290 ms at 1200+ live runs) and a live-population fixture split showing compact_test_runs_locked's full-history projection as the dominant locked sub-step, recorded on the item with run ids.",
+    "The compaction step no longer re-projects full history on an unrelated revision change, and the selection pass and list read make no per-row linear entry lookups or per-run wait scans. Deterministic count witnesses at two history sizes prove both, with the existing compaction suites green and a clean review pair, with no new cache, poller or StateInner field. Moving the remaining once-per-rescan selection off the lock is filed as its own item if still material after landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "diagnosis-only",
+    "greg-reported",
+    "performance",
+    "state-lock",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

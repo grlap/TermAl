@@ -1,0 +1,42 @@
+{
+  "id": "01a130f5-4b7c-7af2-a025-d269129dd70d",
+  "external_ref": null,
+  "title": "The carried Codex late-end intake does not check the event's runtime token against the carried test's runtime",
+  "outcome": "note_engram_reported_end (reached through take_shared_codex_late_command_end and EngramHost::codex_reported_end) takes a late end for a carried Codex test only when the event's runtime token equals the runtime the test was carried under: the token is passed through and engram_carried_awaits_report requires carried.runtime == Some(token). Today a stale runtime's end is harmless only because a carried test is closed when its runtime is cleared or replaced.",
+  "acceptance": [
+    "A test delivers a late end with a matching item key through a runtime that is not the carried test's and shows it is not taken.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

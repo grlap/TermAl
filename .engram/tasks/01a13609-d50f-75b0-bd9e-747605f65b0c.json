@@ -1,0 +1,36 @@
+{
+  "id": "01a13609-d50f-75b0-bd9e-747605f65b0c",
+  "external_ref": null,
+  "title": "Automatic Engram retry ticks never send a receipted head on a paused queue, and burn their attempt budget",
+  "outcome": "Automatic Engram retry ticks never send a receipted head on a paused queue, and burn their attempt budget",
+  "acceptance": [
+    "Either the automatic Engram bind, abort and admission retry owners that release an exact paused head may begin that receipted head's write-ahead, or such a tick does not charge an attempt and the head's preview stops saying it is waiting for an automatic retry; the chosen behaviour is documented in the host-architecture row for receipts.",
+    "A test drives an automatic retry tick of a receipted head on a paused queue and pins the chosen behaviour, including the attempt count."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delivery",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed by the w-9b3a30fde03e landing (master 13063e3b, pushed 23:21:09Z). An automatic Engram bind, abort or admission retry of a receipted head on a paused queue without Resume, or with its write-ahead in flight, parks: it begins nothing, charges nothing, reschedules nothing, and the preview reads \"Paused, waiting for Resume\". This is documented in the receipt row of docs/features/host-architecture.md. Eight park tests pin it, the retry lineage and attempt count included (test-7f2da5e2, 8 passed). Evaluation 135c81bc passed both criteria.",
+    "completed_at": "2026-10-13T23:32:35.330536400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

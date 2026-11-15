@@ -1,0 +1,29 @@
+{
+  "id": "01a1d03e-efc2-7c80-865b-45c1d3515ccf",
+  "external_ref": null,
+  "title": "Remove the unused conversation-overview decoder after the reader retirement",
+  "outcome": "The reader-only decoder no longer remains as dead code after overview navigation removal, coordinated with the separate persistence-write cleanup.",
+  "acceptance": [
+    "Confirm the decoder has no remaining production or test caller while retaining every encoder/classifier needed by current writers.",
+    "Remove the unused decoder without changing persistence columns, schema floors, retained data or writer behavior; affected compilation and persistence checks pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "legacy",
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1cdb5-1bbd-7041-b93b-a6964aa3a001",
+  "disposal_reason": "Absorbed into w-a6964aa3a001. Once that change removes the overview writers, the decoder, codec, classifier and enum all become unreferenced, so they're removed together there (its revised criterion 1, coordinator note on w-a6964 about 22:38Z). This item's criterion 2 (\"without changing … writer behavior\") can't be satisfied separately in that same change.",
+  "completion": null
+}

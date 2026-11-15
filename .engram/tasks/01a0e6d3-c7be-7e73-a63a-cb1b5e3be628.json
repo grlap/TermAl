@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c7be-7e73-a63a-cb1b5e3be628",
+  "external_ref": "tm-wh6h",
+  "title": "Container: ordinary mailbox projection follow-up after root admission removal",
+  "outcome": "Normal enabled root sessions currently bypass Engram evaluate/begin because dispatch uses a delegation-child predicate and child binding. Cover direct and queued root turns through shape-aware admission, preserving child authority, disabled project behavior, recovery and fail-closed errors. Add host-path grant/begin/completion and denial-before-provider regressions, run required gates and independent review. No commit/push/install/restart or live Phoenix dispatch.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated",
+    "gating-removal-audited"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

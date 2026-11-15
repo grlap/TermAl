@@ -1,0 +1,29 @@
+{
+  "id": "01a1a498-4866-71d0-b6db-828f294d95b1",
+  "external_ref": null,
+  "title": "Document the optional session-list browser geometry check for CSS changes",
+  "outcome": "Session-row CSS authors can find the optional real-browser geometry guard and know when to run it, without adding a browser prerequisite to the full gate.",
+  "acceptance": [
+    "docs/test.md names scripts/check-session-list-layout.mjs, its repository-root command with an explicit absolute Chrome/Chromium executable, and session-row CSS changes as the occasion to run it.",
+    "The guidance distinguishes the reduced actual-CSS markup fixture from actual-App behavior coverage and does not add a mandatory browser prerequisite to the maintained full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-docs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

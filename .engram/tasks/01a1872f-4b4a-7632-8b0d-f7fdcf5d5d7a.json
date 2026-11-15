@@ -1,0 +1,28 @@
+{
+  "id": "01a1872f-4b4a-7632-8b0d-f7fdcf5d5d7a",
+  "external_ref": null,
+  "title": "Bound owed verification binds before a batch gate fans out, instead of leaving them unbounded",
+  "outcome": "A session's owed verification binds have a precise durable capacity, enforced BEFORE a batch gate creates new dispatched uncertainty: the gate's whole member fan-out is reserved up front, or unsent target binds are declined with their status reported. A potentially dispatched bind is never dropped or turned into refused/bound by the cap, and existing over-cap state stays readable.",
+  "acceptance": [
+    "Bound owed verification binds before a batch gate fans out, instead of leaving them unbounded is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "engram-host",
+    "lost-reply"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

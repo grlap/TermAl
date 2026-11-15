@@ -1,0 +1,28 @@
+{
+  "id": "01a11ef7-b889-7192-a273-f81ccba4f3d4",
+  "external_ref": null,
+  "title": "review-freeze-fingerprint's trackedIndexDiffSha256 uses abbreviated blob ids, so the fingerprint depends on the environment's abbreviation length",
+  "outcome": "The freeze fingerprint's tracked-index-diff component hashes a diff with full blob ids (`git diff --cached HEAD --binary --full-index`), so the same staged input yields the same component in every worktree and environment.",
+  "acceptance": [
+    "scripts/review-freeze-fingerprint.mjs (and any compiled counterpart that recomputes it) computes trackedIndexDiffSha256 from a full-index diff; a test shows the component is identical for the same staged input whether core.abbrev or the repository's object count would give different abbreviation lengths.",
+    "The schema version or the docs state the change, so earlier manifests aren't silently compared against the new component."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "fingerprint",
+    "review-freeze"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

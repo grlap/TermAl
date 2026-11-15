@@ -1,0 +1,46 @@
+{
+  "id": "01a1d30d-722f-7e31-ab8d-4bd81a716e52",
+  "external_ref": null,
+  "title": "Trace test-run refresh phases without a trace-ring lock under StateInner",
+  "outcome": "A permanent bounded tracing build can measure test-run state-lock work before any scanner restructuring, without taking the trace-ring mutex while StateInner is held.",
+  "acceptance": [
+    "The trace-only change uses the existing bounded 256-entry/32-phase test-run trace owner to record actual rescan origin, acquisition wait, the complete final StateInner guard including tail work, separate validation/fallback, diff/alias, publication, card, terminal-retention and compaction phases, available work counts and observed persistence dispatch. No new telemetry registry, worker, polling endpoint or persistent store is added; missing, evicted and truncated evidence is explicit.",
+    "Marks captured while StateInner is held are buffered in bounded storage and appended to the trace ring only after the guard is released, preserving their original monotonic timestamps. Deterministic tests prove timestamp/order/budget behavior and an unlock barrier; held recording performs no trace-ring locking, formatting, serialization, extra inventory traversal or I/O, and tests use no sleeps or elapsed-time pass/fail limits.",
+    "The candidate changes tracing only: scanner decisions, schedules, cut validation, publication/event order, persistence fences, retention and compaction behavior remain unchanged. Existing focused tests covering touched owners and new trace tests pass as a registered committed-input run on the exact candidate.",
+    "The exact candidate has the independent read-only Codex/Claude pair with no outstanding Medium-or-higher finding and a passing maintained FULL, and is landed on origin/master with its exact-tree binary installed by the integration owner. Passive baseline and performance claims remain on the parent and require the tracing build actually running after Greg's coordinated restart."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-concurrence-needed",
+    "greg-reported",
+    "performance",
+    "state-lock",
+    "tracing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19daa-be21-7ac2-9bae-79f213be4f9e",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

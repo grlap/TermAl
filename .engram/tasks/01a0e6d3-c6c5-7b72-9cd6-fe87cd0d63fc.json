@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6c5-7b72-9cd6-fe87cd0d63fc",
+  "external_ref": "tm-rpfo",
+  "title": "ACP tool-call cards fall back to the literal title Tool call for Cursor updates",
+  "outcome": "Observed with the Cursor/Grok status bug (same screenshot, 2026-09-12): every Cursor tool-call card is titled Tool call. src/acp.rs:1555 acp_tool_identity derives the card command from rawInput.command, else title (kind), else the literal Tool call; Cursor's tool_call / tool_call_update payloads apparently carry neither on the update, and command_completed re-derives the label from the update, so the initial title (if any) can be replaced by the fallback. TASK: keep the label established by the initial tool_call when a later update lacks title/rawInput, and prefer whatever Cursor does send (title, kind, or the tool name inside rawInput) so cards read e.g. Read file (read) instead of Tool call; verify against a captured Cursor session/update pair and add a cursor.rs fixture test. Low user impact once the status bug is fixed; owner per Greg: Codex (follow-up batch).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

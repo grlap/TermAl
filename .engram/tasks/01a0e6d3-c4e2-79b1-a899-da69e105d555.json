@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4e2-79b1-a899-da69e105d555",
+  "external_ref": "tm-d9gl.1",
+  "title": "Engram identity slice 1: capture installed, launched-with and observed build identity and detect same-path staleness",
+  "outcome": "Slice 1 of the Engram runtime identity plan (Greg's work-use focus, relayed by Engram::Advisor #33, 2026-09-06). Today EngramMcpInstalledDescriptor holds path + home and session_crud.rs compares binary_path as a string, so an in-place upgrade of the same path is invisible. Capture identity, not paths: (a) installed identity = file size + mtime of the configured engram binary plus the build_fingerprint reported by the binary itself (engram --version --json or doctor --json; cache the fingerprint per path+size+mtime so the probe runs once per upgrade), stored in the installed descriptor and refreshed on settings load/save, on each host status refresh and before each turn dispatch (bounded polling of size+mtime, no file watcher); (b) launched-with identity recorded for every live component TermAl starts: the cached control process (spawn_engram_control_process) and the per-session injected MCP configuration (engram_mcp_config.rs) at the moment the runtime is started with it; (c) observed identity = the build_fingerprint returned by the host-context provider (engram work next, Engram 03fb694 and later; older builds record unreported), which is the installed build by construction because that provider spawns the binary per call. Stale = installed identity differs from the launched-with identity of any live component of the session (control process or MCP config) or the last observed context fingerprint is older than installed. Limitation stated in code and docs: TermAl cannot read the agent's MCP child fingerprint over its MCP connection; launched-with identity is the host truth, same-connection checks belong to the agent (see the optional cross-team item on the parent). Acceptance: rewriting the binary in place (new size/mtime/fingerprint) is detected within one status refresh; unchanged path with unchanged identity never marks stale; tests cover both and the unreported-fingerprint fallback.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram",
+    "lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c4e0-7e22-943a-82aa6d83139a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

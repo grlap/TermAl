@@ -1,0 +1,36 @@
+{
+  "id": "01a1a3f9-5b77-7e21-879c-0c8d13a9aa06",
+  "external_ref": null,
+  "title": "Session panel resize snaps back: a dragged width doesn't stay",
+  "outcome": "After a user drags to resize the session area, the new width stays, across updates and re-renders.",
+  "acceptance": [
+    "The resize failure is reproduced and its cause identified in code, including which update returns the width",
+    "A dragged width stays after the drag ends and across state updates, and a regression test that fails before the fix proves it",
+    "The review pair has no outstanding finding of Medium or higher and the full gate is green on the exact candidate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed session-panel width reset after SSE adoption through the existing stable-event callback. Native browser reproduction and expected-ratio RED→GREEN prove the repair; clean independent review pair carried unchanged into N4, exact-tree Windows B FULL passed. Landed on master/origin2fdbb2e1; ui/dist served after04:42:30Z.",
+    "completed_at": "2026-11-04T04:47:01.724779900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1082b-8737-7c40-a3d6-8d776ae95faa",
+  "external_ref": null,
+  "title": "Store an unambiguous host-wake notice presentation timestamp",
+  "outcome": "Durable presentation timestamp records UTC date and zone so bounded history exposes an unambiguous accounting time.",
+  "acceptance": [
+    "Store an unambiguous host-wake notice presentation timestamp is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-followup",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

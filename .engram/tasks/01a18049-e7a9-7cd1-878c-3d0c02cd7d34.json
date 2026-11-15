@@ -1,0 +1,29 @@
+{
+  "id": "01a18049-e7a9-7cd1-878c-3d0c02cd7d34",
+  "external_ref": null,
+  "title": "Reconnect-backoff test does not isolate the reset at confirmed recovery, nor the deadline inheritance",
+  "outcome": "Reconnect-backoff test does not isolate the reset at confirmed recovery, nor the deadline inheritance",
+  "acceptance": [
+    "The reconnect-backoff tests fail when the backoff reset at confirmed recovery is removed (independently of the onerror-after-open reset), and fail when the inherited fallback deadline is not resumed after an EventSource recreation that lands before that deadline."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "sse",
+    "test-coverage",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

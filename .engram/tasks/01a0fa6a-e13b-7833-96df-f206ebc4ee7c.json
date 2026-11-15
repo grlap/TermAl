@@ -1,0 +1,38 @@
+{
+  "id": "01a0fa6a-e13b-7833-96df-f206ebc4ee7c",
+  "external_ref": null,
+  "title": "Preserve remote history freshness conflicts when forwarding upstream body pairs",
+  "outcome": "Preserve remote history freshness conflicts when forwarding upstream body pairs",
+  "acceptance": [
+    "An admitted matching remote page preserves its actual upstream sequence/epoch pair, and a discriminating regression fails with the freshness bypass and passes with the approved correction.",
+    "Paired and unpaired proxied history responses retain the master freshness conflict protection; a mismatched captured page is never relabelled as current mirror metadata."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fe83-9734-7222-b4f0-898728fd3c64",
+  "disposal_reason": "Greg closed the parent P0 w-1b692f268123 at about 21:25Z on 2026-10-02 (note 13ee75cf). This required child continues as standalone work in w-898728fd3c64, so it no longer blocks the parent. Coordinator: Termal::Fable2.",
+  "completion": null
+}

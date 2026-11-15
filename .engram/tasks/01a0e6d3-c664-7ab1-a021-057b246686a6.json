@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c664-7ab1-a021-057b246686a6",
+  "external_ref": "tm-ng02",
+  "title": "Doctor timeout can outlive its own deadline: failed kill leaves an unbounded wait, and both results are discarded",
+  "outcome": "On expiry the enablement/verify doctor path does `let _ = child.kill(); let _ = child.wait();` and discards both results, then returns \"Engram doctor exceeded the N second enablement deadline\". Two consequences, and the second is worse than a silent error.\n\n1. A FAILED KILL IS INVISIBLE. Nothing in the response, the state, or any log records that the doctor was not actually terminated. The caller is told the deadline was enforced; whether the process died is unknown to everyone.\n\n2. THE DEADLINE DOES NOT BOUND THE REQUEST. If `kill()` fails, `wait()` blocks until the child exits on its own. The polling loop is bounded; the reap after it is not. So the message can promise \"exceeded the 300 second deadline\" while the HTTP call returns much later - or, against a genuinely hung doctor, never. The enable/verify call runs through run_blocking_api, so a blocking worker thread is held for that whole time. This is the shape the deadline exists to prevent, surviving inside the code that enforces it.\n\nWHY IT IS FILED SEPARATELY: the deadline-value fix deliberately did not touch it. Making the reap observable changes the function's contract, and testing it with a process scan would be a non-discriminating instrument. Named here so the gap is carried explicitly instead of quietly.\n\nSCOPE NOTE, so this does not grow into process-tree management: `kill()` here terminates the direct child only. Engram::Advisor searched the Engram sources for Command::new/process::Command/.spawn and found no subprocess spawning by the doctor - a bounded source review, not a runtime observation of the tree. So a tree kill is probably unnecessary for this path. By contrast the control-process path already uses EngramProcessTree::terminate and has a test named real_process_timeout_kills_the_entire_control_process_tree; the asymmetry is deliberate to note, not automatically a defect.\n\nMINIMUM SHAPE IF TAKEN UP: bound the post-kill wait (or use a try_wait loop with its own small budget) so the expiry path cannot outlive its own deadline, and surface a failed kill rather than discarding it. Neither requires new telemetry or UI.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-DONE. Doctor execution is bounded, landed in 0e7ab55 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

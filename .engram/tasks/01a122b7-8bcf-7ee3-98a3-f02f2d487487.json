@@ -1,0 +1,41 @@
+{
+  "id": "01a122b7-8bcf-7ee3-98a3-f02f2d487487",
+  "external_ref": null,
+  "title": "Further silent check-drop paths: command identity or place invalidation, finished-check eviction, carried-reserve trim, unconfirmed publication, refused-report fallback",
+  "outcome": "Each of these additional paths ends a recognised check with a verification record or a holder-visible line naming the cause, never silence. They extend w-aec234e3f7d0's paths (a), (b) and (c).",
+  "acceptance": [
+    "For each path listed in Termal::Codex's inventory 0d835ebb on w-aec234e3f7d0 (silent command identity or place invalidation, finished-check eviction, carried-reserve trim, unconfirmed publication, and the refused-report fallback at engram_turn_observations.rs:843), the holder's note gives file:line, and a fail-first test shows no record and no line on the base and a record or a cause-naming line after the fix.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "diagnostics",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

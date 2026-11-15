@@ -1,0 +1,28 @@
+{
+  "id": "01a1c002-de04-7c01-a8d0-742933ba970a",
+  "external_ref": null,
+  "title": "After done, termal_release_named_root and termal_name_source_root give contradicting answers for the same root",
+  "outcome": "After a claim ends by completion, a holder gets one consistent answer about its named root, and the root's slot doesn't stay occupied.",
+  "acceptance": [
+    "After done, release either succeeds, or says the root retires by itself and when, and no refusal points at a remedy that is refused in turn; a behaviour test covers the moment between done and retirement.",
+    "It's established whether the slot stays occupied or retires at the next opening. If it stays, it's fixed. A review pair has no Medium or higher and the normal gate passes, if code changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

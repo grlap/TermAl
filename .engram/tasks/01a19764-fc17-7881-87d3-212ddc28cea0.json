@@ -1,0 +1,30 @@
+{
+  "id": "01a19764-fc17-7881-87d3-212ddc28cea0",
+  "external_ref": null,
+  "title": "Import-hold fence-owner proof: a live ResponsibilityEntry of the fence owner tied to the candidate's binding (or unbound) must refute \"another owner\"",
+  "outcome": "engram_import_fence_owner_is_another also scans ResponsibilityEntry records in the candidate's store and project: a non-terminal entry (Outstanding or Unknown) whose owner_id is the fence owner and whose original_binding equals the candidate's makes the owner-scoped fence COVER the candidate (held); such an entry whose binding is not Exact makes the proof fail (unknown, FenceOwnerUnproven). Terminal entries and the fence owner's coverage or association on other bindings do not change the outcome. Regression tests cover each case.",
+  "acceptance": [
+    "engram_import_fence_owner_is_another (or the hold disposition) treats a non-terminal ResponsibilityEntry of the fence owner, in the candidate's store and project, with original_binding equal to the candidate's as covering: the disposition is HeldByImportReconciliation for that fence",
+    "A non-terminal ResponsibilityEntry of the fence owner in that scope with an Unknown or Legacy binding yields Unknown(FenceOwnerUnproven), never Admitted",
+    "A Terminal ResponsibilityEntry, an entry of another owner, and an entry with a different Exact binding leave today's outcome unchanged; the fence owner's coverage or association on its other bindings is not consulted",
+    "Focused tests cover all of the above, and the review pair has no outstanding Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "found-by-review",
+    "import-reconciliation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,34 @@
+{
+  "id": "01a1d92c-6af2-71f1-9486-c31ad45c795a",
+  "external_ref": null,
+  "title": "Gate combo102 (2ecb + 3186 + b239) as 73177116 on d377696e with one full launcher run on a DL560 test ref; Opus2 lands",
+  "outcome": "The review-clean w-2ecb0cb4d6e6 (c3466fb2), w-3186172accdc (4728d60e) and w-b23917aa170c (0318023a) are carried byte-identically onto master d377696e as 73177116. They have one passing full launcher gate on their exact tree via a test ref, the integration checks hold, and master is fast-forwarded to 73177116 and pushed.",
+  "acceptance": [
+    "A full launcher run (node scripts/test-launcher.mjs full) on a fresh checkout of the test ref test/w-c31ad45c795a-755508f9 whose tree is 1695119ebfe143770d4ae6af2a23592d4bff7354 passed every stage, with the same review-freeze fingerprint before and after its run. The landing commit 7317711656696fa95c0ef9663b33489d708b8b21 sits on d377696e as three commits whose contributions are byte-identical (raw diff, full blob ids, no renames) to 2ecb c3466fb2, 3186 4728d60e and b239 0318023a. Its run id, host, commit, tree and before and after fingerprints are recorded on this item.",
+    "Before the push, origin/master equals d377696e51eb40790f763b6763bcb03e3112679d, so the landing d377696e -> 73177116 is a fast-forward. After the push, git ls-remote origin refs/heads/master equals 73177116, which is recorded on this item, and the test ref is deleted with its push and deletion recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo102 (2ecb + 3186 + b239) carried byte-identically onto d377696e as 73177116 (tree 1695119e). DL560 test-ref FULL test-08b6afb0 passed every stage on test ref 7107fb0d (same tree; runner fingerprint b270a7f0 equal before and after). Master was fast-forwarded and pushed d377696e..73177116 at 09:22:55Z, and both refs were deleted at 09:23:01Z. The independent evaluation (Codex session 18024) passed 2/2.",
+    "completed_at": "2026-11-14T09:27:13.410297400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

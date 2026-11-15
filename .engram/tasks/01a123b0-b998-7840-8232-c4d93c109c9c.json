@@ -1,0 +1,28 @@
+{
+  "id": "01a123b0-b998-7840-8232-c4d93c109c9c",
+  "external_ref": null,
+  "title": "When Begin's reserved share is already spent before the named-root guard, report a distinct unsent-Begin cause",
+  "outcome": "If the Begin-guard deadline has already passed before the named-root guard runs (evaluate and the prepared-Begin fence spent more than budget minus Begin's share), the admission fails with a distinct unsent-Begin cause naming Begin's reserved share, not a persist-writer Deadline diagnostic, and a scripted-clock test that spends the budget during evaluate shows that cause with Begin unsent.",
+  "acceptance": [
+    "When Begin's reserved share is already spent before the named-root guard, report a distinct unsent-Begin cause is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "review-low",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

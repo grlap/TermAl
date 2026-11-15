@@ -1,0 +1,31 @@
+{
+  "id": "01a17638-358e-7e23-b775-e1c9cd8822bb",
+  "external_ref": null,
+  "title": "Fence canonical retained-row identities in the scan projection cut when map keys differ",
+  "outcome": "A retained row whose map key differs from summary.run_id cannot produce a stale prepared scan summary.",
+  "acceptance": [
+    "A deterministic re-keyed retained-row case either expands the cut to the canonical identity or forces live fallback.",
+    "Unstamped canonical-identity marker changes are fenced, while ordinary well-formed retained rows preserve their behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-followup",
+    "state-lock",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a175e1-c2a5-7671-8ea2-b5476c291e56",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

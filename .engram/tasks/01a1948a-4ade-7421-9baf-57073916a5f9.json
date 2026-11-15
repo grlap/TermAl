@@ -1,0 +1,28 @@
+{
+  "id": "01a1948a-4ade-7421-9baf-57073916a5f9",
+  "external_ref": null,
+  "title": "Long test fixture names push Windows paths to near MAX_PATH (carried_checks git init, turn_observations rebind worktrees)",
+  "outcome": "TermAl's Windows test fixtures stay well below MAX_PATH even without OS long-path support, so a gate's result doesn't depend on a few characters of TEMP prefix.",
+  "acceptance": [
+    "Long test fixture names push Windows paths to near MAX_PATH (carried_checks git init, turn_observations rebind worktrees) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "fixtures",
+    "test-runs",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

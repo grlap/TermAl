@@ -1,0 +1,29 @@
+{
+  "id": "01a168b0-509a-7dd2-ac1b-2450f4a8684e",
+  "external_ref": null,
+  "title": "Drive the review-input check-during-submission tests through real concurrent checks",
+  "outcome": "The review-input tests that change a check or attempt between a submission's off-lock verification and its publication run a real concurrent begin_review_input_check (or rearm) on another thread, instead of writing the Pending proof or attempt bump into StateInner from a capture stub; a failed commit of a check's Pending is covered too.",
+  "acceptance": [
+    "review_input_checks_a_check_or_attempt_change_during_submission_is_refused (or its successor) starts a real freeze check through verify_review_freeze_with_runner on another thread at the point between verification and validation, and asserts the [identity-changed-during-submission] or [identity-check-pending] refusal.",
+    "A test covers a failed commit of a check's Pending: the check is refused and leaves no observation counted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

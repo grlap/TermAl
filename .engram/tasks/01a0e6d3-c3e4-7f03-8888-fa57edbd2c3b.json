@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3e4-7f03-8888-fa57edbd2c3b",
+  "external_ref": "tm-4tp",
+  "title": "Complete command collapse regression matrix",
+  "outcome": "Delegated review found three untested CommandCard collapse paths in ui/src/MessageCard.test.tsx: opening then re-collapsing details, a successful command with empty output rendering the No output summary, and a user-expanded successful card remaining expanded through search enable/clear or an unrelated rerender. Add focused regression coverage for all three sticky-toggle invariants.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1c9e8-f08e-7e33-9407-277b7077a6ac",
+  "external_ref": null,
+  "title": "Evaluator brief omits older evidence when its discovery time budget is spent, producing insufficient_evidence verdicts",
+  "outcome": "An acceptance evaluator is not left judging criteria without the evidence that exists on the task merely because the brief's discovery read budget ran out; omitted evidence is either read, or the omission is made explicit and recoverable before a verdict is recorded.",
+  "acceptance": [
+    "When the brief's discovery budget stops paging before all of a task's evidence is read, the evaluator is told exactly which records were omitted and has a supported way to read them before judging, or the brief reads all the evidence that a criterion's verdict depends on.",
+    "A behavioural test with a task whose evidence exceeds the first page shows that the evaluator can reach the older evidence, and that an insufficient_evidence verdict is not recorded solely because of the time-budget omission.",
+    "Greg's minimum-60 s rule for operation-aborting limits still holds: no issued read is aborted below 60 s."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance",
+    "evaluation",
+    "evidence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a13607-eb98-7c82-8d8d-bc433ec9bab9",
+  "external_ref": null,
+  "title": "Import reconciliation E: G1 final challenge, release cleanup and decision recovery",
+  "outcome": "TermAl answers a core final-apply challenge only from a prepared, durably persisted fence with a complete settled inventory. It reconciles the exact terminal apply or abandon decision across crashes and boot, with one winner and no partial graph.",
+  "acceptance": [
+    "Tests: the same hold on two required hosts with one dead stays pending; a stale, missing, duplicate or foreign attestation cannot fill a slot; a changed inventory, candidate, claim or read-set rejects the apply; owner release triggers cleanup and blocks final Ready until it settles; a host crash before persistence, after Ready, or before or after the core commit restores the fence and reconciles exactly; concurrent apply and abandon have one winner; a failed apply leaves no partial graph and a cancellation revives no claim. A successful whole sequence yields one import receipt and zero new provider sends while held. There is no asynchronous invalidation-only design (no TOCTOU).",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a135ff-5979-7203-93d4-358040469407",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

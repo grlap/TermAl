@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c69f-7b51-9934-bdfc9fead1ab",
+  "external_ref": "tm-plxt",
+  "title": "Test the commit-failure rollback of name_engram_source_root, and move ScriptedEngramControlTransport to a test-support module",
+  "outcome": "Follow-ups from the tm-5gi4 phase 2 round-5 review (Claude notes). (1) name_engram_source_root restores the entries, the generation counter, the pending line and the turn root (with its sealed revision) when commit_locked fails, but no test covers that path. Add one that injects a persistence failure; the stepped persist writer in src/tests/acceptance_evaluation.rs shows how. (2) ScriptedEngramControlTransport and its held-claims scripting (script_held_claims, replace_held_claims) live in engram_host_adapter.rs under cfg(test), which is already far over the Rust size threshold. Move them to a test-support module, as a pure move.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

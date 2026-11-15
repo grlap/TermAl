@@ -1,0 +1,30 @@
+{
+  "id": "01a1b8cc-fe7c-7410-931e-b1dd88017ea5",
+  "external_ref": null,
+  "title": "Pin phase-aware declared completion through the real ordinary and native producers",
+  "outcome": "Producer-level deterministic interposition tests fail if either original declared END producer stops selecting the settlement phase.",
+  "acceptance": [
+    "Exercise the real ordinary and native declared completion producers with a deterministic pause after END and before verdict application; a wait refreshed there remains pending.",
+    "The tests observe the selected row's pending phase and later artifact verdict, with no real sleeps and without mirroring Markdown or fabricated credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "greg-reported",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1b889-1cb7-7ce2-bf94-2b4dccf4861d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1ba27-93cf-7e73-acfd-9b25c526779c",
+  "disposal_reason": "Continue as independent work after w-2b4dccf4861d completed on landed d3499b97. This optional Low/Note follow-up remains open and is not claimed fixed; preserve its evidence and acceptance.",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1431a-5d90-72c2-9d94-9dc238ea5251",
+  "external_ref": null,
+  "title": "Claude review-code children skip the lens files and the freeze checks when the brief comes only through the slash command",
+  "outcome": "Claude review-code children skip the lens files and the freeze checks when the brief comes only through the slash command",
+  "acceptance": [
+    "A Claude /review-code child launched by /review-changes reads every reviewer lens file and runs the BEFORE and AFTER freeze checks, and its result names each lens with findings or none.",
+    "A test or recorded live run shows it on a frozen input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "review-process",
+    "reviewer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

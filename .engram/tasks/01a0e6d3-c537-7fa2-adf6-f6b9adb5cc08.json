@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c537-7fa2-adf6-f6b9adb5cc08",
+  "external_ref": "tm-j4xj",
+  "title": "Dev-server proxy cuts Engram enablement Verify/Save at 120 s and reports the backend as unavailable",
+  "outcome": "ui/vite.config.ts proxies '/api' with timeout/proxyTimeout 120_000 and answers a proxy error with a plain 502 ('The TermAl backend is unavailable. Start it again and wait for reconnect.'); api-request.ts maps 502/503/504 to the generic backend-unavailable error. The backend's Engram enablement (verify and the PATCH that repeats it) runs 'engram doctor' under a 300 s deadline; on the Engram repo's 2.4 GB store the doctor takes 110 s standalone and the verify route answers 200 verified=true in 126 s. Through the dev server the request is cut at 120 s, so the operator sees 'Verify failed · The TermAl backend is unavailable.' and cannot enable Engram. Fix applied (uncommitted, 2026-09-15): raise the '/api' proxy timeout/proxyTimeout to 360_000 so the proxy outlives the backend's longest bounded request, with a comment naming why. Follow-up to consider: have the settings panel keep the backend's own error text instead of the generic 502 mapping, and show a 'this can take a few minutes' hint while verifying.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

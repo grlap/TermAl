@@ -1,0 +1,44 @@
+{
+  "id": "01a1c3f1-63fe-70b3-b673-9b31490ca137",
+  "external_ref": null,
+  "title": "Refuse explicit Resume while a direct-prompt receipt is held",
+  "outcome": "Refuse explicit Resume while a direct-prompt receipt is held",
+  "acceptance": [
+    "An explicit Resume of a held direct-prompt primary receipt reports a truthful refusal and leaves its attempt, write-ahead, acknowledgement request and queue unchanged, with a behavior control through the real Resume caller."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "review-low",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Explicit Resume of a held direct-prompt receipt now refuses before scheduling or mutation; real Resume caller regression covers five session states. Independent acceptance evaluation c22af264005143f7a0501ba0f76f3ae3 passed criterion1 at cut59 on clean landed dab1d863/tree68144410; full evaluator packet, command inventory, 2706-byte output and tracker verdict read completely and archived. Registered exact-input focused test-d93a4599 passed with acknowledged verification d75307905ddf4340a893329db7d12c79. Broader Stage B and Pending-with-no-queue work remain open.",
+    "completed_at": "2026-11-10T21:59:07.756592500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "id": "01a14181-a00c-7792-87c1-270c4b1fa8bc",
+  "external_ref": null,
+  "title": "Work view: fetch the full Work set automatically (pages of 200) and show closed work through the existing lifecycle filter",
+  "outcome": "Fetch the full Work set through existing ls --all cursor, serial requested pages of 200 until end; append incrementally in bounded measured list preserving selection/scroll. Open is the default; completed, cancelled and superseded work is reachable through lifecycle filtering and existing Updated sort. Existing progress, changed-list reload, Retry and query-generation fences remain. Exact independent coordinator concurrence7f2636741e0540a99a5cb5a7f7dbeb10, Fable2#395, Greg relay Advisor#833. Each row also shows muted second-line last-updated metadata from the existing payload; independent concurrence6ae47bffe8df4efbb51ceae9609dec66, Fable2#399/Advisor#835.",
+  "acceptance": [
+    "Opening the Work view fetches the full Work set (all lifecycles, through the existing Engram `ls --all` cursor) automatically and serially in pages of 200, following Engram's more/after until it reports the end, with no click or scroll required and exactly one request in flight; the full set is eventually loaded, including more than 1,000 items; tests show it.",
+    "Each page is appended or merged incrementally into a bounded (virtualized or equivalent) store without wholesale list replacement; scroll position and selection are preserved while pages arrive; with 1,200 loaded rows the number of rendered row elements stays bounded; tests show it.",
+    "Open work remains the default view, and closed work (completed, cancelled and superseded) is reachable through the existing lifecycle filtering path and ordered by the existing Updated sort; no new closed-specific API or separate closed-order surface is added; tests show closed rows reachable and sorted by Updated.",
+    "Compact progress and end-of-list states are visible; a cursor invalidated by a membership change stops and shows an explicit 'list changed; reload' state; a failed page shows Retry, which re-requests the same cursor once per activation with no automatic retry loop; a byte-bounded page reporting more with no cursor stops visibly instead of looping; tests show each.",
+    "Changing a filter or the search restarts from the first page and discards any in-flight continuation of the old query, so no stale page is appended; a test shows it.",
+    "`npx tsc --noEmit` is clean and the full five-stage gate passes on the exact landed input.",
+    "Each Work row shows its last-updated time from the existing updated_at field as muted metadata on its second line, beside or after the labels, in a compact locale-aware or relative form whose exact timestamp is available as an accessible title; no API is added, and pages arriving do not redraw existing rows wholesale; a test shows it."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Train-2 package landed at 9c80a234; acceptance evaluation 9fd430f653634525bc21ffef233ec406 passed 7/7.",
+    "completed_at": "2026-10-16T00:01:01.211899200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

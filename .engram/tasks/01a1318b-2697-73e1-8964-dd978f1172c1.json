@@ -1,0 +1,42 @@
+{
+  "id": "01a1318b-2697-73e1-8964-dd978f1172c1",
+  "external_ref": null,
+  "title": "The pending-finish case of silent_check_outcome_source_captures_are_reported_or_explained waits the real 40 s settlement budget",
+  "outcome": "The 'pending-finish' case of silent_check_outcome_source_captures_are_reported_or_explained (src/tests/engram_turn_checks.rs) no longer blocks about 40 s on the production REVIEW_FREEZE_TIMEOUT settlement budget. The settlement deadline is test-injectable, or engram_resolve_turn_checks_with_notices is tested directly with a short deadline. The test stays deterministic about which side of the deadline it takes.",
+  "acceptance": [
+    "The case runs in well under a second and still asserts the pending-capture notice, with no production constant changed.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low",
+    "test-debt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

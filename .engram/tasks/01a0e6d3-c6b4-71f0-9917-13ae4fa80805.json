@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6b4-71f0-9917-13ae4fa80805",
+  "external_ref": "tm-r8ry.3",
+  "title": "Preserve unchanged heavy-card restoration when its hidden page streams",
+  "outcome": "Consolidated final scroll review 2026-09-24, Claude7558 Low; source-identified, not executed. Restoration IDs are gated on whole-page pageMatchesMeasurement at VirtualizedConversationMessageList.tsx:2149, and pageHeights memo deletes measured identity for changed unmounted pages. A changed sibling message while hidden can therefore discard fully-rendered provenance for an unchanged table on that page. First reproduce via inactive sibling text delta in bottom and detached modes, checking first paint/native clamps and later settled anchor. Preserve per-message render provenance independently of invalid aggregate page geometry; do not reuse stale height for changed text. Cover membership/content/width invalidation and add/remove messages. Current full ee232913 PASS covers unchanged rehydration, mixed previews and immediate expansion, NOT hidden same-page streaming.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c6b2-7de1-9153-5df973f60ae2",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

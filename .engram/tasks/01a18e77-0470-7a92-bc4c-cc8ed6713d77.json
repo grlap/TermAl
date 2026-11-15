@@ -1,0 +1,30 @@
+{
+  "id": "01a18e77-0470-7a92-bc4c-cc8ed6713d77",
+  "external_ref": null,
+  "title": "Attempt-only exact_identity_required check should take the project from the requested attempt's stamped snapshot",
+  "outcome": "Attempt-only exact_identity_required check should take the project from the requested attempt's stamped snapshot",
+  "acceptance": [
+    "stamped_archive_project (src/delegation_review_attempts.rs) prefers the stamped snapshot whose slot.submission_attempt equals the requested attempt, falling back only when that attempt has no stamped snapshot, so the diagnostic decides the project as read_exact_review_as_root does for the selected attempt",
+    "A deterministic test covers an unstamped legacy record whose attempts 1 and 2 are stamped with different projects: the attempt-2 project's root gets 400 exact_identity_required and the attempt-1 project's root gets the plain 404 for attempt 2",
+    "Exact-input focused tests and a clean review pair"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation-results",
+    "review-custody",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,42 @@
+{
+  "id": "01a128ad-1dd6-7a50-863c-1a61aac935d2",
+  "external_ref": null,
+  "title": "No-change drift control: check the absent observation in memory, not only in the persisted snapshot",
+  "outcome": "no_change_between_named_root_turns_sends_no_observation (src/tests/engram_drift_reaches_store.rs) checks 'no observation is prepared for the next turn, sent or not' against the SQLite snapshot (load_state). A pending persist write would let that pass even if an intent existed; the wire check is the one that discriminates. Read claimed.state.inner.engram_source_sightings under the lock instead, or narrow the message.",
+  "acceptance": [
+    "The control's negative is checked against the in-memory source sightings under the state lock (or its message is narrowed to what the snapshot proves); the focused test passes.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1a025-8778-7060-857e-04020befb41d",
+  "external_ref": null,
+  "title": "Record the producer invariant for restored remote proxies without a queue hash",
+  "outcome": "Optional Low from Claude R2: wire_session_from_record and wire_session_summary_from_record copy a remote proxy's stored queue_projection_hash verbatim. An obsolete persisted proxy row with None would emit a current DTO without the required field until validated remote refresh. All current remote admission producers supply Some; reviewer explicitly calls this outside current-tree defect scope and covered by development-phase compatibility policy. Resolve the invariant/disposition explicitly without inventing an owner hash, adding an old-protocol compatibility path, or deleting/mutating historical data as an assumed fix.",
+  "acceptance": [
+    "Record source-backed current producer, restore and first-refresh behavior and the explicit disposition of hashless historical proxy rows; if a supported current-input invariant violation is confirmed, repair it through the existing owner with focused regression evidence while keeping historical records readable and avoiding compatibility heuristics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated",
+    "legacy-cleanup",
+    "persistence",
+    "protocol",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3b8-74b2-b398-36b76a54c347",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

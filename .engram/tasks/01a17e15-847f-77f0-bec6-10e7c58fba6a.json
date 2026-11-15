@@ -1,0 +1,30 @@
+{
+  "id": "01a17e15-847f-77f0-bec6-10e7c58fba6a",
+  "external_ref": null,
+  "title": "Keep owned Rust fixture roots canonical and compare displayed paths in their existing representation",
+  "outcome": "The approved three-path fixture-only repair addresses the17 diagnosed Mac alias failures while preserving the separately filed watcher regression and all existing ownership, authority and exact-content assertions.",
+  "acceptance": [
+    "Newly created TestTempRoot paths are canonical internally, with the existing cleanup owner established before fallible canonicalization; Windows verbatim prefixes are stripped through the existing helper, externally adopted roots and placement/marker/lifetime behavior remain unchanged.",
+    "Acceptance evaluator cwd and restart-evidence display assertions use their existing path conversion owners, preserving canonical target/brief assertions and exact producer/source-basis proof; the production watcher regression remains unchanged and separately tracked.",
+    "A focused check on the named source root covers the17 repaired controls, TestTempRoot ownership/cleanup, and broad persist_*, http_routes and session_settings groups; the standard independent review pair and exact-input integration gate are recorded. A known Mac watcher failure is never called a Mac full PASS."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "macos",
+    "portability",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

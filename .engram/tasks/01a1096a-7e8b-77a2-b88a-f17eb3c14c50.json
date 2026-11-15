@@ -1,0 +1,27 @@
+{
+  "id": "01a1096a-7e8b-77a2-b88a-f17eb3c14c50",
+  "external_ref": null,
+  "title": "Preserve explicit PowerShell script resolution when switching Engram host cwd",
+  "outcome": "Bare explicit .ps1 paths preserve the documented project-root resolution and reject invalid roots; empty PATH entries do not accidentally select a script from the TermAl process cwd.",
+  "acceptance": [
+    "Preserve explicit PowerShell script resolution when switching Engram host cwd is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

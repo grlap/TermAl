@@ -1,0 +1,29 @@
+{
+  "id": "01a0fb1e-7080-7171-bff2-8d29339db213",
+  "external_ref": null,
+  "title": "UI unit-list comment and guard test name claim more than the static DOM guard checks (align with its exact patterns)",
+  "outcome": "Two pieces of wording overstate the static check \"keeps every unit file free of Testing Library, rendering and the DOM globals\" in ui/src/test-categories.test.ts:\n- the comment above UNIT_TEST_FILES in ui/test-categories.ts (\"rejects a unit file that imports Testing Library, renders, or uses the DOM globals itself\");\n- that test's own name.\nThe check matches only its listed patterns: a `from \"@testing-library/…\"` import, renderHook, render(, screen., document., window., and localStorage or sessionStorage. A side-effect Testing Library import, document['body'], navigator, location, requestAnimationFrame, the observers, `new Event` or createRoot(...).render( all pass it. docs/test.md and the guard's own comment already state those limits.\n\nThe same rewording can fix a Note from the same review: the vite.config.ts comment says the heavy and app files \"either render the full App or exercise the scheduler-sensitive SessionPaneView and virtualizer lifecycle\". src/panels/WorkPanel.test.tsx and src/panels/WorkTree.test.tsx are heavy because of measured duration and wall-clock waits, so the comment should add \"or are CPU- or wall-clock-heavy\".\n\nThis may be overtaken when the unit project moves to a node environment, which makes the static check a backstop only.",
+  "acceptance": [
+    "The comment above UNIT_TEST_FILES and the guard test's name describe only what its patterns check (or name the patterns), consistent with docs/test.md.",
+    "The vite.config.ts comment on why heavy and app run in their own groups also covers files that are heavy by duration or wall-clock waits.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "test-architecture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

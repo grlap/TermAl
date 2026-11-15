@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c705-7031-9ad0-8096aff7d3b3",
+  "external_ref": "tm-ncc6.3.4",
+  "title": "Re-attach a live launcher worker after a TermAl restart (contract option B)",
+  "outcome": "After boot reconciliation (tm-ncc6.2.3) leaves a record running with a live, identity-matched pid, re-attach it. WINDOWS: the run's job object is NAMED (TermAl-test-run-RUNID) and created without kill-on-close (tm-ncc6.3.1); re-attach = OpenJobObjectW(JOB_OBJECT_TERMINATE|JOB_OBJECT_QUERY, name) + OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION, pid) + GetProcessTimes creation-time check against started_at; a reaper thread waits on the process handle and finalizes from results.json; cancel after re-attach = TerminateJobObject on the reopened job (grandchildren included, since they never left the job). LINUX/MACOS: setsid leader; liveness = bounded poll (500 ms) of /proc/PID (Linux) or sysctl kern.proc.pid (macOS) with start-time identity; finalize on disappearance; cancel = killpg(pid, SIGKILL). Optional follow-ups (separate tasks): pidfd_open + poll on Linux 5.3+, kqueue EVFILT_PROC on macOS. REBOOT: boot id changed = unknown, no re-attach. If a platform cannot re-attach, it degrades explicitly to option A for that platform (documented in tm-ncc6.1). Test without restarting TermAl: start a fixture run, drop the supervisor (handles closed; kill-on-close off keeps the child alive), re-attach by pid/name, assert exactly-once finalize and cancel-after-re-attach.\n\nOUTPUT TO FILE (Greg, 2026-09-23): re-attach reads everything from disk - HOST_LOG (receipt already parsed, final summary appended by the still-running child), <runDir>/<stage>.log (growing stage output) and results.json (stage states). Nothing from the previous instance's pipes is needed because there are none.",
+  "acceptance": [
+    "- Windows: after dropping the supervisor, OpenJobObjectW recovers the named job; the fixture grandchild is still alive; re-attach finalizes exactly once when the fixture exits; TerminateJobObject after re-attach kills the grandchild.\n- Unix: after dropping the supervisor, the setsid fixture keeps running; the poll detects exit and finalizes exactly once; killpg after re-attach kills the grandchild.\n- Identity mismatch (creation/start time differs from started_at beyond tolerance) -> unknown, no re-attach.\n- Boot id changed -> unknown, no re-attach.\n- macOS path compiles and is covered by the same test where a mac runner exists; otherwise the platform is marked 'verified on Linux/Windows only' in the docs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a426f8314ee",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a19438-780c-7561-88d2-d7c63a14bf98",
+  "external_ref": null,
+  "title": "step_test_command_observation_persistence holds StateInner for up to 4.5 s: the day's top lock hold (test_run_observations.rs:880)",
+  "outcome": "The idle test-command observation persistence step no longer holds StateInner for seconds. Expensive work (scanning unclassified commands against session runtime identities, compaction and persistence preparation) runs on a snapshot or outside the lock, with the same results.",
+  "acceptance": [
+    "A cause note names the expensive operations held under the lock in step_test_command_observation_persistence (test_run_observations.rs:879 onward) with file:line, based on reading the code at the running master. It's labelled as a reading, not a profile, per Greg's direction to fix from code first.",
+    "The observation-persistence step no longer scans or clones a backlog-sized collection, performs a backlog-by-sessions lookup, polls persistence waiters, or builds a full-history projection while holding StateInner. Candidate discovery and coherent input capture use bounded resumable batches owned by the existing collections; per-acquisition work is bounded by the batch and affected identities, with no hidden full scan in cursor advancement or session lookup. Runtime identity formatting/hashing and candidate computation run off-lock. Application revalidates each exact current entry, session/runtime and persistence fence before changing state, batches changed rows through the existing persistence owner, uses targeted publication and defers compaction. Under a quiescent finite backlog, repeated steps eventually examine every eligible entry; concurrent insertion, replacement and removal cannot lose work or apply a stale result. Tests with large unrelated history and many sessions establish bounded scan/capture work and unchanged durability, failure and publication semantics. The existing disconnected synchronous persistence fallback keeps its ordering; it is explicitly outside this scan/capture complexity claim and is not represented as bounded or moved off-lock without an existing owner protocol.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "lock-hold",
+    "measured",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-28c0-7e92-83c9-139877b42f30",
+  "external_ref": null,
+  "title": "Update canonical completion and producer-overflow recovery contract documentation",
+  "outcome": "Update canonical completion and producer-overflow recovery contract documentation",
+  "acceptance": [
+    "Update canonical completion and producer-overflow recovery contract documentation with regression or contract evidence reviewed independently."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "low",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

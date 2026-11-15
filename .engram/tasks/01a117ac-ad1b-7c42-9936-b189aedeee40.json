@@ -1,0 +1,64 @@
+{
+  "id": "01a117ac-ad1b-7c42-9936-b189aedeee40",
+  "external_ref": null,
+  "title": "Recognize foreground focused launcher runs of Node's native test runner",
+  "outcome": "A foreground test-launcher focused invocation wrapping a genuine node --test command is recognized and judged from its validated result artifact under existing source/claim/exit/positive-test requirements, with informative refusal when a recognized run cannot earn credit.",
+  "acceptance": [
+    "A foreground `node scripts/test-launcher.mjs focused -- node --test ...` invocation, including a quoted --test-name-pattern filter, enters the host Test verification lifecycle. A valid successful run earns PASS only with matching validated artifacts, successful completion and positive executed/passed counts.",
+    "A recognized focused Node run with attributable valid failing test evidence records a failed Test result, never PASS or silent omission. Missing, malformed, stale or mismatched evidence, absent exit status, zero executed tests and source/claim/root violations retain the existing non-passing or credit-refusal behavior with an attributable reason; the repair does not weaken provenance, ownership or artifact checks.",
+    "An unsupported inner command in a foreground focused launcher invocation does not become a Test merely because it uses the launcher. Its non-recognition is reported to the requesting session through the existing host feedback path when the host classifies it, identifying the command and stating that no Test record will follow, so the caller need not enter a wait for a nonexistent record. Cover unsupported forms and ensure ordinary unrelated Node commands do not receive this launcher-specific notice.",
+    "Regression coverage exercises the recursive recognition and validated launcher-result path for Node success, failure and unsupported forms; existing focused Cargo and full/live recognition remain intact. Record the d4d8e1f3 source-backed diagnosis and distinguish it from earlier refusal/capture incidents without claiming unsupported common cause."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "node",
+    "test-recognition"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Foreground focused native Node Test recognition, validated success/failure attribution, unsupported-form disclosure and regression coverage landed and installed from exact gated/reviewed tree.",
+    "completed_at": "2026-10-07T22:11:51.330581900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

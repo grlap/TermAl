@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3c7-7d40-a7eb-51771c83e9a1",
+  "external_ref": "tm-32lh",
+  "title": "Audit stale permission fencing for other ACP agents",
+  "outcome": "Claude structured review session-6523 notes OpenCode-only new stale-runtime protection while Cursor Agent mode also auto-approves. Investigate existing runtime/stop admission guarantees for Cursor and other ACP permission handlers, add focused regression or document deliberate scope. Not a regression proven by this OpenCode diff; avoid broad permission-policy changes without evidence. Review candidate HEAD 0e7ab55, tracked diff SHA256 3715182cad09de8a53bc9104243875be7aeb23d4910f4bf0987c2626361adab9; searches included closed issues and found no exact existing item.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

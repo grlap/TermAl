@@ -1,0 +1,30 @@
+{
+  "id": "01a0e6d3-c55e-7033-9416-54b0da231bae",
+  "external_ref": "tm-luzz",
+  "title": "Remove the staged WinDbg thread dump 1.txt and guard debug dumps with .gitignore",
+  "outcome": "A 1,052-line WinDbg thread dump of termal.exe (53 threads) is staged at the repository root as 1.txt. It is not source, exposes process addresses and stack internals, adds about 1k lines of noise, and makes git diff --cached --check report 219 trailing-whitespace lines. Remove it from the index and the working tree before any commit of the Engram changeset, and add a .gitignore rule (root-level dump pattern or a dumps/ directory) so the next dump cannot be staged by accident. Found by both delegated reviewers (Codex Low, Claude High) in /review-changes on HEAD 2e0e7b1 + 22 staged files.",
+  "acceptance": [
+    "The repository root 1.txt WinDbg dump is absent from the tracked tree, index and working tree of the reviewed input.",
+    "A root-anchored /1.txt rule ignores the known dump, *.dmp and *.mdmp files are ignored repository-wide, and a comment directs future captures into the existing .evidence/ folder.",
+    "The added ignore rule matches no tracked repository asset and does not ignore LICENSE.txt, NOTICE.txt, requirements.txt or docs/1.txt; the change introduces no blanket text-file ignore.",
+    "The final staged change contains only the documented .gitignore guard, with no source or product behavior change and no unrelated index/worktree changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

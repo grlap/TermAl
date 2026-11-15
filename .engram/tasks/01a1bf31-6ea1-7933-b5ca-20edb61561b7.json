@@ -1,0 +1,30 @@
+{
+  "id": "01a1bf31-6ea1-7933-b5ca-20edb61561b7",
+  "external_ref": null,
+  "title": "Restore complete unbound registration assertions for foreign non-holders",
+  "outcome": "Non-holder regressions assert no bound work, no pinned named root and no claim-credit eligibility.",
+  "acceptance": [
+    "Restore named_root None and empty summary bound_work_ids assertions in the rewritten named-root non-holder regression, and named_root None for handoff absent/different-claim cases, alongside existing binding and eligibility oracles."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "low",
+    "review-followup",
+    "test-credit",
+    "verification-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a183bd-a8cb-7f22-a511-600257272d37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

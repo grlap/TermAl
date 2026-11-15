@@ -1,0 +1,31 @@
+{
+  "id": "01a14672-1446-71d2-98b9-ac0485b1398b",
+  "external_ref": null,
+  "title": "Remove ancestor directory aliases before launcher fixture cleanup",
+  "outcome": "A retained failed launcher registration fixture does not keep its test-created junction or symlink pointing back to its own ancestor.",
+  "acceptance": [
+    "Directory-alias witnesses unlink their exact test-created alias before fixture cleanup, including assertion failures, without traversing the alias target.",
+    "Foreground and detached alias controls preserve realpath-equivalence, ACK barriers and once-only execution evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "ci",
+    "greg-reported",
+    "review-followup",
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a145cf-8b9f-7d93-a5f7-9b211ca7daa2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

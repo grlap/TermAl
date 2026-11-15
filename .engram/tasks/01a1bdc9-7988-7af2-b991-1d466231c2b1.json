@@ -1,0 +1,32 @@
+{
+  "id": "01a1bdc9-7988-7af2-b991-1d466231c2b1",
+  "external_ref": null,
+  "title": "Cover bounded project-reset typed refusal bodies and the runtime-held branch",
+  "outcome": "Add focused coverage for the documented bounded-reset refused, deadline and runtime-held HTTP response bodies, plus a same-authority tier change with a live quarantined MCP runtime that retains current settings and returns the runtime-held refusal.",
+  "acceptance": [
+    "Tests assert status and documented code/outcome/existingSettingsRemainCurrent/reset JSON for the refused, deadline and runtime-held errors, and exercise runtime-held refusal with settings unchanged at the relevant before-fence and transaction revalidation cuts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "outage",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete removed containment/reset owner, not fixed or tested by this sweep. Original w-0433f3c00bd9 was stranded under completed w3af0 and admitted tracker detach preserves its provenance in this independent continuation. Fable2722/message43b9a7df-11b7-403a-a0d1-1e21100b4562 authorizes cancellation. Full original outcome/criteria and available review/repair notes inspected; current master2e03d1a9 plus native87f49ed0 deleted-path diff establish deletion of src/engram_project_reset_wait.rs, engram_project_containment.rs, containment admission/durability/plan owners and active ContainmentStop/recovery scheduler branches. No such typed reset-fence or containment Stop behavior remains executable. Passive historical codecs do not re-enable it. This does not certify original incident cause, erase earlier Medium/failed-run provenance, or claim new test/credit/FULL/live evidence. Ordinary process startup, delivery ownership, SQLite compatibility and provider Stop work remain separately preserved. No product/source change or Cargo run; retain artifacts while still cited by other open work.",
+  "completion": null
+}

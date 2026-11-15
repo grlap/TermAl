@@ -1,0 +1,30 @@
+{
+  "id": "01a1ba27-94bd-70c0-a42f-6cfa4bbfdeeb",
+  "external_ref": null,
+  "title": "Exercise equal and conflicting original bindings retained by both trace and active check",
+  "outcome": "A mediated late-completion fixture verifies equal trace/check copies deduplicate to the artifact verdict and divergent retained originals produce the named UNKNOWN.",
+  "acceptance": [
+    "Exercise equal and conflicting original bindings retained by both trace and active check is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "declared-commands",
+    "greg-reported",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

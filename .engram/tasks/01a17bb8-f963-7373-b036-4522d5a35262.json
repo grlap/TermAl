@@ -1,0 +1,30 @@
+{
+  "id": "01a17bb8-f963-7373-b036-4522d5a35262",
+  "external_ref": null,
+  "title": "Graceful shutdown's final full-store write holds StateInner for 649 ms under modeled load",
+  "outcome": "Reduce or explicitly resolve the StateInner hold of the existing final full-store shutdown persistence while preserving shutdown durability and the transition to synchronous fallback.",
+  "acceptance": [
+    "The existing final synchronous shutdown persistence preserves all mutations accepted before worker join completes, keeps persist_worker_alive ordering intact, and does not introduce a second concurrent persistence owner.",
+    "A disposable regression attributes the shutdown hold separately from active workload phases and verifies the chosen bounded-lock repair or documented resolution; the required review pair and full gate pass on the final input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "review-followup",
+    "shutdown",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

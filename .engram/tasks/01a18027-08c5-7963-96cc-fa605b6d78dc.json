@@ -1,0 +1,31 @@
+{
+  "id": "01a18027-08c5-7963-96cc-fa605b6d78dc",
+  "external_ref": null,
+  "title": "stateBroadcast diagnostics cannot distinguish no-subscribers from a stalled worker",
+  "outcome": "GET /api/diagnostics/persistence shows whether the state broadcaster has subscribers and is alive, so frozen stateBroadcast counters can be read correctly without opening an event stream.",
+  "acceptance": [
+    "GET /api/diagnostics/persistence stateBroadcast exposes the stream_events receiver count, a broadcaster worker heartbeat or last-forward time, and the pending broadcast mailbox length.",
+    "A test covers the new fields: the receiver count follows subscribe and drop, the heartbeat or last-forward time advances when the worker forwards work, and the pending length reflects queued work.",
+    "Documentation of stateBroadcast notes that frozen counters with zero receivers are normal, because counters advance only on a send that reaches at least one receiver."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-visible",
+    "host-stability",
+    "sse",
+    "state-broadcast"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

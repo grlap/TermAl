@@ -1,0 +1,33 @@
+{
+  "id": "01a1a2a1-0602-76d3-b479-8cd6577fb525",
+  "external_ref": null,
+  "title": "Make the child ignoreCase status pin observable on case-insensitive test hosts",
+  "outcome": "The child status case-folding pin has a direct regression witness on case-insensitive hosts, or its existing counterexample is explicitly evidenced on a case-sensitive host, without confusing conservative rename refusal with proof of the pin.",
+  "acceptance": [
+    "A recorded test result proves the core.ignoreCase=false status pin is exercised: either protected status exposes a renamed case variant that raw local-true status hides on an insensitive host, or the existing arbitrary-untracked-variant counterexample executes on a case-sensitive host.",
+    "The evidence records the actual host/capability and any UNVERIFIED controls; a positive or rename refusal that passes without the pin is not claimed as pin-removal sensitivity."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-low",
+    "source-id",
+    "source-revision",
+    "team-pilot",
+    "test-evidence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

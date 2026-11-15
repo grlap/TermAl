@@ -1,0 +1,57 @@
+{
+  "id": "01a0e6d3-c3ec-72d2-a99a-670af503338b",
+  "external_ref": "tm-5cag",
+  "title": "Restore test HOME before deleting its temporary directory",
+  "outcome": "The Windows app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs test manually removes state_root while ScopedHomeDir still points process-global HOME and USERPROFILE at it. Parallel tests can resolve TermAl data paths into the deleted termal-bootstrap-verbatim-state-* directory. Observed during full cargo test: project_deletion_outbox_survives_deferred_worker_cleanup_and_fences_across_restart failed writing .termal/telegram-bot.json with NotFound. Remove the premature manual cleanup and let drop order restore HOME before TestTempRoot removes the directory; validate the focused tests and full suite.",
+  "acceptance": [
+    "A deterministic witness first fails on the unmodified fixture path that let a resolver, child or worker observe a redirected HOME/USERPROFILE and create or use that fixture's home after its root cleanup; the original failed gate and retained run-mkk0Zk remain preserved as provenance.",
+    "Home-redirecting test fixtures restore HOME/USERPROFILE before their temporary roots are removed, and every resolver, child or worker that can retain a redirected home is isolated from that redirect or settled before its owning root is removed; a controlled post-cleanup witness proves no home-path recreation or access, with a positive control proving the intended home-dependent behavior still executes.",
+    "The family correction changes only test fixtures and preserves production home-resolution and bind/admission behavior; surviving blank-home, relative-home rejection and existing bootstrap/Telegram isolation assertions pass. A product or test-architecture change requires Architect2's decision before implementation.",
+    "The combined w-ab41/family input passes the maintained five-stage gate with zero remaining run-root entries and zero new outside-product-root entries, and a fresh independent Codex/Claude complete-input review pair has no outstanding in-scope Medium or higher; exact run directory and fingerprint are recorded."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "HOME fixture-family correction accepted4/4 by independent evaluation42e6798be23647869a17316bc9184a9f at exact759804/contentab76. Own54 host27af, exact shared fullgate d64db42d/host9eff, full17 Codex/Claude pair noMedium+ and Lows filed. Complete historical fail-first/architectural records recovered into hash-verified repo artifact; original failedrun/provenance preserved. No commit/push/install or running-product validation yet; combined correction awaits parent acceptance/Opus2integration.",
+    "completed_at": "2026-10-03T02:36:39.265991900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

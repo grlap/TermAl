@@ -1,0 +1,36 @@
+{
+  "id": "01a1d73f-656b-7b32-a712-610b5060255e",
+  "external_ref": null,
+  "title": "Direct-send relay refusal and bypass use the physical queue front while relay authority uses the runnable position, so a refused relay behind a historical row is promoted and the user prompt stalls",
+  "outcome": "Relay refusal ownership, the ordinary-user bypass and the FIFO decisions in direct send all use the same runnable-queue selector (ordinary_queue_position) as relay authority validation. A refused relay carrier that sits behind a non-runnable historical row is held, not promoted, and a fresh user prompt runs.",
+  "acceptance": [
+    "A behavioural test: an idle, unpaused queue [non-runnable historical non-relay row, runnable relay carrier whose enrollment is revoked or whose metadata is missing]. A fresh user prompt runs as the next turn; the refused relay carrier is NOT promoted; both prior rows remain unchanged",
+    "Refusal capture and the bypass predicates select the same queue entry as validate_front_mailbox_relay_authority (ordinary_queue_position), with no remaining physical-front assumption on these paths"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "prompt-delivery",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed postlanding atmasterd377696e51eb40790f763b6763bcb03e3112679d/treec45e3ef4c5828e41dc8b57c69a6b7d7780f7ed90. FreshindependentSonnet18007/delegation2a10ddf0 evaluation87717a03875e48ff859eb72436447ac9 recorded08:31:55.986Z rev4/cut329,2/2judgmentPASS,stale=null,consumedwithoutlinks. Fullpacket/ALL1708Bprose/actualverdict/configarchivedbeforedone. C1idleunpausedhistory+refusedrunnablecarrier4variants freshuserdispatched/carriernotpromoted/queueunchanged; C2sameordinary_queue_positioncapture/authority/bypassdurability/FIFO, intentionalphysicalfrontguardonlynon-bypassnon-relaypausepreserved. Reviewed623ccontributionbyteidenticalto6d07carryon491dd015and3postimagesunchangedthroughd377; cleanR2Codex17945+Claude17946zeroM+, priorHighfixedandre-reviewed,3Low335c/4ace/caa3separate. Author495/0/102ignoredall49originals; originalFULLdebf8952sameexactlandedtree6stagesPASSRust7847/0/114+2/0+40/0/1,Node559/0/16skip,Vitest5158/0/296files;all8requiredbehaviorwitnessesindividuallyok.21originalfiles+manifestexactbytes/SHA/readbackverified547019B/SHA04f1f08db3cee6fda59776ee88f4730d9cb05a667e3265416430182d0374c8c9. Standalonehostlessnotnativecredit. Ownerlanded07:26:57Z/testcomboauthorrefsdeleted07:27:05Z; noinstallurgencyclaimed. LastingREADYeff9bff43e3041c6aaf6ce9f3d6e8c6d. No testsrerun/evaluatorloop/sourceedit. Nextsafeownedroot/authorrefcleanup; rawreview/RED/GREEN/FULLretainedonlyforopenLowfollowupswithconcretenotes.",
+    "completed_at": "2026-11-14T08:32:54.598928600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

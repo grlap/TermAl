@@ -1,0 +1,29 @@
+{
+  "id": "01a18e77-1c9d-73e2-b593-1301484e0687",
+  "external_ref": null,
+  "title": "Pin every precedence step of the attempt-only exact_identity_required project decision with tests",
+  "outcome": "Pin every precedence step of the attempt-only exact_identity_required project decision with tests",
+  "acceptance": [
+    "Tests in src/tests/delegation_review_access.rs cover: (a) an unstamped legacy record with no custody rows, where consistent native facts alone decide the 400; (b) unreadable custody or a missing auth key, which falls back to the plain 404; (c) a commissioning-stamped record whose parent and child later moved, which still gives 400 to an original-project root and 404 to a root of the new project",
+    "Exact-input focused tests and a clean review pair"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-custody",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

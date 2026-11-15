@@ -1,0 +1,28 @@
+{
+  "id": "01a12d2b-8900-7882-b5fa-0fe09bc90cb2",
+  "external_ref": null,
+  "title": "Test the withheld-reason order: Overlapped and RuntimeOutputCut win over FocusedStageLineMissing for a record-backed focused launcher run",
+  "outcome": "Test the withheld-reason order: Overlapped and RuntimeOutputCut win over FocusedStageLineMissing for a record-backed focused launcher run",
+  "acceptance": [
+    "Test the withheld-reason order: Overlapped and RuntimeOutputCut win over FocusedStageLineMissing for a record-backed focused launcher run is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

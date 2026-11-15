@@ -1,0 +1,29 @@
+{
+  "id": "01a15490-84f7-7ca1-977d-568c51d3816a",
+  "external_ref": null,
+  "title": "Document safe recovery when a pre-schema-4 binary suggests resetting coordination data",
+  "outcome": "Explain that an older binary's move/delete reset guidance must not be followed after a schema-4 rollback; use a schema-4-capable build to preserve coordination data.",
+  "acceptance": [
+    "The central-control-plane feature brief distinguishes automatic refusal, which preserves data, from manually following the old binary's move/delete reset guidance, which discards or hides coordination state.",
+    "The rollback guidance tells operators to keep the upgraded coordination database intact and run a schema-4-capable build; it does not introduce a migration, reset or binary-backup requirement."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "federation-m4",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

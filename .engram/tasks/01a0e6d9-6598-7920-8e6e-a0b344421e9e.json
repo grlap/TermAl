@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d9-6598-7920-8e6e-a0b344421e9e",
+  "external_ref": null,
+  "title": "Evaluator brief states Engram's admission rule for a pass on a bound criterion (observed basis, passed verification citations only; resubmit on a citation refusal)",
+  "outcome": "Evaluator brief states Engram's admission rule for a pass on a bound criterion (observed basis, passed verification citations only; resubmit on a citation refusal)",
+  "acceptance": [
+    "Evaluator brief states Engram's admission rule for a pass on a bound criterion (observed basis, passed verification citations only; resubmit on a citation refusal) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "PI-30",
+    "acceptance-evaluation",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f580-04c4-7823-8717-51dab1c2faab",
+  "disposal_reason": "Same defect, filed again on 2026-10-01 from w-a450af06e8bd's evaluation 5bc7bccd before this older item was found. w-51dab1c2faab has testable criteria and is claimed (Termal::Opus2, worktree .tmp/wt-eval-brief). Its scope takes over this item's generalized rule: an observed basis cites only passed verification records; a judgment basis may cite notes and gates; a bound criterion needs observed; on a citation refusal, drop the non-qualifying citation and resubmit rather than downgrade. Its scope also covers this item's three recorded occurrences (Fable2's case F, Engram w-cf5e3938717a, Engram w-d9d85d42c6ac).",
+  "completion": null
+}

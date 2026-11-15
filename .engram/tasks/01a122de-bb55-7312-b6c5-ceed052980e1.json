@@ -1,0 +1,27 @@
+{
+  "id": "01a122de-bb55-7312-b6c5-ceed052980e1",
+  "external_ref": null,
+  "title": "Test the persist writer loop's tick-timing wiring (collect measured, fences marked in tick before collection)",
+  "outcome": "A test drives the real termal-persist writer loop (app_boot.rs) and shows that it measures the collect phase and marks pending fences as in a tick before collection, so dropping that wiring fails a test.",
+  "acceptance": [
+    "Test the persist writer loop's tick-timing wiring (collect measured, fences marked in tick before collection) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-persistence",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

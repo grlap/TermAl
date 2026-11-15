@@ -1,0 +1,39 @@
+{
+  "id": "01a129c7-3499-7ad0-9698-a563b5cd120b",
+  "external_ref": null,
+  "title": "Keep host-generated unresolved file evidence out of delegation result candidates",
+  "outcome": "A host-generated Unresolved file changes transcript note cannot hide a delegated child's earlier structured result or become its synthesized plain output. Preserve visible unresolved evidence and ordinary provider-authored result parsing.",
+  "acceptance": [
+    "A regression with a child's final reply followed by host-generated unresolved file evidence preserves the structured result on the terminal-error path and the provider output on the plain-output synthesis path.",
+    "Host-generated unresolved evidence stays visible without being treated as an assistant result candidate; ordinary provider-authored Markdown remains eligible."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "file-changes",
+    "greg-direction",
+    "performance",
+    "review-followup",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12942-9786-7983-86d5-204186fe854d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a0fd1d-f524-71f0-b3bd-350df830dfd0",
+  "external_ref": null,
+  "title": "Evidence notice: a one-off exclusion gives a spurious restricted-then-lifted notice pair",
+  "outcome": "Evidence notice: a one-off exclusion gives a spurious restricted-then-lifted notice pair",
+  "acceptance": [
+    "A turn started by the Claude runtime on an idle session, including a cron-started turn, keeps its foreground root calls attributed to that current runtime and adopted turn for outstanding-work tracking: before, during and after correlated foreground completion it creates no outstanding-work evidence restriction, restricted/lifted notice pair, or orphan-work exclusion window in its own or overlapping peer workspaces. Its edits and tests remain unassigned to Engram grants. This item changes only the host-local outstanding-work hazard classification and notices; it does not implement the Engram unadmitted-turn reporting of w-df1ef323efe9 / w-e12abe9f8cbe, which stays parked on the control-mode decision w-a5cb89d95340.",
+    "A one-off foreign observation or mixed-grant mark with no outstanding hazard does not emit an Evidence restricted or subsequent Evidence restriction lifted notice. The affected grant retains its existing mixed-attribution/source-report withholding and any legitimate check fences.",
+    "Actual unresolved background, nested or orphaned work still restricts evidence and fences overlapping checks, including across Stop/runtime replacement/deletion; it is released only by the existing correlated-completion rules. Merely hiding a notice never clears an outstanding hazard.",
+    "Deterministic source-level regressions drive representative runtime-started frame sequences and inspect hazard/exclusion state while foreground calls are open and after completion, plus true-orphan controls. The exact final input passes authorized focused checks, the full five-stage gate and the independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

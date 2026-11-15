@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7a8-75b0-9ec3-36b621bedb39",
+  "external_ref": "tm-vufx",
+  "title": "Type both ends of the SharedWorker client-to-hub protocol",
+  "outcome": "Parent-verified post-fix review: shared-live-events.ts:112 receives MessageEvent<any> and live-event-source.ts posts untyped start/pong/probe/close messages, whereas the hub-to-client direction has SharedLiveEvent. Add a discriminated client-message union and a typed sending boundary as well as a typed receiver; annotating only the receiver cannot catch producer drift because native MessagePort.postMessage accepts any. Keep required runtime validation such as safe-integer probe ids. This is a maintainability follow-up, not an observed malformed-message bug. Related implementation tm-lgw8.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

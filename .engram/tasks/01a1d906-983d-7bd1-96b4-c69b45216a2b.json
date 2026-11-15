@@ -1,0 +1,27 @@
+{
+  "id": "01a1d906-983d-7bd1-96b4-c69b45216a2b",
+  "external_ref": null,
+  "title": "Gate combo101 (2ecb + 8318) as 8198d5d7 on d377696e with one full launcher run on a DL560 test ref; Opus2 lands",
+  "outcome": "The review-clean w-2ecb0cb4d6e6 (c3466fb2) and w-8318a4ce5a64 (136ecfdc), carried byte-identically onto master d377696e as 8198d5d7, have one passing full launcher gate on their exact tree via a test ref, the integration checks hold, and master is fast-forwarded to 8198d5d7 and pushed.",
+  "acceptance": [
+    "A full launcher run (node scripts/test-launcher.mjs full) on a fresh checkout of the test ref test/w-c69b45216a2b-2533c159 whose tree is 3812391100798792498b25c34f44ddc126f1cd8e passed every stage, with the same review-freeze fingerprint before and after its run. The landing commit 8198d5d7839e961d0805eb4760ce8dc9ec1ab967 sits on d377696e as two commits whose contributions are byte-identical (raw diff, full blob ids, no renames) to 2ecb c3466fb2 and 8318 136ecfdc. Its run id, host, commit, tree and before and after fingerprints are recorded on this item.",
+    "Before the push, origin/master equals d377696e51eb40790f763b6763bcb03e3112679d, so the landing d377696e -> 8198d5d7 is a fast-forward. After the push, git ls-remote origin refs/heads/master equals 8198d5d7, which is recorded on this item, and the test ref is deleted with its push and deletion recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "combo101 (8198d5d7) failed its landing FULL test-23757e2e on a test defect in w-8318's new file (raw std::process::Command rejected by the host_command guard); it never landed. Its members were re-trained: 2ecb landed in combo102 (w-c31ad45c795a, master 73177116); 8318 was fixed by its owner as 55ba462a (F2 890/0) and rides a later train. Refs were deleted at 08:26:15Z; no further gate on 8198d5d7.",
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0f67c-5841-74e0-8d5b-55adb13046c6",
+  "external_ref": null,
+  "title": "Restore named-root journal state when staging persistence fails",
+  "outcome": "Restore named-root journal state when staging persistence fails",
+  "acceptance": [
+    "Restore named-root journal state when staging persistence fails is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete by redesign (Termal::Fable2, coordinator, 2026-10-15 21:49Z; triage by Termal::Opus3, TermAl mailbox 03723eab #2675, verified on master d8fdd2dc).\n- The finding was against pre-landing code that never shipped.\n- stage_engram_root_event_locked now only stages: \"Stage only. The owner acknowledges this whole image off-lock before transport; failure retains the exact intent\" (engram_named_root_binding.rs:1513-1515).\n- Durability comes from the PersistFence in prepare_engram_authority_until and confirm_engram_authority_image_until (engram_root_authority.rs:1342-1353, 1478-1497), shipped in b1c10d7b and d7050386.\n- Covered by source_root_orphan_read_persistence_failure_retains_the_exact_retry_intent (tests/engram_source_root_naming.rs:1129) and the assignment persist-failure test at :3014.",
+  "completion": null
+}

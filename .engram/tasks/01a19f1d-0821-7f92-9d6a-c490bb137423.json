@@ -1,0 +1,31 @@
+{
+  "id": "01a19f1d-0821-7f92-9d6a-c490bb137423",
+  "external_ref": null,
+  "title": "Host console log has no timestamps and floods with recurring lines (~10 lines/s): add time and aggregate or rate-limit periodic diagnostics",
+  "outcome": "Every host console log line carries a timestamp (UTC, at least millisecond precision). Recurring diagnostic lines (lock-hold and file-change timings, relay retries, named-root deferrals, unhandled runtime notifications and similar) are aggregated or rate-limited per kind, with a suppressed count reported. Real errors and first occurrences are never suppressed. Console line rate is measured on the running host before and after, and the after rate stays low enough to read during normal operation.",
+  "acceptance": [
+    "In server mode every host console line written through eprintln! starts with a UTC RFC 3339 timestamp with millisecond precision; other process modes write their lines unchanged.",
+    "Only these recurring diagnostic kinds are limited to their first line per minute, followed by a summary with the suppressed count and the last suppressed line: state-lock held, waited and file-change timings; relay notification retries; the named-root reclamation pass summary and its budget deferrals.",
+    "Lines naming an error or failure, ACP and Codex runtime diagnostics, and lines outside those kinds are never suppressed.",
+    "A deterministic test measures the line rate before and after: a 10 lines/s flood of those kinds becomes one line per kind per minute.",
+    "After the landing and restart, the console line rate on the running host is observed before and after."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "logging"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

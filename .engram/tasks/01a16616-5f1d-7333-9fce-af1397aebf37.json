@@ -1,0 +1,26 @@
+{
+  "id": "01a16616-5f1d-7333-9fce-af1397aebf37",
+  "external_ref": null,
+  "title": "The exhaustion hold says \"outcome is unknown\" for a dispatch_budget_exhausted local hold that sent nothing",
+  "outcome": "EngramSpentInvocation::of_cause (engram_begin_preparation_retry.rs, from w-ac230a24d0d8) classifies every code that is neither a certificate nor a local preparation code as Unknown. That includes dispatch_budget_exhausted, a local hold in which the budget ran out before evaluate or transmission (engram_host_adapter.rs about :8711 and :8745) and nothing was sent. So the hold tells the operator that an unsent invocation has an unknown outcome. That is safe but inaccurate, and it can read as a possible duplicate write.\nFix: classify local NotStarted causes as NotSent, ideally derived from the card's causal_failure remote_application rather than from the code string. Cover it with a test of the spent hold after a dispatch_budget_exhausted park.",
+  "acceptance": [
+    "The exhaustion hold says \"outcome is unknown\" for a dispatch_budget_exhausted local hold that sent nothing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,53 @@
+{
+  "id": "01a15f30-f135-72c1-9644-7e452e884f43",
+  "external_ref": null,
+  "title": "Replace quadratic removed-run membership scans with one current-ID set under the test-run rescan lock",
+  "outcome": "Replace only the nested removed-ID membership scan in test-run rescan with a scoped HashSet<&str>; retain publication, rollback, ordering and durability behavior. This is a source-derived complexity reduction within the measured lock holder, not a live speedup or parent root-cause closure.",
+  "acceptance": [
+    "Removed-run detection in the production test-run rescan builds current-ID membership once and checks each previous ID once, replacing the nested linear scan with expected O(M+N) membership work; only membership detection changes, while the previous-entry map, changed/restored handling, existing removal sort, rollback, cards and compaction remain unchanged.",
+    "Deterministic tests prove identical removed IDs for empty, unchanged, reordered, added, removed, duplicate-current, case-sensitive and prefix-distinct IDs; integration controls retain sorted removal publication, first-directory selection for duplicate IDs, and previous entries after unsent delta failures. These are semantic controls, not a manufactured failing functional RED or a wall-clock benchmark.",
+    "The exact input passes the authorized focused checks and full gate, receives independent read-only Codex plus Kimi review with recorded Claude unavailability and no outstanding in-scope Medium-or-higher finding, and passes independent acceptance before completion.",
+    "Evidence reports this slice as a code-derived complexity reduction within the measured rescan lock region; it does not claim the live population, the runtime fraction saved, the full registration-deadline cause, or closure of the parent persistence incident without separate measurement."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "host-persistence",
+    "p1-recovery",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed exact reviewed/gated tree77cdbf70fcaa020592b22c3adfabac26b3ec9e65 asdb2943f8a698b90e655b77b99f613e3b0421d3be onorigin/master. Removed-run membership now uses one scoped current-ID HashSet, expectedO(M+N); previousmap/publication/rollback/cards/compaction preserved. Focused88 and maintained5stagefullgate passed exactsource; independentreadOnlyCodex+Kimi pair clean with recordedClaudeweeklyoutage; independentCodexacceptancea68eb6fced744860bab7e45cb8cdfae8 current4/4PASS. Postlandingcommitparent364dd446/tree77cd/remotecontainment verified; producerraw60bdae1a unchanged. Merger11865 receipts#5/#7 supplylandingandpushUTC17:14:01. Exact-tree releasebuild/install remainMergerBUILDREADYpending; noinstalledbuild/no restart asserted. Code-derived complexity reduction only: livepopulation/runtimefraction/full deadlinecause/parentresolution unproved. Parentpersistenceincident/originalc54eUNKNOWN stayopen.",
+    "completed_at": "2026-10-21T17:16:15.824206Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

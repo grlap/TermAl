@@ -1,0 +1,29 @@
+{
+  "id": "01a12ddb-2169-7393-96d7-53bca89e5fa0",
+  "external_ref": null,
+  "title": "Make the scratch-entry lookup in note_engram_workspace_file_changes fail closed, and split the watcher-routing tests out of tests/engram_carried_checks.rs",
+  "outcome": "An impossible miss of the per-directory scratch entry in note_engram_workspace_file_changes falls through to routing by the remembered key and fencing, never to `continue`. The scratch and watcher-routing tests move to their own test module, so tests/engram_carried_checks.rs is back under about 5,000 lines, as a pure move.",
+  "acceptance": [
+    "The scratch-entry lookup binds the pushed or found entry once, or falls through to fencing on a miss; there is no `continue` on a miss.",
+    "only_the_scratch_directory_at_its_own_worktree_root_is_scratch, a_scratch_write_under_tmp…, and the two a_fixture_store_under_a… tests live in a dedicated module with a provenance header, moved without behaviour change, and they pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "carried-checks",
+    "refactor",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

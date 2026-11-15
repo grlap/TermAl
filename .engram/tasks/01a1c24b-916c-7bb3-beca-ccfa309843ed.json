@@ -1,0 +1,27 @@
+{
+  "id": "01a1c24b-916c-7bb3-beca-ccfa309843ed",
+  "external_ref": null,
+  "title": "Admit bounded read-only listing modes for mutable Git command families",
+  "outcome": "Evaluators and reviewers can use safe listing/read modes of reflog, tag, worktree, config, stash and notes, with command-specific option and execution-sink checks.",
+  "acceptance": [
+    "Behaviour tests through the real permission classifier show that the approved listing/read forms are admitted while each family's mutation and external-program forms stay refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "permissions",
+    "read-only-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1c8f0-64d2-7033-b87b-cf45dc64aa79",
+  "external_ref": null,
+  "title": "Reconcile UNTRACKED contract docs with explicit standalone notification mode",
+  "outcome": "Low docs/test.md:462-464 and docs/features/test-runs.md:152-154 still say only a fully hostless invocation may run UNTRACKED. Explicit --standalone now requires complete genuine inherited context and another --notify recipient while remaining untracked/no-credit. Qualify both old sentences and cross-link the standalone section.",
+  "acceptance": [
+    "Both contract documents consistently describe hostless and explicit notification-only UNTRACKED routes, their identity requirements and lack of registered credit; cross-link resolves."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

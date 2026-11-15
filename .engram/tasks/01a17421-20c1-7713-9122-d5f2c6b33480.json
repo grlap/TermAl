@@ -1,0 +1,29 @@
+{
+  "id": "01a17421-20c1-7713-9122-d5f2c6b33480",
+  "external_ref": null,
+  "title": "Retain safe server-side causes for executor diagnostics read failures",
+  "outcome": "Retain safe server-side causes for executor diagnostics read failures",
+  "acceptance": [
+    "Read failures retain bounded useful server-side error classification while HTTP500 remains generic and excludes private operation/prompt/acknowledgement content.",
+    "Focused failure/privacy checks and independent review cover final error handling."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "observability",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173f0-87db-7522-aab0-16cbff19cd11",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

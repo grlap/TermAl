@@ -1,0 +1,29 @@
+{
+  "id": "01a1cb9f-143a-7b73-9e95-3558d9c5c500",
+  "external_ref": null,
+  "title": "Clear automatic archive provenance in runtime-matched Codex thread-state updates",
+  "outcome": "Runtime-matched Codex archive/unarchive notifications clear prior automatic archive provenance consistently, so a future runtime attachment path cannot preserve stale automatic ownership across a state transition and restart.",
+  "acceptance": [
+    "Runtime-matched thread-state changes clear stale automatic archive provenance while retaining the existing runtime identity guard.",
+    "A behavioral notification-and-reload regression verifies that stale automatic ownership cannot authorize automatic unarchive after the thread was restored or archived externally."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "hardening",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

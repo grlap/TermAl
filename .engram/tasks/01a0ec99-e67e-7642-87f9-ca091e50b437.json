@@ -1,0 +1,36 @@
+{
+  "id": "01a0ec99-e67e-7642-87f9-ca091e50b437",
+  "external_ref": null,
+  "title": "Auto acceptance evaluator picks a vendor that is refusing every spawn on its usage limit",
+  "outcome": "When termal_evaluate_acceptance is called without an agent, Auto does not choose a Claude/Codex vendor that just refused a spawn on its usage limit; it falls back to the other ready vendor or the caller's own agent, and the choice and its reason are visible in the request's answer.",
+  "acceptance": [
+    "After a child of vendor V fails with a usage-limit refusal, an Auto evaluation request within a bounded window does not choose V while the other vendor or the caller's agent is ready, shown by a behavioral test.",
+    "The request's answer names the chosen agent and, when a vendor was passed over, the reason.",
+    "An explicit agent is honoured unchanged.",
+    "The tool description states the rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Auto acceptance evaluator skips a recently quota-refused vendor for five minutes, discloses fallback/refusal, preserves explicit preferences, and documents the rule. Landed through combo38 with fresh composite pair and eligible exact-tree FULL.",
+    "completed_at": "2026-11-10T07:33:02.357913400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

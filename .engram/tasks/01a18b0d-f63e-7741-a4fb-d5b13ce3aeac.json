@@ -1,0 +1,27 @@
+{
+  "id": "01a18b0d-f63e-7741-a4fb-d5b13ce3aeac",
+  "external_ref": null,
+  "title": "Fast coalesced mailbox wakes can keep re-acknowledging a checkpoint-settlement retry and defer it indefinitely",
+  "outcome": "Fast coalesced mailbox wakes can keep re-acknowledging a checkpoint-settlement retry and defer it indefinitely",
+  "acceptance": [
+    "Fast coalesced mailbox wakes can keep re-acknowledging a checkpoint-settlement retry and defer it indefinitely is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

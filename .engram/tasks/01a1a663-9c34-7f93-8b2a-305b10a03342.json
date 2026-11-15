@@ -1,0 +1,29 @@
+{
+  "id": "01a1a663-9c34-7f93-8b2a-305b10a03342",
+  "external_ref": null,
+  "title": "A registered run whose stage isn't a recognised check stays pending with no notice, so its holder reads it as a missing record",
+  "outcome": "A session whose registered run can't produce a verification record because a stage isn't a recognised check is told so, with the reason, and doesn't have to ask or rerun to find out.",
+  "acceptance": [
+    "A registered --input commit run that ends with an unclassified stage surfaces that reason, naming the stage, to the holder's next turn, without creating a record or credit",
+    "A deterministic test covers a passing focused run through scripts/test-temp-root.mjs, showing either the surfaced reason or a record, according to the decision in the next criterion",
+    "It is decided and recorded whether the classifier should recognise cargo test run through scripts/test-temp-root.mjs. If it does, an unrecognised command under the same wrapper still can't be classified as a test"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

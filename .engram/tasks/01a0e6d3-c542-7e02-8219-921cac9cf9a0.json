@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c542-7e02-8219-921cac9cf9a0",
+  "external_ref": "tm-k315",
+  "title": "Resolve advertised legacy numeric mailbox ACK protocol (942fd3c)",
+  "outcome": "Commit 942fd3c (2026-09-11) added an advertised, documented dual-client mailbox acknowledgement protocol for 'legacy numeric clients': src/delegation_mcp.rs:2080,:2521,:2557,:2581, src/coordination_cli.rs:35-36,:51-56, src/mailboxes.rs:7 and :2480-2506. The 2026-09-05 no-legacy audit never listed this exception. The delegation bridge is a mode of the same TermAl binary, so this is compatibility with older builds of itself — unless the project deliberately classifies long-running pre-upgrade bridge processes as a pinned external artifact. Decision needed: either (a) document it in the audit classification as pinned external protocol with an expiry, or (b) delete the numeric-CAS acceptance path and require receipt-based ACKs. Greg's stance: no legacy. Found in Kimi's no-legacy re-audit 2026-09-25 (session-7706).",
+  "acceptance": [
+    "- termal_acknowledge_mailbox accepts only {mailboxId, receipt}; a request carrying expectedProcessedThrough/processedThrough (with or without a receipt) is rejected with 400 and the upgrade/restart wording; the tool schema no longer lists those fields. - termal mailbox acknowledge accepts only --receipt; --expected/--through is a usage error (exit 2) and is absent from the usage text. - The numeric CAS path and its issuance query in src/mailboxes.rs are deleted; receipt acknowledgement behaviour and its tests are unchanged. - No 'legacy', 'numeric' or 'pre-upgrade' wording remains in the three tool descriptions, the CLI usage or TERMAL_MAILBOX_GUIDANCE (rg -n 'legacy numeric|Legacy acknowledge|Old numeric' src/ is empty). - docs/architecture.md's no-legacy audit records the removal (no new exception). - cargo check clean; cargo test --bin termal green; fixtures for the numeric form are converted to rejection tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated",
+    "legacy-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

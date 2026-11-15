@@ -1,0 +1,27 @@
+{
+  "id": "01a12d09-3361-7942-90ad-3c8206199d7a",
+  "external_ref": null,
+  "title": "Durability marker lost on requeue of a rejected orphaned workflow prompt; held prompts not refused for remote sessions",
+  "outcome": "Durability marker lost on requeue of a rejected orphaned workflow prompt; held prompts not refused for remote sessions",
+  "acceptance": [
+    "Durability marker lost on requeue of a rejected orphaned workflow prompt; held prompts not refused for remote sessions is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "delivery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

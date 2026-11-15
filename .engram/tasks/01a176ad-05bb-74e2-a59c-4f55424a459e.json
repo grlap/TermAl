@@ -1,0 +1,50 @@
+{
+  "id": "01a176ad-05bb-74e2-a59c-4f55424a459e",
+  "external_ref": null,
+  "title": "Manually driven observation-publication test races the production five-second fence deadline under parallel gate load",
+  "outcome": "Manually driven observation-publication test races the production five-second fence deadline under parallel gate load",
+  "acceptance": [
+    "Both observation-persistence fences measure their deadline on the state's existing Engram budget clock, through PersistFence::new_with_clock, and the observation step polls each fence on that fence's own clock. In production that clock is Real and the deadline stays 5 s; no production deadline, dispatch path, durability rule or published state changes.",
+    "A deterministic witness, RED before and GREEN after: in the observation publication fixture on a scripted clock, advancing that clock past 5 s before the write resolves the observation fence as Deadline and records failed tracking. That is also the control that a genuinely expired fence still fails. Without the advance, elapsed wall time cannot expire the fixture's fences.",
+    "observation_publication_late_start_ack_cannot_ack_the_new_terminal_image keeps every existing assertion: late start ACK versus the terminal image, and Running then Passed durability. No deadline inflation, sleep, synthetic load, ignore or skip is added. The test_run_observation* and persist_fence suites stay green.",
+    "A focused run plus the default full gate in the normal queue, a clean review pair, then one READY to Merger2."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "gate-failure",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

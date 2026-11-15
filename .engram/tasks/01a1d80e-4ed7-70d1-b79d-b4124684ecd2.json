@@ -1,0 +1,30 @@
+{
+  "id": "01a1d80e-4ed7-70d1-b79d-b4124684ecd2",
+  "external_ref": null,
+  "title": "An unadmitted turn in a clean, unchanged named root is recorded as \"source change (assumed_missing_baseline)\", which invalidates a valid acceptance evaluation",
+  "outcome": "When a turn's source baseline is missing but the named root's measured source identity before and after equals the evaluated cut (same commit, tree, zero changes), the host does not report a source change. A completed, still-valid acceptance evaluation is not made stale by a turn that changed nothing.",
+  "acceptance": [
+    "A behavioural test: after an acceptance evaluation of a clean named root at commit C, an unadmitted turn whose baseline is missing, while the root's measured source id stays C with 0 changes, records no source change (source_changed false, or an explicit no-change accounting), and done consumes the evaluation",
+    "A behavioural test: a turn with a missing baseline where the root's source id actually differs from the evaluated cut still records a source change, and done still refuses as today",
+    "The host never emits two observations for the same turn window that disagree on source_changed for the same root and identical source id"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "named-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

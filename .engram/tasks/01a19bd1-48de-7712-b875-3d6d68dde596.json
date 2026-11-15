@@ -1,0 +1,38 @@
+{
+  "id": "01a19bd1-48de-7712-b875-3d6d68dde596",
+  "external_ref": null,
+  "title": "w-3fe8 source slice: process-cleanup and control-startup tests off deleted SessionStatus/SessionBind",
+  "outcome": "w-3fe8 source slice: process-cleanup and control-startup tests off deleted SessionStatus/SessionBind",
+  "acceptance": [
+    "A source-only patch for exactly src/tests/delegation_process_cleanup.rs (six SessionStatus and one SessionBind request at lines ~37/155/434/470/510/715) and src/tests/engram_control_startup_codes.rs (SessionBind at ~54), on the integrator's current tree b659, is returned to Sol-03d4",
+    "The real cleanup process and fence guarantees are ported onto the remaining ordinary WorkSessionRead rather than deleted, with an explicit per-original disposition from a full-body read",
+    "No ignores, aliases or other writes, and no cargo"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered exact2 source-only WorkSessionRead cleanup/startup port to integrator: immutable tree2f4ffb4119025ea98d4c810f89b05cf2e47fd7b2 vsb659, nativebefore/afterblobs, fullnativepatch and71 per-original dispositions. All71 tests retained,23ported/48unchanged, no ignores/aliases/unmounts/product/outside2 edits or Cargo. Fable2#1879/mailbox-message-4e7f0fb6-b3a7-47c1-b438-7e9452f181c7 acknowledges return and releases lane tostandby.",
+    "completed_at": "2026-11-02T10:50:53.575656200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

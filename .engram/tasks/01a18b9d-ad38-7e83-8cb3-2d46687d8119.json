@@ -1,0 +1,28 @@
+{
+  "id": "01a18b9d-ad38-7e83-8cb3-2d46687d8119",
+  "external_ref": null,
+  "title": "Add a live-row end-to-end test for the control_startup_refused recovery hold: send refused, hold armed, re-enable by bind, identical resend",
+  "outcome": "Add a live-row end-to-end test for the control_startup_refused recovery hold: send refused, hold armed, re-enable by bind, identical resend",
+  "acceptance": [
+    "Add a live-row end-to-end test for the control_startup_refused recovery hold: send refused, hold armed, re-enable by bind, identical resend is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "from-review",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

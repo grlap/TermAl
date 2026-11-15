@@ -1,0 +1,29 @@
+{
+  "id": "01a11c98-b3c5-7593-bca8-1401a83b1351",
+  "external_ref": null,
+  "title": "Read-only Claude Bash tests' sed comments overstate what the sed vetter checks",
+  "outcome": "Read-only Claude Bash tests' sed comments overstate what the sed vetter checks",
+  "acceptance": [
+    "Read-only Claude Bash tests' sed comments overstate what the sed vetter checks is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "read-only-delegation",
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

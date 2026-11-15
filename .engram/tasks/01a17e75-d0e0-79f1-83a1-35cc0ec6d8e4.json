@@ -1,0 +1,30 @@
+{
+  "id": "01a17e75-d0e0-79f1-83a1-35cc0ec6d8e4",
+  "external_ref": null,
+  "title": "Pin the documented lexical spelling of terminal fixture TEMP and TMP paths",
+  "outcome": "The terminal child-temp fixture test covers the documented returned path spelling from test_temp_dir(), alongside exact physical directory identity and existing refusal/cleanup controls.",
+  "acceptance": [
+    "Add an assertion of each returned TEMP/TMP lexical path against test_temp_dir().join(created root file_name).join(\"child-temp\"), preserving the helper's documented no-verbatim-prefix spelling contract on Windows and intentional OS alias spelling on Unix.",
+    "Keep exact canonical child-directory identity, TEMP/TMP name checks, no nested-workdir child-temp, linked/outside-root refusal and cleanup behavior; validate using the standard focused check and review for the resulting input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "macos",
+    "portability",
+    "review-followup",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17e15-847f-77f0-bec6-10e7c58fba6a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

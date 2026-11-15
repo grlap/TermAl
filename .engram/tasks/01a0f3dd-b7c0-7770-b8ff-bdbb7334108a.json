@@ -1,0 +1,29 @@
+{
+  "id": "01a0f3dd-b7c0-7770-b8ff-bdbb7334108a",
+  "external_ref": null,
+  "title": "Witness duplicate requested claim-row refusal in acceptance requests",
+  "outcome": "A request-path regression with two held rows matching the requested work but different claim_ids refuses BAD_GATEWAY and creates no evaluator; removing the duplicate-row guard makes it fail.",
+  "acceptance": [
+    "Witness duplicate requested claim-row refusal in acceptance requests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "named-root",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f315-4d7e-75e3-9a0e-4a3324d6da5c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

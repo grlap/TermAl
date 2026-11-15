@@ -1,0 +1,63 @@
+{
+  "id": "01a152ce-6e1f-73a2-a34c-cfa68bc79717",
+  "external_ref": null,
+  "title": "A launcher run that aborts at registration before any test starts is recorded as a FAILED test verification",
+  "outcome": "When the test launcher aborts before any test starts (for example a registration POST that exceeds its budget, so nothing compiles or runs), the host records no failed test verification for the item, or records a distinct not-run/infrastructure disposition that an evaluator cannot read as a test failure at that revision.",
+  "acceptance": [
+    "A recognised launcher check (`node scripts/test-launcher.mjs full|focused|live`) that exits non-zero while its output shows no sign that the run executed — neither a launcher verdict line `PASS|FAIL <runId> exit=<code>` nor a launcher stage line `NAME: passed|failed` — ends with outcome Unknown, never Failed, in both the one-call form and the plain (cwd-reporting) form; output whose only launcher lines are `FAIL launcher: …` refusals is such a run. A fail-first unit test feeds the exact output of run test-7f571048 (the RUN line and the `FAIL launcher: registration error … no tests started` line) with exit 1, and shows Failed on unchanged code and Unknown with the fix.",
+    "A run that did execute is still classified as today. A launcher output with `FAIL <runId> exit=1` and a `rust-tests: failed` stage line ends Failed, and `PASS <runId> exit=0` with a passed test stage still earns a passed verification. Existing check-recognition, focused-run and carried-gate tests pass unchanged, and a new test pins the failed-verdict case.",
+    "A launcher run whose own results.json, found through its `results:` line, records every stage \"unrun\" ends Unknown, not Failed, even when its summary prints `FAIL <runId> exit=1`. Examples are the disk-capacity refusal that \"saves a failed run with every stage unrun\" (docs/test.md) and a registration refusal recorded after the summary line. A test covers it with a fixture run directory.",
+    "The maintained full five-stage gate passes on the exact final input, and the independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "registration",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A test-launcher check that ran no test stage is no longer recorded as a failed test. A launcher that exits non-zero without the run's verdict or a stage line (a refusal before its run starts, such as an aborted registration printing only `FAIL launcher: …`) now ends Unknown, in the one-call and plain forms. A foreground run whose own results.json, named by its `results:` line and matching its first verdict's run, records it failed with every stage unrun also ends Unknown. A carried gate like that is refused rather than recorded failed. A run that failed at any stage is still recorded failed. docs/test.md describes the rule.\nEvidence:\n- RED fail-first: test-f7133aac, 1 passed / 2 failed.\n- GREEN: test-0f185ac0, 1743/0.\n- Full gate, host record ab10d5c8: test-899d1493, 5/5 at f879db59, fingerprint 0b712557.\n- Clean review pair: Codex 67f5ca00, Claude 6207cdcf.\n- Independent evaluation 17d2566e: 4/4.\nLanded as cc72eac28e599dbd804c83216e5383c57e32c272 (tree 3485859b) by Opus2. No install.",
+    "completed_at": "2026-10-20T17:13:22.723059100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

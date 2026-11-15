@@ -1,0 +1,30 @@
+{
+  "id": "01a17006-54af-7732-931d-9b0cfb7f2485",
+  "external_ref": null,
+  "title": "Allow the owning Merger to consume a full-gate result independently of its notification recipient",
+  "outcome": "A completed full-gate result remains attached to its run and frozen input and can be waited on/consumed by its owning Merger even if completion notification went to a different session.",
+  "acceptance": [
+    "Gate result lookup/wait authorization uses the run and its owning package/input association; notification routing does not make a valid result inaccessible to the owning Merger.",
+    "A regression reproduces different producer, notification target and owning Merger and verifies correct result consumption and rejection of an unrelated run/input/session.",
+    "New and relevant focused tests pass, an independent review pair has no outstanding Medium-or-higher findings, and the exact patch/package with test and review evidence is handed to Merger under Greg's simplified flow."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "merge-workflow",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

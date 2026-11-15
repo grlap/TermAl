@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4da-7fa2-a44f-782ab8502ab2",
+  "external_ref": "tm-cya7",
+  "title": "Restore all saved workspaces in separate browser tabs",
+  "outcome": "Greg requests a UI recovery action after a reset: reopen every saved workspace, each in its own browser tab. Add it to the existing workspace switcher using saved workspace summaries and existing workspace deep links. Keep the current workspace in its existing tab, do not create replacement layouts, open other tabs synchronously from the user gesture, and give actionable feedback if the browser blocks popups. Validate behavior for multiple workspaces, current workspace, loading, and blocked tabs.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Bulk restore was abandoned by the user in favour of workspace labels (the outcome of w-0236d5fe7edb, shipped).",
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a167d4-157d-73f0-874f-68f544bb7c33",
+  "external_ref": null,
+  "title": "w-dc76 post-restart live read-only explorer check",
+  "outcome": "After w-dc7657cc3529 has landed and the host runs a build containing it, a live check shows that a Claude explorer delegation spawned with writePolicy readOnly is enforced as read-only by the host.",
+  "acceptance": [
+    "Live, on the installed CLI: a Claude explorer delegation with readOnly, in a scratch workspace whose project settings allow Bash(git add:*) and Bash(node:*), has both commands refused by the host, and the workspace shows no mutation. This mirrors the evidence in delegation-99c215cd, which showed the defect."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "live-proof",
+    "post-restart",
+    "read-only",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,45 @@
+{
+  "id": "01a13881-ad59-7313-8bd8-9e57ad48cd1c",
+  "external_ref": null,
+  "title": "npm audit reports 20 advisories (1 critical, 7 high) in the UI dependency tree installed from ui/package-lock.json",
+  "outcome": "The UI dependency tree has no critical or high npm advisories that affect TermAl's shipped UI or its build/test tooling, or each remaining one is documented with why it does not apply. Fixes come from deliberate lockfile updates that keep the full gate green, not from an unreviewed `npm audit fix`.",
+  "acceptance": [
+    "A note lists each critical and high advisory from `npm audit` (or `npm audit --json`) run on the lockfile at the fixing commit: package, path, and whether it reaches the shipped UI bundle or only dev/build/test tooling.",
+    "Each critical or high advisory that reaches the shipped UI or the build toolchain is resolved by a reviewed lockfile/package update, or is documented with a concrete reason it does not apply.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "dependencies",
+    "pilot",
+    "security",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed on master by the integration owner, Termal::Opus2.\n\nCommit 8c79b51adda5d795120cc0a72546fc64e18d0a9b (tree 98ef1a58) was pushed to origin/master as a fast-forward from bea31ec2, and ls-remote confirmed it at 09:09:08Z.\n\nPre-push checks:\n- 3 files: ui/package.json (vite ^7.3.7, vitest ^4.1.11), ui/package-lock.json, ui/src/shared-live-events.test.ts. +265 −223, 0 CR.\n- Full gate test-2ba552d8: PASS 5/5 (host record e6a0ac16). Its new-format staged hash 5e1e449b was reproduced exactly from a scratch index of the commit.\n- Review: the dependency pair 93f22238 / 568b3109 covers blobs 3c74e7a5 / b68079c9, and the confirmation pair f9d58707 / 21e6c05c covers test blob 45b05de5.\n- Evaluation cf2ec9e3: 3/3, independent, not stale.\n\nUI tooling only; no binary or ui/dist rebuild for this item (Fable2).",
+    "completed_at": "2026-10-14T09:09:16.195513600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

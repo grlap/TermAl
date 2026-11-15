@@ -1,0 +1,28 @@
+{
+  "id": "01a1cb6a-6f37-7893-ab97-baec3670c277",
+  "external_ref": null,
+  "title": "Isolate request-identity recheck in the unclassified-run selection race test",
+  "outcome": "Isolate request-identity recheck in the unclassified-run selection race test",
+  "acceptance": [
+    "The request-changed interleaving in fmt_transparency_rechecks_request_identity_and_results_after_classification changes only an identity-pinned field outside the planned stages, leaves the actual and planned command equal, and retains the newer UnclassifiedStages refusal; its unchanged control still admits the older acknowledged test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

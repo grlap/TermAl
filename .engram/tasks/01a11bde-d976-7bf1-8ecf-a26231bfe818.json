@@ -1,0 +1,29 @@
+{
+  "id": "01a11bde-d976-7bf1-8ecf-a26231bfe818",
+  "external_ref": null,
+  "title": "A writable Codex root's in-repo PowerShell file edit was rejected \"blocked by policy\"; classify which layer refused it",
+  "outcome": "Agents know which shell edits a writable Codex root may run, and a refusal names its layer and reason.",
+  "acceptance": [
+    "The refusing layer is identified with evidence (Codex runtime exec policy or TermAl configuration) and recorded with the rule that matched.",
+    "If the refusal is intended, agent-facing guidance says which edit route to use; if it is not, the rule is corrected and a test covers the command shape."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-runtime",
+    "diagnosis-required",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

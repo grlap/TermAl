@@ -1,0 +1,34 @@
+{
+  "id": "01a0e6d3-c517-7f82-90f0-d861ca5c4d27",
+  "external_ref": "tm-gzwx",
+  "title": "Align delegation snapshot documentation with minimal state links",
+  "outcome": "Broad /api/state delegation summaries intentionally expose the minimal four-field DelegationStateSummary: id and childSessionId ownership links plus mode and reviewResultRequired capability metadata required by the delegation MCP bridge. They must not expose lifecycle status, title, result, or result summaries. Align docs/features/agent-delegation-sessions.md, docs/architecture.md, UI types, and Rust comments with that contract.",
+  "acceptance": [
+    "Both feature and architecture docs name id, childSessionId, mode, and reviewResultRequired for StateResponse.delegations and explain the MCP-gating purpose; lifecycle recovery wording distinguishes broad-state identity/capability metadata from parent-scoped lifecycle detail; source comments match; no broad snapshot status/title/result fields are documented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verified delivered core delegation metadata documentation and source-comment boundary on1495e8d3, with delivery5292cc875 ancestry confirmed. Independent Claude session12670/delegation-ca784d50-ac3a-4bbb-bfca-a5de9bf47c06 recorded evaluation0fddfb390c144247bd1723b207296d35 PASS1/1 (judgment), stale:null confirmed before done. Existing criterion revision1 unchanged. Evaluator explicitly judged that later reviewFreezeAllowed/acceptanceEvaluationAllowed capability-only extensions do not contradict this criterion; neither their presence nor the docs' four-core Pick was hidden. Evidence2d5cc6eada324a0ebcc26cc3e96372d6. No edit/test/build/commit/push/deployment.",
+    "completed_at": "2026-10-15T15:18:07.783795800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

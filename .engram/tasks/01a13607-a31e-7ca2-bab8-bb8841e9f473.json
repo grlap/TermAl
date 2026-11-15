@@ -1,0 +1,93 @@
+{
+  "id": "01a13607-a31e-7ca2-bab8-bb8841e9f473",
+  "external_ref": null,
+  "title": "Import reconciliation A: joint host/core enrollment, hold and receipt contract, and the durable local journal (active path disabled)",
+  "outcome": "TermAl and Engram jointly freeze the enrollment, hold, final-challenge, outcome and retirement, and terminal-decision contract. TermAl persists a per-scope reconciliation journal (EnrolledResponsibilityOwner, LocalImportFence, ResponsibilityEntry, ResponsibilitySnapshot) through the existing metadata pipeline with versioned codecs. Active reconciliation stays DISABLED until the later children land.",
+  "acceptance": [
+    "Before implementation code lands, this item records the joint contract by reference to Engram w-42d16bae66ac note a730874769064ca2a20196daa217187c (JOINT … FINAL AGREED DESIGN v1) with its concurrence references, and each implementation departure from it is recorded here as a concrete delta concurred by the TermAl coordinator.",
+    "The MAIN shared metadata field engramImportReconciliation is a map of stable record keys to strict, versioned, tagged records of exactly four variants (EnrolledResponsibilityOwner, LocalImportFence, ResponsibilityEntry, ResponsibilitySnapshot) carrying the §6 fields, projected one member per record through state_metadata_units. Decoding refuses an unknown variant, an unknown or missing field, an unsupported schema version, a key that does not match its record's identity, and a record count or serialized size beyond the declared journal limits, without changing the stored state; fence-generation overflow refuses rather than wraps; coverage is unknown unless positively complete. Tests cover each refusal and an exact round trip.",
+    "Recording the same record identity with the same canonical body is idempotent and returns the stored record; a changed body, candidate, store or project association, or owner under the same identity conflicts and leaves the stored record unchanged; an incomplete, legacy or foreign association is recorded as pending or coverage unknown, never complete. Tests cover each case.",
+    "While unactivated, open, load and every ordinary save keep the predecessor reader floor and metadata inventory exactly, writing no engramImportReconciliation descriptor, and the in-memory state is NotActivated rather than an empty journal; the writer chooses the persisted format from the on-disk floor inside its writer transaction. A test shows ordinary snapshot and delta saves on a predecessor store leave its floor and every unit they do not change byte-identical.",
+    "The first activation commits, in one immediate writer transaction, the journal descriptor, the activation intent record and the successor MAIN reader floor, then obtains a content-specific durable acknowledgment that reads back exactly that committed subset; only after it succeeds can the caller's first effect run. A failed commit or a failed or mismatched acknowledgment runs no effect and yields no ready record. Tests cover the success order and each failure.",
+    "Crash injection at each activation step leaves the store wholly predecessor or wholly successor; an ordinary save concurrent with or after activation preserves the descriptor, records and floor; after activation the floor stays even when the journal is empty. Tests cover each injected point and the concurrent save.",
+    "A reader that knows only the predecessor floor refuses a successor-floor store before any maintenance, startup recovery or provider effect; no path downgrades the floor, decrements the marker or deletes journal records; unknown, corrupt or future shapes refuse without reset. Tests cover each.",
+    "Snapshot and delta persistence both round-trip unresolved journal records, including after the owning session is deleted, quarantined or replaced, and restore loads activated records before runtime, dispatch or retry starts. The journal is never included in /api/state, SSE or session projections sent to clients, and an ordinary commit that does not change the journal performs no journal serialization (it persists through the existing per-member delta path only). Tests cover each.",
+    "This child alone enables no active reconciliation: no endpoint, enrollment, hold or Ready path exists, the activation entrypoint is unreachable without the test-only capability, a ready ResponsibilitySnapshot cannot be built from incomplete coverage, journal records carry references and fingerprints only (no routing tokens, credentials or raw request bodies), and the coordination store schema is unchanged. Tests cover each.",
+    "Relevant focused checks pass on the frozen input, the repository-standard independent review pair is clean, and the full gate passes on the exact committed tree, without weakening tests or inflating deadlines."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 8,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 9,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 10,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a135ff-5979-7203-93d4-358040469407",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

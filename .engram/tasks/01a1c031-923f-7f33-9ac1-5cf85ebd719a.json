@@ -1,0 +1,28 @@
+{
+  "id": "01a1c031-923f-7f33-9ac1-5cf85ebd719a",
+  "external_ref": null,
+  "title": "Remove the unused committed-input matcher wrapper and keep the live matching contract",
+  "outcome": "The committed-input registration matcher has one live entry point and no unused wrapper warning, with the matching contract documented on the function that executes it.",
+  "acceptance": [
+    "The unused acceptance_committed_input_registration_matches wrapper is removed or merged into the live requester matcher without changing matching behavior, and its contract comment remains on the executing entry point; relevant matching tests still pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "cleanup",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

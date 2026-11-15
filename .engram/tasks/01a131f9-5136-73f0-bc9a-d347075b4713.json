@@ -1,0 +1,29 @@
+{
+  "id": "01a131f9-5136-73f0-bc9a-d347075b4713",
+  "external_ref": null,
+  "title": "Host memory and global-lock scans grow with ALL stored sessions: every session's 64-message transcript tail, its delegations and its positions stay resident and are scanned under the state lock",
+  "outcome": "The host's resident memory and its global-lock passes are bounded by the sessions that are live or recently used, not by every session ever stored. Idle, finished or archived sessions and their transcript tails are not kept resident; they are loaded on demand from the store, which stays the authority. Lock-held scans no longer iterate every stored session. No behaviour visible to a live or recently used session changes.",
+  "acceptance": [
+    "Host memory and global-lock scans grow with ALL stored sessions: every session's 64-message transcript tail, its delegations and its positions stay resident and are scanned under the state lock is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-direction",
+    "host-stability",
+    "memory",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

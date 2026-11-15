@@ -1,0 +1,28 @@
+{
+  "id": "01a123a5-ad81-7bf0-b675-3a9e7309efd1",
+  "external_ref": null,
+  "title": "A Codex session's Engram MCP call stays pending for minutes after a TermAl restart while the same read via the CLI returns in under 1 s",
+  "outcome": "An Engram MCP tool call from a Codex root session either returns or fails with a typed, visible timeout within the configured tool timeout. It never stays pending indefinitely while the Engram store and CLI are healthy, including in the first minutes after a TermAl restart.",
+  "acceptance": [
+    "A Codex session's Engram MCP call stays pending for minutes after a TermAl restart while the same read via the CLI returns in under 1 s is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "mcp-routing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

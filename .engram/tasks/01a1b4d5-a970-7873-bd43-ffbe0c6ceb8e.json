@@ -1,0 +1,30 @@
+{
+  "id": "01a1b4d5-a970-7873-bd43-ffbe0c6ceb8e",
+  "external_ref": null,
+  "title": "Strengthen native relay ACK cursor and refusal regression controls",
+  "outcome": "Association-loss ACK regressions prove their cursor snapshot contains the intended participant rows, and a valid ACK demonstrates the observer detects advancement; invalid receipt and mismatched-home controls identify their refusal path.",
+  "acceptance": [
+    "The association-loss regressions assert both intended participant rows are present before comparing unchanged cursors.",
+    "A successful ACK control reads the recipient cursor before and after acknowledgement and proves it advances to the issued message sequence.",
+    "Invalid-receipt and mismatched-home controls distinguish their expected refusal from missing-association re-resolve refusal; focused behavioral regressions pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-follow-up",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

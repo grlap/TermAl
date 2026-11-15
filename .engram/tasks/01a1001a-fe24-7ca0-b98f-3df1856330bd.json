@@ -1,0 +1,28 @@
+{
+  "id": "01a1001a-fe24-7ca0-b98f-3df1856330bd",
+  "external_ref": null,
+  "title": "A detached test-launcher `live` run earns no host verification and shows no refusal line, so its pass is invisible to the tracker",
+  "outcome": "A pinned `node scripts/test-launcher.mjs live …` run is either recorded by the host as a verification with its result, or refused with a visible credit line that names why, as the focused and full launcher modes are. It is never silently unrecorded.",
+  "acceptance": [
+    "A detached test-launcher `live` run earns no host verification and shows no refusal line, so its pass is invisible to the tracker is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

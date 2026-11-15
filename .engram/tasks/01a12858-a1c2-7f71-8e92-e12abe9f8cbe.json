@@ -1,0 +1,64 @@
+{
+  "id": "01a12858-a1c2-7f71-8e92-e12abe9f8cbe",
+  "external_ref": null,
+  "title": "Report each adopted runtime-started Claude turn to Engram as an unadmitted turn with its observed checks",
+  "outcome": "Report each adopted runtime-started Claude turn to Engram as an unadmitted turn with its observed checks",
+  "acceptance": [
+    "When an adopted runtime-started turn ends in a session bound to claimed work, the host sends one execution_observe unadmitted_turn under account_if_eligible, with causality unknown and the exact binding, root basis and capture cut current at its closing capture. host_turn_ref names the adopted turn; the host retains its actual adoption time without treating it as a pre-effect start or admission. observed_interval is the envelope of the reported observations, not the turn's execution duration: its from is the earlier of adoption and the original baseline.observed_at when a content_comparison is included, otherwise adoption; its through is the actual closing observation cut, no earlier than the closing sighting and no later than request construction. Every serialized observation timestamp lies within that interval. The source_change is measured against the previous checkpoint's end basis for the same workspace and binding: content_comparison when the revisions differ, null when they are equal, assumed_missing_baseline when no compatible measured basis exists. The baseline keeps its original revision and measured timestamp. The comparison reports endpoint drift with unknown causality; it does not attribute pre-adoption changes to the adopted turn or assert continuous observation of the intervening gap. It is never sent as turn_evaluate, turn_begin or a checkpoint, and never under another turn's grant. A test drives a runtime-started turn with an edit through the production frame router and shows the request and its accounted receipt, including a baseline observed before adoption.",
+    "Each test run the turn observed is sent once as an uncredited ObservedCheck with its own stable host_check_id. Up to 16 travel inside the unadmitted_turn, the rest as standalone observed_check occurrences of the same host_turn_ref. The local 64-entry cap on unassigned observations never truncates what is sent to Engram (Engram's no-truncation rule). A test with 70 observed runs shows each reaches the producer exactly once and none is credited.",
+    "The pending report is saved with the session before it is sent. Its idempotency key derives from the host turn ref, plus the check id for a standalone check. A lost reply or a restart resends the identical request. A definitive refusal ends in a visible host diagnostic naming the code, never a silent drop or a retry loop. Tests cover a lost reply (identical resend, one record), a restart before the reply (identical resend), and a refusal (diagnostic).",
+    "In a session with no claimed work binding, nothing is sent, and the turn's transcript notice says the turn is not reported to Engram. A test shows it.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6c9-9c20-7ad3-8066-df1ef323efe9",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a12858-8aa2-7740-aae4-2d696613cd5f"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

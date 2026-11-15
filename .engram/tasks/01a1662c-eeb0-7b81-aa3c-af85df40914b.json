@@ -1,0 +1,30 @@
+{
+  "id": "01a1662c-eeb0-7b81-aa3c-af85df40914b",
+  "external_ref": null,
+  "title": "Federation onboarding image child disconnects during Windows full-suite execution",
+  "outcome": "The Windows onboarding image-identity test retains its child process and reports actionable failure evidence when run as part of the full suite, while preserving the original running-image identity assertion.",
+  "acceptance": [
+    "The cause of the full-suite child-process disconnection is established from retained evidence, and the necessary product or test-harness correction is reviewed.",
+    "The focused onboarding image regression and Windows full gate pass on the exact reviewed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "gate-failure",
+    "test-stability",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

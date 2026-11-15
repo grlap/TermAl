@@ -1,0 +1,30 @@
+{
+  "id": "01a1a41e-2c81-74c0-9d7d-27a146570e0e",
+  "external_ref": null,
+  "title": "Use conditional registered-run advice on remaining launcher capacity and carry refusal paths",
+  "outcome": "Use conditional registered-run advice on remaining launcher capacity and carry refusal paths",
+  "acceptance": [
+    "Review the capacity and unchanged carried-launcher refusal paths and make launcher rerun advice conditional on no registered run covering the intended root and input.",
+    "Controls preserve non-launcher guidance and existing carry, persistence and verification authority semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a01f-522e-7d00-9d49-96480bbbe221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

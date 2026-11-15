@@ -1,0 +1,33 @@
+{
+  "id": "01a1c469-4ada-7920-840d-c5cacebdcb8e",
+  "external_ref": null,
+  "title": "Integrate combo39 on 25454797: edfd 760962ac (w-752c), c593 53891e74 (w-31d0)",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo39 on 25454797: edfd 760962ac (w-752c), c593 53891e74 (w-31d0) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No acceptance evaluation exists; self-asserted under the evaluation-OFF policy. combo39, commit 62a4785a (tree 40ae282d), combines edfd 760962ac (w-752c, the delegation result parser) and c593 53891e74 (w-31d0, doc-link Lint admission), both byte-identical carries. It was fast-forwarded onto master from 25454797 and pushed to origin at 08:32:58Z, with origin/master verified. Review: the composite pair found no Medium or higher (Codex 17217 none; Claude 17218 3 Lows, all filed). The DL560 focused union passed 237/0/0. Landing gate: DL560 FULL test-66a61e64 on test ref commit 6585d257, which has the same tree; eligible, all six stages passed; Rust 7543/0; vitest 5091. Refs deleted at 08:33:00Z. Installs: Central termal.exe 7b460f25 at 08:38:13Z, with the old binary backed up as termal-before-62a4785a-c8a5c45a.exe; DL560 termal 99f1808f at 08:48:25Z, backup termal.173541f1.bak. Neither host was restarted.",
+    "completed_at": "2026-11-10T08:49:19.466797700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1b123-f9aa-7872-855c-ff1ae7c381fe",
+  "external_ref": null,
+  "title": "Assess eager idle source snapshots if synchronous native capture latency warrants it",
+  "outcome": "Use measured clean native opening-capture dispatch latency to decide whether eager idle S0 is justified; preserve BEFORE timing, exact authority and no late credit without adding an unnecessary lifecycle subsystem.",
+  "acceptance": [
+    "Record complete clean native S0 and prompt-dispatch latency on Questly and Phoenix with exact installed executable identity; distinguish source-only timings, workload and unknowns.",
+    "Decide explicitly whether eager idle preparation is warranted compared with synchronous bounded capture; if adopted, independently concur on BEFORE semantics, one-shot identity/watcher fences, bounded dispatch and no late credit before implementation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "design-deferred",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

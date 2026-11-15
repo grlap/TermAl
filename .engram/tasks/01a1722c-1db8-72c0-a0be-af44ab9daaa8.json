@@ -1,0 +1,28 @@
+{
+  "id": "01a1722c-1db8-72c0-a0be-af44ab9daaa8",
+  "external_ref": null,
+  "title": "No test drives process_workspace_watch_event with a pre-launch arrival and checks it records no provenance",
+  "outcome": "No test drives process_workspace_watch_event with a pre-launch arrival and checks it records no provenance",
+  "acceptance": [
+    "No test drives process_workspace_watch_event with a pre-launch arrival and checks it records no provenance is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

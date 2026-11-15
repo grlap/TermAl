@@ -1,0 +1,28 @@
+{
+  "id": "01a1a605-b457-7e60-a226-24d49badbf37",
+  "external_ref": null,
+  "title": "Migrate synchronous context lifecycle fixtures to the owned observer and remove their obsolete ownership-wait branch",
+  "outcome": "Context lifecycle fixtures exercise the same owned asynchronous preparation used by ordinary prompts, and production no longer contains the old test-only ownership-wait/retry path.",
+  "acceptance": [
+    "Lifecycle fixtures that currently call cfg(test) prepare_engram_context_nudge_off_lock are migrated to owned background scheduling and deterministic transport synchronization while preserving their cache/generation/acknowledgement assertions.",
+    "The obsolete synchronous ownership-wait and retry machinery is removed without changing the explicit compact-hook exact-ticket behavior or ordinary asynchronous delivery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test-maintenance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

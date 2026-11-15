@@ -1,0 +1,32 @@
+{
+  "id": "01a1505c-e0c9-74d0-8fec-1f8b98e24b4d",
+  "external_ref": null,
+  "title": "Cancel central federation health probes on stop and control termination",
+  "outcome": "A central peer stop or exact control-task termination interrupts an in-flight health probe promptly and begins owned SSH cleanup without waiting for the ten-second RPC bound.",
+  "acceptance": [
+    "A phase-controlled held health probe exits when stop arrives or the control task ends, and the exact old SSH child is reaped before a successor starts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a14d7d-ccb4-79f3-a4dd-06dfdd4ab87e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1560b-26d9-7820-bfc7-594185e18ac3",
+  "disposal_reason": "Continue independently after A1 completion, assigned by Fable2 mailbox #365/message-d61c9aef-1aac-4feb-a821-504cf8448951 on base476c45c7.",
+  "completion": null
+}

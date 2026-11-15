@@ -1,0 +1,26 @@
+{
+  "id": "01a189ec-129a-7060-952c-f47b9ff6eebe",
+  "external_ref": null,
+  "title": "Setup: read-only view of configured federation hosts and Remotes, their relationship and live connection state (no secrets)",
+  "outcome": "Setup: read-only view of configured federation hosts and Remotes, their relationship and live connection state (no secrets)",
+  "acceptance": [
+    "The Settings dialog has a \"Setup\" tab placed before Remotes. It shows this host's identity, role and federation enabled state, then two labelled sections: every configured federation peer, and the saved Remotes. A federation peer with no matching Remote stays visible, with an explanation. The existing Remotes editing tab keeps working. Setup performs no mutation, probe or polling.",
+    "In GET /api/federation, each peer row carries a read-only `linkConnected`, computed by the same rule as `satellite.centralPeer.linkConnected` through one shared helper, with Rust tests on central and satellite. The UI shows \"Connected\" only when that explicit current flag is true in a successfully fetched snapshot. It shows authentication; verification (current, needs recheck, or unverified); connecting or retrying; connection error with fixed copy for each SSH class; disabled or held; and unknown, each separately. Past success alone never yields Connected. The relationship display distinguishes a unique SSH endpoint match (labelled \"identity not confirmed\"), possible or ambiguous matches, local, and not linked. Loading or error never displays as \"not linked\".",
+    "Only allowlisted display fields reach the DOM. Vitest covers sentinel-secret fixtures for pairCapabilityRef, hostKeyRef, knownHostsRef and raw error text; the loading, empty, per-row partial, first-load error and stale-refresh states; a single-column layout at ~320 px; and keyboard disclosure and refresh. Refresh happens only on open, manual action or transport reconnect, is deduplicated, and a stale completion cannot overwrite a newer snapshot. tsc, the affected Vitest suites and the Rust focused tests pass on the frozen tree, and an independent review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1556b-d633-73e1-9ffc-b7757531462c",
+  "external_ref": null,
+  "title": "Bounded retirement of RESOLVED executor evidence (settled mirrors, processed operations) so the executor cap is not a lifetime cap on remote wakes",
+  "outcome": "Follow-up named by Architect1 (TermAl mailbox 2a27fd51 #865, 2026-10-19 18:28Z; capacity ruling note bb07c69912d64f28b6b821b59cb442d3 on w-01da81a029e7), filed by Termal::Fable2. M4 increment 1 has no eviction, and increment 2 keeps central-side settled mirrors forever, so the executor journal caps (count and bytes) become a LIFETIME cap on remote wakes per central host, and the satellite journal cap a lifetime cap on operations per satellite. Under Greg's direction (#1266/#1268), the remote mailbox must be the operational control channel before the team can scale, so this is P1. Outcome: bounded retirement of RESOLVED executor evidence (settled mirrors, processed operations) that keeps each entry's identity, digest and outcome and releases its payload bytes; unresolved evidence is never deleted, as the M4 brief requires. Until this lands, the M6 pilot's expected wake volume must stay well below the caps, whose values are to be stated on w-01da and in its READY.",
+  "acceptance": [
+    "Resolved executor evidence (settled central mirrors and processed satellite operations) is retired in bounded steps that keep identity, digest and outcome and release payload bytes, so sustained remote wake traffic above the journal caps over time continues to be admitted; unresolved evidence (pending, queued, runtime-accepted or uncertain) is never deleted or retired. Tests cover retirement at the caps, persistence cuts during retirement, and refusal to retire unresolved evidence.",
+    "The full five-stage gate passes on the exact input with an independent Codex plus Claude review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "federation",
+    "follow-up",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

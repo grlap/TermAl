@@ -1,0 +1,37 @@
+{
+  "id": "01a1c9dc-b37d-7552-9f67-5c92208a9f3c",
+  "external_ref": null,
+  "title": "Restore working-indicator animation at 30 frames/s and animate the \"Agent is working\" dots again (Greg)",
+  "outcome": "Working indicators in the tab card and the session view animate smoothly at 30 frames per second again, and the \"Agent is working\" dots animate, while hidden or offscreen indicators still pause and reduced-motion is respected.",
+  "acceptance": [
+    "The working indicators in the tab card and in the session view animate at 30 frames per second while visible (the steps(8)/1600 ms stepping introduced by 5be407c3 is replaced by 30-frame-per-second motion), and the existing pause when hidden or offscreen still applies.",
+    "The \"Agent is working\" dots in the transcript activity line animate again, as they did before 5be407c3, with prefers-reduced-motion still disabling the motion.",
+    "cd ui && npx tsc --noEmit is clean and cd ui && npx vitest run is green; any changed tests check observable behaviour (animation running or paused state), not CSS text, per the no-tautological-tests rule; no GPU measurement step is required (Greg)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "activity-indicator",
+    "greg-directed",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Restored synchronized 30 updates per second for activity indicators and animated working dots, preserving hidden/offscreen pauses and reduced-motion behavior. Landed on origin/master after the integration full gate; independent acceptance passed all three criteria.",
+    "completed_at": "2026-11-11T11:33:18.458636Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

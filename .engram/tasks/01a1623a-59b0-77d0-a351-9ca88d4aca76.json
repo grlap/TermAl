@@ -1,0 +1,37 @@
+{
+  "id": "01a1623a-59b0-77d0-a351-9ca88d4aca76",
+  "external_ref": null,
+  "title": "Integrate Mac federation credential settlement fix",
+  "outcome": "Land the authorized Mac federation credential settlement fix from fix/federation-credential-settlement on master after exact-input provenance, independent review and gate verification; push and install under the standing integration rules, without restarting hosts.",
+  "acceptance": [
+    "The remote candidate 0180f46676e6ada8b72e81c233cf2a4e8573aca5 is inspected against the exact merge base; provenance is understood; any carry is resolved and the final exact tree has the required independent review pair with no outstanding in-scope Medium-or-higher findings and a passing full gate.",
+    "The exact reviewed and gated candidate is integrated onto master, pushed fast-forward to origin/master by the integration owner, and the remote commit/tree are independently verified.",
+    "A release binary built from the exact landed tree is installed at target/release/termal.exe and its hash is verified; no TermAl host is restarted or deployed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "integration",
+    "macos"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed after fresh independent acceptance evaluation 28b42ca27aef40758d38ae35e0c14061 passed all 3 criteria. The exact reviewed/gated candidate 0180f46676e6ada8b72e81c233cf2a4e8573aca5 is on master and pushed to origin. Criterion 3 is satisfied by the authorized combined install 23f7a2be (tree fd47f0dc), installed at 17:40Z with recorded SHA-256 21ef8305... per c8979f4e and Greg's ruling b121e4ee. Later supersession/relinking is expected and does not undo the landing-time installation; no separate install or restart was performed.",
+    "completed_at": "2026-10-22T23:05:12.879911100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a13d00-dba9-7043-9c4d-63d2a489637f",
+  "external_ref": null,
+  "title": "Amend the commit rule: Kimi stands in for an unavailable Codex OR Claude reviewer, never for both",
+  "outcome": "Amend the commit rule: Kimi stands in for an unavailable Codex OR Claude reviewer, never for both",
+  "acceptance": [
+    "CLAUDE.md's Commit and push section, and AGENTS.md's same clause, state that Kimi stands in for an unavailable Codex or Claude reviewer (an unavailability recorded on the item with the refusal text) and never for both reviewers of the same round, and cite Greg's 2026-10-15 word verbatim with its source; CLAUDE.md's Review cadence section, .claude/commands/review-changes.md, .claude/commands/fix-bug.md, docs/dev-team-pattern.md and docs/features/agent-delegation-sessions.md state the same rule consistently; src/tests/agent_commands.rs pins the new review-changes.md wording; and nothing outside the passages concurred under condition (a) changes.",
+    "Both coordinators' concurrence on the exact wording, Greg having been sent the exact wording and its consequence before landing, and a passed final-diff audit naming the reviewed input fingerprint are recorded on this item.",
+    "The full gate passed on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "commit-rule"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Amended the commit rule: Kimi stands in for an unavailable Codex or Claude reviewer, never for both reviewers of the same round. CLAUDE.md and AGENTS.md (Commit and push, citing Greg's 2026-10-15 word verbatim with its source), the Review cadence section, /review-changes, /fix-bug, docs/dev-team-pattern.md and docs/features/agent-delegation-sessions.md state the rule, and src/tests/agent_commands.rs pins the new wording. Landed as 0527f910 on origin/master, a fast-forward from d8fdd2dc.\n\nEvidence:\n- Review pair on freeze e02ac3a5: Codex 0a800e91 clean; Claude sonnet 6a91bbaf, no Medium or higher; its Low was filed as w-330d8e8561a8.\n- Byte-exact carries to 196fe3a7 and then 5b6841be.\n- Authority conditions: (a) concurrence by Fable2 (ce2256b4/ba7b6f27) and Engram::Fable (#2117, #63); (b) Greg notified via Advisor #814/#816; (c) final-diff audit 1d0c9203 naming 5b6841be.\n- Full gate test-bdb7eba1 PASS (record 794bc540); the commit tree equals the gate input (index 52a39d80).\n- Evaluation 2a2dc649 PASS 3/3.\n\nNo binary install: the only Rust change is a test file, which isn't in the release binary. No ui/dist change.",
+    "completed_at": "2026-10-15T22:17:42.696562200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

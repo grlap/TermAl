@@ -1,0 +1,28 @@
+{
+  "id": "01a19f6b-c395-7340-81fa-0134a7dde722",
+  "external_ref": null,
+  "title": "Local operator API has no caller authentication: assess cross-origin and local-process exposure of mutating routes",
+  "outcome": "A written assessment, with tests where behaviour is asserted, of who can call TermAl's mutating local routes, such as POST /api/federation/settings, /api/settings, /api/telegram/config and the new peer recover route.\n- It confirms the listener binds loopback only.\n- It confirms what the CORS policy allows: whether a web page in Greg's browser could trigger a state-changing request, including simple-request and no-preflight cases.\n- It confirms that remote federation peers cannot reach operator routes through the pair router.\n- If a real exposure exists, it proposes a minimal hardening, for example an Origin check, a per-install token for the UI, or preflight-forcing content types, as a decision for Greg.",
+  "acceptance": [
+    "Local operator API has no caller authentication: assess cross-origin and local-process exposure of mutating routes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "api",
+    "federation",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

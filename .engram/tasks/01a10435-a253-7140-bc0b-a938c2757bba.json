@@ -1,0 +1,86 @@
+{
+  "id": "01a10435-a253-7140-bc0b-a938c2757bba",
+  "external_ref": null,
+  "title": "Named source roots of ended claims are never reclaimed: the 64-entry table fills and no agent can name a new worktree",
+  "outcome": "Host capacity is released on canonically proven obsolete named-root entries, independently of directory deletion or naming-session focus; unknown/live bindings and pending ownership are retained. Handoff/recovery/lease loss alone are not lifecycle-end proof.",
+  "acceptance": [
+    "Preserved fail-first evidence on unchanged product reproduces retained ended-claim named-root capacity blocking. A holder note distinguishes live reports, source hypotheses and executed witnesses, including why disk cleanup alone is not lifecycle proof. This criterion is judgment-only, not test-bound.",
+    "Using only the existing canonically validated NamedRootRead and classified authority path, host reclamation retires an exact retained entry only for completed/cancelled lifecycle, definitive unbound/release proof, or validated Bound with remote generation >= local and any workspace/generation/named_at difference. Older/mismatched proof, handoff/recovery/lease loss without binding end, no reader/association, disabled/unreachable stores and unknown states retain the entry with truthful reasons; restored authority permits retry. Tests cover safety and eventual retirement after the naming session moves on.",
+    "The limit remains globally 64. Full-table refusal returns promptly and truthfully reports whether one bounded pass was scheduled and retained reasons. A traced recurring host scheduler drives bounded 8-read/2-second, single-flight, round-robin store reclamation with oldest-first selection and unknown cooldown, including idle current bindings through their existing owner without provider dispatch; a session whose matching local binding holds no current store authority is not an owner, and its entry is read through another eligible reader. Tests cover another reachable store freeing capacity, successful later naming, unknown-oldest fairness, idle-owner progress, a stale binding without store authority reclaimed through another reader, and all-valid/unknown refusal without success promises.",
+    "Reclamation snapshots and revalidates exact store/work/run/claim/generation/workspace/named_at, journal state and reader authority around off-lock I/O; a replacement racing the read survives. Pending Bound/Ended/RootInvalid intents, receipts and required evidence/history are preserved and settled only by the existing owner. Publication/persist failure leaves recoverable obligation, never a released-slot claim; restart and compaction tests retain required journals and demonstrate acknowledged once-only retirement.",
+    "Each confirmed retirement atomically records a durable informational notice distinct from SelectionLoss, visible to the naming session after focus changes and restart, naming store/work/root/generation, proof-derived reason and read cut, plus host logging. Retry does not duplicate it; it neither instructs re-naming nor forces a control/provider wake. Tests cover old-claim visibility, restart, once-only publication and unchanged SelectionLoss behavior.",
+    "No-path own-clear without a live claim synchronously uses the same authoritative one-entry retirement, requiring caller == named_by_session and exact entry/run association fences; another reader cannot confer ownership. Terminal/released obsolete entries clear host-side without fabricating producer events; open/unknown/foreign-replacement requests refuse truthfully and preserve the entry, naming a holder only when actually validated. Tests distinguish manual synchronous success from background progress and preserve the existing live-held clear/event branch.",
+    "The existing current-binding missing-directory RootInvalid producer-event and acknowledged cleanup paths remain unchanged and cannot race a second reclamation owner; failed flush remains recoverable. A pinned disposable-Engram live run through the supported launcher exercises real NamedRootRead of a long-finished run and actual host retirement, plus a retained live/unknown control; source inspection or mocked receipts alone do not establish installed-producer compatibility.",
+    "The maintained full five-stage gate passes on the exact frozen tree reviewed by independent read-only Codex and Claude children. Holder notes cite the run directory, fingerprints, current passed host test record, review closure and source/compilation provenance; no outstanding in-scope Medium or higher remains."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 8,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "agent-workflow",
+    "blocker",
+    "engram-host",
+    "source-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered canonical exact named-root reclamation, bounded recurring scheduler, durable informational retirement, safe own-clear, and published-journal unpinning. Landed master 0f36360debf050e83614bd59b600e089d50fd23f in train33 per integration owner Opus2 mailbox83 and full observation d8b6017b64ee4cc896ca1dbc01a9b380; integration gate52fac34b PASS and pairf4b6a7c7/0d3becae no Medium+. Independent acceptance6a3996cf754a415188feeaf79f1e9b03 all8PASS rev4 on author tree13b46085/current99cdc. Author commitd471a44, fullgatea054 and pinnedlive66f preserved. Residual Lows tracked separately; merged-live gapw-fd2313374bb9 remains owner/coordinator follow-up. Owner reports installed binary; holder makes no running/deployed proof or restart claim.",
+    "completed_at": "2026-10-04T05:36:47.063375200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

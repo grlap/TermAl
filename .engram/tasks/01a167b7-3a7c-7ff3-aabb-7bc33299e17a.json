@@ -1,0 +1,28 @@
+{
+  "id": "01a167b7-3a7c-7ff3-aabb-7bc33299e17a",
+  "external_ref": null,
+  "title": "w-de60 post-restart live StateInner measurement",
+  "outcome": "After the reviewed snapshot repair lands and Greg restarts TermAl, verify the original live clause of w-de6021f4b32f C2 verbatim. Record at least 15 minutes of idle-host persistence observer collectWait and tail-trim bounds at the current session count, and gated turn_begin admission within budget. Fixture timings are not live proof. This linked follow-up remains open independently of source landing.",
+  "acceptance": [
+    "With the fix, on an idle host with this session count, the persistence writer's StateInner wait per tick stays well under the admission budget (recorded by the persistence observer: collectWait and the tail-trim phase both at most a documented bound, well below ENGRAM_DISPATCH_BUDGET_MS = 20,000 ms, measured over at least 15 minutes with no single tick above it). The removed gated-session turn_begin admission clause is recorded as not applicable, with source evidence that no current gated dispatch route exists."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "live-verification",
+    "post-restart",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

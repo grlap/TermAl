@@ -1,0 +1,37 @@
+{
+  "id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "external_ref": null,
+  "title": "Host test-check warnings ask to investigate or rerun although a valid current registered record already exists",
+  "outcome": "The host's test-check warnings never ask an agent to investigate or rerun a test for an item that already has a received, current registered verification record on unchanged input; when such a record exists, the warning names it instead.",
+  "acceptance": [
+    "When an ordinary check for a test-launcher command closes Unknown because the turn ended before its end was observed, and a registered run launched by that same command in that turn settles with a received verification record for the current claim, the host's delivery to the agent names the registered run and record as the outcome and does not present the ordinary Unknown as an unresolved problem; when no such registered settlement exists, the existing Unknown warning is unchanged.",
+    "When a recognised test runs in one claim's named root, the reminder that another bound item in the same session gets no credit and should run its test next turn is not given if that other item already holds a received registered verification record whose source matches its current, unchanged input; it is given unchanged otherwise.",
+    "Tests cover both warnings in both branches and assert the delivered wording; no credit is derived from the ordinary check or moved across roots."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered and landed registered-verification-aware test warnings: the same-command native record replaces unresolved ordinary Unknown advice after durable settlement and current source confirmation; companion reminders consult the correct root's record without granting or transferring credit. Unknown/no-proof behavior and authority/source fences remain, with approved explicit historical/unavailable wording when confirmation cannot complete. Source confirmation uses owned off-lock CaptureLifetime observers within one unchanged eight-second presentation budget. Exact candidate a27b4bc4/tree766376d8 passed 50 focused tests with RECEIVED verification d71c92fce06b4ffda2e4b07ef8b00625, a fresh independent Codex+Claude WHOLE14 R4 pair with no Medium+, and Windows maintained five-stage FULL12627de2 with clean eligible unchanged fingerprint130c0756. Opus2 landing notice443/messagea2afb2b8-840e-4608-b751-a789a6db57cd confirms master fast-forward from ee2f21c6, push21:12:17Z and ls-remote verification. All eight deferred Lows filed as optional follow-ups; no ignored/live row execution claimed.",
+    "completed_at": "2026-11-06T21:13:44.421344600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

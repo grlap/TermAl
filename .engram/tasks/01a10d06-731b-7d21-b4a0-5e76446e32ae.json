@@ -1,0 +1,28 @@
+{
+  "id": "01a10d06-731b-7d21-b4a0-5e76446e32ae",
+  "external_ref": null,
+  "title": "Credit a `dotnet test --no-build` run when it follows a recognised `dotnet build` on the same unchanged source basis (build-then-test gate shape)",
+  "outcome": "A repository whose gate is \"build, then `dotnet test --no-build` with no source movement between\" earns host test credit for that pair. The --no-build test is credited only when a recognised build of the same configuration completed on the same content revision and nothing changed between them. Otherwise it stays uncredited, as DD1 rules for w-8e72f7e16778.",
+  "acceptance": [
+    "Credit a `dotnet test --no-build` run when it follows a recognised `dotnet build` on the same unchanged source basis (build-then-test gate shape) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dotnet",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

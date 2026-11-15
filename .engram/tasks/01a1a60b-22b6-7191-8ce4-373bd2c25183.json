@@ -1,0 +1,30 @@
+{
+  "id": "01a1a60b-22b6-7191-8ce4-373bd2c25183",
+  "external_ref": null,
+  "title": "Remove unreachable bounded-capture logic from the legacy Node Git reader",
+  "outcome": "The legacy runGit branch describes only its live raw-fingerprint behavior, while bounded committed-input reads use the process owner without duplicate dead timer or stderr logic.",
+  "acceptance": [
+    "Remove unreachable bounded-capture logic from the legacy Node Git reader is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-finding",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

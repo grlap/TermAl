@@ -1,0 +1,29 @@
+{
+  "id": "01a14667-d27c-7192-8ef6-7300ebf72c7f",
+  "external_ref": null,
+  "title": "Cover first-load manual workspace ownership when deferred recovery-marker reads fail",
+  "outcome": "Add a stateful persistence regression for an initially unpaused load: fetch succeeds while sessions are unavailable, manual layout ownership is acquired, marker reads fail at deferred adoption, then storage is restored and Retry succeeds. Verify the newly created pause inherits preserveLocal from manual ownership and the current local tree is kept and saved rather than replaced by the server layout.",
+  "acceptance": [
+    "Cover first-load manual workspace ownership when deferred recovery-marker reads fail is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "test-gap",
+    "ui",
+    "workspace-layout"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14655-e63d-7dc1-aea3-7db733586c88",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

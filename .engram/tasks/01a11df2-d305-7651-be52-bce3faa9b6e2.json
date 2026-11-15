@@ -1,0 +1,30 @@
+{
+  "id": "01a11df2-d305-7651-be52-bce3faa9b6e2",
+  "external_ref": null,
+  "title": "Delegated Codex child environment holds a duplicate case-variant variable, breaking PowerShell Env: enumeration",
+  "outcome": "A delegated child's environment block on Windows holds each variable name once, ignoring case, so `Get-ChildItem Env:` and Env:-prefixed filters work in the child's shell.",
+  "acceptance": [
+    "Identify the duplicated variable name pair in a delegated Codex child's environment on Windows (the exact names, and which layer adds each: TermAl spawn, Codex app-server, or the shell tool).",
+    "If TermAl's spawn adds the duplicate: TermAl deduplicates the environment case-insensitively before spawn on Windows, keeping one deterministic value, and a test pins it. If another layer adds it: the item records that layer with evidence and is handed to its owner.",
+    "`Get-ChildItem Env:ENGRAM*` succeeds in a fresh delegated Codex reviewer on Windows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "session-environment",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10199-c4a0-7862-bd39-6d42c3e614aa",
+  "disposal_reason": "Duplicate of the older w-6d42c3e614aa, which holds the 10-03 and 10-07 occurrences of the same `Get-ChildItem Env:` duplicate-key failure in a delegated Codex child. This item's three criteria were carried to it verbatim (its revision with reason citing coordinator concurrence eabca0f0), and this item's 10-08 occurrence (note 159371a2) was quoted on it. Consolidation by Termal::Opus3 per Termal::Fable2's concurred plan (mailbox 03723eab #2587).",
+  "completion": null
+}

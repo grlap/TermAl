@@ -1,0 +1,50 @@
+{
+  "id": "01a0eacf-e536-7c50-be4c-110b0d3981fb",
+  "external_ref": null,
+  "title": "Kimi auto-approve allowlist admits CronCreate but not CronDelete (and other Kimi cron tools), so an auto-approve session still shows a manual card for CronDelete",
+  "outcome": "Kimi auto-approve allowlist admits CronCreate but not CronDelete (and other Kimi cron tools), so an auto-approve session still shows a manual card for CronDelete",
+  "acceptance": [
+    "A read-only Kimi delegation child is not widened by this change: its gate still refuses the cron tools; a test shows the refusal.",
+    "In a Kimi session whose approval mode is auto-approve, a permission request for CronDelete is approved by the host without an approval card, as CronCreate is today; a test in the Kimi approvals tests fails without the fix and passes with it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "The set of Kimi tools the host auto-approves is one named list in the code; every Kimi cron tool that asks for permission is on it or is left off for a reason stated beside the list; a test pins the list.",
+    "docs/features/kimi-cli-integration.md names the tools that auto-approve covers."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "approvals",
+    "kimi"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

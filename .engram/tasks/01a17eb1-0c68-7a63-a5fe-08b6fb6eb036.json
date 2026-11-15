@@ -1,0 +1,30 @@
+{
+  "id": "01a17eb1-0c68-7a63-a5fe-08b6fb6eb036",
+  "external_ref": null,
+  "title": "Give truthful tracking Resume guidance for disable-held closing custody",
+  "outcome": "A disabled session with retained closing observation custody gets truthful supported recovery guidance instead of an ineffective unconditional retry instruction, while original immutable custody and authority fences remain intact.",
+  "acceptance": [
+    "Existing removal/binding owners distinguish a disabled-held closing capture from a transient recoverable rebind and present the actual condition and supported next action.",
+    "Relevant controls preserve custody, queue pause and grant separation during the disabled state; no report is discarded or new authority invented to make Delete succeed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "inventory",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12858-a1c2-7f71-8e92-e12abe9f8cbe",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

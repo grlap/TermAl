@@ -1,0 +1,28 @@
+{
+  "id": "01a16826-bd35-7173-ac20-3aff1cee849a",
+  "external_ref": null,
+  "title": "Publish a state revision when acknowledged containment release changes the recovery view",
+  "outcome": "Acknowledged containment release updates the public recovery projection and its state/SSE revision immediately, including the retry-only local ACK path.",
+  "acceptance": [
+    "Publish a state revision when acknowledged containment release changes the recovery view is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "review-low",
+    "state-publication"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1c410-0d20-7960-af92-b7223d15c00c",
+  "external_ref": null,
+  "title": "Engram's selected-FULL registration sends requestMessageId, which TermAl's register route refuses (deny_unknown_fields) and never publishes",
+  "outcome": "A FULL launcher run that Engram's adapter registers with a selected requestMessageId is accepted by TermAl's registration route; TermAl validates the id against the retained native or relayed request message, records it immutably in the run's registration, and publishes it on the full and registration views, so the adapter's identity check can pass.",
+  "acceptance": [
+    "Engram's selected-FULL registration sends requestMessageId, which TermAl's register route refuses (deny_unknown_fields) and never publishes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "registration",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

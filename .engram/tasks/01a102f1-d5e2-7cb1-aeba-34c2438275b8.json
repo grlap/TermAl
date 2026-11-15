@@ -1,0 +1,53 @@
+{
+  "id": "01a102f1-d5e2-7cb1-aeba-34c2438275b8",
+  "external_ref": null,
+  "title": "Budget-clock migration B3: engram_host_adapter.rs boot-recovery region (about lines 12700-16600)",
+  "outcome": "An audited migration, through the state-owned clock boundary from slice 1, of the fixtures in src/tests/engram_host_adapter.rs at about lines 12700-16600, the boot-recovery region. w-4401's fixture at :13387 is already scripted there. Navigation counts at 593c783: 15 enable_test_project_engram calls and 10 direct deadline_ms sites (:12774, :12941, :13076, :13360, :13464, :13957, :14036, :14584, :14772, :15287). The batch lists each converted test's deadline, elapsed and wait sources and its assertions, adds focused boundary controls, and keeps the negative scheduling and timeout assertions. It inventories the transitive test callers of every changed shared fixture, including indirect clock selection and existing time hooks. A full run validates the batch; it does not classify it. No blanket Real declarations and no production change. The decomposition is note 7c38dafc37c5410391ab42881615461a on the parent, with f842da36050949b3ba884f5884c64766. Criteria are to be agreed before this batch starts.",
+  "acceptance": [
+    "Every test in the B3 region of src/tests/engram_host_adapter.rs is classified as reaching an Engram budget or not. Region: from RestartEngramControlTransport (:12479 at d6b9442) to the end of the file, whose last test is doctor_transport_drains_a_report_larger_than_the_pipe_buffer (:16963); it starts where B2 ends, after runtime_terminal_callbacks_abandon_blocked_engram_begin_before_queue_drain. A test that reaches a budget chooses its clock through the slice-1 boundary before Engram is enabled and before any target or worker snapshot: either the shared scripted clock, or a declared Real with its reason in a comment. This includes BoundedBootRecoveryFixture's existing scripted clock (:13490-:13491), which moves from install_test_engram_budget_clock to the boundary. A test that calls enable_test_project_engram or real_fixture_engram_settings, or sets deadline_ms, but reaches no budget ends with assert_engram_budget_clock_unread. Floor: the region holds at least the 45 tests, the 15 enable_test_project_engram calls, the 4 real_fixture_engram_settings calls, and the direct deadline_ms sites :12878, :13045, :13180, :13464, :13568, :14061, :14140, :14688, :14876 and :15391 at d6b9442; the inventory note maps each to its position at the batch's base.",
+    "A note lists, for each converted test, its deadline, elapsed and wait sources and its assertions. A note inventories the transitive test callers of every shared fixture the batch changes, including indirect clock selection and existing time hooks.",
+    "Every converted expiry test does one of two things. Either it advances the same scripted clock across the causal boundary, with an unadvanced positive control asserted in that test, or it declares Real. The separate negative scheduling and timeout assertions are kept, and no expectation is weakened.",
+    "No blanket Real declarations and no production change. enable_test_project_engram, real_fixture_engram_settings and every other fixture used outside the region stay unchanged. Edits stay within the B3 region and the fixtures it owns (RestartEngramControlTransport, BoundedBootRecoveryTransport with BootRecoveryHeldWorker, BlockingBootRecoveryTransport, BoundedBootRecoveryFixture, BlockingShutdownEngramTransport, set_test_project_engram_mcp_settings, assert_delegation_mcp_baseline_is_unchanged, slow_doctor_fixture_path, check_doctor_descendant_deadline and large_doctor_fixture_path). It changes one of them only if criterion 2's transitive-caller inventory shows no caller outside the B3 region, or lists and converts each such caller within this batch.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Budget-clock migration B3 (engram_host_adapter.rs boot-recovery region) landed on master in train 29 as c98d041aad6c6f98b245ad39e71b81f9cbb31cbf. It carries the reviewed commit e3664966ca9cd57b3a4aee5b4e073f1beddbbb78 unchanged, and that commit is verified as an ancestor of the landing.\n- B3's own exact-tree evidence: freeze 0174e6e8…; gate test-2ec4a1a5 passed; pair c3903236/a6f04f50 clean; evaluation 1bf95807 passed 5/5.\n- Train 29 evidence (Termal::Opus2): gate test-7f2171eb passed (Rust 3703/0, Vitest 4555/0); integration pair Codex be4ca782 (no findings) and Claude f7459cff (2 Notes).\nThe change is test-only, so no install or restart is needed.",
+    "completed_at": "2026-10-04T00:33:58.942568800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

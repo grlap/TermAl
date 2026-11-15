@@ -1,0 +1,29 @@
+{
+  "id": "01a1a97d-1855-7991-9583-9bc8414ce185",
+  "external_ref": null,
+  "title": "Hold passed clean verification records when launcher eligibility is false",
+  "outcome": "A passed clean launcher result whose fingerprint qualification makes input.eligible false cannot be published as passed clean verification; current legacy/failed-result semantics are explicitly preserved.",
+  "acceptance": [
+    "Hold passed clean verification records when launcher eligibility is false is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "committed-input",
+    "execution-observability",
+    "greg-directed",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,82 @@
+{
+  "id": "01a12285-f438-7652-b407-5a1a58299818",
+  "external_ref": null,
+  "title": "Schedule the automatic retry when admission parks on a bind backoff while the prior turn's grant is still active with an unsettled closing checkpoint",
+  "outcome": "After a closing turn_checkpoint ends without settling (for example, deadline_exceeded) and the next prompt's admission then meets a bind backoff, the host shows the post-backoff transition and retries on its own. When the retry is due, its rebind's status reconciliation closes the prior grant exactly once (or clears it when status shows no open grant), and the queued head is admitted and delivered once, with no Resume. A definite refusal on that path ends in a durable, actionable hold that names the code and the grant, never a silent park.",
+  "acceptance": [
+    "K1 (fail-first): a production-path witness with scripted transport and clock, and no synthetic load. Turn N's closing turn_checkpoint ends deadline_exceeded, a control_unavailable puts the bind into backoff, and the next queued prompt parks. On the unchanged base it shows the explicit hold 'existing scheduler did not admit a retry' and no scheduled retry.",
+    "K2: after the fix, that park schedules an automatic retry. The session preview and the control card show the post-backoff transition: retry scheduled, attempt number, and a next due time no earlier than next_bind_retry_at.",
+    "K3: when the retry is due, the rebind's status reconciliation closes grant N exactly once (the recovery checkpoint carries the cached closing report, and a replay reuses the same idempotency key), or clears it when status shows no open grant. The queued head is then admitted and delivered exactly once, without Resume, and no new evaluate is sent before grant N is settled.",
+    "K4: a definite refusal of the recovery checkpoint, or a status that names a different grant, ends in a durable, actionable hold naming the refusal code and the grant, not a silent retry loop. Stop, Cancel and an operator pause each end the scheduled retry. Tests cover each.",
+    "Scope guard: only the admission-retry head-match predicate is extended, with an exception bound tightly to an active grant that is the prior turn's grant whose newest checkpoint card for this continuation owner is a Degraded turn_checkpoint (as engram_checkpoint_cause_for_owner already proves). No other active grant is admitted. A test shows that an unrelated active grant still refuses.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host",
+    "engram-host-adapter",
+    "host-recovery",
+    "pilot",
+    "reliability",
+    "retained-prompt",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a10c85-3888-7713-8bc7-58cf44d04f2c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed on commit c13ee7d55b69ec373876165be3260e83a7555955 (tree 7f46eec22ff7e7c25dc960f32aaf4d62998152fb). Fresh independent acceptance evaluation 4f501cd3bfa743da959c5a23b102f084 passed all 6 criteria on the committed source, citing the current full-gate record b91496a793d246dca5e75968d1b386ce for each criterion. Full gate test-42f3b15a passed all five stages on the exact committed tree. Remaining source-mutation obligations were marked no action before evaluation and are recorded as displaced.",
+    "completed_at": "2026-10-11T17:21:42.213664200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

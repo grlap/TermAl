@@ -1,0 +1,28 @@
+{
+  "id": "01a1d1d3-e1b3-75b2-b425-f53adb8fffbb",
+  "external_ref": null,
+  "title": "Integrate combo75 stacked on combo74 1412077d: a7bb 58f44a51 (w-78ec retire legacy observations, byte-identical carry of 074c9c8f)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 58f44a510d96420c0005e53c9cefa6a8d0b90292 (tree 2dccc34624d56acadc70b0fd46aa22bdba17c1b1) is on origin/master, where master was moved to it by a fast-forward from 1412077ddfa6c6c6cdace74d6335a76c6efea6ab (combo74).",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 2dccc346 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 1412077d is byte-identical (same 12 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 074c9c8f's contribution against 73f0fe27, which the whole-12 R1 pair Codex session 17673 and Claude session 17674 reviewed with no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree 2dccc346 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded: combo75 was stacked on combo74 (1412077d), whose DL560 landing FULL test-68087550 failed (time-zone-dependent SidebarClockBar tests), so 1412077d will not land. a7bb's unstacked fallback 3a060dbe on master 42851443 is integrated instead under a new item.",
+  "completion": null
+}

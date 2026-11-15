@@ -1,0 +1,33 @@
+{
+  "id": "01a1c644-ba28-79d2-902e-bd31e57a1047",
+  "external_ref": null,
+  "title": "Integrate combo40 on 62a4785a: 8e1f f01b5d1d (w-65d3), d50d 0be709f7 (w-58b0), 03d4 5ed007bb (w-a15b)",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo40 on 62a4785a: 8e1f f01b5d1d (w-65d3), d50d 0be709f7 (w-58b0), 03d4 5ed007bb (w-a15b) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No acceptance evaluation exists; self-asserted. combo40 is on master as one commit, 0b32ab57da52e892018d275ba13efae21e639054 (tree 144596bb). It was fast-forwarded from 62a4785a and pushed to origin/master at 18:21:10Z, with the remote verified.\n- Gate: the DL560 FULL test-ce0a612f on the exact tree via test ref ab3f58be. PASS and eligible, all six stages, Rust 7553/0/113, vitest 5091/0.\n- Composite pair: clean of Medium or higher (Codex none; Claude 1 Low, filed as w-e92e8555f9a3).\n- Installed on Central (15c2772c…) and DL560 (cc414baa…). The test ref was deleted at 18:21:20Z.\n- Part items: w-58b0 is done. w-65d3 and w-a15b have been asked to close; w-a15b keeps open Stage B criteria.",
+    "completed_at": "2026-11-10T18:33:23.326070600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "01a19c6a-95f8-7641-bafd-d1818c0d174d",
+  "external_ref": null,
+  "title": "Ordinary persistence: reconcile durable causal-evidence projection repair",
+  "outcome": "The legacy and full persisted session JSON again keeps an EngramControl card's causal_failure while it is still pending publication, projected as durable (publication_pending false) on the serialized clone only, while the live and public session body stays unchanged.",
+  "acceptance": [
+    "src/persisted_state.rs serialize_persisted_session_view restores master's durable-only projection: on the cloned session, every Message::EngramControl card whose causal_failure has publication_pending is serialized with publication_pending = false; the live record and the public or wire body are not mutated; file:line",
+    "persist_message_delta::persisted_causal_projection_includes_unpublished_evidence_without_changing_live_body passes on the exact candidate (both the normalized SQL row assertion and the full-JSON assertion)",
+    "A fresh, independent Codex and Claude review pair of exactly the delivered causal-evidence projection repair as present on current master has no outstanding finding of Medium or higher, a full gate passes on a current master containing that repair, and this item's own tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-directed",
+    "persistence",
+    "w-3fe8-regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered durable causal-evidence projection reconciled: clone-only persisted JSON projection, own exact candidate witness passed with acknowledged Testdd933dbe, independent Codex/Claude delivered-source pair0Medium+, qualifying6-stage current-master FULL649a269c reconciled under revised C3. Independent evaluator17988 recordd296cd4023f04128a2d9463ec3eef064 at2026-11-14T06:58:47.624579700Z, revision3/cut104,3/3PASS/stale=null; full actual verdict and complete packet/ALL1210B prose/config archived before done. C1/C3judgment, C2observed; no new test or attribution of hostless FULL as nativecredit. Source remains clean2a873/d93f. Cleanup dedicated root and aa7b raw retention now follows seal; d181 review artifacts retain existing concrete need until two separately filed Low follow-ups close.",
+    "completed_at": "2026-11-14T06:59:34.584115800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

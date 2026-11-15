@@ -1,0 +1,38 @@
+{
+  "id": "01a1d83c-2b20-7361-8cee-7c9daa59fced",
+  "external_ref": null,
+  "title": "Gate the P0 scroll fix (w-84132b835175) plus the board fix (w-8e291dcbe597) with the e879 launcher slice as 491dd015 on eb78d349 with one full launcher run; Opus3 lands after Opus2's GO",
+  "outcome": "The scroll fix, the board fix and the e879 launcher slice, stacked as 491dd015, have one passing full launcher gate on their exact tree, the integration checks hold, and Opus3 has Opus2's explicit GO to fast-forward master to 491dd015 and push.",
+  "acceptance": [
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a clean checkout whose commit is 491dd015e75e25ee3f13465ce5e165980346c1f5 and tree a56107d348193ed7730009993b66f3fd69725915 passed every stage, with equal source ids before and after and an eligible clean input. The commit sits on eb78d349 as three commits: the e879 launcher slice a0a90268, byte-identical to 4a92e8a1, then the scroll and board commits, whose 20 ui/ paths are byte-identical to eb78d349..772f1da1. Its run id, host, commit, tree and the before and after source ids are recorded on this item.",
+    "At GO time origin/master equals eb78d349c23fc370ede49cc073daa5b91b65f5c9, so the landing eb78d349 -> 491dd015 is a fast-forward. The main checkout's ui/ working tree equals 491dd015's ui/ tree, byte-identical to what Greg tested. Opus2's explicit GO naming 491dd015 is recorded on this item and sent to Opus3."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a1d8b5-5790-7bc2-96d7-831e171806d4",
+      "kind": "manual",
+      "detail": "Landing done and verified (491dd015 on origin/master; FULL test-590a0d31 PASS). Closure is blocked on w-c2a8ce6f513d: termal_evaluate_acceptance refuses, verbatim: \"409 Conflict: verification_record_not_acknowledged: the verification record of run test-590a0d31-baf4-4739-aa18-8a068f4ba322 at 491dd015e75e25ee3f13465ce5e165980346c1f5 is not yet acknowledged by Engram (rejected: Engram refused it: verification_record_refused); request again once Engram has received it\". Per Fable2 #6091 there is no credit rerun; close after w-c2a8 lands. Integration bookkeeping only.",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-11-14T06:18:45.505884400Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1c014-d909-7fe0-879f-70b0f21c1140",
+  "external_ref": null,
+  "title": "Cover refused never-named refresh and return to settled unnamed work",
+  "outcome": "Behavioral regressions distinguish prospective refresh ordering for never-named and settled unnamed work without weakening authority or receipt fences.",
+  "acceptance": [
+    "A never-named focused claim whose canonical proof read refuses creates no work-naming history row or authority owner, and the refused original turn remains uncaptured; a settled unnamed claim can be selected prospectively on a valid quiet return, while changed acknowledged history refuses publication and preserves the original authority and receipt behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

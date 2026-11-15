@@ -1,0 +1,37 @@
+{
+  "id": "01a19c94-a0b2-7933-9949-a33bbe097c81",
+  "external_ref": null,
+  "title": "Port two busy Resume tests to preserved master-equivalent 409 contract",
+  "outcome": "Port two busy Resume tests to preserved master-equivalent 409 contract",
+  "acceptance": [
+    "Change only admission::ordinary_history_never_gates_resume_or_consumes_the_fifo_successor and parked_retry::ordinary_repeated_resume_never_dispatches_a_second_turn_while_busy to expect the master-equivalent busy409, with no dispatch, FIFO successor intact and no head consumed; no product edit.",
+    "Return a source-only immutable scoped patch on exact0c00 from a fresh named root after its naming turn; preserve original no-gating/fresh-work guarantees and coordinate shared-file composition with Sol-03d4; no Cargo."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered source-only two busy-Resume test ports as TREEa04cc298fc8fe91374519051591af148ae33ac2a, exact scoped patch/provenance sent to Sol-03d4 and Fable2; preserve master's409 guard and strengthen queue/no-dispatch assertions.",
+    "completed_at": "2026-11-02T14:10:06.049729900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8b005a6c4687",
+  "external_ref": "tm-bv7",
+  "title": "Audit every feature that rediscovers state by scanning session.messages — tail hydration invalidated the residency assumption",
+  "outcome": "PATTERN BEAD, third instance in one day (2026-07-30). tm-9sf slices A+B replaced full-transcript hydration with a bounded 20-message tail. Any code that RE-DISCOVERS state by scanning session.messages silently changed meaning: it now searches a window, not a transcript, and returns null/absent instead of the truth. No compile error, no test failure — the scan is still 'correct', its input shrank.\n\nCONFIRMED INSTANCES: tm-1q1 (findLastUserPromptInMessages -> working-turn hint disappears once a turn emits 20+ messages; measured zero user prompts in the tail of BOTH live active sessions). tm-hna (adjacent shape: the tail WIRE projection inherited a metadata-only builder and dropped pendingPrompts).\n\nTASK: enumerate every consumer that derives state by scanning a session's message array and classify each as (a) safe — only needs recent messages, (b) broken — needs an arbitrarily old message, or (c) needs an explicit field instead. Start from grep for session.messages / activeSessionMessages / messages.length / findLast / reduceRight / for-loops-backward across ui/src. Known candidates to check explicitly: last-user-prompt derivations (findLastUserPrompt and findLastUserPromptInMessages have TWO callers), latest-assistant-text scans (the Telegram forwarding cursor uses one server-side — verify whether its bound is now a window too), conversation-marker index hints, search-index construction, overview-rail summaries, message-count-derived UI gates, and anything computing 'first message' or 'session start'.\n\nRULE TO ADOPT AND RECORD: features must not depend on transcript residency. State the UI needs continuously (current turn prompt, current command, first-message identity, counts) should be carried as an explicit field or fetched deliberately — never rediscovered by scanning whatever happens to be loaded. Add this to the tm-9sf design notes and dev-team-pattern.md so the remaining hydration slices are written against it rather than discovering it one bug report at a time.\n\nCross-reference: tm-9sf (epic), tm-9sf.1 (jump-to-start, same family — the boundary jump assumed the loaded window was the transcript), tm-hna, tm-1q1, tm-qt5 (verify against reality, not fixtures).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

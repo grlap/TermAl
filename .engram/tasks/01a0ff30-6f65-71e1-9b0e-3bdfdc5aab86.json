@@ -1,0 +1,30 @@
+{
+  "id": "01a0ff30-6f65-71e1-9b0e-3bdfdc5aab86",
+  "external_ref": null,
+  "title": "UI project accounting: tolerate a non-monotonic wall clock in Vitest file windows",
+  "outcome": "UI project accounting: tolerate a non-monotonic wall clock in Vitest file windows",
+  "acceptance": [
+    "A deterministic witness first fails on the current planner: a report whose file windows reflect a backward wall-clock step fails accounting although every test passed.",
+    "The planner distinguishes a non-monotonic report from an order or overlap violation, without relaxing any coverage status and without ever reporting a pass it did not observe.",
+    "The full five-stage gate passes; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "low",
+    "test-categories"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

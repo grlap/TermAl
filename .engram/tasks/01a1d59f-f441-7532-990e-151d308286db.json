@@ -1,0 +1,26 @@
+{
+  "id": "01a1d59f-f441-7532-990e-151d308286db",
+  "external_ref": null,
+  "title": "Replace the stale docs/bugs.md link in the root SKILL.md",
+  "outcome": "SKILL.md at the repository root no longer links the retired docs/bugs.md; it names the Engram work tracker, as docs/ now does.",
+  "acceptance": [
+    "Replace the stale docs/bugs.md link in the root SKILL.md is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

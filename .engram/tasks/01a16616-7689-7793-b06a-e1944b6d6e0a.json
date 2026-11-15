@@ -1,0 +1,27 @@
+{
+  "id": "01a16616-7689-7793-b06a-e1944b6d6e0a",
+  "external_ref": null,
+  "title": "The park's spent-window card calls a window ended by Stop, pause or control-disable \"spent\"",
+  "outcome": "engram_admission_window_spent (w-ac230a24d0d8) is also true when the lineage window has ended, which a Stop, an operator pause or control disabled does while the deadline is still ahead. The park then writes the spent-window disposition (\"the admission window from X to Y is spent after N attempts\"), so a Stop-ended window is described as exhausted, for example when an in-flight attempt parks after a Stop. The state is right; the wording is wrong.\nFix: word the hold by cause (ended versus deadline passed). The card wording at the park belongs to w-260d2528bc15 (Coder), which replaces w-ac230's placeholder; EngramSpentWindow can carry an ended-versus-deadline flag for it.",
+  "acceptance": [
+    "The park's spent-window card calls a window ended by Stop, pause or control-disable \"spent\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cards",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

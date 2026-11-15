@@ -1,0 +1,29 @@
+{
+  "id": "01a0ee3a-60fe-7f50-b057-6c2c05e634e1",
+  "external_ref": null,
+  "title": "Review-freeze fingerprint: trackedHeadDiffSha256 changes when identical content is staged",
+  "outcome": "Review-freeze fingerprint: trackedHeadDiffSha256 changes when identical content is staged",
+  "acceptance": [
+    "Staging unchanged content leaves trackedHeadDiffSha256 unchanged on Windows with CRLF working files, or the documentation of the fingerprint states that the head digest is comparable only between trees in the same staging state; a test shows whichever holds",
+    "The cause of the differing digests is established from the two outputs, not inferred",
+    "The full five-stage gate passes on the exact reviewed tree"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-freeze"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10afc-58fa-79f2-8148-f6c12d3c9de2",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate. The review-freeze trackedHeadDiffSha256 changes with staging state; w-f6c12d3c9de2 holds the real outcome and the confirmed diagnosis.",
+  "completion": null
+}

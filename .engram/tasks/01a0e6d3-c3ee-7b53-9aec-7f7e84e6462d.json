@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-7f7e84e6462d",
+  "external_ref": "tm-5fsy.13",
+  "title": "Freeze checker: explain unsupported embedded untracked repositories",
+  "outcome": "Claude session-6889 Low, src/review_freeze.rs:188. Untracked nested Git repositories produce a trailing-slash entry currently rejected as generic unsafe untracked path. Failure is safely closed but diagnostic is misleading. Distinct from fixed gitlink filter execution tm-5fsy.10.",
+  "acceptance": [
+    "Isolated nested-repository fixture fails closed with explicit unsupported embedded-repository diagnostic; feature docs list restriction. Do not recurse into repository-configured code."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

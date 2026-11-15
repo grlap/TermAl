@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-55c3e25a6595",
+  "external_ref": "tm-m6r1.25",
+  "title": "Work view: explicit 'show closed' read for both sources",
+  "outcome": "Greg (2026-09-15): closed items are excluded by default (Engram ls now runs without --all; bd list already lists open issues only). If a closed-history view is wanted, add it as an explicit control that applies to BOTH sources at once — Engram 'ls --all' and a Beads read that includes closed issues — as a separate read with its own cap and its own status text, never a silent widening of the default view. Keep the dependency tree's 'satisfied · not loaded' disclosure semantics.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e8cb-f795-70a0-94be-6afb21d3c1f8",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate. Work \"show closed\"; covered by w-6afb21d3c1f8.",
+  "completion": null
+}

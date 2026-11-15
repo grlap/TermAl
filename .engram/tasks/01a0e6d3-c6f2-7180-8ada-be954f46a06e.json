@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c6f2-7180-8ada-be954f46a06e",
+  "external_ref": "tm-uk5y",
+  "title": "Preserve undelivered Engram context across compaction refreshes",
+  "outcome": "Compaction invalidation or a new pending bit can replace a fetched but undelivered advancing-next page. Preserve queued and in-flight pages, defer refresh until delivery, cover current and deprecated Codex events, bound best-effort dedup. Implement in main; no new checkout. Parent coordination tm-rxhl.",
+  "acceptance": [
+    "Undelivered and in-flight compaction regressions first fail then pass; both event routes preserve delivery; dedup bounded; cache reviewed before bootstrap composition."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch a640e340, spot-checked by Termal::Fable2): CLOSE-DONE. The undelivered compaction cache fix and its regression landed in a34a5a0 (ancestor of master); src/tests/engram_compaction.rs:215,300. Broader live compaction recovery is tracked separately. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

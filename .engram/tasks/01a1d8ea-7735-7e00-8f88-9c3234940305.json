@@ -1,0 +1,37 @@
+{
+  "id": "01a1d8ea-7735-7e00-8f88-9c3234940305",
+  "external_ref": null,
+  "title": "Central disk: remove stale worktrees and build targets under the TermAl checkout (52 GiB free, full-gate floor 50 GiB)",
+  "outcome": "Central has comfortable headroom above the full-gate disk floor, because worktrees and build targets that no open item or live session needs are removed. Nothing in use is touched.",
+  "acceptance": [
+    "A census lists the TermAl checkout's git worktrees and .tmp/ directories (including target/ build directories) with their sizes and owning item or session, and classifies each as in use (open claim, live session workdir, running test, frozen candidate or retention note) or removable (its items closed or landed, no live session, no retention note).",
+    "Only removable entries are deleted, each after resolving its absolute path and checking that it lies inside C:\\github\\Personal\\TermAl, with git worktree remove (or git worktree prune for already-missing ones) used for registered worktrees; no live worktree, running test or frozen candidate is touched, and nothing outside the repository is deleted.",
+    "Free space on the TermAl volume before and after is recorded on this item, with the list of removed paths."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 0,
+  "labels": [
+    "central",
+    "cleanup",
+    "disk"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed owner-confirmed Central disk cleanup. Fresh independent Sonnet17999 evaluation1b6980240dcf4e508cdca3af658cb016 at08:13:33.633Z rev1/cut39 is recorded3/3PASS,stale=null; all judgment, consumed without explicit links. Preserved complete packet,2580B ALLprose,actual fullverdict and request/config under .evidence/disk-cleanup-9c32-13106/evaluation-17999 before sealing. Census1039registeredworktrees/1379tmpdirs/52targetparents;254unresolvedowners kept. Removed only five exact owner-released buildoutputs (51,401,550,969logicalB) and three released retiredsourceworktrees via gitworktreeremove, allsafeinside.tmp. Main target/live/active/frozen/uncertain/retained paths untouched. Free56063229952B(52.21GiB)baseline→104508465152Bimmediate→95677284352B(89.11GiB)finalduringconcurrentbuild; globalgain not isolated deletion amount. C1 three retiredroots lacked fullpre-removal sizing; trackedGitlowerbounds42323173/42400997/42385737Bexplicit, independentlyaccepted minor disclosed gap. No tests/retries/Cargo/codechanges; filesystemchore. Lasting holder evidencee6321d74c8104933950313f0812e30f3 and20414ae51f104faa922dee2f4dfb5ade. Next remove dedicated controlroot after safe native checks; retain raw census temporarily only for openf5dc combo97retention/release reconciliation, then remove after that lastuse.",
+    "completed_at": "2026-11-14T08:14:44.704083600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

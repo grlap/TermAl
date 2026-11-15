@@ -1,0 +1,29 @@
+{
+  "id": "01a1948a-f0df-7843-8ab7-6fd8fe54bbc4",
+  "external_ref": null,
+  "title": "DL560 Codex session-3 cannot use TermAl mailbox: MCP tool needs approval under policy never, CLI gets connection denied",
+  "outcome": "A remote Codex root session that is meant to act as a runner can read and send TermAl mail. The termal-delegation mailbox tools are usable without an interactive approval it can't get, and the TERMAL_CLI connection to its host isn't blocked by the session's sandbox, or the host tells the operator which session setting prevents it.",
+  "acceptance": [
+    "DL560 Codex session-3 cannot use TermAl mailbox: MCP tool needs approval under policy never, CLI gets connection denied is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "cross-machine",
+    "mailbox",
+    "remote-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

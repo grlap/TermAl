@@ -1,0 +1,40 @@
+{
+  "id": "01a1944c-fbd6-79a3-ae56-5e2f3fba987a",
+  "external_ref": null,
+  "title": "Remote runner inside a TermAl session cannot register runs from an independent TermAl clone (HTTP 400 run directory outside project)",
+  "outcome": "A runner session on a remote host can run the standard launcher in an approved independent TermAl clone and get a tracked registration, or a clearly documented supported binding, instead of a definitive 400 refusal.",
+  "acceptance": [
+    "C1. A standard-launcher run in an approved independent clone registers durably on its origin host through the existing native session/project/workdir binding and host-owned launch/request correlation. Canonical clone/worktree/run identity and immutable request ownership are checked by the existing registration owner; an arbitrary caller path, wrong project/session, redirected directory or conflicting request is refused before a stage. Existing local registration behavior remains unchanged.",
+    "C2. Central can durably wait on an explicitly host-qualified remote native run reference in the caller's project, before terminal completion, through its existing wait owner and authenticated native completion path. The wait pins origin host, native runner/run and original request/project association when available, remains pending while authoritative facts are missing, and does not require a local indexed directory, a preissued job binding, a new registration channel or a fabricated local run. Equal bare run ids on different hosts and foreign projects never alias.",
+    "C3. Remote wait settlement consumes the existing origin-host native launcher/process and settlement owner's retained completion correlated with the actual run and original request, preserving native verdict, terminal flag, exit/reason and execution time. Mail prose, caller fields, raw results, a full label or stage count alone cannot supply a success. Missing/Unknown delivery stays nonterminal; genuine failed/interrupted terminals stay failures; conflicting authoritative terminals are visible conflicts. Input qualification and verification-versus-landing use remain solely the final K3 contract, with no new fingerprint, sighting, capture or results-hash condition added by this item.",
+    "C4. Registration and remote wait observation grant no verification credit and create no local RegisteredHostRun, producer, grant, turn or source sighting. Until the supported K3/Engram remote_verification_record_v1 capability and genuine current destination association are available, remote runs remain observable but explicitly uncredited using the shared contract's existing reason/detail vocabulary. Qualification and credit association stay with K3 and the Engram-owned admission contract; this item does not implement a second credit path.",
+    "C5. Existing bounded authenticated completion recovery and durable wait recovery handle missed, duplicate, late and reordered delivery and restart/reconnect without a duplicate test launch, new model/import turn or new transport. Each wait settles at most once; origin run facts remain separately reusable under K3's valid destination-association checks, and a delivery Unknown cannot occupy an immutable terminal or erase an earlier genuine failure. Existing federation authority/refusal checks remain applicable.",
+    "C6. Meaningful tests exercise the actual origin registration and Central wait consumers using real or provenance-preserved producer wire, covering the approved independent-clone path, wrong host/project/request/locator, pending-to-terminal recovery, duplicate/reordered delivery, terminal conflict and restart. Existing local registration/waits remain green; docs describe the supported binding and END-mail fallback; the exact final input has a passing FULL and independent review pair with no outstanding Medium+. Ordinary remote witnesses use only coordinator-authorized slots, with no new manual proof campaign."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "remote-runner",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered native origin registration provenance and authenticated, durable host-qualified remote waits as observation-only/uncredited. Landed exact reviewed/gated tree on master and origin. Windows focused75/0/1 and same-tree five-stageFULL PASS; fresh WHOLE58 Codex+Claude noMedium+. Original FULL failures diagnosed and repaired without weakened assertions. Five Low follow-ups and old-reader witness recorded separately.",
+    "completed_at": "2026-11-06T01:57:50.020671100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

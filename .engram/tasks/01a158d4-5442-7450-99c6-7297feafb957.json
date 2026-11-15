@@ -1,0 +1,38 @@
+{
+  "id": "01a158d4-5442-7450-99c6-7297feafb957",
+  "external_ref": null,
+  "title": "Update runtime Mermaid to address reachable diagram rendering advisories",
+  "outcome": "Upgrade Mermaid to the smallest compatible patched release (at least11.16.1 for the current nine Mermaid GHSAs), deliberately resolve its runtime sanitizer dependencies, and verify main-realm untrusted-diagram rendering through a separate reviewed, gated change. No blanket npm audit fix or unreviewed UI deployment.",
+  "acceptance": [
+    "ui/package-lock.json resolves Mermaid 11.16.1 within the unchanged manifest range; the nine directly reported Mermaid advisories no longer apply, and normal ESM/fallback DOMPurify copies plus remaining advisories are explicitly recorded.",
+    "Relevant Mermaid/Markdown Vitest controls and TypeScript checking pass without changing runtime rendering or trust settings.",
+    "The full maintained gate passes on the final input, and an independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "dependencies",
+    "runtime",
+    "security",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

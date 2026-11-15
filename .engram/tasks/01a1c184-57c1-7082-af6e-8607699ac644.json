@@ -1,0 +1,43 @@
+{
+  "id": "01a1c184-57c1-7082-af6e-8607699ac644",
+  "external_ref": null,
+  "title": "Redact retained prompt identity keys and digests from Debug",
+  "outcome": "Formatting retained direct-prompt identity for diagnostics does not expose the idempotency key or intent digest.",
+  "acceptance": [
+    "Debug output for a retained identity omits the idempotency key and intent digest."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the stated behavior with independent review and passing focused/full evidence; retained in origin/master 0b32ab57. No acceptance evaluation exists.",
+    "completed_at": "2026-11-10T18:28:59.425968200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "id": "01a16c92-7860-7540-b12c-d428620a6474",
+  "external_ref": null,
+  "title": "Under parallel multi-lane load, state-locking API calls stall 12–30 s+ (mailbox read timed out at 30 s, queue resume 500 after 25.6 s) while writer ticks spike to 10.6 s",
+  "outcome": "On the combined landed persistence/snapshot base, remaining StateInner work in the affected writer bookkeeping and state-locking API paths is bounded and verified under the explicitly modeled parallel workload below, preserving exact state, queue ownership and durability. Deterministic fixture evidence is distinct from post-restart host evidence.",
+  "acceptance": [
+    "A diagnosis note identifies the exact combined base and the remaining StateInner holders on mailbox read/ack, queue resume and writer collection/bookkeeping paths after reclamation scheduling, deferred snapshot publication, incremental metadata and sparse message persistence have landed. It distinguishes measured waits/holds, source-inferred candidates and unknown SQLite COMMIT causes, and separates prepared payload bytes from actual SQL changes and physical writes.",
+    "Phase-controlled regressions on the real affected paths fail on the pre-fix base and pass after repair: expensive projection or transcript disposal happens without StateInner held; bookkeeping releases StateInner between bounded units so an unrelated mailbox read/receipt acknowledgement and queue-head check can progress. Concurrent mutation, removal/hide, pause/Stop and stale-owner cases preserve exact snapshot revisions, retained transcript positions, watermark advancement and head ownership. No durable success or Begin is emitted before its unchanged exact-content durability/authority conditions are met; injected I/O or stalled durability retains the existing refusal/unknown-outcome behavior.",
+    "A disposable real-router/real-SQLite fixture contains 6,793 session records, eight changing sessions each retaining 64 messages of 16KiB, 512 named-root/journal pairs and 512 test-run registrations; these are modeled dimensions, not a measured production field distribution. Eight concurrent client lanes each execute 100 valid mailbox-read, unchanged-receipt ACK and paused-empty-queue Resume triplets while production background publication/reclamation/persistence runs and at least 100 nonempty writer ticks commit. Record every operation, StateInner acquisition and writer phase using a real monotonic clock, without retries or discarded outliers. Report cold-start, warm-workload and teardown phases separately. For every operation kind, report the complete operation-latency distribution and every original elapsed sample, including the elapsed effects of snapshot projection, lock contention, readiness, response handling and fixture decoding. Keep 1s p99 and 5s maximum as visible warm API reference values and report any overruns, but operation-latency distributions are report-only for this trim slice. Do not subtract projection-hold overlaps, inferred projection waits, scheduler time or other unmeasured components from operation latency, and do not label an inferred remainder as a measured latency. Exact per-request projection-wait attribution is unavailable from the current diagnostics and must be stated as unavailable; no adjusted API latency is gated. In the warm workload, each run reports writer-tick p99 and maximum against 2s and 5s, retaining all elapsed work within those ticks, and StateInner hold p99 and maximum, on the affected warm paths that do not construct the immutable snapshot cut, including writer collection and post-commit trim units, against 50ms and 250ms; per Greg's ruling of 2026-11-04 these limits are reported, not gated. What fails the check is the work done under load: warm snapshot cuts, collection locks per writer tick, and warm messages written per edit, each against its stated allowance. Acquisitions that construct the immutable snapshot cut form an explicitly identified projection category: record and report their complete hold intervals, callsites, counts, p99, maxima and measured snapshot-cut overlap separately; their numerical hold distribution is not a gate for this trim slice. Do not subtract projection time from a mixed acquisition and present the remainder as a measured hold. Cold-start operation, hold and writer-tick distributions and teardown distributions remain fully recorded and reported, rather than numerical latency gates for this slice. Every phase retains the original functional correctness requirements, with zero 500/503/timeouts due to state-lock or writer contention. The separate snapshot/cold-start work item carries the outstanding projection-hold, request-contention and post-handler-tail baseline and follow-up scope; this criterion does not resolve that item or establish an end-to-end API latency guarantee. External transport stalls, injected I/O failures and synthetic CPU/disk burners remain outside this success fixture and are not hidden by these reports.",
+    "Focused regressions, the modeled parallel check and the full five-stage gate pass on the exact final input that lands, with the independent review pair having no outstanding in-scope Medium-or-higher finding. These source checks do not claim the running host meets live latency bounds. The unchanged post-restart idle-host15-minute writer/admission proof remains open independently as w-7bc33299e17a; fixture results do not satisfy it. Any additional real parallel-host closure claim requires a separately authorized and recorded live observation."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "mailbox",
+    "performance",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The state-lock trim landed on master as 361e02db and d47518ba, and the modeled parallel check is green. After the restart one registered Cargo run on Central on master 24b42615 passed and earned its record. The limits on this evidence are in the closing notes; w-7bc33299e17a stays open for the running host.",
+    "completed_at": "2026-11-04T15:45:30.606345400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

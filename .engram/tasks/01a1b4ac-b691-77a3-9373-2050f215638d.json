@@ -1,0 +1,39 @@
+{
+  "id": "01a1b4ac-b691-77a3-9373-2050f215638d",
+  "external_ref": null,
+  "title": "Session panel: filter the session list by host/remote, including local sessions, combined with the project filter",
+  "outcome": "The session panel, next to the PROJECT filter and \"Search sessions\", offers a host filter: all hosts, this host (local) or a specific remote host. It narrows the session list together with the project filter and the search text.",
+  "acceptance": [
+    "The session panel shows a host filter next to the PROJECT filter. Its choices are all hosts (the default), the local host, and each known remote host by its host name. Local sessions are selectable as their own choice.",
+    "The host filter combines with the project filter and the search text: the list shows only sessions matching all three. Clearing the host filter restores the previous list.",
+    "A remote host that is disconnected or has no sessions is handled without errors, and its choice either shows an empty list or is marked as unavailable.",
+    "No UI performance regression (Greg: „tylko aby nie popsuc perf UI :)”). Filtering uses the session data the panel already holds, with no new per-session request, polling or subscription, as confirmed by the independent review pair. It respects the existing rendering limits. An automated behaviour test with at least 1000 sessions shows the filter keeps the bounded rendering window. Responsiveness on the real view is observed on the installed build after the next restart and reported to Greg; that observation does not block completion.",
+    "UI tests cover filtering by local, by one remote host, and by host combined with project and search. `cd ui && npx tsc --noEmit` is clean and `npx vitest run` is green. The change lands under the standing rule (review pair, FULL)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered session Host filter (All hosts, Local, configured remotes) composing with project/status/search, host-scoped counts and search metadata, persistent docked/per-tab selection and bounded session rendering. Landed with clean pair and both exact-tree FULLs. No acceptance evaluation exists.",
+    "completed_at": "2026-11-08T21:41:41.808053700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

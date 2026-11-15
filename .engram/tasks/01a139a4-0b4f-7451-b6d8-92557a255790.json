@@ -1,0 +1,27 @@
+{
+  "id": "01a139a4-0b4f-7451-b6d8-92557a255790",
+  "external_ref": null,
+  "title": "Correct test-run removal documentation for retained unresolved artifact loss",
+  "outcome": "Feature documentation distinguishes Changed retained unknown/registered fallback after artifact loss from resolved-detail removal, and matches actual proof-gated compaction policy.",
+  "acceptance": [
+    "Correct test-run removal documentation for retained unresolved artifact loss is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

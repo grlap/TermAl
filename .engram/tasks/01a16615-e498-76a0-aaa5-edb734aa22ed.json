@@ -1,0 +1,33 @@
+{
+  "id": "01a16615-e498-76a0-aaa5-edb734aa22ed",
+  "external_ref": null,
+  "title": "Cover production state-broadcaster boot ownership and early-error shutdown",
+  "outcome": "Production AppState construction has focused coverage proving projection warm-up precedes worker startup and early-error/owner cleanup joins outside StateInner without losing final publication.",
+  "acceptance": [
+    "A focused regression exercises the production AppState construction path, checks warm-up before worker acceptance, and verifies early-error/drop cleanup completes outside StateInner without a leaked worker or lost final publication.",
+    "Focused checks and the required review pair pass on the exact implementation; preserve existing ordering and no full per-commit projection behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "greg-reported",
+    "host-persistence",
+    "p0-profiling-2026-10-22",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a164ff-dc1b-71f3-bda3-de6021f4b32f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a10415-dae3-7811-a21f-97ab445e5ea1",
+  "external_ref": null,
+  "title": "Replace diff-render freeze hashes with a deterministic structural input fingerprint shared by the helper and launcher",
+  "outcome": "The helper and launcher identify the same frozen input with one versioned structural fingerprint, preserving exact HEAD/root binding, independent staged-content identity (the index tree id, taken from a temporary copy of the index), and actual worktree paths/types/modes/bytes including admitted untracked content. Its identity does not depend on rendered Git diffs. Required distinctions currently detected by status are retained structurally. The old diff-render identity is replaced in active capture/verification consumers; historical records keep their original meaning and are not promoted to new evidence. The existing independent Engram review-freeze protocol is not silently reinterpreted.",
+  "acceptance": [
+    "One canonical freeze key: the Git tree id of the frozen content, printed by both the freeze script and the launcher is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "agent-workflow",
+    "review-freeze",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

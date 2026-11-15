@@ -1,0 +1,28 @@
+{
+  "id": "01a18388-7d78-7562-b2f8-3f3813146bc8",
+  "external_ref": null,
+  "title": "Codex reviewer delegation follow-up fails: thread/unarchive times out (500), and the identical replay is refused with 400 \"no archived rollout found\"",
+  "outcome": "A follow-up sent to a completed read-only Codex reviewer delegation either resumes its archived thread or fails with a definite, recoverable answer. A timed-out unarchive never leaves the thread in a state where the identical replay is refused as missing.",
+  "acceptance": [
+    "Codex reviewer delegation follow-up fails: thread/unarchive times out (500), and the identical replay is refused with 400 \"no archived rollout found\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "delegation",
+    "review-pipeline"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

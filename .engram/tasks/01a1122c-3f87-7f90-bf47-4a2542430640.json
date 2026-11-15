@@ -1,0 +1,27 @@
+{
+  "id": "01a1122c-3f87-7f90-bf47-4a2542430640",
+  "external_ref": null,
+  "title": "Keep CLAUDE.md focused on current rules without historical references",
+  "outcome": "CLAUDE.md states current operational rules directly, with anecdotes, dated attribution, historical quotes, incident identifiers and migration history removed; rule requirements remain intact.",
+  "acceptance": [
+    "Keep CLAUDE.md focused on current rules without historical references is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "documentation",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

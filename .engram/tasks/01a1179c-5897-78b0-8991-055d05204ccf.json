@@ -1,0 +1,64 @@
+{
+  "id": "01a1179c-5897-78b0-8991-055d05204ccf",
+  "external_ref": null,
+  "title": "Support coding workers in fresh dedicated worktrees with ordinary Git handoff",
+  "outcome": "A parent creates one writable coding worker in a fresh dedicated Git worktree at a declared base and receives its ordinary diff or commit and test result. The parent chooses whether and how to integrate through ordinary Git. The separate worktree is the v1 separation boundary; sandboxing, stronger containment, owned-path enforcement and host-managed merge/conflict prevention are deferred.",
+  "acceptance": [
+    "mode=worker with isolatedWorktree creates one fresh dedicated worktree at the declared Git base and starts one writable worker session in that worktree through the existing delegation lifecycle. Unsupported write-policy combinations are rejected clearly; sharedWorktree remains deferred. The isolatedWorktree policy accepts an optional caller-supplied base ref or commit, defaulting to HEAD. Before worktree creation the host resolves it to one commit object ID and uses that same ID for creation and recorded baseRevision. The worker starts from that commit without copying the parent's staged, unstaged or untracked changes; those changes neither require cleanup nor block this route. Existing explorer dirty-state carry behavior remains unchanged.",
+    "The worker may change files freely within its dedicated worktree. The v1 implementation adds no ownedPaths enforcement, parent/outside-path containment mechanism or sandboxing requirement. Documentation states accurately that a separate worktree is workspace separation, not enforced filesystem containment; reviewer and evaluator read-only behavior remains unchanged.",
+    "The owning parent can retrieve the worker's attributable ordinary diff or commit, declared source base and test result through the existing result mechanisms. A native test outcome is distinguished from host-recorded verification; completion does not automatically import, merge, commit or push.",
+    "The parent chooses whether and how to integrate with ordinary Git. No delegation merge service, custom conflict-control system or guarantee preventing concurrent-base conflicts is introduced; Git import conflicts remain ordinary failures the parent resolves or rejects.",
+    "Reuse existing delegation status, cancellation, failure and follow-up mechanisms with correct parent/child/attempt attribution. Worker role eligibility is harness-independent; actual adapter limitations are reported truthfully. Focused tests cover creation at the declared base, writable child operation, attributable handoff and unchanged read-only roles without introducing a new orchestration subsystem."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "design-pending",
+    "harness-agnostic",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

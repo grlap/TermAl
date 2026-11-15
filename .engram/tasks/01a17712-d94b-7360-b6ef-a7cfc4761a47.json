@@ -1,0 +1,31 @@
+{
+  "id": "01a17712-d94b-7360-b6ef-a7cfc4761a47",
+  "external_ref": null,
+  "title": "Bound pre-send observation-policy read failures before terminal LocalFailure",
+  "outcome": "Transient or incoherent pre-send observation-policy reads use the existing bounded delivery-attempt owner rather than prematurely retiring the immutable report; definitive store mismatch stays fail-closed.",
+  "acceptance": [
+    "A controlled pre-send Protocol failure followed by coherent policy retains the exact request/key and uses bounded retry; eventual exhaustion is visible and retains custody.",
+    "Definitive store mismatch does not send, and settled/unresolved removal fences remain intact.",
+    "The maintained full gate passes on the exact repaired input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "retry",
+    "review-inventory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12858-a1c2-7f71-8e92-e12abe9f8cbe",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,43 @@
+{
+  "id": "01a1423d-daf6-7f80-acba-e803e7f5cb8c",
+  "external_ref": null,
+  "title": "Work view: applying display filters refetches the whole Work set instead of filtering the loaded set client-side",
+  "outcome": "After the full Work set has loaded, changing or applying display filters filters and sorts the retained client-side set, preserving selection and scroll. Only an explicit Refresh, a project or source change, or a list-changed or generation recovery starts a new loading generation. Today (landed master 9c80a234, after w-270c4b1fa8bc), WorkPanel.tsx:74 keys WorkResults on `${submission}:${JSON.stringify(filters)}` and line 84 calls useWorkList(projectId, filters), so Apply filters remounts the results and re-reads every page.",
+  "acceptance": [
+    "After the full Work set has loaded, changing or applying any display filter or sort (lifecycle, kind, label, search text, sort column, view) issues no new work-list read: the panel filters and sorts the retained set client-side, keeps the current selection while it stays visible, and keeps the scroll position.",
+    "A new loading generation starts only on explicit Refresh, a project or source change, or a list-changed or generation recovery. Component tests assert that the work-list read count is unchanged across filter and sort changes and increments once for each of those triggers.",
+    "While a load is still in progress, a filter change applies to the rows loaded so far without restarting or duplicating the load.",
+    "The full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

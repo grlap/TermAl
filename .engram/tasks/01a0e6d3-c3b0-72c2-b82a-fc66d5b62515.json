@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3b0-72c2-b82a-fc66d5b62515",
+  "external_ref": "tm-0t3j",
+  "title": "Exercise direct and queued dispatch after deferred Engram compaction",
+  "outcome": "Parent consolidation of authoritative /review-code results session-6542 (Codex) and session-6543 (Claude), HEAD 272965d, frozen tracked diff 0674b61e4bd755293d721f24bb4985c90ef3d556f3a8dd92dbcc4568477b6465. Fingerprint unchanged at fan-in; Rust 2189 PASS/4 ignored, UI 3783 PASS/214 files, cargo check/tsc/freeze-helper tests PASS. No source edits or new runtime reproduction in this review. Codex Low finding src/tests/engram_compaction.rs:248. Existing compaction_deferred_page_is_ready_for_prompt_admission calls context_needs_preparation and manually acknowledges delivery; it does not drive either changed admission caller. Add direct dispatch_turn and queued promotion tests that start with a fetched undelivered page plus a compaction refresh, inspect actual runtime prompt delivery, verify no advancing read before that delivery, then verify deferred refresh after acknowledgement. Related implementation tm-uk5y. Searched open/closed titles and all descriptions; no dedicated admission coverage task found.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

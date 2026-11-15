@@ -1,0 +1,42 @@
+{
+  "id": "01a1554e-34c5-7921-a69e-545f2060aec0",
+  "external_ref": null,
+  "title": "Define and test forward compatibility of nested build identity in remote health replies",
+  "outcome": "Decide and cover the remote health compatibility boundary for unknown nested build identity fields/reasons, while keeping attestation fail-closed.",
+  "acceptance": [
+    "A documented and regression-tested policy defines which newer or malformed nested build identities may preserve basic remote health, which require coordinated peer upgrades, and how attestation refuses unsupported identities."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "compatibility",
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "health",
+    "mailbox",
+    "multi-machine",
+    "provenance",
+    "remote",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14cac-c6b9-77b3-ad29-ab6cc520ffb4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1db2f-047a-7cc0-99e4-65e4b55d6323",
+  "external_ref": null,
+  "title": "Drop the explicit mimalloc v3 feature when upgrading to a release with v3 as default",
+  "outcome": "When mimalloc is next upgraded to a release whose default allocator is v3 and whose feature set no longer includes v3, update the dependency feature selection accordingly without changing the currently requested 0.1.48 configuration now.",
+  "acceptance": [
+    "Drop the explicit mimalloc v3 feature when upgrading to a release with v3 as default is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "dependency-upgrade",
+    "mimalloc",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

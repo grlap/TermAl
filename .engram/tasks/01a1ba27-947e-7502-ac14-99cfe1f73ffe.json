@@ -1,0 +1,30 @@
+{
+  "id": "01a1ba27-947e-7502-ac14-99cfe1f73ffe",
+  "external_ref": null,
+  "title": "Make the repeated-tool-key regression reject selecting the earlier declared binding",
+  "outcome": "The latest-binding regression fails when the first earlier entry is selected and passes only when the current original binding is selected.",
+  "acceptance": [
+    "Make the repeated-tool-key regression reject selecting the earlier declared binding is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "declared-commands",
+    "greg-reported",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

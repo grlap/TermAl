@@ -1,0 +1,39 @@
+{
+  "id": "01a1749d-773d-7231-bbfe-c292f2656605",
+  "external_ref": null,
+  "title": "Prompt-policy handler deadline should report an unknown outcome without fencing the authenticated link",
+  "outcome": "Prompt-policy handler deadline returns authenticated retryable unknown outcome without fencing the pair link or interrupting unrelated wake/mail. Rerated Medium per Fable1570, same class as executor wake R5; repair and deterministic late-handler/no-fence test included in parent P1 R2.",
+  "acceptance": [
+    "Prompt-policy handler deadline should report an unknown outcome without fencing the authenticated link is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "greg-reported",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "remote-prompt",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1741f-92e2-7ba2-921c-e1b088ba9d33",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

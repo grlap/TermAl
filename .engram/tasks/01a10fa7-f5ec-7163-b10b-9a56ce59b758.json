@@ -1,0 +1,28 @@
+{
+  "id": "01a10fa7-f5ec-7163-b10b-9a56ce59b758",
+  "external_ref": null,
+  "title": "Doctor process-tree tests start the deadline before descendant readiness",
+  "outcome": "Doctor process-tree tests start the deadline before descendant readiness",
+  "acceptance": [
+    "Doctor process-tree tests start the deadline before descendant readiness is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host-adapter",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

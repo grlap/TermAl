@@ -1,0 +1,28 @@
+{
+  "id": "01a1891d-d2ab-78e3-87d5-1bc6b10e2733",
+  "external_ref": null,
+  "title": "Refresh TermAl README and status docs to show where we are after federation recovery, remote gates and gated control (2026-10-29)",
+  "outcome": "A reader of TermAl's README and current feature/status docs can see clearly what ships and works now, the active limitations and P0s, and what comes next. That covers federation (hostname endpoints, Windows B and Mac links), remote full gates on satellites, and turn-gated control (ON for the Engram project, OFF for TermAl pending w-3af0aab58d4c). The change is docs-only, accurate to master, and cross-linked.",
+  "acceptance": [
+    "README.md and the relevant docs/features briefs state, accurately against master 92572b94 and the tracker: what works now (federation via hostnames, remote full gates on Windows B and Mac, gated control for the Engram project); the active limitations and open P0-level problems, in plain language without tracker ids; and what is next. New statements are cross-linked both ways with existing briefs.",
+    "The change is documentation-only. It has passed an independent review pair with no outstanding Medium-or-higher finding and has been handed to the integration owner for landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "docs",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

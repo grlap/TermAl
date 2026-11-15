@@ -1,0 +1,29 @@
+{
+  "id": "01a1a7fe-a660-7d73-9921-c66bb771d29d",
+  "external_ref": null,
+  "title": "Review the unused modeUnknown field after session row label removal",
+  "outcome": "Remove the unused activity-only modeUnknown field or document a concrete production consumer while preserving run marker and Working classification semantics.",
+  "acceptance": [
+    "The unused modeUnknown activity field and tests are removed, or a documented production use justifies retaining them.",
+    "Foreground/background classification, Working filters/counts and test-run marker semantics remain covered."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "UI",
+    "cleanup",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

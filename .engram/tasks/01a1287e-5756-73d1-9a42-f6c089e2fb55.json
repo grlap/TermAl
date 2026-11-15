@@ -1,0 +1,39 @@
+{
+  "id": "01a1287e-5756-73d1-9a42-f6c089e2fb55",
+  "external_ref": null,
+  "title": "Cover the conservative retained-bind Resume hold after promotion",
+  "outcome": "A public Resume regression covers the ineligible bind-retry park after this click promotes its selected head, preserving its exact conservative hold reason and owned control cause despite a later same-prompt successor.",
+  "acceptance": [
+    "A regression reaches park_engram_bind_retry_with_reporter with ineligible authority after fresh-head promotion and verifies its own bind retry authority changed reason and correlated control cause survive a same-prompt successor, without provider delivery or successor text.",
+    "The focused regression passes on host-recorded verification at the judged source revision."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "reliability",
+    "resume",
+    "retained-prompt",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12188-9cc9-7b60-9301-b21c5132848c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

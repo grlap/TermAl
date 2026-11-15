@@ -1,0 +1,31 @@
+{
+  "id": "01a1acce-f901-74f1-9ddd-ae94e358080e",
+  "external_ref": null,
+  "title": "Bound and control-filter retained verification refusal messages",
+  "outcome": "Refusal diagnostics retain a bounded useful message and prevent terminal control sequences in displayed summary text.",
+  "acceptance": [
+    "Define and apply a byte bound and control-character policy to retained remote refusal messages without losing the typed refusal code or terminal semantics.",
+    "Cover C0/C1 controls and long multibyte messages through retained detail and displayed summary tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "diagnostics",
+    "execution-observability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1ac9d-e250-7900-ab4e-5f01ad87280f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1ad1c-419e-7aa2-a41d-7975652f7b65",
+  "disposal_reason": "Continue as independent work after parent implementation landed and completed; optional review Low remains tracked with quoted provenance.",
+  "completion": null
+}

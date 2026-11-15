@@ -1,0 +1,40 @@
+{
+  "id": "01a19cc7-fce7-7670-aeae-201f1d91b645",
+  "external_ref": null,
+  "title": "Correct reclamation journal-protection fixture timeline around ordinary opening",
+  "outcome": "Test-only correction serves live/Bound until opening, then completed/None before reclamation; all protection assertions retained.",
+  "acceptance": [
+    "Cite master5dd913d2 confirming canonical None selection removal without reclamation notice predates C2.",
+    "Only the journal-protection test setup changes: live/Bound through ordinary opening, then completed/None after successor binding before reclamation. Preserve all eight protection rows, notice identity/equality and unprotected progress controls.",
+    "Return separate frozen test-only source on92a from fresh named root to Sol03d4, cc Fable2; no Cargo/tests or validation credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Separate source-only row9 fixture timeline correction returned to Sol03d4 and Fable2: treeb8d51714 over92a, one test file +6/-0, live/Bound opening then exact completed proof before reclamation. Master existing reconcile behavior cited; all assertions/eight protections/notice equality/progress controls unchanged. No Cargo/tests or validation credit; original5f8FAIL preserved; root frozen.",
+    "completed_at": "2026-11-02T15:04:21.892526300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

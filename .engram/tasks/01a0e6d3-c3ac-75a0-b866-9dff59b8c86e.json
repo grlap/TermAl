@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3ac-75a0-b866-9dff59b8c86e",
+  "external_ref": "tm-0j32",
+  "title": "Cap the cargo inventory result lines kept on a check",
+  "outcome": "Round-19 review (Claude, tm-winf steps 2+3). engram_check_result_lines exempts cargo inventory lines ('PATH: N physical lines (limit M)') from ENGRAM_CHECK_RESULT_LINE_LIMIT and the per-line cap, so a test printing many matching lines keeps all of them on the check until the checkpoint (the summary stays bounded, all or nothing). Memory is bounded only by the command's output. Add a count cap after which the inventory is marked omitted.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

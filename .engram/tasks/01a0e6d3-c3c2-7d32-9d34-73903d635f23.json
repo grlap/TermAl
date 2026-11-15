@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3c2-7d32-9d34-73903d635f23",
+  "external_ref": "tm-2m0t",
+  "title": "Resume a session once when all its pending test-run waits are satisfied (Greg: wait on different tests together)",
+  "outcome": "From Greg's decision after the tm-ncc6.8.6 consultation (2026-09-27). Today mode 'all' applies within one registration (1-16 runs), but a session may hold several waits and gets one resume per wait. Preferred form (Fable): leave wait records unchanged and join at consumption, i.e. resume a session once, with one prompt, when every one of its pending waits is satisfied. That needs no record change and no new event (merging records would change a record the spec calls immutable and emit consume plus create at one revision, the shape behind tm-ncc6.8.6). Open decisions: how 'any' waits combine with 'all' (refuse a mismatch or drop 'any'); the 16-run and 48 KiB bounds apply to the union; cancellation and title semantics. Several sessions must still be able to wait on one run. Do after tm-ncc6.8.6 lands. Rejected for now: 2c (a newer run supersedes an older one and inherits its waiters). A newer run need not cover the same checks and could hide an earlier failure; if ever done, it needs explicit equivalence, same-owner scope, and a resume prompt naming both runs.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

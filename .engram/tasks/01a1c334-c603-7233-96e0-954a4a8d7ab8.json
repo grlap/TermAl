@@ -1,0 +1,31 @@
+{
+  "id": "01a1c334-c603-7233-96e0-954a4a8d7ab8",
+  "external_ref": null,
+  "title": "Integrate combo34 on 1d63b37a: Claude output Unicode cut test (w-c26c), Windows temp alias fixture (w-c80f), native fixture panic cleanup (w-3963 r7)",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo34 on 1d63b37a: Claude output Unicode cut test (w-c26c), Windows temp alias fixture (w-c80f), native fixture panic cleanup (w-3963 r7) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo34 146764d4 landed on master as a fast-forward from 1d63b37a. It holds test-only changes: the Unicode output-cut test (w-c26c), the Windows temp-alias fixture (w-c80f) and fixture panic cleanup (w-3963 r7). Gated by Windows B FULL test-ec10c722 on tree e95da553: eligible, fingerprints equal, six stages passed. Pushed at 03:06:49Z; test ref deleted. Installed on Central (93279cd0) and DL560 (4c481223), both unchanged because the change is test-only. Composite pair clean; its Low is filed as w-36cc9076a5ec. No acceptance evaluation exists; this is self-asserted under TermAl's evaluation-off policy.",
+    "completed_at": "2026-11-10T03:12:54.989375Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

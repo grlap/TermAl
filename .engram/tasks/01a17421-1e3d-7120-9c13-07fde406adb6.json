@@ -1,0 +1,29 @@
+{
+  "id": "01a17421-1e3d-7120-9c13-07fde406adb6",
+  "external_ref": null,
+  "title": "Clarify executor diagnostics availability reasons and response enum values",
+  "outcome": "Clarify executor diagnostics availability reasons and response enum values",
+  "acceptance": [
+    "Documentation explains authority-guard refusal meaning and relevant response fields/enum values/error statuses without implying delivery or runtime acceptance from queue or processed state.",
+    "Focused documentation/source checks and independent review cover the final wording."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "observability",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173f0-87db-7522-aab0-16cbff19cd11",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

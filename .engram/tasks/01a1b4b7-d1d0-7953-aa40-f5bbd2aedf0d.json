@@ -1,0 +1,31 @@
+{
+  "id": "01a1b4b7-d1d0-7953-aa40-f5bbd2aedf0d",
+  "external_ref": null,
+  "title": "Workspace watcher publishes every file and directory of a new Git-ignored worktree tree to the session's 'Workspace changes during turn' panel",
+  "outcome": "Creating a large, Git-ignored tree inside a watched root (for example a new `.worktrees/<name>` checkout) does not publish an entry per file and directory to a session's 'Workspace changes during turn' panel. Ignored paths are filtered at the source, without enumerating the tree and without a new costly scan. Real changes to tracked or untracked, non-ignored files in the session's own worktree stay visible.",
+  "acceptance": [
+    "Through production watcher/attribution/publication, a Git-ignored subtree created inside a watched repository (including .worktrees/<name>) does not produce per-file or per-directory changes in the ancestor session turn summary or UI event stream.",
+    "Tracked and non-ignored untracked changes in the session own worktree remain visible; an independently active nested worktree under a parent-ignored directory retains its own real changes, without attributing the whole new checkout to the ancestor session.",
+    "The filter runs before excess turn-summary/UI materialization, without recursive tree enumeration, a Git subprocess per event, or new costly monitoring; check-credit ordering and conservative coverage are preserved. Large change sets are coalesced before transport and the UI into bounded summaries with counts and a small path sample, instead of one entry per file, while covering invalidations preserve meaningful own-worktree refreshes.",
+    "Behavioural regression tests exercise ignored-subtree suppression and positive own/nested-worktree cases through the production path, first demonstrate RED on the pre-fix code, then pass with the fix; required focused checks, independent review pair and exact-input FULL pass under standing rules."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "ui",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

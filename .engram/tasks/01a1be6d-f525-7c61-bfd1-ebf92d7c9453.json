@@ -1,0 +1,37 @@
+{
+  "id": "01a1be6d-f525-7c61-bfd1-ebf92d7c9453",
+  "external_ref": null,
+  "title": "Project dropdown too narrow since the host filter: open list is half the session panel and cuts off paths",
+  "outcome": "The open Project list spans the whole session panel, within its bounds, whatever the button's width, while the Project and Host controls can stay side by side.",
+  "acceptance": [
+    "The open Project list is as wide as the session panel, stays inside it, and follows panel width changes; paths aren't cut off by the half-width button. A behaviour test or a recorded real-view check covers this.",
+    "There is no horizontal overflow, overlay and scrolling behave properly, and selecting by mouse and keyboard still works.",
+    "No extra queries and no performance regression. Review pair with no Medium or higher, and the normal checks and gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "regression",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed Sessions Project list anchored across panel scope, responsive bounds/path wrapping, preserved mouse/keyboard/scroll behavior; real-App A/B and scoped tests recorded.",
+    "completed_at": "2026-11-09T07:43:42.597501400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

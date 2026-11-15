@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c77e-7f62-b6ba-6428e6326b26",
+  "external_ref": "tm-uw7j.4",
+  "title": "Allow Engram ledger repair and deletion beyond the unconfirmed cap",
+  "outcome": "The retired-authority preflight rejects every settings mutation and project deletion once a store exceeds MAX_UNCONFIRMED_RETIRED_ENGRAM_GRANTS_PER_STORE. If the recorded Engram binary path is permanently unavailable, the operator cannot point the project at a repaired binary and cannot delete the project, so fail-closed retention becomes an unrecoverable 409 lockout. Preserve the 16-entry protection for mutations that add another unconfirmed grant, while allowing repair-only mutations and deletion to converge without dropping or confirming pending tombstones.",
+  "acceptance": [
+    "A store above the unconfirmed cap can update only the fields needed to restore a runnable Engram target and can delete the project; neither path drops unconfirmed entries or accepts a new grant hash; a repaired target retries pending revocations; deterministic tests cover repair and deletion above the cap."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

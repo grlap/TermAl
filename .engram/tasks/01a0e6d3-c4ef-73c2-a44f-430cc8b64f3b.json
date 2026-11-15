@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4ef-73c2-a44f-430cc8b64f3b",
+  "external_ref": "tm-dqbv",
+  "title": "Composer and MCP parsers disagree on Unicode whitespace around the slash-command -- separator",
+  "outcome": "Found by the Claude /review-code of tm-p619 (delegation-d65b3097, 2026-09-25). The difference predates tm-p619; the old UI regex also used /\\s/u.\n\nThe UI's splitAgentCommandResolverTail (ui/src/panels/session-agent-command-submission.ts, around line 55) accepts any Unicode whitespace (/\\s/u: U+2003, U+00A0, U+3000, \\v) around `--`. The MCP bridge's split_mcp_agent_command_tail (src/delegation_mcp.rs, around line 2887) accepts only ASCII whitespace, and a Rust test pins `staged\\u{2003}--\\u{2003}include tests` as not splitting. So the same `/review-code ... -- ...` text can resolve differently from the composer than from termal_spawn_session. Native commands reject notes, so one path can fail with 400 while the other works.\n\ntm-p619's new UI comment (\"Match the MCP parser: ...\") is about the backtick rule, which does match, but it reads as full parity.\n\nFix: use an ASCII whitespace class ([\\t\\n\\f\\r ]) in the UI check, or else document the difference and narrow the comment. Add em-space and NBSP cases to both the Rust and the Vitest tables. See also the shared-fixture follow-up.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

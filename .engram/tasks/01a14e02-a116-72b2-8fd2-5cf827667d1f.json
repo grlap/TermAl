@@ -1,0 +1,31 @@
+{
+  "id": "01a14e02-a116-72b2-8fd2-5cf827667d1f",
+  "external_ref": null,
+  "title": "Supervised pilot, colleague machine: Greg's run at the chosen tier, readiness check, workaround acknowledgement, previous build kept and rollback drilled once",
+  "outcome": "Supervised pilot, colleague machine: Greg's run at the chosen tier, readiness check, workaround acknowledgement, previous build kept and rollback drilled once",
+  "acceptance": [
+    "Greg's own run on the colleague's machine at the chosen tier (I1 or I2) is recorded with its outcome and locator, per the supervised-pilot-onboarding brief §8.",
+    "The readiness check passes on the colleague's machine, recorded with its output locator.",
+    "The supervisor names the two documented workarounds and the restart effects to the colleague, recorded with the acknowledgement locator.",
+    "The previous build is kept on the colleague's machine and the rollback in brief §2 is drilled once, recorded with the build hashes and the drill outcome.",
+    "All four are recorded before the colleague is invited; no invitation is sent while any is open."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "onboarding",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

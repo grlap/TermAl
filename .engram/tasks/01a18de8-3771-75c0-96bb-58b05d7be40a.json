@@ -1,0 +1,37 @@
+{
+  "id": "01a18de8-3771-75c0-96bb-58b05d7be40a",
+  "external_ref": null,
+  "title": "Acceptance evidence reads validate full record ids and check fingerprints with the 8–64-hex citation-locator check instead of the record-id and SHA-256 validators",
+  "outcome": "Acceptance evidence reads validate full record ids and check fingerprints with the 8–64-hex citation-locator check instead of the record-id and SHA-256 validators",
+  "acceptance": [
+    "Full Engram record ids read for acceptance evidence (obligation definition, triggering observation, resolution record, bound verification and sighting, verification record and producer record) are validated with is_engram_record_id, check fingerprints with the existing SHA-256 validator, and is_citable_acceptance_locator remains only for user/evaluator citation locators",
+    "Deterministic tests show a too-short or wrong-kind value in each of those fields is refused while valid 32-hex and legacy 64-hex record ids and 64-hex fingerprints are accepted, and existing citation-locator behaviour is unchanged",
+    "Exact-input focused tests, the maintained full gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "id-contract"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Full record-ID and SHA-256 validation landed in combo40; generated field-refusal tests, independent pair and six-stage exact-tree gate passed.",
+    "completed_at": "2026-11-10T18:27:59.531836600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

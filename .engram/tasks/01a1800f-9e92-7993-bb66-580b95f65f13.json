@@ -1,0 +1,30 @@
+{
+  "id": "01a1800f-9e92-7993-bb66-580b95f65f13",
+  "external_ref": null,
+  "title": "Running TermAl host process grows to 27 GiB committed memory within ~1h40m of restart (8 GiB in the last ~4 minutes)",
+  "outcome": "The cause of the running host's committed-memory growth is identified, from host diagnostics and not guesswork, and fixed or bounded, so a long-running host does not exhaust system commit.",
+  "acceptance": [
+    "A diagnosis note names the component retaining the memory, with evidence: allocation or heap diagnostics, or a reproduction with a measured growth curve. It distinguishes a leak from expected caching.",
+    "A fix or bound lands under the standing rule, with a regression test or a measured long-run check showing bounded growth.",
+    "A post-restart observation on the installed build shows committed memory stays bounded under ordinary multi-session load."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-visible",
+    "host-stability",
+    "memory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

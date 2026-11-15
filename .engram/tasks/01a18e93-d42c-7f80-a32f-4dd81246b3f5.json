@@ -1,0 +1,27 @@
+{
+  "id": "01a18e93-d42c-7f80-a32f-4dd81246b3f5",
+  "external_ref": null,
+  "title": "Duplicate federation delivery receipt at the home hard-codes notificationDisposition durableButNotWoken instead of the original's at-send outcome",
+  "outcome": "A duplicate federation delivery at the mailbox home returns the original message's stored dispatch outcome as notificationDisposition, so the send result's AT SEND TIME line names the original's wake outcome.",
+  "acceptance": [
+    "Duplicate federation delivery receipt at the home hard-codes notificationDisposition durableButNotWoken instead of the original's at-send outcome is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "agent-ux",
+    "cross-machine"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

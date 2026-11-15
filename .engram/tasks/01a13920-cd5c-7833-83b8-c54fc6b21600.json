@@ -1,0 +1,28 @@
+{
+  "id": "01a13920-cd5c-7833-83b8-c54fc6b21600",
+  "external_ref": null,
+  "title": "Retain an exact launcher artifact association across unrelated concurrent observation updates",
+  "outcome": "src/test_run_artifacts.rs:155 discards its only output-derived locator when any unrelated row field changes during off-lock filesystem validation. Reapply under the existing guard after immutable owner/execution/artifact conflict checks; preserve current evidence/durability/gap fields and fail closed on actual identity change.",
+  "acceptance": [
+    "Retain an exact launcher artifact association across unrelated concurrent observation updates is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "stage-1-registry",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

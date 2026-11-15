@@ -1,0 +1,27 @@
+{
+  "id": "01a11e6a-3f5a-7f13-9340-32e08428722e",
+  "external_ref": null,
+  "title": "A server start right after the previous one exits can be refused on Windows, naming the exited holder",
+  "outcome": "A server start just after the previous holder of the data directory's instance lock exited either succeeds or says that the previous holder has exited and to retry, instead of telling the user to stop a process that is gone. The lock alone still decides admission.",
+  "acceptance": [
+    "A server start right after the previous one exits can be refused on Windows, naming the exited holder is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-boot",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

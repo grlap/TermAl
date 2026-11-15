@@ -1,0 +1,28 @@
+{
+  "id": "01a12a5f-8e0b-7362-bb1b-5c58f12ea7e4",
+  "external_ref": null,
+  "title": "Add tests for a pending prepared begin's re-acknowledgement meeting WriteFailed (stays pending) and WorkerStopped (withdrawn into the hold)",
+  "outcome": "Two scripted-writer tests cover the untested pending-kind branches of prepare_engram_begin_durable. First, Deadline then WriteFailed: the same key, grant and tokens stay pending, and no rebind happens. Second, Deadline then WorkerStopped (or Shutdown/Superseded): the record is withdrawn, the begin_preparation_unacknowledged hold is set, and nothing is sent.",
+  "acceptance": [
+    "Add tests for a pending prepared begin's re-acknowledgement meeting WriteFailed (stays pending) and WorkerStopped (withdrawn into the hold) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

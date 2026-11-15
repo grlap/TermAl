@@ -1,0 +1,27 @@
+{
+  "id": "01a19676-706b-76d3-8724-9d46a44e86d1",
+  "external_ref": null,
+  "title": "Import-reconciliation activation and adoption: require the live state's exact known metadata generation, not only refuse a newer one",
+  "outcome": "The activation commits only on top of the metadata generation the live state knows (exact predecessor), or adoption accepts only committed_generation == known + 1 (or == known for an idempotent re-adopt), so adoption can never move metadata_predecessor past durable content the live state never adopted.",
+  "acceptance": [
+    "Import-reconciliation activation and adoption: require the live state's exact known metadata generation, not only refuse a newer one is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-import-reconciliation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

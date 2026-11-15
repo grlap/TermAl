@@ -1,0 +1,29 @@
+{
+  "id": "01a19eca-2297-7292-a11f-30ad5d74b7dd",
+  "external_ref": null,
+  "title": "Keep the historical obligation-ledger corpus as a regression guard",
+  "outcome": "TermAl's test suite keeps a compact, portable set of obligation ledgers written by the gated builds. A change to the historical validators that would refuse one of those shapes, as a ledger or as a whole store with its session-row mirrors, fails a test. A malformed ledger or mirror is still refused, and the refusal writes nothing.",
+  "acceptance": [
+    "A committed fixture set under src/tests/fixtures holds gated-era obligation ledgers chosen to keep every shape feature of the full corpus, except the two capacity-limit fixtures (65536 attempts; a near-64 MiB extension field). It contains no machine-local path or user name, and paths are resolved per platform at test time.",
+    "Tests on master show that each fixture decodes and re-encodes its checkpoint operations exactly, and that a store holding it with its session-row mirrors loads through ensure_sqlite_state_schema_for_load.",
+    "Tests show that an unknown entry kind, an unknown entry field and an unprotected session mirror are each refused, with total_changes and the stored metadata unchanged.",
+    "The return is source only: a tree with before/after blobs and a patch, handed to the integration owner, with no landing in this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

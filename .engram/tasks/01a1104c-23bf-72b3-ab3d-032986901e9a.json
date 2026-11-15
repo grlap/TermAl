@@ -1,0 +1,28 @@
+{
+  "id": "01a1104c-23bf-72b3-ab3d-032986901e9a",
+  "external_ref": null,
+  "title": "Clear exact unsent reviewer turn-start markers on late admission refusal",
+  "outcome": "Low in both Pair7 results src/codex.rs:1895. Pending request ID and turn-local clear precede late gate/current/failure checks; refusal leaves an unsent marker without pending RPC/watchdog. Move arming after checks or clear only exact request/generation ownership. Add a synchronized late-cut witness; preserve ordinary check-to-write policy. Inventory only: no assigned implementation owner or scheduled trigger. Holder must establish concurred acceptance before evaluation.",
+  "acceptance": [
+    "Clear exact unsent reviewer turn-start markers on late admission refusal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a1712c-28ea-7bb2-a4c7-413dd9d8d70a",
+  "external_ref": null,
+  "title": "w-65af removal execution: remove registered worktrees and merged branches that pass predicates P1–P6 (emergency, Greg #1789)",
+  "outcome": "w-65af removal execution: remove registered worktrees and merged branches that pass predicates P1–P6 (emergency, Greg #1789)",
+  "acceptance": [
+    "Every removed worktree passed P1–P6 (parent note, 2026-10-25 03:55Z) when checked live immediately before removal, and was removed with `git worktree remove` without --force. Every merged local branch was deleted only with `git branch -d`.",
+    "C:\\github\\Personal\\TermAl\\.evidence\\w-65af-removal\\log.csv records path, size, predicate results and action for every entry, and the item records the before/after counts and free space.",
+    "No dirty or unpushed worktree, protected root, .evidence entry or main-checkout staged file was touched."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 0,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "hygiene",
+    "worktrees"
+  ],
+  "assigned_to": "Termal::Opus3",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a16ec8-3954-7023-98c7-65afd9cec452",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; Non-code execution complete (no commit): d921c592 records 2 safe worktree removals, 11 branch deletions/cache pass + logs/counts. Closure/custody reconciliation only; not new deletion authority.",
+    "completed_at": "2026-11-08T19:21:42.237318800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

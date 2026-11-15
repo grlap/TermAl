@@ -1,0 +1,30 @@
+{
+  "id": "01a18936-a645-71c1-bffa-c28b1a5f287a",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance refuses with 'no sighting of named source root' although the root was named before edits and later checkpoints were taken (Kimi session, Engram project, 2026-10-29)",
+  "outcome": "A session that names its source root before editing and then checkpoints has a named-root sighting at the evidence basis, so termal_evaluate_acceptance can run. Where a runtime cannot produce sightings, the host says so in a typed, actionable way at naming time, not only at evaluation time.",
+  "acceptance": [
+    "A cause note identifies why no sighting existed for generation 2219 at cuts 17 and 21 (runtime support, capture path, or checkpoint semantics), with file:line and evidence.",
+    "When a session names its source root during a turn, the naming response states that the root takes effect at the session's next turn and that acceptance evaluation needs a later turn that opens in the named root. An acceptance evaluation requested before any turn has opened in the newly named root is refused before the Engram read, with a typed, actionable reason saying so. The refusal for an absent sighting names, as its remedy, a turn that opens in the named root after the naming. Deterministic tests cover: name mid-turn, then evaluate, gives the typed refusal; and after the next gated turn opens in the named root, the evaluation preflight proceeds past the sighting check.",
+    "When turn-gated control is off for the naming session's project, successful root naming includes a typed, actionable notice that another ordinary turn does not produce a mediated named-root sighting. If the normal sighting read returns absent, acceptance refuses with the same actionable limitation rather than prescribing a focus-only checkpoint as a guaranteed remedy. An existing matching sighting still permits preflight under OFF. Deterministic tests cover OFF naming, OFF absent-sighting refusal, OFF present-sighting success, and retain the gated naming-turn and later-opening controls. No automatic gating change, fabricated observation, sighting waiver or shell-touch requirement is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "source-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — Exact criteria prescribe turn-gated opening/OFF notices. Gating and those provider-admission branches were removed; EO sighting and committed-input cases are now separate current contracts. Source: src/engram_source_roots.rs:1840; docs/features/engram-host-adapter.md:3283. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

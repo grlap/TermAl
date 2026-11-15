@@ -1,0 +1,29 @@
+{
+  "id": "01a14ae3-a33d-7db1-ba57-3134bb6705c2",
+  "external_ref": null,
+  "title": "Cover the Cargo intermediate build directory in disk-space preflight",
+  "outcome": "The launcher accounts for CARGO_BUILD_BUILD_DIR, including path templates and Windows casing, or explicitly documents it as an unchecked location requiring coordinator capacity planning.",
+  "acceptance": [
+    "The supported Cargo build-directory contract is confirmed from primary documentation and the project's toolchain.",
+    "The disk-space preflight checks the effective intermediate-output filesystem, or docs/test.md explicitly names the unchecked selector and required planning.",
+    "Any implementation has focused tests for alternate output paths and preserves the full-only refusal policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1c382-d682-7521-8120-80b0d876c3c5",
+  "external_ref": null,
+  "title": "Cover native acceptance ordering across multiple runs and retained unheld requesters",
+  "outcome": "Behavioral tests establish native-specific newest-terminal selection and the retained unheld requester admission fences using production registration and acknowledgement seams.",
+  "acceptance": [
+    "Tests with multiple real native registrations cover another-commit skip, pending native before older acknowledged PASS, and newer native FAIL superseding older native PASS.",
+    "Tests cover mixed launcher/native ordering and an unheld retained-root requester, including the canonical sighting guard and refusals without evaluator admission."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "declared-commands",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

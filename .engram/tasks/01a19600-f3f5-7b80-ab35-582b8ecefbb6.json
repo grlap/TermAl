@@ -1,0 +1,29 @@
+{
+  "id": "01a19600-f3f5-7b80-ab35-582b8ecefbb6",
+  "external_ref": null,
+  "title": "Naming's control-OFF flagged-token re-bind does not check the boot-recovery fence the owed-bind rebinder checks",
+  "outcome": "Source-root naming's re-bind of a flagged token never races a lazy boot recovery. Either it refuses while engram_boot_recovery_pending or engram_boot_recovery_retry_in_progress is set, as the control-OFF owed-bind rebinder does, or the coordinator has recorded why the turn-dispatch fence makes that unreachable.",
+  "acceptance": [
+    "bind_fresh_engram_source_root_until refuses a flagged-token re-bind while engram_boot_recovery_pending or engram_boot_recovery_retry_in_progress is set, with a test; or the coordinator has recorded in a note why the turn-dispatch fence makes it unreachable",
+    "the change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "control-off",
+    "engram-control-transport",
+    "found-by-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

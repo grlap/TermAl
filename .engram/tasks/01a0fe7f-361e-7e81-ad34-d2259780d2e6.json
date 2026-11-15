@@ -1,0 +1,50 @@
+{
+  "id": "01a0fe7f-361e-7e81-ad34-d2259780d2e6",
+  "external_ref": null,
+  "title": "ClaimedRoot fixture drops its state while detached check-capture workers still run in its worktree, so the temp root is not removed",
+  "outcome": "ClaimedRoot tests no longer leave a capture worker (basis snapshot or toolchain probe) running in the fixture worktree when their temp root is dropped, so the root and its owner marker are always removed.",
+  "acceptance": [
+    "A deterministic witness first fails on the unmodified fixture: with one of the fixture session's capture workers held running, the ClaimedRoot fixture's teardown removes its temporary root before that worker finishes.",
+    "The fix changes only test fixtures: ClaimedRoot settles every capture worker its session started (its capture_workers count reaches zero) before its state drops, failing a hung worker by a watchdog, and gives the checks it starts the fixture toolchain label so no host rustup runs; product capture, its worker limit and its real-path tests are unchanged.",
+    "The full five-stage gate passes on the combined input with no run-root leftover attributed to these tests; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-blocker",
+    "temp-root-leak",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The ClaimedRoot fixture settles every capture worker its session started before its state drops (a watchdog fails a hung one), and gives its checks the fixture toolchain label so no host rustup runs. The change is test-only. Landed in 7f10cfb + c5a1f2978a337f62e9644f431d281b84e9342f9c via train-18 merge 5c6f6dd42c5c00511b280ff14db2c53f4560a1e0. Evaluation 6cbae38dd0394a41a343e984c9452f09 passed 3/3.",
+    "completed_at": "2026-10-03T03:07:30.979517300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

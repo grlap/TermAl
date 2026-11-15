@@ -1,0 +1,31 @@
+{
+  "id": "01a1a60b-9c2f-7d32-8b35-9fef5f1c9bbd",
+  "external_ref": null,
+  "title": "Gate the inherited-pipe deadline witness on actual descendant readiness",
+  "outcome": "The held-pipe deadline test establishes its real readiness precondition before triggering the deadline condition, without relying on two process starts completing within five seconds or increasing timeouts to obtain green.",
+  "acceptance": [
+    "Gate the inherited-pipe deadline witness on actual descendant readiness is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-finding",
+    "source-revision",
+    "team-pilot",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

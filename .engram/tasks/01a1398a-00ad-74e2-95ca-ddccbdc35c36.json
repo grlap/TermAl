@@ -1,0 +1,27 @@
+{
+  "id": "01a1398a-00ad-74e2-95ca-ddccbdc35c36",
+  "external_ref": null,
+  "title": "Clarify completed test-run evidence lifecycle without a named-root generation",
+  "outcome": "Define and verify conservative completion handling when a legitimate bound work basis has no named-root generation, without treating unrelated or stale reads as completion.",
+  "acceptance": [
+    "Clarify completed test-run evidence lifecycle without a named-root generation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

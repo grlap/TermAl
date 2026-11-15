@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c560-7192-8c99-360274dc863c",
+  "external_ref": "tm-m3u3",
+  "title": "Keep slash-command arguments when the prompt template has no $ARGUMENTS slot",
+  "outcome": "Reported by Engram::Opus (2026-09-26, review round 5, 14:02-14:04 local). termal_spawn_session (mode reviewer, readOnly) was called with a one-line prompt: \"/review-code Round 5 of ... fingerprint ... manifest ...\". TermAl expanded .claude/commands/review-code.md, which has no $ARGUMENTS slot, and dropped the rest of the line without any warning, so neither reviewer received the freeze literal. Affected: delegations b92ccea8 (Codex, session-7811) and 70c7be9a (Claude, session-7812). Workaround used: a multi-line brief telling the child to read the command file (delegation b574dd1d).\n\nMechanism, confirmed in code: src/workspace_queries.rs resolve_agent_command_payload, PromptTemplate branch. It runs content.split(\"$ARGUMENTS\").join(arguments), so a template without the placeholder loses the arguments.\n\nWanted: arguments are never dropped silently. Either append them to the expanded prompt when the template has no slot, or refuse the request with an error that names the command. Acceptance: a unit test where a template without $ARGUMENTS plus non-empty arguments either keeps the arguments or returns an error; nothing is lost silently.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

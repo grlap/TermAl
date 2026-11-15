@@ -1,0 +1,41 @@
+{
+  "id": "01a19d10-512c-7791-9cfd-74bb5efc2d7a",
+  "external_ref": null,
+  "title": "Preserve the exact restored receipt Resume through its own write-ahead transition",
+  "outcome": "Source-only P7 repair on composed50226370: a promoted known-unsent receipted entry keeps its exact Resume ownership after Pending becomes HandingOff, without replaying an unowned or ambiguous entry.",
+  "acceptance": [
+    "After the selected promoted receipt moves Pending to HandingOff, existing resume and write-ahead continuation paths recognize that exact stored resume identity, nonce, content, generation, stop and pause; master continuation rationale is recorded, with no blanket replay and no P20 or f8a9 change.",
+    "Keep the original round_five regression unchanged and add a focused negative proving a HandingOff entry not owned by the matching Resume remains rejected.",
+    "Return an immutable source-only scoped patch from a fresh named root based on502263704cf4429911dd3a58560d64fc4eb5e7c4 to Sol-03d4 and Fable2, with exact identities and no Cargo/tests/compiler execution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gated-control",
+    "greg-directed",
+    "ordinary-resume",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Returned immutable P7 source TREE7fb5e294 on composed502, exact existing receipt/selector/owner repair plus unowned HandingOff negative; no runs. Sol-03d4#312/Fable2095 carry source package.",
+    "completed_at": "2026-11-02T16:32:28.894427900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

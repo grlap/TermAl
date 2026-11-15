@@ -1,0 +1,35 @@
+{
+  "id": "01a0e6d3-c543-7613-a73e-5599b39bb8cd",
+  "external_ref": "tm-k90q",
+  "title": "Remove the beads ids that the source-root landing put in code comments (3ced0fc, 507ac05)",
+  "outcome": "Greg's coding convention (bd memory code-comments-no-beads-ids, 2026-08-14): never put Beads ids in source comments, identifiers or user-facing copy. Comments must explain the invariant in self-contained language, and ids belong in Beads, commits and review notes only. The source-root landing broke this; Termal::Opus found it at handover, 2026-09-27.\nLines added in 0d54fd1..507ac05 (git diff 0d54fd1 507ac05 -- src ui, then grep for tm-), 12 lines in 10 files:\n- src/delegation_mcp_source_root.rs: 3 (header 'tm-5gi4 phase 2' and 'tm-dy69'; doc of source_root_tool_definition)\n- src/engram_source_roots.rs: 1 ('tm-5gi4 phase 2, Greg's option B')\n- src/session_crud.rs: 1 (fence-gate comment '(tm-gcs8)')\n- src/tests/acceptance_evaluation_source.rs, engram_control_transport.rs ('(tm-menr)'), engram_host_adapter.rs ('(tm-gcs8)'), engram_source_root_naming.rs, engram_source_roots.rs, engram_turn_observations.rs: 1 each\n- ui/src/message-cards.tsx: 1 ('(tm-5gi4 phase 2)')\nFix: reword each comment to say what it means without the id, for example 'named source roots' in place of 'tm-5gi4 phase 2'. Comment-only change, so the normal gate and review pair apply. docs/features already cite beads ids, as elsewhere; leave them.",
+  "acceptance": [
+    "No Beads id remains in the code comments, identifiers or user-facing strings the source-root landing (3ced0fc, 507ac05) added under src/ and ui/src/, and no line added under those directories from 0d54fd1 through the final source revision carries one, shown by an executor check cited in a note (Beads ids older than 0d54fd1 are outside this item)"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered by commit e5bac803db8ed4ce84daf78c1c1d34df7feae422 (parent 507ac05): the beads ids that 3ced0fc and 507ac05 put in source comments are reworded away, a comment-only change; gate test-084f1b77 PASS 5/5 and a clean round-2 review pair, then Termal::Fable2's exact-delta review (completion note bce9a964ec2744e991894f5b874babf3). Executor check at 99d262e (note cd30f458395c41f5bf1bc797e3fd5abd): none of tm-5gi4, tm-dy69, tm-gcs8, tm-menr remains under src or ui/src, and no line added there from 0d54fd1 through 99d262e carries a beads id. Criterion 1 passed by the independent evaluator (Codex session-8289, delegation-66c2c6dc, recorded 07:17:50Z). Older ids outside this item's range are tm-84nm (w-ce333e4d7ccf).",
+    "completed_at": "2026-09-28T07:18:07.343932100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

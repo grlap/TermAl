@@ -1,0 +1,43 @@
+{
+  "id": "01a16e26-90bb-78d3-98d7-bd747ae81969",
+  "external_ref": null,
+  "title": "Full gate: federation_reference_durability_pending_commit_is_not_visible_or_reloadable failed with 500 (PermissionDenied stat on its own termal.sqlite-wal)",
+  "outcome": "The test passes deterministically on Windows under gate load. The cause of the 500 is classified with evidence (product, test/runner, or environment), and a confirmed defect is fixed without weakening the test.",
+  "acceptance": [
+    "The original federation-reference publication HTTP 500 is classified using the preserved failure log and a source-traced causal account, explicitly distinguishing a WAL delete-pending or sharing condition from external interference and test-isolation overlap; unavailable historical observations are identified rather than inferred.",
+    "A deterministic Windows regression reproduces the confirmed condition before the correction and passes afterward through the production publication path. Publication still honors the existing durability boundary: pending commits remain invisible and non-reloadable until acknowledged, and genuine permission, path-identity and other I/O failures remain fail-closed. The correction adds no retry loop, timeout inflation, ignored or weakened test, storage-floor change, or durability/authority bypass.",
+    "Host-recorded focused compile and tests covering the reproducer, the original durability regression and relevant I/O refusal controls pass on the exact proposed input. Independent read-only Codex and Claude reviews of that input have no outstanding in-scope Medium-or-higher finding, and every earlier such finding is fixed and re-reviewed. Integration and landing remain subject to the standing exact-input full-gate and acceptance rules."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "gate-failure",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

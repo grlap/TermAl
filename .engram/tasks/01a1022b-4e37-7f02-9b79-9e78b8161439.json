@@ -1,0 +1,28 @@
+{
+  "id": "01a1022b-4e37-7f02-9b79-9e78b8161439",
+  "external_ref": null,
+  "title": "A carried full gate is silently stranded when the session's focus moves to another item before it settles, so done on the gate's item records untested_changes",
+  "outcome": "A gate launched for one item reaches that item's verification even if the session works on another item while the gate runs. If that cannot be done, the host says plainly, at the moment focus moves and again before done, that the carried gate will settle only at a checkpoint of a turn bound to the original claim, and that it is lost if that item completes first.",
+  "acceptance": [
+    "A carried full gate is silently stranded when the session's focus moves to another item before it settles, so done on the gate's item records untested_changes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

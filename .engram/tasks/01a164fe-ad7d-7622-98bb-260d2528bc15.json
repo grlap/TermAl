@@ -1,0 +1,44 @@
+{
+  "id": "01a164fe-ad7d-7622-98bb-260d2528bc15",
+  "external_ref": null,
+  "title": "Admission retries re-run a full evaluate inside the 20 s dispatch budget shared with the durability fence, so when evaluate plus fence exceed it every attempt fails the same way and the grant expires (2026-10-22 17:46-17:49Z)",
+  "outcome": "An automatic re-admission adapts to the latency the host is observing instead of repeating a doomed attempt: when an evaluate or the durability fence alone has just exceeded the shared ENGRAM_DISPATCH_BUDGET_MS (20,000 ms, engram_host_adapter.rs:16-27), the next attempt is not started on the same schedule only to be withheld again at the same boundary, a grant issued by a successful evaluate is not left to expire behind a fence wait, and the operator can see why the host is waiting.",
+  "acceptance": [
+    "A measurement note from the running host records, for one held session, each attempt's evaluate, admission-fence and total latency against the 20 s budget and the writer tick state at the time, and names the code path that scheduled the next attempt without regard to the previous attempt's measured latency (engram_admission_retry.rs schedule_engram_admission_retry_locked and the budget clipping in engram_queued_admission.rs:411-421).",
+    "With the fix, a still-gated retained head whose typed withheld outcome records exhaustion of the admission-attempt budget is not retried on an unchanged schedule into the same outcome: the host waits for a defined relevant observed condition to clear, uses a bounded documented continuation with verified validity, or holds with a card naming the attempt, measured evaluate (which includes the admission fence), separate fence, total, configured budget and retry condition, without resetting the original head/window. Ordinary proven-unsent fail-open, explicit Refuse/Defer and possibly transmitted operations retain their distinct semantics. For an issued grant whose first Begin is proven never sent, the host promptly attempts exact-owner rebind retirement once under the existing bounded control-call cap, excluding a competing first Begin and without a new Evaluate or timeout/lease inflation; in a deterministic responsive-producer case retirement is confirmed before the producer's authoritative test-clock expiry. Failed, lost or late retirement preserves its exact unresolved identity and never reports released without matching confirmation and durable local settlement. Possibly-sent or restart-ambiguous Begin retains exact replay and cannot be retired from a guessed TTL or status-only inference. Deterministic clock-seam tests cover the responsive, loss, restart, stale-owner and Begin/retirement race cuts, with no synthetic load. No universal use-or-release-before-expiry guarantee is claimed for an expiry-less response during outages or delays.",
+    "The full five-stage gate passes on the exact committed tree with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "gate-load",
+    "p0-profiling-2026-10-22",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

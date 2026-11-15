@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c50a-7f43-868d-37a5f1796658",
+  "external_ref": "tm-g6h",
+  "title": "Thread-setup test uses try_recv() where a bounded recv_timeout is needed; Superseded branch untested",
+  "outcome": "From round-4 review of the Codex thread-setup work.\n\n(1) Codex M2 — prompt_during_codex_thread_setup_does_not_start_a_second_thread calls input_rx.try_recv() immediately after the first asynchronous handoff to assert no SECOND StartTurnAfterSetup arrives. A second handoff could land just afterwards and the assertion would still pass (false positive). Use a bounded recv_timeout, or synchronise on the waiter, before asserting absence.\n\n(2) Claude M2 — CodexThreadSetupCompletion::Superseded has no direct test. It is now only reachable via detach/reset (a prompt never supersedes an in-flight setup), and it disowns the thread by suppressing it. Worth pinning: detach mid-setup -> the waiter's response lands -> thread is suppressed, no turn is started, no stale binding is left.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a1a56e-d580-7343-984b-afeb934a4b3c",
+  "external_ref": null,
+  "title": "Settled observation reports are never removed, so a session row grows with every traced turn",
+  "outcome": "A settled execution observation report stops occupying a session's persisted row, or the retained reports are bounded, so a long-lived session's row doesn't grow with each traced turn. A test pins it.",
+  "acceptance": [
+    "Reports Engram answered definitively on every envelope (Recorded or Refused) are bounded in EngramSessionState.unadmitted_reports, while a report with a pending or locally failed envelope keeps its exact bytes; retention of locally failed reports belongs to w-19ece3f27021.",
+    "A test shows a session's report count or row size stays bounded across many traced turns whose reports settle, and that a pending report survives compaction.",
+    "Anything that reads settled reports for its own purpose (engram_named_root_binding.rs:818, the idempotency check at engram_unadmitted_worker.rs:410, engram_unadmitted_lifecycle.rs:276, engram_source_observation_removal.rs:29-37) still behaves correctly, including not re-reporting a turn whose report was compacted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A session keeps only its newest 8 reports that Engram answered definitively, so a long-lived session's row stops growing with each traced turn; pending and locally failed reports keep their bytes. On master d47518ba, gated by test-bade87f1. Locally failed reports are w-19ece3f27021.",
+    "completed_at": "2026-11-04T10:22:11.015402300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

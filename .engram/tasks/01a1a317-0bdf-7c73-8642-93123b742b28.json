@@ -1,0 +1,28 @@
+{
+  "id": "01a1a317-0bdf-7c73-8642-93123b742b28",
+  "external_ref": null,
+  "title": "Retained-run settlement: refused_claims does not survive a restart, and recovery_reason is last-writer-wins",
+  "outcome": "A claim whose retained run was retired on claim_not_current_for_run keeps its disposition route across a restart: refused_claims persists, or is re-derived from retired_runs. A work's recovery_reason no longer loses a store-integrity alarm to a later transient failure, and no longer names a retired run while other runs remain retained.",
+  "acceptance": [
+    "Retained-run settlement: refused_claims does not survive a restart, and recovery_reason is last-writer-wins is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19ef7-c9f6-75a2-a139-426dcbda4467",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

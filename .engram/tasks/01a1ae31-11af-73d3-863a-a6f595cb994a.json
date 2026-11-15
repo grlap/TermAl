@@ -1,0 +1,30 @@
+{
+  "id": "01a1ae31-11af-73d3-863a-a6f595cb994a",
+  "external_ref": null,
+  "title": "TermAl host memory: grows by about 26 GB during runs that create large file trees, and sits at about 4 GB right after a restart",
+  "outcome": "It is established what the TermAl host allocates while a tracked launcher run with large fixture repositories is active. The host's memory stays bounded during such a run, with no growth proportional to the run's repository size or output. A test shows the bound.",
+  "acceptance": [
+    "The host's post-restart baseline (about 4 GB commit at 00:43Z on 2026-11-06, build from ed2b5e4d) is measured and broken down by major consumer, including the session count (w-b17b985f5dbc). It is either reduced, or each large part is justified with its numbers.",
+    "Live criterion, verified after a restart onto the fixed build: a Windows C4 live run with the Phoenix fixtures in an ordinary checkout path runs on Central with the host sampled, and the host stays within the stated bound."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

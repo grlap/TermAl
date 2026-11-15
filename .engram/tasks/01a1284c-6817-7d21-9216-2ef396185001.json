@@ -1,0 +1,39 @@
+{
+  "id": "01a1284c-6817-7d21-9216-2ef396185001",
+  "external_ref": null,
+  "title": "Cancel Resume reporters when revocation release drops callbacks for a mismatched runtime",
+  "outcome": "A Resume reporter carried by a deferred callback reaches one terminal or Unknown outcome when the revocation release discards that callback after its runtime token ceases to match. Reporter cancellation runs after StateInner is released.",
+  "acceptance": [
+    "The runtime-token mismatch branch of release_engram_mcp_runtime_revocations_without_teardown_locked preserves reporter disposal for off-lock cancellation, including all caller returns.",
+    "A discriminating regression proves the exact Scheduled feedback row settles once without provider delivery and no longer pins transcript trimming."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "reliability",
+    "resume-outcomes",
+    "retained-prompt",
+    "runtime-revocation",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12188-9cc9-7b60-9301-b21c5132848c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

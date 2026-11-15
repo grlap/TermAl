@@ -1,0 +1,30 @@
+{
+  "id": "01a186d0-2ca5-78d2-b4c7-f3487684116d",
+  "external_ref": null,
+  "title": "Amend CLAUDE.md and AGENTS.md: replace standing-rule condition 3 with the shared \"Autonomous landing and completion\" wording (v2)",
+  "outcome": "Amend CLAUDE.md and AGENTS.md: replace standing-rule condition 3 with the shared \"Autonomous landing and completion\" wording (v2)",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md each replace the standing rule's condition-3 paragraph with the exact shared v2 text \"AUTONOMOUS LANDING AND COMPLETION\" as recorded on this item (Engram::Architect3, TermAl mailbox 63096d00 #114), with no other operative change; any wording difference from the recorded v2 is a failure.",
+    "Before landing: both projects' coordinators (Engram::Fable and Termal::Fable2) have recorded concurrence on the exact v2 wording in this item's notes; Greg has been sent the exact wording and its consequence; Greg's recorded word supporting the widening is quoted verbatim with its source on this item; and no objection from Greg is recorded.",
+    "The final-diff audit required by /review-changes is recorded on this item as passed and names the input fingerprint of the reviewed and gated input, and the review pair has no outstanding Medium or higher finding on that input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "cross-project",
+    "governance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1d7a3-b955-7642-b00e-3fe51a9da5c2",
+  "external_ref": null,
+  "title": "Reuse Fixture::saved_session in the queued-promotion persistence witness",
+  "outcome": "The queued-promotion persistence witness uses the existing saved-session helper instead of maintaining a second SQL-row deserializer.",
+  "acceptance": [
+    "promote_queue_after_consumed_watermark uses Fixture::saved_session for its persisted-session reads, preserving the existing persistence/reload/receipt assertions and behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "persistence",
+    "review-low",
+    "test-hygiene"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

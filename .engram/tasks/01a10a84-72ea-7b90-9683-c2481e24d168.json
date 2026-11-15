@@ -1,0 +1,28 @@
+{
+  "id": "01a10a84-72ea-7b90-9683-c2481e24d168",
+  "external_ref": null,
+  "title": "Settle deferred runtime callbacks explicitly after a dedicated reset context changes",
+  "outcome": "Settle deferred runtime callbacks explicitly after a dedicated reset context changes",
+  "acceptance": [
+    "Settle deferred runtime callbacks explicitly after a dedicated reset context changes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "process-cleanup",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

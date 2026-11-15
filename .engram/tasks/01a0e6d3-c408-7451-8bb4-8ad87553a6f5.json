@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8ad87553a6f5",
+  "external_ref": "tm-7cu.43",
+  "title": "Idle bottom jitter: 1-2 px page-measurement changes bypass the resize deadband and keep repinning the bottom",
+  "outcome": "Greg reports (2026-09-06, via Termal::Scroll): a completed, idle session sitting at the bottom can oscillate a few pixels up and down with no agent output and no user interaction. Scroll's read-only diagnosis on HEAD 49aafb9 found a concrete inconsistency between two anti-jitter routes: ui/src/SessionPaneView.resize-measurement.ts (about line 17) suppresses idle content-height changes of 2 px or less while retaining the last handled baseline so real same-direction growth still accumulates, but ui/src/panels/virtualized-conversation-page-heights.ts (about lines 104-112) rounds the measured height and accepts a 1 px change, bumps layoutVersion and requests bottom restoration (about line 169); ui/src/panels/VirtualizedConversationMessageList.tsx (about lines 1847-1916) also requests a bottom repin on layoutVersion/totalHeight changes (about line 1903); ui/src/SessionPaneView.scroll.ts (about lines 989-1030) handles those requests without the idle deadband and calls scrollToLatestMessage(\"auto\", true), whose forced writer (about line 872) corrects differences above 0.5 px. The displayed conversation's ResizeObservers stay active after the agent finishes (virtualized-conversation-rendering.tsx about lines 176-190; AgentSessionPanel.tsx passes isActive for the displayed conversation, not the agent-running state). So alternating 1-2 px geometry changes can bypass the existing filter and keep producing bottom corrections at idle. The bypass is established by code reading; the source of the repeated geometry changes and Greg's exact live reproduction are NOT yet proven - do not describe this as a confirmed refresh loop. Task: first a regression covering the complete idle page-measurement -> repin -> scroll-writer path (red on HEAD), then unify the idle measurement tolerance/baseline across the repin routes while preserving real accumulated growth, immediate explicit Send/End/New-response navigation, streaming follow and the STAY invariants. Existing pure resize-helper tests do not cover this path. Owner: Termal::Scroll.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The idle jitter fix landed in cb1ee25 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c51b-7df2-8753-e4ea12b01b75",
+  "external_ref": "tm-h6uc",
+  "title": "Move Workspaces into the control-panel rail above Projects",
+  "outcome": "Direct Greg request in session-4982 with screenshots: treat workspaces like other sections, immediately above Projects; Codex designs and breaks down work, Termal::Grok implements. DESIGN: replace the large pane-bar Workspace popover with a normal Workspaces control-panel section. Use an outlined layout/windows icon, standard active indicator, tooltip and keyboard behavior. Default and first migration place Workspaces directly before Projects; preserve all existing user order and honor subsequent manual reorder. Normal panel header Workspaces, New workspace here (+), New window secondary action, Refresh; searchable compact list, current row first, remaining rows label/id alphabetical with id tiebreaker, Current badge. Main row shows label or short-id fallback, optional muted updated time; full UUID in accessible details/tooltip, never a dominant wide chip. Row main button switches here; separate overflow actions Rename, Open in new tab, Delete; preserve no open-new-tab/delete for current workspace and existing 80-char/empty-label rules, add explicit confirmation for delete, preserve failures inline. Existing backend/API/URL/storage/last-write-wins semantics do not change. Reuse app-workspace-layout handlers; no layout save/recovery rewrite. Scope v1: full dock section and rail reorder, not a new persisted workspace-list tab kind or drag-out launcher. Remove old popover only once access via the normal control panel remains available when dock is closed or moved. Tests cover old-order migration, CRUD/switch/new-tab safeguards, stale async results, keyboard/focus, narrow dock/long labels and left/right docking. No implementation by Codex in this planning handoff. Grok owns source changes, focused tests and docs; Codex owns final full gates and required Codex+Claude review. No commit/push/deploy/Beads close without further Greg instruction.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. Epic: all four children are closed; its work landed in f4ede4b (ancestor of master).",
+  "completion": null
+}

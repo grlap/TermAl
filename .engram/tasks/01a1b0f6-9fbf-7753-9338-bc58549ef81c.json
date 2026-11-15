@@ -1,0 +1,28 @@
+{
+  "id": "01a1b0f6-9fbf-7753-9338-bc58549ef81c",
+  "external_ref": null,
+  "title": "termal_get_session_result: a non-parent reader gets 409 'retained review result identity does not match a confirmed publication' for a resubmitted (attempt 2) Codex result the parent reads as published and validated",
+  "outcome": "An authorized non-parent reader that supplies the exact delegation id, submission attempt and result id of a published, validated result reads the same immutable result the parent reads, or gets a refusal naming the real reason (for example that it is not authorized), never a misleading identity-mismatch 409.",
+  "acceptance": [
+    "For a delegation whose result was resubmitted (submissionAttempt 2) and is published and validated, an authorized non-parent reader passing the exact delegationId, submissionAttempt and resultId gets the same result (disposition, submission state, message id and complete output) as the parent; if the reader is not authorized, the refusal says so instead of reporting an identity mismatch.",
+    "A test covers parent and non-parent exact reads of a second-attempt result, plus a first-attempt control, and asserts identical results or the correct authorization refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "delegation-results"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7e5-7fe3-84de-13a5a6c82b14",
+  "external_ref": "tm-xt3g",
+  "title": "Reduce transcript persistence work exposed by SQLite overflow-record comparisons",
+  "outcome": "Dump termal (2).DMP, captured 2026-09-07 19:06 PDT, shows thread 27 / 0xbb6c termal-persist allocating 385312 bytes inside SQLite 3.46.0 sqlite3BtreeIndexMoveto, reached from OP_NoConflict during INSERT INTO messages. Bound row: session-5703, position 43, message-555114, JSON 1055 bytes. Comparison record: session-5705, position 4, message-555327, git diff output, full record 385293 bytes. The messages table is WITHOUT ROWID, so this PK lookup encounters full message payloads and takes the overflow-record allocation/read path. src/persist.rs:3132 also deletes the retained transcript tail and reinserts every retained message for each changed session. Persistence thread accrued 108m24.608s CPU of 156m02s process CPU over 7h34m16s uptime. Single-snapshot evidence proves the current operation, not its historical frequency or share of CPU. Investigate both per-message persistence deltas and a rowid-backed or separated-body schema, preserving transcript order, updates, truncation, deletion and atomicity. Benchmark representative synthetic/offline fixtures before selecting a fix; do not open the live database. Evidence: target/dump-analysis-20260907/analysis.md and associated CDB logs.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1 re-check with marker, spot-checked by Termal::Fable2): CLOSE-DONE. Messages conversion implemented; regression test src/persist_sqlite_messages_tests.rs:116 conversion_restores_views_before_their_instead_of_triggers on master f7db2c58.",
+  "completion": null
+}

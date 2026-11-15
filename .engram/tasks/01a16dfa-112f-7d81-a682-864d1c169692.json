@@ -1,0 +1,42 @@
+{
+  "id": "01a16dfa-112f-7d81-a682-864d1c169692",
+  "external_ref": null,
+  "title": "Avoid cloning shared message bodies for discard-only removals",
+  "outcome": "Discard-only transcript removal does not copy a shared body while StateInner is held, and retained snapshots keep their original contents.",
+  "acceptance": [
+    "The remote-delta and state-cleanup removal paths discard message bodies without converting shared bodies to owned copies, while preserving live message ordering and retained snapshot contents.",
+    "A focused regression keeps a shared snapshot alive during production discard-only removal, observes zero shared-body ownership clones, and verifies the live and snapshot contents."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

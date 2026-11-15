@@ -1,0 +1,49 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-8a05d96233e1",
+  "external_ref": "tm-ncc6.11",
+  "title": "Launcher save(): handle a Windows sharing violation on the atomic results replace instead of killing the run",
+  "outcome": "Consolidated Claude reviewer hypothesis, NOT a reproduced defect: periodic Rust reads of results.json may collide with Node renameSync replacement on Windows and cause sharing violations. Inspect actual open/share flags and deployed Node behavior; use a disposable focused deterministic reader/writer or stress check with original exit/error evidence. Do not touch live run artifacts, add speculative retries, or classify as confirmed without reproduction. If proven, propose bounded sharing-violation handling preserving atomic-reader and terminal-evidence guarantees; otherwise document measured scope and close only with owner approval. Source anchors scripts/test-launcher.mjs:50, src/test_runs_disk.rs read path. Parent full gate passed; this investigation was not run by reviewers or coordinator.",
+  "acceptance": [
+    "Fail-first: a deterministic test holds the target open from another process during save() and shows the unchanged save() throws EPERM. The failed run is kept and cited.",
+    "save() handles a sharing violation on the rename only. On Windows, an EPERM, EACCES or EBUSY from the rename retries the same rename with a short backoff up to a stated bound, then throws the original error. The temp write is unchanged and completes before the first rename. Each reader sees either the previous complete file or the new one, never a partial one. A target released within the bound is replaced; one held past the bound fails with the original error, keeps its previous complete content, and leaves no temp file behind.",
+    "No test, stage or launcher-level retry is added. Any other error is thrown at once, as today. Terminal results still go through the same save(), so terminal evidence is never lost to a silent retry.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The launcher's save() now waits out a Windows sharing violation on the atomic results replace. It landed on master in train 31 as 38b659bd8603ceee54f32cdcef99f4ed8286e42d, carrying the reviewed commit 059fcfc50159bb1214175b60916db5ff070340b1 unchanged; I verified it is an ancestor of the landing.\n- Own exact-tree evidence: freeze cf78af45…; gate test-49db88d3 passed (credited verification 7f764ba0); delta pair a9f77b68/9b11c332 clean; evaluation 0c5a7d89 passed 4/4.\n- Train 31 evidence (Termal::Opus2): gate test-1bc5bdf7 passed (Rust 3721/0, Vitest 4560/0); integration pair Codex 01866e6c (no findings) and Claude c7bcf70b (3 Notes, filed as follow-ups or left as Notes).\nThe change is script-only, so no install or restart is needed.",
+    "completed_at": "2026-10-04T01:29:41.391528400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

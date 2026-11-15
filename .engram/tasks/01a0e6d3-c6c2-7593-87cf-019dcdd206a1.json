@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6c2-7593-87cf-019dcdd206a1",
+  "external_ref": "tm-rknq",
+  "title": "Make session Stop asynchronous: return immediately, finish interrupt and Engram checkpoint in the background",
+  "outcome": "Greg priority (2026-09-01). At HEAD 18e36dd Stop is synchronous end to end: src/session_runtime.rs interrupt_turn waits up to 10 s for the agent, then src/session_lifecycle.rs:532 runs checkpoint_engram_turn_off_lock synchronously, so the Stop route (and the UI button) block for the sum. Required design: the Stop route flips the session into an explicit 'stopping' state and returns immediately (< 100 ms); interrupt and the Engram checkpoint complete in the background; completion or failure is surfaced on the session (status, preview, and a transcript notice on failure); a second Stop while stopping is idempotent; restart while stopping is handled by the existing interrupted-session recovery. Acceptance: Stop route latency under 100 ms in tests; tests for the stopping state, background completion, checkpoint failure surfacing, and idempotent double Stop. Implementer: Termal::Codex; verification by a different agent (Termal::Fable) per Greg.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Asynchronous Stop landed in aeaa20b, an ancestor of master f7db2c58. Closed by evidence; no acceptance evaluation was possible for this migrated item.",
+  "completion": null
+}

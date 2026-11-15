@@ -1,0 +1,43 @@
+{
+  "id": "01a1d3bf-d356-70b1-985a-c82b845900a5",
+  "external_ref": null,
+  "title": "K3 slice 3: send and settle remote verification admission on the genuine destination",
+  "outcome": "TermAl sends remote_verification_record automatically on the genuine destination connection and retains/replays the actual receipt using existing settlement owners, with uncredited outcomes visible.",
+  "acceptance": [
+    "Behavioral consumer/transport evidence shows the genuine destination sends the exact sealed w-180d remote_verification_record operation and capability with immutable authenticated native facts and each genuine held-claim/root association, using only SourceId input with the complete before/after source_id pair for both committed_input verification and landing_gate; no new legacy commit/fingerprint delivery is sent. This narrows new delivery while preserving readable historical facts.",
+    "Behavioral tests show durable stable request/operation identity, retry and exact original receipt replay, current authority for new associations, origin-host/run fact deduplication, immutable terminal conflict handling and the sealed reason vocabulary. Admission uses actual execution completion time and the genuine producer/consumer matcher; failure, missing support/facts, stale association or refused admission remains visibly uncredited without fabricated local execution or agent-gate credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered genuine-destination causal remote admission and durable original receipt recovery; landed b9186b44. Fresh independent evaluation210b2a43ffa147f8bbc3493d1b64eea0 atrev15 passed2/2 oncleanlandedinput. Both fullverdicts read; sourceunchanged. R4vendorpair noMedium+, Windows754/0 and identicaltreeDL560FULLfeff8a66 passed. Admission9/0 was admissiononly, notcoverage; binding-onlyrev15 underFableconcurrence. No restart/activationclaim.",
+    "completed_at": "2026-11-14T22:14:37.455202500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

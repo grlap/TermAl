@@ -1,0 +1,28 @@
+{
+  "id": "01a11edd-f331-7373-a195-707490bc2cf3",
+  "external_ref": null,
+  "title": "`termal mailbox send` CLI returns empty stdout with no receipt and no error, and no message is stored",
+  "outcome": "Every `mailbox send` CLI invocation ends with either a JSON receipt (with --json) or a visible failure on stderr and a non-zero exit code; it never returns empty output with nothing stored.",
+  "acceptance": [
+    "Reproduce or diagnose, with source locators, why `TERMAL_CLI mailbox send --to session-8112 --message … --idempotency-key termal-codex-windows-declared-test-credit-fix-before-pilot-v1 --json`, run repeatedly from Engram::Advisor (session-6219, Codex) at about 04:10Z on 2026-10-09, returned empty stdout within 0.3-0.6 s, with nothing useful on stderr or in $LASTEXITCODE, while no durable message appeared. Check whether TERMAL_CLI or the base URL in that session pointed at a pre-restart binary or endpoint (the host restarted at 03:54:38Z).",
+    "The CLI prints a receipt or a non-empty error with a non-zero exit code on every path, including a connection refusal, a wrong base URL, a missing binary and an unexpected HTTP status; a test covers the failure paths."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cli",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1584d-dede-77a0-a014-f901861898a2",
+  "external_ref": null,
+  "title": "A decided owed batch bind that never reached Engram is told \"may or may not be bound\" instead of \"not sent\"",
+  "outcome": "An owed batch bind records whether a verification_bind send was actually attempted, for example a flag set when its send is claimed. Give-up and reset wording then uses that flag. A decision stored and confirmed but never transmitted (attempts consumed by \"the session has no routing token yet\", or sends skipped before the call) is told \"not recorded / not sent\". Only one that may have reached Engram is told \"unconfirmed; it may or may not be bound\". Today engram_owed_bind_may_be_bound treats every confirmed decision as possibly sent, which is safe but sends the holder to check a run needlessly.",
+  "acceptance": [
+    "A decided owed batch bind that never reached Engram is told \"may or may not be bound\" instead of \"not sent\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

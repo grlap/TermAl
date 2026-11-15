@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3fe-7191-bbaa-2b026e1a4efd",
+  "external_ref": "tm-61v.1",
+  "title": "Make the bounded Rust review gate runnable on Windows",
+  "outcome": "The mandatory /review-changes Rust gate now invokes scripts/test-rust.sh directly. Native Windows PowerShell and cmd cannot execute the POSIX shebang or ulimit logic, so the workflow is blocked on a P0 platform. Provide a cross-platform launcher or a documented and command-selected Windows fallback that still bounds RUST_TEST_THREADS and preserves caller arguments.",
+  "acceptance": [
+    "The mandatory Rust review gate runs from supported Windows, macOS, and Linux environments; Unix retains the raised-FD behavior where available; Windows uses a compatible bounded-concurrency path; command docs and command-contract tests cover platform selection."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the shared test launcher, per coordinator Fable2 disposition f9ceb2e8978e4fec82d4db748b705a90 and mailbox1042/message d2e7df67-8c86-4ab3-9db6-85f915f41f8d. Shared launcher introduced by ancestor fed0f786; current review command uses node scripts/test-launcher.mjs full, explicit Git Bash on Windows and sh on POSIX, preserving FD/thread bounds and caller argv with platform contract tests. Historical Windows full gate test-dfad0bd7-0539-42de-8044-ed9f4e871783 / FULL typed PASSED2089cab5390549a398e3827565326d30 on w-6a1d54a2b49a ran all5stages on tree9570efb722c54844815b046257bb1ddd59a214d0, now landed852c0a98. No new code, RED, gate, acceptance PASS or current native Mac/Linux execution claimed. July cleanup Low is separate/unproven current failure and is not represented as fixed.",
+  "completion": null
+}

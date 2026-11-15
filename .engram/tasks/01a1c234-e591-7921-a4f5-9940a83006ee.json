@@ -1,0 +1,31 @@
+{
+  "id": "01a1c234-e591-7921-a4f5-9940a83006ee",
+  "external_ref": null,
+  "title": "Integrate combo30 on d53b3c7a: revision-advance observation refresh, Engram stderr evidence",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo30 on d53b3c7a: revision-advance observation refresh, Engram stderr evidence is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo30 is on master as d6a359fc17fe025fc9edc90dc329d54a7e2ece9d (tree 8ec788ad). It contains two parts by Sol-8e1f:\n- a620 (w-1d8a): a later opening is refreshed when the work revision advances.\n- ad94 (w-f6ad): bounded Engram control-child stderr evidence on worker-side and caller-side failures. This fixes the composite Medium that had pulled it from combo29.\n\nReview, tests and landing:\n- Fresh composite pair: Codex 17114 found nothing; Claude 17115 found one Low, filed as w-1e5a72f965db.\n- Focused union test-cde86bf4: 666 passed, 0 failed, 1 ignored.\n- Gate: the Windows B FULL test-f7c80847 passed and was eligible, with equal fingerprints (linked note).\n- Landed by fast-forward from d53b3c7a, pushed at 22:32:08Z. The test ref is deleted.\n\nInstalls:\n- DL560 d6a3: 07b81648, at 22:37Z.\n- Central: the planned d6a3 install was skipped. The combo31 install superseded it, and the restart's cargo run builds master anyway.\n- After Greg's 00:15Z restart, Central runs master 9075802d, which contains d6a359fc (exe 0e955adf). DL560 has 9075 installed (12329d74).\n\nNo acceptance evaluation exists: evaluation is OFF for TermAl, so this closes self_asserted.",
+    "completed_at": "2026-11-10T00:20:07.249386600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

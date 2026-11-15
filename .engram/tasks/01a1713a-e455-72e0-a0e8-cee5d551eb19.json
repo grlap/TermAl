@@ -1,0 +1,39 @@
+{
+  "id": "01a1713a-e455-72e0-a0e8-cee5d551eb19",
+  "external_ref": null,
+  "title": "Preserve every evidence-batch failure delta after stopped-worker persistence errors",
+  "outcome": "Every changed observation publishes its factual failed-tracking delta at its distinct allocated revision when stopped-worker synchronous persistence fails; revision exhaustion does not reuse a revision.",
+  "acceptance": [
+    "A regression with multiple changed observations, persist_worker_alive=false, a disconnected sender and failing synchronous storage asserts one distinct revision and failed-tracking update per observation.",
+    "Preserve the existing synchronous persistence attempt and normal batch/fence path; publish an advanced revision on write failure without emitting an old revision when allocation itself fails."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "host-persistence",
+    "persistence",
+    "review-followup",
+    "state-lock",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a16f0d-1e3e-76d0-a454-e1053ea93543",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The failed observation save is now visible on the merged test-run card (failedObservationIds, plus the UI note \"observation save failed (N)\"). The batch and single-row regressions assert it per observation at distinct revisions. Landed in 6fce69dc (combo89) with a clean review pair and a FULL pass on DL560. Independent evaluation (delegation-8525e115) passed both criteria.",
+    "completed_at": "2026-11-13T08:26:44.167298300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3c8-7751-887e-531722dfa264",
+  "external_ref": "tm-36l",
+  "title": "Delegation MCP bridge refetches /api/state twice per termal_send_to_session; cache child-ness for the bridge lifetime",
+  "outcome": "Claude reviewer, Low (perf), 2026-07-16: the delegation MCP bridge issues two full GET /api/state fetches per termal_send_to_session call (one in caller_is_delegation_child, one in resolve_session_reference) and one per tools/list. /api/state is summary-only but still serializes every session.\nChild-ness is fixed for the bridge's lifetime, so cache it after the first resolution. The name->id resolution could also skip its fetch when the argument already looks like a session id. Not correctness-affecting; purely redundant work on a hot peer-messaging path.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

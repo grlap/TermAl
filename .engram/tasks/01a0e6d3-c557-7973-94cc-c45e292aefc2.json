@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c557-7973-94cc-c45e292aefc2",
+  "external_ref": "tm-l62y",
+  "title": "Codex thread archive returns HTTP 400 after the 30 s bound while Codex releases the thread; local codexThreadState stays active",
+  "outcome": "OBSERVED during the tm-z0mg measurement (Termal::Codex, 2026-09-11 17:30Z, one deliberate action on the coordinator's own finished child session-6560; coordinator confirmed the after-state read-only at 17:35Z).\n\nSYMPTOM: POST /api/sessions/session-6560/codex/thread/archive started 17:30:18.588Z and ended 17:30:48.770Z (30.18 s) with HTTP 400 Bad Request. The response body was not captured, so the server's reason is unknown; the elapsed time matches the 30 s bound in src/codex_thread_actions.rs:219-240 but does not prove a timeout. Afterwards: all seven processes of that thread (delegation-mcp bridge 22332, node_repl 48096, the cmd/npx/node chain of chrome-devtools-mcp, 274 MiB private) were absent at +30 s and +120 s, the shared app-server 54804 survived, and GET /api/state still reports session-6560 idle with codexThreadState=active at 17:35Z. TermAl's local state and Codex's actual thread state diverged.\n\nREADING (source, HEAD 942fd3c; not proven to match the running binary): codex_thread_actions.rs sets Archived locally only after a successful RPC response; src/shared_codex_mgr.rs:83-115 maps Codex RPC errors to 400; src/codex_events.rs:607 updates archived state on a matched runtime notification. One of these paths did not fire, or the RPC exceeded the bound while Codex completed the archive.\n\nWHY IT MATTERS: any fix for tm-z0mg that archives threads at terminal cleanup must reconcile \"RPC failed\" against \"resources actually released\", or the UI will show active threads that no longer exist in Codex, and retries may hit \"already archived\" (409 path).\n\nNEXT: reproduce with the response body captured and the server log at hand; check whether a thread/archived notification arrived late; decide whether the bound, the error mapping, or the state update needs the change. Related: tm-z0mg.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in c07657c (ancestor of master).",
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a19bf5-8e0d-7221-bf94-8adf41ff3709",
+  "external_ref": null,
+  "title": "w-3fe8 test compile closure SET B: own-row, custody and public projection tests (10 paths, 37 diagnostics)",
+  "outcome": "w-3fe8 test compile closure SET B: own-row, custody and public projection tests (10 paths, 37 diagnostics)",
+  "acceptance": [
+    "Source-only patch on 2faa6a33 for exactly: persist_queue_promotion_conflict.rs, engram_root_causal_failure.rs, engram_unadmitted_reporting_repairs.rs, deferred_state_snapshot.rs, session_projection_contract.rs, state_diff_broadcast.rs, session_stop.rs, session_stop_idle_wait.rs, persist.rs, engram_delegation_held.rs (src/tests), resolving every b59846ef diagnostic in them, returned to Sol-03d4",
+    "Meaningful current-owner ports with an all-original disposition; no compatibility aliases, ignores, unmounts or assertion weakening; no cargo"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 test setB; exact10 port/retirements ede6edc0. Reconcile per-original ledger; no test deletion or separate runtime claim from author.",
+    "completed_at": "2026-11-08T19:22:48.810280100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

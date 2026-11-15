@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c681-7d83-b5de-e590cbbba229",
+  "external_ref": "tm-obug",
+  "title": "Tidy OpenCode approval controls and formatting",
+  "outcome": "Consolidated Claude low-priority review: remove redundant autoApprove self-assignment in OrchestratorTemplatesPanel; place approval selector with peer controls and keep hint adjacent in prompt/create dialog. Create-dialog persistent-scope issue tracked separately, so do not merely adjust copy if draft isolation is implemented. Group approval fields alongside OpenCode fields when touching types. Check formatting of changed hunks; reviewer did not run rustfmt or UI formatting and no formatter failure is claimed. Review candidate HEAD 0e7ab55, tracked diff SHA256 3715182cad09de8a53bc9104243875be7aeb23d4910f4bf0987c2626361adab9; searches included closed issues and found no exact existing item.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

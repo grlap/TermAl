@@ -1,0 +1,43 @@
+{
+  "id": "01a0f31c-7196-71f1-a480-68268dc810eb",
+  "external_ref": null,
+  "title": "The host marks an evidence body the tracker's window omitted but does not read it: a note larger than the window still reaches the evaluator as \"(body not shown)\"",
+  "outcome": "When the tracker's window lists an evidence record without its body or with a cut one, the host reads that body through the per-record read the row names (`engram work show REF --note LOCATOR --json`), as the host reader and within the request's existing read budget and the first read's cut, and lists it in the brief under the same byte budget and markers as any other entry. A body it could not read stays marked as today.",
+  "acceptance": [
+    "A record the window lists with body_omitted or summary_truncated is read by its locator and its whole body reaches the brief, within the 65,536-byte budget and the clip and leave-out order already in place; a test covers both flags.",
+    "The brief's evidence still belongs to the first read's basis: a per-record read that the tracker refuses because its cut changed is treated as a failed read, never as a newer basis; the note on the item cites Engram's rule with its source.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "The per-record reads stay within the request's deadline and leave the reserve for the reads that decide the request; when the budget is spent or a read fails, the entry keeps its tracker marker and the requester's notice still names it; a test covers a failed read."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

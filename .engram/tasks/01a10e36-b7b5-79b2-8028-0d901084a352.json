@@ -1,0 +1,29 @@
+{
+  "id": "01a10e36-b7b5-79b2-8028-0d901084a352",
+  "external_ref": null,
+  "title": "Windows read-only Codex source-read guidance: decide whether Explorer and Evaluator children get it, and word its last sentence for non-review modes",
+  "outcome": "Windows read-only Codex source-read guidance: decide whether Explorer and Evaluator children get it, and word its last sentence for non-review modes",
+  "acceptance": [
+    "A recorded decision says whether Windows read-only Codex Explorer and Evaluator children get the source-read guidance.",
+    "The prompt builder and the guidance wording match that decision, and a test pins the intended mode scope."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex-runtime",
+    "read-only-review",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

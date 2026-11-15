@@ -1,0 +1,38 @@
+{
+  "id": "01a19e51-fa43-7563-a673-dd4479551eed",
+  "external_ref": null,
+  "title": "After an acknowledged forward name, the next ordinary prompt still carries the obsolete source-root recovery warning",
+  "outcome": "After an acknowledged forward name, the next ordinary prompt still carries the obsolete source-root recovery warning",
+  "acceptance": [
+    "After name_recovered_root acknowledges a prospective (forward) name, the next ordinary prompt no longer carries the current 'Retained source-root history requires repair before a fresh evaluation' guidance",
+    "The guidance is retired only after an acknowledged forward name; a user quotation of it is preserved verbatim, the earlier uncertain trace is not upgraded, and unrelated pending facts remain",
+    "No Engram RPC is made before the provider send (the ordinary no-RPC handoff stays)",
+    "engram_legacy_root_recovery recovered_naming_preserves_a_user_quotation_without_repeating_obsolete_status and a_forward_name_is_prospective_and_never_upgrades_an_earlier_uncertain_trace pass, as do the ordinary_opening tests, with no assertion edits"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "An acknowledged forward name retires the obsolete repair guidance for its own store and work, without an RPC, keeping user quotations, earlier traces and unrelated facts. Landed in 87f49ed0.",
+    "completed_at": "2026-11-04T06:56:35.644813100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

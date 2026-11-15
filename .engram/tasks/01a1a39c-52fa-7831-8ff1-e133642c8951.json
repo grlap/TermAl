@@ -1,0 +1,32 @@
+{
+  "id": "01a1a39c-52fa-7831-8ff1-e133642c8951",
+  "external_ref": null,
+  "title": "Specify source identity filter refusal order and detection",
+  "outcome": "Require root and child filter preflight before status can invoke child filters; explicitly address clean, smudge, process and filter attributes whose driver was globally configured.",
+  "acceptance": [
+    "The contract states how root and child filter checks prevent filter execution before any relevant status call, including process filters and global-driver attribute cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "architecture",
+    "cross-project",
+    "docs-only",
+    "greg-directed",
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a23f-d694-7041-b135-ccbea5f6c63c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

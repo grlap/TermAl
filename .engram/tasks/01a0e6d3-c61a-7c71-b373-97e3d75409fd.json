@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "external_ref": "tm-m6r1",
+  "title": "Work visualizer: one read-only view over Engram work (primary) and Beads, with table, tree, holder jump and memories",
+  "outcome": "REQUESTED BY GREG 2026-09-12 (design task, verbatim): warto by dodac wizualizacje beadsow w projekcie; moze zacznijmy od engram, warto by miec wsparcie dla jednego i drugiego; to nie jest tracker tylko vizualizer; chcialbym miec tabelke, to jest to co czesto robie, przypinam do board i patrze gdzie jestesmy; drugie to drzewko, bo to sa i zaleznosci; kto ma claim task, latwy przeskok; zrodlo danych beads i engram (ale wazniejszy jest engram), wizualizacja powinna byc taka sama; fajnie by widziec memory co mamy zapamietane. FULL BRIEF (to become docs/features/work-visualizer.md when work starts): %TEMP%/termal/work-visualizer-brief-2026-09-12.md. SUMMARY: (1) read-only visualizer, every mutation stays in engram/bd CLIs; (2) host-side WorkSource trait with EngramWorkSource (phase 1) and BeadsWorkSource (phase 2), both shelling out with --json and parsed into one normalized WorkItem model (source, id, ref, title, kind, priority 0-4, state proposed/open/ready/held/blocked/completion_pending/completed/cancelled/superseded, holder with sessionId, parent/children, prerequisites, blockedBy, labels, updatedAt, lastNote, outcome/acceptance/gates for Engram, parsed links to sessions/delegations/commits) plus a Memory model (source, key, title, body on demand, attribution, revision); (3) views identical for both sources: sortable/filterable TABLE whose saved query can be PINNED to the Response Board as a live card, TREE (parent/child forest with prerequisite edges as dashed links, ready/blocked/held badges, same row renderer), item DRAWER (outcome/acceptance, notes/comments timeline, gates, history, clickable links), HOLDER chip that jumps to the TermAl session (Engram holder carries the session id; beads assignee maps by session display name), MEMORIES list/search with full body and Engram revision picker; (4) Engram adapter reuses the host binding (ENGRAM_HOME, seat from engram_mcp_config.rs:437) with a dedicated read identity, only ls/show/memories --json, never next without --peek, never claim/update/done; Beads adapter reads only via bd list/show/comments/graph/memories --json, refresh on .beads changes excluding interactions.jsonl; (5) API GET /api/projects/{id}/work, /work/{source}/{itemId}, /memories, deltas over the existing SSE channel; unavailable source renders as a labelled empty state; (6) conventions: label decision for items awaiting Greg, beads assignee = TermAl session display name; (7) phases: 1 Engram read-only (table, tree, drawer, jump, pin, memories); 2 Beads + id linkification in transcripts/mailboxes; 3 (separate decision) Greg-only write actions. Placement: project panel next to the Response Board. Owner: Codex (after the current follow-up batch or as Greg orders); Fable consults.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

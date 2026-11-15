@@ -1,0 +1,27 @@
+{
+  "id": "01a10789-1409-7c53-904d-c0389eac585d",
+  "external_ref": null,
+  "title": "A non-gated queued prompt can be started over an Active turn: delayed test-run wait dispatch promotes the queue head with no busy-status check",
+  "outcome": "A non-gated queued prompt can be started over an Active turn: delayed test-run wait dispatch promotes the queue head with no busy-status check",
+  "acceptance": [
+    "A non-gated queued prompt can be started over an Active turn: delayed test-run wait dispatch promotes the queue head with no busy-status check is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

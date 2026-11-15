@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-554c59b6d764",
+  "external_ref": "tm-m6r1.18",
+  "title": "Work list: make the Engram launch-bound rejection a source condition like the Beads one, or cap the query filters below both bounds",
+  "outcome": "Review round 25 (Claude Note). First-page source isolation is not symmetric for over-long filters: a label that passes WorkListQuery::validate (up to 16 KiB) but would push the bd argv past the process launch bound is now a Beads source error (the Engram page still arrives), while the Engram read's own launch-bound rejection is a 400, which is_work_source_condition treats as a request failure - so with both sources configured a long label is rejected by Engram first and a readable Beads snapshot is never read. Options: (a) map Engram's launch-bound rejection inside the first-page read to a source error the same way; (b) lower the validate() bound for search/label below both launch bounds (a few KiB is ample for a filter). The Engram launch path and validate() are the existing Engram contract, so this is a decision for that code's owner; the feature doc lists the current behaviour.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

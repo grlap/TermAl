@@ -1,0 +1,33 @@
+{
+  "id": "01a1bcce-8318-7011-a475-0affdd357734",
+  "external_ref": null,
+  "title": "Update lifecycle journal docs for native prewrite sizes and panic context",
+  "outcome": "The lifecycle journal documentation accurately describes nativePreWrite observations and the bounded panic context/backtrace fields introduced by the main HTTP write adapter.",
+  "acceptance": [
+    "docs/features/host-lifecycle-journal.md describes nativePreWrite as an active final encoded-body observation, including once-per-response 1 GiB reporting, exact known-size completeness before delivery and lower-bound unknown-length crossing; existing observation-only semantics remain clear.",
+    "The panic-record description includes capped route/session context or unknown and up to 32 raw Windows stack addresses with explicit unavailable capture elsewhere; no test reads repository Markdown or pins its phrases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18073-bc4d-7e21-8d46-a81c8a3f5351",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

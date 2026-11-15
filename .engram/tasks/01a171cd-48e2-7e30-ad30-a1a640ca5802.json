@@ -1,0 +1,29 @@
+{
+  "id": "01a171cd-48e2-7e30-ad30-a1a640ca5802",
+  "external_ref": null,
+  "title": "A root session named for the Engram project (Engram::Merger2, session-14574) was created in the TermAl 2 project and bound to the TermAl workdir",
+  "outcome": "A root session named for the Engram project (Engram::Merger2, session-14574) was created in the TermAl 2 project and bound to the TermAl workdir",
+  "acceptance": [
+    "The creation path used for session-14574 (UI or API) is identified, and it is established whether the creator selected the Engram project",
+    "If the host bound a session to a project other than the one the creator selected, that is fixed and a focused test covers project selection at creation; if the creator selected TermAl 2, the item records that and closes as no host defect"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "project-binding",
+    "session-creation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

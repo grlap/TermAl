@@ -1,0 +1,30 @@
+{
+  "id": "01a15a3a-fbf0-71f0-87e5-452a606c3584",
+  "external_ref": null,
+  "title": "S3 step 2 courier: relay home-a readiness to native Mac and return its enable receipt",
+  "outcome": "Carry the exact approved step-2 packet once over the O1-certified native A13930↔Mac6192 mailbox, preserving provenance and returning the actual native Mac result to Windows11334 and both coordinators; stop honestly on explicit errors/unknown outcomes. O1 stays completed and no later pilot phase is implied.",
+  "acceptance": [
+    "The exact Windows11334 report, EngramFable sections2–4 and GO text are retained verbatim with SHA256 and actual sender/executor attribution before A→B delivery.",
+    "The approved setup and native step-2 handoff preserve the certified participants, canonical mailbox, fixed keys, receipt provenance and unchanged ACKs; the actual Mac result or any explicit STOP is recorded without inventing success or resending a changed intent.",
+    "The actual B→A result is returned locally to Windows11334, EngramFable and Fable2 with append/read/ACK receipts, unchanged policy and precise limits; no unapproved later pilot phase is executed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "courier",
+    "federation",
+    "s3-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

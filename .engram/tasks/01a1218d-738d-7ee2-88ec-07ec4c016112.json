@@ -1,0 +1,27 @@
+{
+  "id": "01a1218d-738d-7ee2-88ec-07ec4c016112",
+  "external_ref": null,
+  "title": "Test the focused Node refusal for ReportedSuccess, the one-call form, and Build's Detached/Cwd-to-root label parity",
+  "outcome": "Tests cover (a) a ReportedSuccess focused Node run with rejected records (\"no native terminal exit observed; <guard> validation rejected\"), (b) the one-call form's refusal summary, and (c) a Build whose records lack `detached` or stage `cwd` still reading \"root validation rejected\".",
+  "acceptance": [
+    "Test the focused Node refusal for ReportedSuccess, the one-call form, and Build's Detached/Cwd-to-root label parity is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

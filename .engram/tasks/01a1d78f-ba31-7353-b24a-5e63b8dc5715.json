@@ -1,0 +1,28 @@
+{
+  "id": "01a1d78f-ba31-7353-b24a-5e63b8dc5715",
+  "external_ref": null,
+  "title": "Wake persistence after idle carried-launcher retirement removes a restart marker",
+  "outcome": "Retirement from the test-run tick promptly schedules persistence of removed launcher restart markers, without waiting for unrelated activity.",
+  "acceptance": [
+    "When poll_engram_carried_runs retires at least one carry, schedule the existing Delta persistence path after releasing the state lock.",
+    "A behavioral regression observes the production persistence wake/write for an otherwise idle session; stamp selection and manually invoking persistence alone are insufficient. Retained run reservation and honest restart disclosure remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

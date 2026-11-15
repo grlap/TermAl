@@ -1,0 +1,28 @@
+{
+  "id": "01a1d2b1-b582-7b12-a389-1beacbeebcfb",
+  "external_ref": null,
+  "title": "Integrate combo80 on 4a46b552: edfd 8ed9af6a (w-36d0 require current-root evidence before acceptance, byte-identical carry of 5a5df60a)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 8ed9af6afe36ecb8976a197ab4f4dc1c66c575f1 (tree e66aedb3c74d35d6defd744763ed8e1bad843384) is on origin/master, where master was moved to it by a fast-forward from 4a46b5526a1d460820c1871de6a9c6b6af3590d3.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is e66aedb3 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 4a46b552 is byte-identical (same 4 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 5a5df60a's contribution against 73f0fe27, which the fresh whole-four pair Codex session 17703 and Claude session 17704 reviewed with no Medium or higher finding (its two Lows filed as w-161aca2c2512 and w-7952cb17ab3c), and the candidate adopts that pair.",
+    "The release binary built from tree e66aedb3 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

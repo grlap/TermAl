@@ -1,0 +1,28 @@
+{
+  "id": "01a1769c-a475-7c10-b0d9-73be9d0ce164",
+  "external_ref": null,
+  "title": "Reduce whole checkpoint-ledger cloning and serialization under StateInner on ordinary commits",
+  "outcome": "Reduce whole checkpoint-ledger cloning and serialization under StateInner on ordinary commits",
+  "acceptance": [
+    "Reduce whole checkpoint-ledger cloning and serialization under StateInner on ordinary commits is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

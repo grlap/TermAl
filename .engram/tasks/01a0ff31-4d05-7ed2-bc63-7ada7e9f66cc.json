@@ -1,0 +1,31 @@
+{
+  "id": "01a0ff31-4d05-7ed2-bc63-7ada7e9f66cc",
+  "external_ref": null,
+  "title": "Retire Beads: remove migration instructions from AGENTS.md, CLAUDE.md and command files, and the remaining .beads artifacts",
+  "outcome": "Retire Beads: remove migration instructions from AGENTS.md, CLAUDE.md and command files, and the remaining .beads artifacts",
+  "acceptance": [
+    "AGENTS.md and CLAUDE.md contain no Beads operational material: no bd-to-Engram mappings, no 'until they move' rules, no bd steps, at most one minimal historical sentence (Beads was retired on 2026-09-28 after a verified import to Engram) if one is still needed. The two files stay identical in the sections they share. .claude/commands/review-changes.md, fix-bug.md and review-code.md carry Engram acts instead of bd steps.",
+    "The .beads directory and its tracked files are removed from the repository, and .gitignore and any script or test that exists only to handle .beads (for example review-freeze-fingerprint's .beads exclusion) are updated or removed; any remaining product or test reference to Beads is listed in a note with a reason it stays, or removed. A note records the final count of Beads operational references and artifacts, which is zero, with the search used.",
+    "Because the instruction files grant or limit tracker authority, the change lands under the authority-text process: both coordinators concur on the exact wording, Greg is sent it and its consequence through Engram::Advisor, and the final-diff audit is recorded as passed, before the landing.",
+    "The full five-stage gate passes on the exact input, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "beads-retirement",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f2d1-eca0-76d1-9b2f-3ba4cdac7fba",
+  "disposal_reason": "Duplicate. Termal::Opus2 filed the same Beads retirement first, as epic w-dc1892c39e24 with authority-text chore w-3ba4cdac7fba (TermAl mailbox 4daa5b87 #967); this one was filed a minute later from the same Advisor direction. Its proposed criteria and its read-only inventory note (files and counts, tracked .beads files, inactive hooks, the open dolt-push question) are offered to w-3ba4cdac7fba's holder to adopt.",
+  "completion": null
+}

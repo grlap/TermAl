@@ -1,0 +1,27 @@
+{
+  "id": "01a1d32b-9b81-78e0-bc15-a5a320f76659",
+  "external_ref": null,
+  "title": "Docs: say which earlier records keep their recorded rules in the registered committed-input section",
+  "outcome": "docs/features/execution-observability.md's \"One rule for a registered committed-input check\" names the exempt records exactly, so no reader takes an earlier committed-input check record as escaping the clean-root rule.",
+  "acceptance": [
+    "The sentence 'Staged-tree inputs and earlier records keep the rules they were recorded under' is replaced by wording that names the exempt records as Engram does: staged-tree inputs, and evaluations, obligation resolutions, seals and registered_input_witness records made before the rule. It also says that an earlier build's registered committed-input check is still read from Git when a new passing evaluation or done uses it.",
+    "The wording is checked against Engram's acceptance-evaluation.md, \"Registered Git-input evidence\", and the change lands under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

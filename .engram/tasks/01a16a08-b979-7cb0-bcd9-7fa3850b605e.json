@@ -1,0 +1,27 @@
+{
+  "id": "01a16a08-b979-7cb0-bcd9-7fa3850b605e",
+  "external_ref": null,
+  "title": "Move carried-command completion matching out of engram_turn_checks",
+  "outcome": "The carried completion-matching logic resides in the appropriate focused module.",
+  "acceptance": [
+    "The completion-matching helper is moved to the appropriate module without behavior changes, with relevant tests passing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16827-bfc6-7af3-948f-ba7f38f569aa",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

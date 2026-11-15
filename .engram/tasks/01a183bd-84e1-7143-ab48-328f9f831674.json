@@ -1,0 +1,29 @@
+{
+  "id": "01a183bd-84e1-7143-ab48-328f9f831674",
+  "external_ref": null,
+  "title": "Panic journal hook doubles backtrace symbolization and ignores RUST_BACKTRACE=0",
+  "outcome": "Panic journal hook doubles backtrace symbolization and ignores RUST_BACKTRACE=0",
+  "acceptance": [
+    "The panic journal hook honours a caller's explicit RUST_BACKTRACE=0 and does not symbolize a backtrace a second time when std's default hook already captures one (capture once and reuse, or skip when disabled).",
+    "The Windows gate-duration effect of the change is measured and recorded, and the review pair finds no Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "panic-journal",
+    "review-low",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

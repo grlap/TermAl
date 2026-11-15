@@ -1,0 +1,28 @@
+{
+  "id": "01a17425-a3ad-7e52-81a0-359ded5f4b27",
+  "external_ref": null,
+  "title": "federation_executor_live_wake.rs provenance header says it does not own the paused-retry and recovery cases it contains",
+  "outcome": "federation_executor_live_wake.rs provenance header says it does not own the paused-retry and recovery cases it contains",
+  "acceptance": [
+    "federation_executor_live_wake.rs provenance header says it does not own the paused-retry and recovery cases it contains is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

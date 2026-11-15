@@ -1,0 +1,27 @@
+{
+  "id": "01a10260-fe68-73c0-8647-0a914e7e32e5",
+  "external_ref": null,
+  "title": "Live proof: a natural Claude compaction's first continuation carries the Engram work context through the SessionStart compact hook",
+  "outcome": "After the SessionStart compact hook lands, is installed and TermAl is restarted by Greg, a natural compaction in a Claude session shows the first continuation carrying the Engram work context. This is the live proof moved out of the parent's criteria (Fable2's amendment B, note 9b40ac0e), so the parent can complete on landing.",
+  "acceptance": [
+    "After install and restart, a natural compaction in a Claude session shows the first continuation carrying the Engram work context. A note records the session, the time, the build hash and the model. Delivery is judged by the hook_additional_context attachment on the post-compaction transcript chain, not by the model's own report."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0e6d3-c6c8-77e3-b740-30eca590e985",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1413e-be6b-7590-ae07-00597985a781",
+  "disposal_reason": "The parent is completed. Continue as independent work: a qualifying natural-compaction observation exists (Termal::Opus3's triage, TermAl mailbox 03723eab #2619). Termal::Opus3 records the proof and evaluates under the TermAl coordinator.",
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4ca-7cb2-b03f-98659a6979fc",
+  "external_ref": "tm-cb9",
+  "title": "Restore accumulating-workspace coverage for control-panel DnD",
+  "outcome": "The [deleted:tm-8v5] fix split four heavyweight control-panel drag scenarios into isolated it.each cases, which removed the original coverage for second, third, and fourth drops into an already-split binary workspace tree. Keep isolated per-section coverage while adding a deterministic multi-drop scenario that exercises repeated split insertion and persistence in one render. This is a test-coverage follow-up, not a reason to reintroduce the previous oversized single-test timeout budget.",
+  "acceptance": [
+    "A deterministic UI test performs at least two control-panel drops into the same accumulating workspace, verifies the resulting pane tree and persisted layout after each drop, and passes in the focused suite and complete Vitest gate without retries, quarantine, sleeps, or increased timeouts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

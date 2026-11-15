@@ -1,0 +1,30 @@
+{
+  "id": "01a157ea-7ce6-7ec2-aaa7-da5825946d1b",
+  "external_ref": null,
+  "title": "Isolate material configuration changes from re-enrollment in M5 composition tests",
+  "outcome": "Prove material configuration-basis refusal independently of enrollment-generation refusal.",
+  "acceptance": [
+    "The Configuration authority variant changes material endpoint/configuration without re-enrolling or borrowing the Enrollment variant's generation/link invalidation; it asserts the intended stale-configuration refusal.",
+    "The Enrollment variant remains independently tested; focused composition tests pass and review confirms each control isolates its named cause."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

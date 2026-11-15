@@ -1,0 +1,30 @@
+{
+  "id": "01a12d8c-9b9f-73f1-8600-e3ecc8c783ad",
+  "external_ref": null,
+  "title": "The 240 s admission window starts at first acceptance, so a Defer or a long pre-hold wait can spend it before prepared-Begin recovery begins",
+  "outcome": "The coordinator decides, and the brief records, whether the prepared-Begin recovery window keeps starting when the head is first accepted (as w-cfcf10b68c9b's C4 specifies) or restarts at the first prepared-Begin hold (held_since) or after a definitive Defer. If it changes, the code and tests change with it. If it stays, docs/features/engram-host-adapter.md states the consequence: an unrelated Defer or a long wait before the hold can leave little or no automatic recovery time.",
+  "acceptance": [
+    "The coordinator's ruling (keep the start at acceptance, or restart it at held_since or a definitive Defer) is recorded on the item.",
+    "docs/features/engram-host-adapter.md describes the chosen start and its consequence for heads that waited before entering prepared-Begin recovery.",
+    "If the start changes, a scripted-clock test shows a head that was deferred or waited before its first hold still gets the specified recovery window, and existing C4 tests are updated to match."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "design-pending",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

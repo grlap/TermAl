@@ -1,0 +1,33 @@
+{
+  "id": "01a176a2-fbb3-7751-948e-9cd6b7b0fb96",
+  "external_ref": null,
+  "title": "Diagnose and safely reduce post-commit integrity stalls on the persistence writer",
+  "outcome": "A decided, evidence-backed way to reduce or contain the writer-loop delay from post-commit integrity verification while preserving path-redirection rejection, supported owner-only permissions, cache/error semantics and verification-before-success/ACK. If no equivalent change is supportable, record the remaining limitation and an explicit defer decision; do not remove or weaken the checks.",
+  "acceptance": [
+    "Independently concurred safety contract, grounded in b7060f3c/238975ea and current file:line, names the protected property: cached and full writes retain their fatal directory/main/sidecar redirection checks; postcommit supported owner-only hardening remains fatal except for the existing explicit permission override, which never bypasses redirection; success/verified-cache publication and durability-fence acknowledgement remain withheld until the relevant committed image's integrity result succeeds. Preserve cache invalidation and failure propagation. State the current check-boundary guarantees and remaining race limits honestly; no change may weaken them.",
+    "A bounded, separately authorized diagnostic plan distinguishes per-path metadata operation elapsed time, retry/backoff and scheduling/unattributed remainder, without changing checks or reading the live store outside supported owners. Preserve tick 8334 and original manifests; missing measurements remain unavailable. No capture is authorized by filing this item.",
+    "An architect/coordinator-concurred design compares retaining current placement, reducing redundant work with equivalent identity coverage, and any off-loop approach. It explicitly handles cached handles versus path replacement, newly created/replaced sidecars, every committed generation's verification/ACK dependency, ordering, concurrency, failure after COMMIT, shutdown and bounded resources. Checking less often or returning success before verification is not an accepted shortcut. If equivalence is unproved, choose defer rather than implement.",
+    "Only after the design is authorized, any implementation has deterministic tests for cached/full writes, parent/main/sidecar redirection and replacement, supported permissions/override, injected postcommit failure, cache invalidation, no early ACK, ordering and shutdown. Preserve durable-write semantics, original deadlines, checks and existing failure evidence; no timeout inflation or retry-until-green.",
+    "Before any implementation landing, independently concurred numeric latency/resource budgets and an authorized comparable same-input load plan discriminate improvements from OS/scheduling pressure, with native Windows evidence and applicable Unix permission coverage. The exact final input passes the required focused checks, independent vendor review pair and maintained full gate. No live improvement or closure follows from the old baseline observation alone."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "host-persistence",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

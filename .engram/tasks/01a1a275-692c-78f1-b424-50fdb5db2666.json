@@ -1,0 +1,30 @@
+{
+  "id": "01a1a275-692c-78f1-b424-50fdb5db2666",
+  "external_ref": null,
+  "title": "Exercise captured MTP and VSTest zero runs through declared-result exit handling",
+  "outcome": "The captured producer asymmetry is covered through declared-command exit precedence as well as the standalone TRX reader.",
+  "acceptance": [
+    "A discriminating declared-result regression covers captured MTP zero with wrapper exit1 as FAIL and captured VSTest zero with exit0 as UNKNOWN, preserving the existing nonzero-exit and explicit-failure precedence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "dotnet",
+    "greg-directed",
+    "review-low",
+    "team-pilot",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a111ee-c262-71e1-a59e-59d270b393d3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

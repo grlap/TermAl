@@ -1,0 +1,32 @@
+{
+  "id": "01a19f47-a63b-7582-bb0e-6ba76713b7ee",
+  "external_ref": null,
+  "title": "Capture-lifetime shutdown: ordering race, added shutdown latency, and concurrent stop_and_join contract",
+  "outcome": "TermAl shutdown never records a spurious failed runtime-observation closing attempt, its added shutdown latency is bounded and documented (or Engram control calls on observer threads honour capture cancellation), and CaptureLifetime::stop_and_join returns a consistent answer to concurrent callers.",
+  "acceptance": [
+    "The runtime-observation stopping flag is set before captures are cancelled, or the observer worker treats a shutdown-cancelled capture as do-not-install; a test shows that shutdown during an in-flight closing capture does not increment attempts.",
+    "The shutdown latency added by joining observer workers (bounded by the 40 s backstop, observers inside Engram adapter calls of up to 20 s) is documented, or those calls honour capture cancellation.",
+    "stop_and_join re-checks draining after each wait, so a second concurrent caller cannot return true while a drainer is pending (with a test).",
+    "The stale comment at src/bounded_read_process.rs:317 about Unix Git children staying in the checker's process group is corrected."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "review-low",
+    "shutdown"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19e13-a5be-7101-af18-c20aee27bd34",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

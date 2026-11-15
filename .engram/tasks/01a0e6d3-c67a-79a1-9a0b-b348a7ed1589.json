@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c67a-79a1-9a0b-b348a7ed1589",
+  "external_ref": "tm-nzim",
+  "title": "Route Claude AskUserQuestion through the can_use_tool permission channel",
+  "outcome": "Claude CLI (verified on 2.1.250 and 2.1.251 with a live stream-json driver) no longer sends the request_user_dialog control request TermAl implements: AskUserQuestion questions arrive as the can_use_tool permission payload, and the user's answers must be returned in the permission decision as updatedInput.answers (question text -> label, multiSelect -> array; free text accepted). TermAl's current flow (auto-allow with unchanged input, or an approval card) makes every AskUserQuestion resolve instantly as 'The user did not answer the questions' with no question card - observed live in Legal::Fable and reproduced first-hand. Fix: classify can_use_tool for tool AskUserQuestion as a user-input dialog in every approval mode (including Plan, which must not deny it), queue the existing userInputRequest card, and on submit respond behavior:allow with updatedInput carrying answers; cancel responds deny. Keep the legacy request_user_dialog handler for compatibility. Empirical contract proof: target/fable-verify/claude-dialog-probe/ (driver.py = allow-unchanged -> did not answer; driver-answers.py = allow with answers -> questions answered). Implementer: Termal::Fable; verification must be done by a different agent (Codex) per Greg.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 18e36dd (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

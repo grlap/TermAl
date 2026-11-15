@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-54c54651908e",
+  "external_ref": "tm-m6r1.10",
+  "title": "Work filters: make repeated Apply behavior explicit after read errors",
+  "outcome": "Claude session-6887 Low ui/src/panels/WorkPanel.tsx:43. Applying unchanged filter values does not start a read because key and hook dependencies stay equal. After 429/502 the Apply action appears inert; separate Refresh work currently provides recovery. Either make each submit request a fresh read or clearly label/document the narrower behavior.",
+  "acceptance": [
+    "Regression after failed list read and unchanged filter submit pins intended retry behavior, including request cancellation/generation fencing; changing filters continues to reset pagination."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

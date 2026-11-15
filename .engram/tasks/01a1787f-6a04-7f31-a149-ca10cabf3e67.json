@@ -1,0 +1,30 @@
+{
+  "id": "01a1787f-6a04-7f31-a149-ca10cabf3e67",
+  "external_ref": null,
+  "title": "Cross-host mail receipts say durableButNotWoken ('requires central activation') even when the satellite is Active and the wake succeeds",
+  "outcome": "A cross-host send's receipt and row state never claim 'not woken / requires central activation' unless activation is actually missing. When the wake is asynchronous, the receipt says so, for example 'durable; wake pending', and the later state reflects the real outcome.",
+  "acceptance": [
+    "A note on master identifies, with file and line, where the activation-prerequisite cause is inserted (reported at public_mailbox_relay_receipt:64-66) and where the row's notificationState for a relay message is set, and states why both legs of the 2026-10-26 proof read durableButNotWoken although both wakes happened.",
+    "Fix criteria are proposed separately and concurred by the coordinator; any fix reuses the existing receipt and wake-outcome path, with no duplicate state. No implementation under Greg's STOP without an exemption."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "greg-p0-proof",
+    "mailbox",
+    "receipt-truth"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

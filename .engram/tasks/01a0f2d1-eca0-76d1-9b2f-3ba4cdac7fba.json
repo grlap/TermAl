@@ -1,0 +1,45 @@
+{
+  "id": "01a0f2d1-eca0-76d1-9b2f-3ba4cdac7fba",
+  "external_ref": null,
+  "title": "Delete .beads and rewrite the bd steps in the instruction, command and doc files as Engram acts",
+  "outcome": "On master no file under .beads is tracked, .gitignore and the review-freeze fingerprint script carry no Beads entry, and AGENTS.md, CLAUDE.md, .claude/commands/*.md and docs/ name the Engram act wherever they named a bd step, with no sentence left that depends on the .beads directory existing.",
+  "acceptance": [
+    "A case-insensitive search for `beads` and for a `bd ` command in AGENTS.md, CLAUDE.md and .claude/commands/ finds only historical provenance (the dated migration and removal record, the external_ref explanation, Greg's verbatim quotes, and named past incident ids) and the prohibition 'agents run no bd command'; no step names a bd command, and no sentence depends on the .beads directory or a Beads store existing.",
+    "Apart from w-5aa79f5c0654's two agreed restart-timing texts, which land in the same concurred change and carry Greg's verbatim word for that widening, the change grants no new act and loosens no condition of the commit rule: both coordinators' concurrence on the exact wording is recorded in this item's notes; Greg was sent the final exact wording of every changed passage and its consequence before the landing, and the audit record names the message for each passage; Greg's word for the removal is recorded verbatim with its source; and the final-diff audit is recorded on this item as passed and names the input fingerprint of the reviewed and gated input.",
+    "The full gate passed on the exact landed input.",
+    "`git ls-files .beads` prints nothing at the landed commit, and .gitignore has no Beads or Dolt entry.",
+    "scripts/review-freeze-fingerprint.mjs and its tests no longer carry the .beads exclusion, docs/ name the Engram act wherever they named a bd step, and the fingerprint tests pass."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "beads-removal"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0f2d1-a84f-7ce1-a23b-dc1892c39e24",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Beads removed from TermAl on Greg's word (\"Nie jest potrzebny. Możemy Usunąc beads completnie.\", Advisor #99). It landed as 8f3dab7 (tree ee61f410) together with w-5aa79f5c0654's agreed restart-timing texts, as ONE authority-text change.\n\n- Concurrence (a) by Fable2 and Engram::Fable on sha 2a8348a4.\n- (b) Greg sent the wording through the Advisor.\n- (c) Final-diff audit FULL PASS, naming gate fingerprint bb64d1f7.\n- Gate test-0fc814d7 (verification 084e253b) passed on the landed input.\n- Review pair: Codex 2824c90c had no Medium or higher; Claude-Fable 206ca939 was clean.\n\nOn master: 0 tracked .beads files, no Beads or Dolt lines in .gitignore, no fingerprint exclusion, docs name Engram acts, and the instruction and command files hold only historical Beads provenance plus the prohibition \"agents run no bd command\". The [beads] entry in repo-local .git/config was removed. The stray local interactions.jsonl changes are backed up in .tmp/beads-local-backup-20261003/. Installed as 2b6aa967; no restart needed.\n\nCriteria 1 and 2 were revised for the combined change, with Fable2's concurrence (#1035). Evaluation af993266 passed 5/5. Follow-up Low: w-b0b079c3e515.",
+    "completed_at": "2026-10-03T04:51:26.850922Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

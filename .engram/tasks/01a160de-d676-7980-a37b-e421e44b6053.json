@@ -1,0 +1,28 @@
+{
+  "id": "01a160de-d676-7980-a37b-e421e44b6053",
+  "external_ref": null,
+  "title": "Revalidate named-root release replay route equality against the recorded audit route",
+  "outcome": "Preparation and replay reject a recomputed release route different from the audit's recorded route, consistently with fresh release, with a deterministic control for canonical association loss; preserve current fail-closed behavior and original audit identity.",
+  "acceptance": [
+    "Revalidate named-root release replay route equality against the recorded audit route is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "named-roots",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

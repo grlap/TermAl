@@ -1,0 +1,31 @@
+{
+  "id": "01a1b026-427f-7451-8606-d6a3413765ac",
+  "external_ref": null,
+  "title": "Diagnose the original native S0 bounded-read failure and uncertified Windows-job cleanup",
+  "outcome": "The two original native S0 refusals in run test-06f4f288-16f5-41e8-988f-3b0601206db9 have an evidence-backed first failing operation and cause classification, or their irrecoverable historical limits and a discriminating reproduction are explicit. No later green run substitutes for diagnosis, and capture cleanup custody remains truthful.",
+  "acceptance": [
+    "Preserve the original run and identify what the log proves versus what remains unknown: the failed bounded operation, consumed shared deadline, and uncertified Windows-job cleanup must not be conflated.",
+    "Use bounded phase evidence or a focused discriminator to classify the cause as product, fixture/runner, or environment/resource; fix a confirmed defect with appropriate regression evidence, or document the supported operating constraint without increasing timeouts or labeling the symptom flaky.",
+    "Retain the existing source predicate, deadline and cleanup custody guarantees; later passing tests do not erase the original failure or certify cleanup that was not observed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "capture-lifetime",
+    "check-credit",
+    "diagnostics",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

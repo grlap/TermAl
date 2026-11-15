@@ -1,0 +1,29 @@
+{
+  "id": "01a17421-2090-7dc0-8830-9e2587704a10",
+  "external_ref": null,
+  "title": "Extend executor diagnostics positive-path, receipt isolation and identity-change tests",
+  "outcome": "Extend executor diagnostics positive-path, receipt isolation and identity-change tests",
+  "acceptance": [
+    "Focused tests exercise positive metadata/receipt attribution and relevant refusal paths through the production HTTP route, including deterministic identity change and mismatched operation receipt.",
+    "Tests pass and independent review finds no Medium-or-higher issues in the final additions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "observability",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173f0-87db-7522-aab0-16cbff19cd11",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

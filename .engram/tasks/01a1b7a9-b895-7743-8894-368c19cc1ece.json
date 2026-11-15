@@ -1,0 +1,30 @@
+{
+  "id": "01a1b7a9-b895-7743-8894-368c19cc1ece",
+  "external_ref": null,
+  "title": "Keep observation capture's legacy test refusal out of production arms",
+  "outcome": "Keep observation capture's legacy test refusal out of production arms",
+  "acceptance": [
+    "Keep observation capture's legacy test refusal out of production arms is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "review-follow-up",
+    "source-identity",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

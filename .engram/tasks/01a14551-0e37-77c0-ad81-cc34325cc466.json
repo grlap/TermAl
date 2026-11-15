@@ -1,0 +1,28 @@
+{
+  "id": "01a14551-0e37-77c0-ad81-cc34325cc466",
+  "external_ref": null,
+  "title": "Work view: page Engram rows with `ls --json --page-bytes` so one page holds up to 200 rows",
+  "outcome": "Work view: page Engram rows with `ls --json --page-bytes` so one page holds up to 200 rows",
+  "acceptance": [
+    "Work view: page Engram rows with `ls --json --page-bytes` so one page holds up to 200 rows is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-interop",
+    "work-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

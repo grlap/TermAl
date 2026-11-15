@@ -1,0 +1,37 @@
+{
+  "id": "01a16b94-c027-7163-83f9-0099d880efe4",
+  "external_ref": null,
+  "title": "Return typed identity-allocation exhaustion without poisoning StateInner",
+  "outcome": "Exhausted local session/message identity counters refuse allocation through a typed error without wrapping, reusing an identity, panicking or poisoning StateInner; affected local and remote-proxy alias callers preserve their publication/durability contracts.",
+  "acceptance": [
+    "A local session or message identity allocation at the exhausted counter returns a typed error without counter reuse, wraparound, partial publication, panic or StateInner poisoning.",
+    "Deterministic tests exercise the boundary through real allocation callers, including remote-proxy alias paths, and show unrelated host operations remain usable after refusal.",
+    "Existing durable counter floors, remote-owned message-ID isolation and exact persistence/fence behavior remain intact; required tests and independent review pass."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "allocation",
+    "persistence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

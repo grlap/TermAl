@@ -1,0 +1,27 @@
+{
+  "id": "01a18a9b-bc00-7e83-b729-35de5812d4e7",
+  "external_ref": null,
+  "title": "Strengthen the second step of immediate_revocation_covers_current_and_runtime_installed_engram_descriptors",
+  "outcome": "After the grant clear, the test shows that the clear itself re-targeted every live descriptor tuple (the current old-home grant and the runtime-installed older grant) instead of only re-reading ledger entries the first rotation had already confirmed, for example through a test hook recording the targets each call to revoke_project_engram_authority_off_lock settles.",
+  "acceptance": [
+    "Strengthen the second step of immediate_revocation_covers_current_and_runtime_installed_engram_descriptors is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

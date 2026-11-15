@@ -1,0 +1,29 @@
+{
+  "id": "01a1cdcd-4f21-74e3-83ec-0052499a7550",
+  "external_ref": null,
+  "title": "Extract approval Git-boundary metadata validation from delegation lifecycle code",
+  "outcome": "The approval-boundary Git metadata parser has a focused module with explicit ownership, and delegations.rs keeps only the scope policy and helper call.",
+  "acceptance": [
+    "Git-boundary metadata helpers are moved into a focused module with a header describing their ownership and exclusions, preserving approval and general write-guard behavior.",
+    "Existing delegation_read_only behavioral tests, including invalid metadata and Unix special-file refusal coverage, remain green on the refactored input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "git",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Crossing coordinator instruction Fable2 #3019/messagee46712ba-0ae4-4c82-b832-886d0328908c, read immediately after this task was filed, requires the new approval Git-boundary code to live in a focused module in the current parent candidate. Cleanup is therefore folded into w-03b4f6a05337 now rather than deferred. No execution began on this independent follow-up.",
+  "completion": null
+}

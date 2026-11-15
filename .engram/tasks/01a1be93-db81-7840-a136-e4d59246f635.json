@@ -1,0 +1,30 @@
+{
+  "id": "01a1be93-db81-7840-a136-e4d59246f635",
+  "external_ref": null,
+  "title": "Keep explicit test-history pagination progress visible and announced without shifting the panel",
+  "outcome": "Loading an older page or retrying its failed continuation has an in-place visible and accessible progress indication while revision refresh keeps the current layout stable.",
+  "acceptance": [
+    "A deferred Load older read and an explicit retry of a failed continuation expose visible and announced progress without moving the history list; rows remain visible.",
+    "Revision refresh remains free of the loading-line layout jump; first load, errors and empty results remain clear, with no new query or retry mechanism."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "low",
+    "review-followup",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be6c-1d92-7803-90e9-1e698c69edff",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

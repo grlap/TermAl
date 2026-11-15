@@ -1,0 +1,30 @@
+{
+  "id": "01a1ae56-71cb-7b02-84da-331e94b026cf",
+  "external_ref": null,
+  "title": "Control-panel Git view shows only the project root (main checkout), not the selected session's worktree or the project's other worktrees",
+  "outcome": "From the control panel, Greg can see the Git state of every worktree of the project: the main checkout and the session worktrees (.tmp/wt-*, .worktrees/*, target/*). At minimum, the selected session's own worktree is shown, and he can choose among the project's worktrees as Git reports them (`git worktree list`). The state is read with Git on demand, without recursive file watching.",
+  "acceptance": [
+    "With a project selected, the control panel's Git view shows the selected session's own worktree when the session works in one, or offers a clear choice of it, instead of always showing the project root.",
+    "The control panel lists the project's worktrees from `git worktree list` (branch or detached HEAD, path) and shows any one's status on selection, read on demand.",
+    "UI tests cover a session in a non-root worktree, and the project root, under a selected project. `cd ui && npx tsc --noEmit` and `npx vitest run` stay green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "git",
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

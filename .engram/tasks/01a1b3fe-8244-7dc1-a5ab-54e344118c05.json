@@ -1,0 +1,29 @@
+{
+  "id": "01a1b3fe-8244-7dc1-a5ab-54e344118c05",
+  "external_ref": null,
+  "title": "Intermittent mailbox read failures on a known, previously-read mailbox: transient 404 \"mailbox not found for this session\" and 410 readKeyExpired, both succeeding on immediate retry",
+  "outcome": "A root session's read of a mailbox it belongs to, and has read and acknowledged before, does not fail transiently. If a read is refused, the error names the real cause and says whether an identical retry is safe; a 404 is never returned for a mailbox the caller is a participant of.",
+  "acceptance": [
+    "The cause of the transient 404 'mailbox not found for this session' on a mailbox the caller participates in is identified and fixed, or the response is replaced by a typed retryable error, with a test reproducing the condition",
+    "The 410 readKeyExpired observed with no central restart is explained (which frozen page/key expired and why) and either prevented or documented as expected with its retry rule",
+    "Both reported calls below are accounted for in the item notes"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

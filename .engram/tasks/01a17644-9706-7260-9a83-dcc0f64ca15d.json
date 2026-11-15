@@ -1,0 +1,38 @@
+{
+  "id": "01a17644-9706-7260-9a83-dcc0f64ca15d",
+  "external_ref": null,
+  "title": "Per-peer federation snapshot and admission checks still say \"authority changed; refresh enrollment\" for continuity, durability and missing identity",
+  "outcome": "The per-peer snapshot read (federation_snapshot_locked) and the admission check (ensure_federation_admission_allowed_locked) name lost continuity, pending durability and a missing local identity with the same cause-specific messages that the peer-snapshot list uses. Their statuses and fencing are unchanged.",
+  "acceptance": [
+    "On the exact w-5701 shared-text baseline, federation_snapshot_locked and its per-peer snapshot/current-check callers report FEDERATION_CONTINUITY_LOST, FEDERATION_DURABILITY_PENDING or FEDERATION_LOCAL_IDENTITY_MISSING for the corresponding cause. Continuity and missing identity keep status 409, pending durability keeps status 423, and the existing per-peer fence priority is unchanged.",
+    "ensure_federation_admission_allowed_locked reports the same three shared cause texts for its corresponding checks and keeps status 409. Disabled or standalone federation, admission quarantine and genuine stale authority retain their existing refusal behavior and messages. Authority validation, generations, persistence, admission eligibility, retries and remote status mapping are unchanged.",
+    "Deterministic tests cover the per-peer snapshot/current checks and admission check for each cause and overlapping fences, plus genuine authority changes, disabled/standalone/quarantine and remote 409 mapping. They assert cause, status and unchanged authority/state where relevant. Focused checks covering the new tests and related federation guards pass on the exact final input, and an independent Codex/Claude review pair has no outstanding Medium or higher findings, and the maintained full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnosability",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a175e2-b63f-7c52-b487-5701350f5527"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

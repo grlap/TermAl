@@ -1,0 +1,59 @@
+{
+  "id": "01a167dd-6506-7a42-8668-ccfc6536a372",
+  "external_ref": null,
+  "title": "Retain bounded StateInner holder intervals with registration failure records",
+  "outcome": "A failing registration preserves bounded, epoch-qualified StateInner wait and holder evidence in its existing response and run trace, with strict launcher retention and no effect on registration, retry, durability or execution-credit decisions.",
+  "acceptance": [
+    "A source note inventories StateInner acquisition families and helper boundaries on the declared source revision, records what existing 250 ms wait/hold warnings, registration phase traces and writer metrics can and cannot attribute, and preserves the prior incident's missing-data and scheduling limits. No new live capture or load experiment is used to satisfy this criterion. only acquisitions through the typed StateMutex wrapper are observed; other std mutexes (e.g. runtime.rs:973 SharedCodexSessions) are out of scope; the 815-call census is inspection, not coverage.",
+    "A bounded, per-mutex observer covers StateMutex::lock and successful try_lock_now acquisitions, including direct callers and propagated helper call sites. It records source site, unique hold identity, requested/acquired/released monotonic points and an active-holder age; retained history is capped at 256 completed spans plus one active span per mutex, with explicit loss, eviction and truncation counts. Diagnostic contention, poisoning or saturation never waits for StateInner, changes lock/poison behavior, allocates an unbounded structure or performs formatting, file, SQLite or network work under the state lock; unavailable observations are UNKNOWN rather than zero.\n\nGOVERNANCE: this is the \"bounded logs/evidence sufficient to diagnose the next occurrence\" Greg asked for (Advisor #497, 2026-10-09), not synthetic load and not a repeat capture; it stays so only if the slice adds NO periodic emission, NO persistence of the ring, and NO new polled endpoint — the evidence surfaces only in the failing registration's 503 and the existing exact-run/operation trace. The \"observer endpoints\" mentioned for a later experiment are out of this slice and need the coordinator's separate authorization. Add that sentence to C2.\n\nOWNER PUBLICATION (C2, amend): (a) one process-wide atomic hold-id counter (total order across mutexes); every record carries (server instance id, mutex epoch, hold id). (b) The ACTIVE slot is lock-free: atomics for hold id, site index/pointer and acquired-at offset, written by the acquirer right after the underlying guard is obtained (nanoseconds, no lock). (c) The completed-span RING (256 fixed slots, no heap after construction, &'static Location only, no formatting) sits behind its own try-lock; the release path captures the released monotonic point BEFORE dropping the underlying guard, then after the drop appends the span under try-lock and clears the active slot by compare-and-swap on its own hold id — a late release of X therefore never erases successor Y's active record; a skipped append on contention increments the loss counter. (d) Requested-at stays the Instant already taken in lock/try_lock_now (state.rs:271/299); monotonic points are serialized as offsets from one process-start origin paired with the instance id, since Instant is not serializable. (e) Per-mutex observer as a StateMutex field, not a global static; the whole-inner replace/reload path bumps the mutex epoch or at least never reuses hold ids. (f) Poisoned diagnostic state → observations UNKNOWN, lock/poison behaviour of StateInner unchanged (the Held callback after release stays as is).\n\nThe mutex epoch is bumped on reload or replace (coordinator adoption).",
+    "Registration diagnostics distinguish the waiting acquisition site and wait time from the observed holder sites, complete hold durations or explicitly labelled active ages, and interval overlaps within the same server/mutex epoch. Up to eight registration lock observations and four overlapping-holder records in total are projected into an advisory block capped at 2,048 serialized UTF-8 bytes, with explicit partial/unavailable indicators. The original pending 503 contract, exact identity, same-request retry, admission budgets, durable acknowledgement and execution-credit decisions are unchanged. A response that exists carries the block; a lost response remains UNKNOWN and the same bounded evidence is retained by the existing exact-run/operation diagnostic trace.\n\nOVERLAP (C3, amend): define it: a span overlaps the waiter when same instance id and mutex epoch and span.acquired < waiter.acquired-or-now and span.released-or-now > waiter.requested; the active holder sampled at 503 construction is labelled \"active, age N ms\" and counts as a blocker only under that rule; the block carries the loss/eviction/truncation counters so partial evidence is legible; \"requested wait includes wall scheduling\" stays in the block's wording.",
+    "The launcher validates and retains only the explicitly supported, bounded advisory lock block in the original run's registration results, without copying arbitrary host fields or adding a diagnostic fetch, retry, stage execution or deadline extension. Deterministic barrier/clock tests cover direct and helper attribution, multiple holder handoffs, late/unrelated and cross-epoch exclusion, active-holder release races, ring loss/eviction/saturation, poisoned diagnostic state, HTTP pending/late-commit identity, disconnected callers and run-record bounds. A stalled or saturated observer cannot strand the production writer or registration; existing no-execution and same-request controls remain green.\n\nC4 (amend): the advisory block never influences any launcher decision (exit code, retry, credit, deadline) — state it as an assertion in the tests, not only as prose.",
+    "Credited focused verification and the final maintained gate pass on the exact source input with an independent review pair free of outstanding Medium or higher. The slice establishes attribution capability and bounded overhead, not a live contention reduction. Running-build/instance-labelled before-and-after measurements after the snapshot and ACK repairs, including any 15-minute idle or gate-plus-one load window, remain open on the parent and linked live follow-up and require the coordinator's separate explicit authorization."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "gate-load",
+    "host-persistence",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

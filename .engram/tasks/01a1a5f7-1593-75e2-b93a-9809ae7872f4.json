@@ -1,0 +1,29 @@
+{
+  "id": "01a1a5f7-1593-75e2-b93a-9809ae7872f4",
+  "external_ref": null,
+  "title": "A turn opening on a stranded publication is told the old remedy, and nothing starts the recovery until that turn",
+  "outcome": "A turn that opens unconfirmed on a stranded publication is told truthfully what the host is doing, and a stranded publication can finish before the next turn opens, with no wait on a turn's path.",
+  "acceptance": [
+    "The notice for the unpublished-transition reason says the host is finishing it in the background and that an ordinary later turn should open confirmed, stays truthful when the pass can't finish, and no longer directs the agent to a naming as the remedy for this reason.",
+    "Decide, and either implement or record why not: scheduling the background pass when a publication fails, rather than only at the next turn opening, so an idle gap can finish it and the first turn afterwards keeps its evidence. No wait is added on a turn's path. A test covers it if implemented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

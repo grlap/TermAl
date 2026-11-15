@@ -1,0 +1,55 @@
+{
+  "id": "01a14655-e63d-7dc1-aea3-7db733586c88",
+  "external_ref": null,
+  "title": "Workspace layout storage recovery bypass: the ignored-fetch path finishes without preserving the paused layout",
+  "outcome": "Workspace layout storage recovery bypass: the ignored-fetch path finishes without preserving the paused layout",
+  "acceptance": [
+    "During deferred workspace hydration or storage retry, ignoring the fetched layout does not complete recovery or enable autosave when the recovery-marker read or required local-preservation write fails; it retains the current in-memory layout, visible storage-pause notice and usable Retry action, without sending a PUT.",
+    "After storage access is restored and Retry succeeds, the locally edited layout is preserved and the actual save payload matches it; ordinary successful ignored-fetch hydration retains its existing manual-layout and visual-preference behavior.",
+    "A regression witnesses the bypass failing before the fix and passing afterward; focused persistence regressions, TypeScript and the full gate pass on the final input, with a read-only review pair having no unresolved in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "ui",
+    "workspace-layout"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Workspace layout storage recovery now preserves paused local edits and keeps Retry available when recovery-marker reads or required preservation writes fail; passing recovery retains the correct saved payload and successful hydration behavior. Independent acceptance evaluation passed all 3 criteria at the TRAIN-4 source revision, with focused persistence checks and the five-stage full gate passing.",
+    "completed_at": "2026-10-17T21:07:49.756424400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

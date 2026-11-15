@@ -1,0 +1,28 @@
+{
+  "id": "01a151bb-9786-7963-a0cc-7b952e51f788",
+  "external_ref": null,
+  "title": "Credit a recognised check preceded only by a recorded environment assignment (pwsh $env:NAME='v'; or bash NAME=v) on the same line",
+  "outcome": "A test or build line of the form `$env:NAME='value'; <recognised launcher command>` (pwsh) or `NAME=value <command>` (bash), run in the measured named root, is credited when every assignment is to an allowlisted, provenance-recorded variable (for example CARGO_TARGET_DIR). The host records each name and value in the check's provenance. Any other prefix stays compound and refused, with a refusal that names the env-prefix form and the supported alternative (for example `cargo --target-dir`).",
+  "acceptance": [
+    "Credit a recognised check preceded only by a recorded environment assignment (pwsh $env:NAME='v'; or bash NAME=v) on the same line is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "check-recognition",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

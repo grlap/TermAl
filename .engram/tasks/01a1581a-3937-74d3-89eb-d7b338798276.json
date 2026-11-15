@@ -1,0 +1,45 @@
+{
+  "id": "01a1581a-3937-74d3-89eb-d7b338798276",
+  "external_ref": null,
+  "title": "Represent uncertain Unix reap outcomes conservatively before future reconciliation",
+  "outcome": "Prevent a future cleanup reconciliation from treating reaped=false after a wait error as proof that a numeric PID/group is still safe to signal.",
+  "acceptance": [
+    "Uncertain wait outcomes including ECHILD are represented or documented conservatively, with a regression or invariant preventing numeric-group signaling based solely on reaped=false."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "bounded-reads",
+    "cross-machine",
+    "design-pending",
+    "diagnosis",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "remote-mailbox",
+    "review-follow-up",
+    "s2",
+    "test-failure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Unknown-before-wait phase prevents numeric-group signaling based solely on reaped=false, including ECHILD and other wait errors. Exact tree319bc4c8766fab4d60f061f13822d316183bb4e2 landed8077d3b3a53cfb89dcebc847f5e4c6d74218049e by Opus2 fast-forward22:25:42Z; parent independently verified ls-remote and commit tree/sole parent5fabca19. Own focused and full gate passed, native same-tree cleanup25/0 and onboarding38/0 passed, counted Codex/Claude R2 pair clean of Medium+, five reviewed blobs preserved by byte-exact carry. Independent evaluation 7e8aa1d7a6ff436db91c8e2cdd89d726 passed1/1. Test ref deleted22:15:57Z. Installation pending coordinator window, not claimed. Deferred Low adapter-wiring coverage remains w-90f6c6ad9915.",
+    "completed_at": "2026-10-20T22:28:08.071531Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

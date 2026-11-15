@@ -1,0 +1,31 @@
+{
+  "id": "01a16df8-09ff-71f1-92df-4cb8b7d2f93e",
+  "external_ref": null,
+  "title": "Clarify federation registry eligibility and retained-probe and reverse-image report fields",
+  "outcome": "Federation docs distinguish compatibility authority from diagnostic build/toolchain evidence and explain retainedProbe and reverseRunningImage fields.",
+  "acceptance": [
+    "Clarify federation registry eligibility and retained-probe and reverse-image report fields is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "documentation",
+    "federation",
+    "greg-reported",
+    "mac",
+    "remote-mailbox",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

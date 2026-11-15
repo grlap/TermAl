@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3bf-77a2-b316-64a3c6f34077",
+  "external_ref": "tm-29gv",
+  "title": "Claude's PowerShell tool calls are invisible to Engram check evidence and overlap tracking",
+  "outcome": "Reported by Engram::Opus (session-7284, mailbox #190, 2026-09-25). After the restart, Engram opened a test obligation for source edits in root session-7284 and kept it open. The session had run `cargo test --lib` twice through the Claude PowerShell tool (1016 and 1019 passed) and run two launcher full gates.\n\nCause, from the code: the Claude adapter records a command only for the \"Bash\" tool (src/claude.rs:1780 start, :1848 result). The PowerShell tool reaches neither recorder.command_started_in nor the command-completion path. So on Windows, where Claude sessions often use PowerShell:\n(1) a test run through PowerShell never becomes typed Test verification evidence (tm-winf step 2), and the Engram source_mutation_requires_test obligation cannot be met that way;\n(2) a PowerShell command that writes into a worktree does not count as a running command, so it does not mark an overlapping check in that worktree as unknown. That is an evidence-soundness gap, not only a missing feature.\n\nFix direction: treat the PowerShell tool like Bash in the Claude adapter: command_started_in with the command line, and completion with an exit mapped like engram_claude_command_exit. The PowerShell result format has to be confirmed first, since it may not use Bash's \"Exit code N\" prefix. Recognition already handles a pwsh-wrapped command. Directory tracking would need a pwsh reading (Set-Location/cd/Push-Location), or else declining to credit when the cwd is unknown. Tests: a PowerShell cargo test recorded as passed; a PowerShell write during a check marks it overlapped.\n\nWorkaround until then: run tests through the Bash tool in the foreground and end the turn.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

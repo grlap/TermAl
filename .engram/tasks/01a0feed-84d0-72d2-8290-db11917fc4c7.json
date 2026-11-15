@@ -1,0 +1,27 @@
+{
+  "id": "01a0feed-84d0-72d2-8290-db11917fc4c7",
+  "external_ref": null,
+  "title": "Check exact recovery association when retiring a selection-loss notice",
+  "outcome": "Establish the producer contract for claim/run/root-execution uniqueness, then ensure selection-loss retirement chooses the correct canonical proof and add a discriminating control if multiple proofs can share a claim.",
+  "acceptance": [
+    "Check exact recovery association when retiring a selection-loss notice is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

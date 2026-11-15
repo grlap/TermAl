@@ -1,0 +1,30 @@
+{
+  "id": "01a0fc6b-1aa8-7991-a304-fbc593018906",
+  "external_ref": null,
+  "title": "Keep the final opening capture fail-closed during a borrowed UserStop runtime",
+  "outcome": "Keep the final opening capture fail-closed during a borrowed UserStop runtime",
+  "acceptance": [
+    "Keep the final opening capture fail-closed during a borrowed UserStop runtime is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

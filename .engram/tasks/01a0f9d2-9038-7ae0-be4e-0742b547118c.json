@@ -1,0 +1,30 @@
+{
+  "id": "01a0f9d2-9038-7ae0-be4e-0742b547118c",
+  "external_ref": null,
+  "title": "One mailbox wake recovery-eligibility rule for never-woken, boot-unread, requeue, coalescing, revalidation and activation, with the unresolved barrier blocking later coalescing",
+  "outcome": "Every place that can create or start a mailbox wake asks one predicate over the session authority: never-woken recovery, the boot unread pass, explicit requeue, coalescing in dispatch_turn (both branches), queue-head revalidation and activation. Unread data is a candidate, never permission to dispatch.\nThe predicate distinguishes four cases:\n- known unsent: the obligation is kept even when the mail was acknowledged;\n- confirmed delivered with eligible unread mail: may open the separately identified recovery obligation, under existing policy;\n- confirmed delivered with acknowledged mail: creates no new wake;\n- unknown with unread mail: stays unknown.\nAn unresolved attempt blocks automatic recovery of its overlapping scope. A later, higher-sequence message must not coalesce over it and thereby replay the unresolved scope; the successor waits behind the unresolved barrier until reconciliation. A cancelled obligation is never reopened by an unread scan. max(sequence) is never taken as proof that every underlying scope is eligible.\n\nProvenance: Architect2's decision f639826d on w-3bd74078208d; item 4 of the decomposition in TermAl mailbox 03723eab #42, accepted in #43.\nReview findings it carries: round-3 High (Codex 39fa80aa): the boot unread pass does not exclude a boundary held as unresolved, so an unknown handoff is replayed and its attempt witness overwritten.\nCriteria to be proposed by the holder and concurred by the coordinator.",
+  "acceptance": [
+    "One mailbox wake recovery-eligibility rule for never-woken, boot-unread, requeue, coalescing, revalidation and activation, with the unresolved barrier blocking later coalescing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "mailbox",
+    "session-blocking",
+    "turn-dispatch",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

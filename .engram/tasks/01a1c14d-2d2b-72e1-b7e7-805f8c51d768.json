@@ -1,0 +1,37 @@
+{
+  "id": "01a1c14d-2d2b-72e1-b7e7-805f8c51d768",
+  "external_ref": null,
+  "title": "Let authors push their own candidates to test refs for remote runners (CLAUDE.md, AGENTS.md, coder skill)",
+  "outcome": "A coder can hand a remote runner its candidate by pushing it to its own test ref, instead of sending mailbox parts, under instruction text both coordinators agreed and Greg approved.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md carry the same 'Author test refs' wording, and the coder test-execution skill tells coders to use it for remote runs, in the exact wording both coordinators concurred on.",
+    "Greg was sent the final wording and its consequence before the landing, and his word on the widening is quoted verbatim with its source; no objection from him is recorded.",
+    "The final-diff audit by the other project's coordinator passed on the landed input, and the change landed under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "instructions",
+    "procedure-cost"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Author test-ref authority text and matching coder skill landed unchanged in combo29c, with exact concurrence, Greg notice and widening word, final-input audit PASS, fresh composite review pair and eligible same-tree FULL.",
+    "completed_at": "2026-11-09T21:26:53.520671Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

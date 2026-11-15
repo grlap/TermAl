@@ -1,0 +1,28 @@
+{
+  "id": "01a19da1-7e32-7102-af18-d4ad976f2cd3",
+  "external_ref": null,
+  "title": "UI reconcilePendingPrompts ignores isEngramRetained / engramInterrupted changes, so a now-historical row stays selectable for Resume",
+  "outcome": "When the backend flips isEngramRetained or engramInterrupted on an existing prompt id, the client adopts the new projection, so canSelectPlainQueueHead no longer offers a selection Resume that the backend refuses.",
+  "acceptance": [
+    "UI reconcilePendingPrompts ignores isEngramRetained / engramInterrupted changes, so a now-historical row stays selectable for Resume is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "ui",
+    "w-3fe8-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

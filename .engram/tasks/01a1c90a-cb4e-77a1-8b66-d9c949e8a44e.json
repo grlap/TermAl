@@ -1,0 +1,37 @@
+{
+  "id": "01a1c90a-cb4e-77a1-8b66-d9c949e8a44e",
+  "external_ref": null,
+  "title": "Named-root journal compaction and census rescan every retention inventory once per journal entry (O(J × inventories)) under the state lock; pre-index custody once per scan",
+  "outcome": "Journal compaction, census and admission scan each retention inventory (retirement notices, histories, delegations, selected roots, sessions and their closing jobs, reports and captures) once per pass and look entries up by index, instead of rescanning all inventories for every journal entry. Lock hold under a full 1024-entry journal therefore stays bounded, with priority, short-circuit and try-lock semantics preserved.",
+  "acceptance": [
+    "Compaction, census and the naming-admission path build the custody index once per pass and classify each journal entry by lookup, with identical retention results to today's predicate for every protection class.",
+    "Behavioural tests show retention and census results unchanged across all classes, and a scaled test shows per-pass work grows linearly in journal entries plus inventory sizes rather than their product.",
+    "No change to ENGRAM_NAMED_ROOT_JOURNAL_LIMIT (1024) or to which entries are retained."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "named-root",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered pass-local journal custody indexing for compaction, census and admission; preserves retention classes and limit1024, adds six behavioral/scaled regressions. Landed5acc932b after clean review pair and exact-tree FULL; independent evaluation7f0f32e139324526995862d160377466 passed3/3 at revision2.",
+    "completed_at": "2026-11-11T12:12:05.884779900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

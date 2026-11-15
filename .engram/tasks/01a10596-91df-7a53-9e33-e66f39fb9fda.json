@@ -1,0 +1,53 @@
+{
+  "id": "01a10596-91df-7a53-9e33-e66f39fb9fda",
+  "external_ref": null,
+  "title": "Budget-clock migration B6: the post-c98d041 test files choose their budget clock through the slice-1 boundary",
+  "outcome": "At master 2933a6a, 11 install_test_engram_budget_clock calls remain in test files that were added after c98d041, outside every budget-clock batch scope. By file: acceptance_evaluation_authority 2, acceptance_evaluation 1, engram_named_root_reclamation_recovery 4, engram_source_observation_removal 2, engram_source_observations 1, engram_source_observation_finalization 1. Each site, or the fixture it sits in, chooses its clock through the slice-1 boundary before Engram is enabled. Some sites replace an already chosen clock on purpose; acceptance_evaluation_authority, for example, installs Real after a scripted clock. Those are restructured to choose once, or kept with a stated reason. The B4c site (engram_turn_checks) and the B4d sites (ClaimedRoot, engram_root_authority, engram_legacy_root_recovery) stay in their own batches. This batch is a prerequisite of FINAL. No production change. Criteria are drafted in the test-only template and agreed before anyone claims it.",
+  "acceptance": [
+    "Scope at 2933a6a: the 11 install_test_engram_budget_clock sites in 6 files (acceptance_evaluation_authority 2, acceptance_evaluation 1, engram_named_root_reclamation_recovery 4, engram_source_observation_removal 2, engram_source_observations 1, engram_source_observation_finalization 1). Each site, or its fixture, chooses the budget clock through the slice-1 boundary before Engram is enabled and before any target or worker snapshot: select_test_scripted_engram_budget_clock, or declare_test_real_engram_budget_clock with its reason in a comment. A site that deliberately replaces an already chosen clock is either restructured to choose once or kept with its reason in a comment and a note. install_test_engram_budget_clock appears in these files only at a site kept so. Each site kept that way is also listed in a note on FINAL (w-c06f573bef27), so FINAL's rejection of undeclared Real reads accounts for it.",
+    "A note gives the transitive caller inventory of every changed fixture per file, showing that no caller installs, selects, declares or advances a clock itself, and classifies each real-time and wall-clock source in those files as a liveness guard or the subject of its test.",
+    "Every test in scope that is compiled on the gate's platform passes on its chosen clock; a test compiled out is listed in a note with its cfg. A budget-expiry assertion either advances the same scripted clock across its causal boundary, with an unadvanced positive control, or declares Real with its reason. Each changed fixture asserts the clock is unread before enable. No expectation is weakened, no timeout grows, and no retry is added.",
+    "No production change. A shared fixture used outside this scope stays unchanged unless the inventory covers every caller.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "pre-existing",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The 11 unguarded install_test_engram_budget_clock sites in the 6 post-c98d041 test files now choose their clock once, through the guarded selection. 8 restored-state sites use a guarded select. acceptance_evaluation::install_store and authority:270 use the before-enable helper; the second-store case uses the new install_store_on_chosen_clock. The authority test's mid-test switch to Real is restructured onto the same scripted clock, with an unadvanced control. None is kept, so FINAL has no B6 entry. Committed ae2de904 (freeze 70b9ff7f, gate test-a8810cd3, pair Codex f31edc96 and Claude f314732c clean, evaluation 8747a79d 5/5). Landed in train 39 as master 9dab1a3b (merge onto da0a3d9, tree e814d168). Train gate test-aba4b705 PASS, integration pair Codex 0a0749e7 and Claude a3b1ddf7, whose one Low is noted on FINAL.",
+    "completed_at": "2026-10-04T10:00:31.503251400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

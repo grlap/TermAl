@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c649-7240-b1a3-f2957f0b4844",
+  "external_ref": "tm-mxkm",
+  "title": "Capture prelude-free platform scroll inputs with independent evidence instead of geometry inference",
+  "outcome": "Follow-up from the tm-7cu.41 plan (2026-09-06): once .41 lands, an upward native scroll with no wheel, key, touch, pointer or focus prelude no longer detaches an explicitly following reader, because two geometry snapshots cannot distinguish reader intent from a shrink/regrow clamp. Platform inputs that produce scroll events without a prelude (middle-click autoscroll, native find-in-page, assistive-technology scrolling, some touchpad drivers) therefore keep FOLLOW until the next owned gesture. This task enumerates which of those inputs exist per supported browser with wire-level evidence, captures the ones that can be observed independently (for example scrollend timing, pointer capture on the scrollbar track, selection changes) and records the remainder as a documented limitation in the transcript feature brief. Acceptance: each input class has a test or a documented reason it cannot be captured; no geometry-only or timer-based intent inference is reintroduced.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

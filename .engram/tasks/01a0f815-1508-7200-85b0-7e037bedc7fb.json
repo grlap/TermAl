@@ -1,0 +1,43 @@
+{
+  "id": "01a0f815-1508-7200-85b0-7e037bedc7fb",
+  "external_ref": null,
+  "title": "A passed carried full gate got no host verification record and no refusal line (Termal::Codex, test-4e7120a0 on w-e57a7f7e8da0), while a parallel gate's record landed",
+  "outcome": "Every carried run that settles while its claim is held yields either a host verification record on the item or a refusal line that names the reason. Never neither.\n\nObserved 2026-10-01 on host 2869ea2 (restarted about 15:00Z). Two detached full gates were launched within a minute of each other by two Codex root sessions, each in its own named root:\n- Termal::Coder (session-7422): test-2b0ee76d, 15:08:49–15:26:04Z, PASS. Coder closed a turn with a holder status note at 15:27:05Z, and the verification 88150336 landed on w-1b692f268123 at 15:27:12Z.\n- Termal::Codex (session-8582): test-4e7120a0, 15:08:25–15:25:46Z, PASS. Codex closed turns with holder status notes at 15:26:44Z (514ee008) and 15:28:02Z (238efef1), focus on w-e57a7f7e8da0 throughout, with no worktree commands, edits, new gates or reviewers since launch. No verification record and no refusal line appeared (show at 15:27:00Z and after 15:28Z).\nThe visible difference: Codex had registered a durable resume on the run (wait-b6fd, termal_resume_after_test_runs). It delivered the settled result into a separate wake turn, the one that closed at 15:28:02Z. Coder registered no such wait.\nHypotheses to discriminate: (H1) a resume-after-test-runs registration consumes or diverts the carry, so neither turn close records it; (H2) the post-restart host lost the carry for this session; (H3) something else in session-8582's turn sequence (two closes, ordering). Related: w-1eb9486ce489 (archived run directory loses carried credit), w-072e84b182c7 (silent host states).",
+  "acceptance": [
+    "A carried run that settles under a held claim produces exactly one outcome on the item: a verification record or a named refusal. A test reproduces the identified cause and fails before the fix.",
+    "A note records the recovered history for session-8582, distinguishes observed facts from candidate causes, and states that the original volatile cause is not provable from persisted state; tests close the two source-identified gaps: a terminal carry with a present different claim and its old root entry retained is refused at that checkpoint, and a recognised detached or background full-gate launch classified Carry that began without a binding or active grant is reported as not carried without creating verification evidence.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered carried-credit outcome correction through exact author commit29ed2c752efc22baf9287146fc1871f03b225d72; integration owner Opus2 mailbox74/message-bf52e686-e69a-4c31-b17a-a3cf642f8af5 reports unchanged inclusion in train27 master d6ea73c0edd02c4c68b41b12b3ec89acf5cc17ec, pushed and verified. Owner-attributed integrated gate test-a9b1bcad-cdd4-4fc4-8306-23278f71f5cd PASS, Rust3703/Vitest4555, fingerprint2488a810…; integration Codex8dabd3e2 and Claude54ff9032 pair no blocking findings. Current independent acceptanceb01eee57419c4473be37acb2f4272840 rev2 all3pass/stale:null read full; exact author gate/fail-first/original+delta review closures remain recorded. Original session8582 volatile cause remains unprovable; no running-host reproduction claim. Installation pending owner.",
+    "completed_at": "2026-10-03T22:54:09.014212100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1c9fd-6890-7a52-9b60-5cd789960565",
+  "external_ref": null,
+  "title": "Host notice blames --detach for a focused run that is not a test or build at all, and recommends foreground against the detached workflow",
+  "outcome": "The host's notice for a detached focused launcher run names the real reason no Test or Build record follows, and does not steer agents away from a supported detached workflow.",
+  "acceptance": [
+    "For a detached focused launcher run whose inner command is neither a recognised test nor a build, the notice says that the inner command is not a recognised test or build, rather than attributing the missing record to --detach.",
+    "For a detached focused run of a recognised test or build, the notice states accurately what credit the detached form does or does not earn and how the result is recovered, without recommending a foreground form that conflicts with the documented detached workflow.",
+    "A behavioural test covers both cases; no test credit is granted to non-test commands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "host-recording",
+    "wording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

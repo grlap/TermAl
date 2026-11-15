@@ -1,0 +1,28 @@
+{
+  "id": "01a1ca60-804b-7d81-8f0f-0b8757589b53",
+  "external_ref": null,
+  "title": "Preserve typed durability-pending replies for locally retired acceptance replays",
+  "outcome": "Preserve typed durability-pending replies for locally retired acceptance replays",
+  "acceptance": [
+    "A missed durable acknowledgement during parent-replay local retirement returns a documented, correctly classified response without sending the retained write.",
+    "A stepped-writer deadline regression preserves the original reference-only delegation, evaluator and attempt identity, and proves no transport call or fabricated refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

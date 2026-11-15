@@ -1,0 +1,28 @@
+{
+  "id": "01a16828-bc0e-7131-8c52-c6aa801ada64",
+  "external_ref": null,
+  "title": "Recover independent checkpoint and provider-interruption obligations retained by project containment",
+  "outcome": "Durable independent containment duties have a supported bounded recovery producer without discarding original authority or releasing competing obligations.",
+  "acceptance": [
+    "Recover independent checkpoint and provider-interruption obligations retained by project containment is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "engram-control",
+    "follow-up",
+    "recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

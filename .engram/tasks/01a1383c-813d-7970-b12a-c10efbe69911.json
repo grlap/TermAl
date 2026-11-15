@@ -1,0 +1,27 @@
+{
+  "id": "01a1383c-813d-7970-b12a-c10efbe69911",
+  "external_ref": null,
+  "title": "Document provider capacity recovery and the waitingForProviderCapacity mailbox disposition",
+  "outcome": "Add a feature brief and update relevant mailbox/delegation/host-adapter disposition documentation for bounded automatic Resume and its manual exclusions.",
+  "acceptance": [
+    "Document provider capacity recovery and the waitingForProviderCapacity mailbox disposition is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "capacity-recovery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

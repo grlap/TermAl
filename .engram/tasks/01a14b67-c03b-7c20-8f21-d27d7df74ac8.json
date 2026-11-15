@@ -1,0 +1,29 @@
+{
+  "id": "01a14b67-c03b-7c20-8f21-d27d7df74ac8",
+  "external_ref": null,
+  "title": "Canonical named-root release can keep a false audit record when another owner retires the root and the retirement call errors",
+  "outcome": "An operator's canonical release keeps its audit record only when this release removed the root. A concurrent retirement by another owner (for example the automatic pass) that surfaces as an error withdraws the record, as the Ok(false) path already does.",
+  "acceptance": [
+    "When another owner retires the selection between the route check and recover_one_engram_root_until, and that call returns Err, the canonical release withdraws its audit record, and no later retry or restart acknowledges it",
+    "A regression test drives that interleaving and asserts that no release record remains"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "named-roots",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a14aa0-1a70-7c61-b143-52222f575b81",
+  "disposal_reason": "Superseded by w-52222f575b81, landed as 8ebf2f8e on origin/master (2026-10-18 19:57Z). Its R8 round fixed exactly this race with an evidence-based attribution: each retirement notice records the authority transition that removed it; the release records its prepared transition before any removal; canonical-release credit is given only when the selection's notice names its own transition. It added a nested-reclamation race regression and a restore foreign-owner branch. BarA1's evidence note 074aadbd. Closed by Termal::Fable2 (coordinator).",
+  "completion": null
+}

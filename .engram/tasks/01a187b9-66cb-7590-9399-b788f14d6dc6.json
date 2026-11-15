@@ -1,0 +1,31 @@
+{
+  "id": "01a187b9-66cb-7590-9399-b788f14d6dc6",
+  "external_ref": null,
+  "title": "Limit repeated credit-diagnostic retirement notices after the process-wide dedup window fills",
+  "outcome": "Keep bounded diagnostic deduplication and truthful tracking-loss disclosure while preventing a retirement notice on every new start after the shared 128-entry window fills. This is prompt/log noise only; no change to execution, verification or durability authority.",
+  "acceptance": [
+    "Limit repeated credit-diagnostic retirement notices after the process-wide dedup window fills is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-7",
+    "acceptance-needed",
+    "host-recording",
+    "post-import",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-0ee9-7970-9657-3e6804fa2785",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

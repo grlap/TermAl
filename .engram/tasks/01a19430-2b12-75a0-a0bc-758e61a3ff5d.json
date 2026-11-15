@@ -1,0 +1,24 @@
+{
+  "id": "01a19430-2b12-75a0-a0bc-758e61a3ff5d",
+  "external_ref": null,
+  "title": "Move the committed-input helpers out of scripts/test-launcher.mjs, now 2,183 lines",
+  "outcome": "scripts/test-launcher.mjs is back under the roughly 1,500-line threshold for JS utility modules, or at least no longer grows from the committed-input flow. The pure committed-input helpers (commitInputStatusClean, commitInputNotCleanReason, commitInputOutcome, commitInputSummaryLine) move to their own module, for example scripts/test-launcher-commit-input.mjs, or next to captureCommitInputStatus in review-freeze-fingerprint.mjs. This is a pure code move with a provenance header. Source: Low from the Claude review (delegation 0c70316c) of committed-input candidate 637616e6.",
+  "acceptance": [
+    "Move the committed-input helpers out of scripts/test-launcher.mjs, now 2,183 lines is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

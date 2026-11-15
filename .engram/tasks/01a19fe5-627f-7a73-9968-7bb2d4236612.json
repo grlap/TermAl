@@ -1,0 +1,28 @@
+{
+  "id": "01a19fe5-627f-7a73-9968-7bb2d4236612",
+  "external_ref": null,
+  "title": "A delegation can complete while its command inventory still lists a command as running, with no terminal evidence for that command",
+  "outcome": "When a delegation reaches a terminal state, every command in its recorded inventory also has a terminal state: completed with exit, interrupted, abandoned with the child's end, or unknown with an explicit reason. Its start, last-observed time and any error text are kept. No command stays 'running' after its owning child has completed, and the result says plainly when a command's outcome is unknown. Tested with a command that never returns before the child completes.",
+  "acceptance": [
+    "A delegation can complete while its command inventory still lists a command as running, with no terminal evidence for that command is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "command-lifecycle",
+    "delegation",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c668-7032-a387-eb4b41f2d431",
+  "external_ref": "tm-nrao",
+  "title": "TermAl produces Engram acceptance evaluations: spawn the evaluator, select the mode, record the verdict",
+  "outcome": "Engram now refuses completion without a recorded per-criterion acceptance evaluation (policy active on the Engram project store since 2026-09-18). The agreed design gives the host everything that needs a model or a workspace: selecting the mode for a task (same-session, sub-agent, independent-session), spawning the evaluator with the task outcome, criteria, evidence index and read-only workspace, and submitting the verdict through Engram's evaluate word under the evaluator's own identity. None of that exists in TermAl yet. Slices: (1) an evaluator delegation profile: read-only workspace plus exactly one tracker write, evaluate, with a built-in evaluator brief and an attempt key per spawn; (2) a tool and a UI action that request an evaluation for a work ref and resume the requester with the verdict; (3) per-project settings for the default mode, evaluator agent and model, honouring a task's pinned mode and the store policy's allowed modes; (4) sub-agent mode with host-attested parent and execution identity; (5) source fingerprint at evaluation and completion; (6) observed build evidence through the control checkpoint. Engram-side contract: docs/features/acceptance-evaluation.md, section Host integration.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

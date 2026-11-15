@@ -1,0 +1,28 @@
+{
+  "id": "01a11bef-76b5-79b3-bfbf-7c165c7d98c3",
+  "external_ref": null,
+  "title": "Classify foreign focused-launcher modes as association rather than root rejection",
+  "outcome": "Separate true root mismatch from detached/full/non-focused invocation mismatch, classify the latter as association and pin reason assertions. Keep all existing artifact validation and no-credit behavior unchanged.",
+  "acceptance": [
+    "Classify foreign focused-launcher modes as association rather than root rejection is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a19f80-13b7-7ef3-8e38-9c356b33aa58",
+  "external_ref": null,
+  "title": "Make mailbox session-link accessibility describe navigation and preserve keyboard marker access",
+  "outcome": "Mailbox header session-name links announce their navigation behavior accurately, and supported keyboard users retain a discoverable route to message marker actions without changing session navigation or Open mailbox.",
+  "acceptance": [
+    "Mailbox header session navigation is not announced as opening a menu when activation navigates; any contextual action hint accurately describes supported platform behavior.",
+    "Keyboard access to mailbox message marker actions is reviewed on supported platforms and preserved through the existing marker owner; meaningful coverage documents the chosen behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "accessibility",
+    "greg-reported",
+    "mailbox",
+    "review-followup",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f07-4a26-7172-a887-8261a06891a2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

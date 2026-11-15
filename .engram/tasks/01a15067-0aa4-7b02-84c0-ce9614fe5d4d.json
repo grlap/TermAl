@@ -1,0 +1,29 @@
+{
+  "id": "01a15067-0aa4-7b02-84c0-ce9614fe5d4d",
+  "external_ref": null,
+  "title": "An operator named-root release sends no notice to a still-present naming session",
+  "outcome": "When an operator release removes a root whose naming session is still present (quiet), that session is told once, like a canonical retirement's Reclaimed notice. It can then rename before measured work instead of silently falling back to its ordinary workdir.",
+  "acceptance": [
+    "An operator release of a root whose naming session is present delivers that session a once-only notice naming the released selection, through the same delivery path as retirement notices (refresh_engram_source_root_notices_locked)",
+    "A test releases a quiet present session's root by the operator route and asserts the notice is delivered once"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "named-roots",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

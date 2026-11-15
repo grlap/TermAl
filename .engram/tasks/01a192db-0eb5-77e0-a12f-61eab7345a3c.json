@@ -1,0 +1,31 @@
+{
+  "id": "01a192db-0eb5-77e0-a12f-61eab7345a3c",
+  "external_ref": null,
+  "title": "Response Board and overview navigation cancel on wheel or touch that does not navigate the transcript",
+  "outcome": "Delayed Response Board source jumps and conversation-overview seeks currently subscribe to raw wheel/touchstart on the transcript node. A nested code/table scroller consuming wheel, a suppressed wheel event or a touch tap can cancel a pending jump despite no transcript navigation. Reuse the pane's normalized navigation owner, or filter raw input through its existing routing/suppression contract, without introducing another scroll authority. Preserve cancellation after real newer transcript input.",
+  "acceptance": [
+    "Pending Response Board and conversation-overview navigation survives wheel consumed by nested scrollables, suppressed wheel and touch taps that do not navigate the transcript, while genuine newer transcript navigation still cancels delayed history/frame work.",
+    "Focused regression tests cover non-navigation controls and genuine navigation in both consumers, and affected UI suites and TypeScript pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "review-low",
+    "scroll",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c516-73f2-802e-df37835ba60a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

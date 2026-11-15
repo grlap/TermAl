@@ -1,0 +1,53 @@
+{
+  "id": "01a114a2-8541-74b0-9eef-ed89bdef7078",
+  "external_ref": null,
+  "title": "Expose bounded parent-visible activity for a running delegated child",
+  "outcome": "A delegation's owning parent can inspect bounded host-observed activity for the current child attempt before a terminal result exists, without mistaking lack of observation for a stalled reviewer or changing the child's execution.",
+  "acceptance": [
+    "A parent-authorized activity read for a running child reports the current attempt/runtime scope, observation time, last observed activity time and kind, and available observed tool/command counts with their coverage. Missing or unsupported observations are explicit unknowns, not invented zero counts. It never exposes raw prompts, command arguments, output or secrets.",
+    "The activity observation is harness-agnostic and performs no resume, cancellation, replacement, retry or completion. Polls do not advance the child's activity time. Restart, runtime replacement and follow-up attempts cannot attribute a prior attempt's activity to the current one. Existing status refresh semantics, if reused, are documented rather than described as side-effect-free.",
+    "Focused tests prove parent isolation, running-child visibility, absent-telemetry behavior, correct observed activity updates, stale-attempt exclusion and unchanged child execution. The maintained full gate and required independent review pass on the exact input; documentation states that inactivity observations alone do not establish a stall."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated",
+    "delegations",
+    "design-pending",
+    "diagnostics",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c6cd-7271-83da-1a2d77dedcad",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

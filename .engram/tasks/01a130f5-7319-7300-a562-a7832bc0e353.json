@@ -1,0 +1,42 @@
+{
+  "id": "01a130f5-7319-7300-a562-a7832bc0e353",
+  "external_ref": null,
+  "title": "Reported-ends test gaps: stale-runtime late end, carried-limit eviction by a Codex test, six-hour expiry arms, a carried declared check, a NotFinished late end",
+  "outcome": "src/tests/engram_reported_ends.rs (or a child) covers the branches still untested: a late end through a runtime that is no longer the session's with a matching item key; eviction at ENGRAM_CARRIED_CHECK_LIMIT by a carried Codex test (engram_push_carried_check, 'a newer carried Codex test took its place'); the six-hour expiry arms (true,true) and (false,true) in engram_take_settled_carried_checks; a carried declared check (end.declared capture and artifact read in engram_settle_reported_end); a late end with exit NotFinished or declined.",
+  "acceptance": [
+    "Tests cover each branch named in the outcome and pass.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

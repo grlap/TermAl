@@ -1,0 +1,32 @@
+{
+  "id": "01a1cdb9-bfd7-7812-a766-d5340890c79d",
+  "external_ref": null,
+  "title": "Exercise the source-owner version warning label through the production seam",
+  "outcome": "Metadata-window coverage observes the operation label chosen by the production source-owner path, and distinguishes fixture-only warning/elapsed accounting from production behavior.",
+  "acceptance": [
+    "A behavioral control reaches the operation label and warning owner actually used by engram_source_owner_run for --version, with scaled/scripted time and no real-minute wait or alternate process runner.",
+    "Fixture-only warning and elapsed-sum assertions are removed, accurately described or backed by the actual production seam; the55s-success/70s-refusal deadline discrimination, no-resend/evaluator/identity controls remain.",
+    "Every changed test module and sibling caller is validated without tautological text/constant pins or new Markdown/instruction-file tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "engram-adapter",
+    "follow-up",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

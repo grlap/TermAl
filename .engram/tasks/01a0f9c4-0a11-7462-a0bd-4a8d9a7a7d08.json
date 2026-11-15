@@ -1,0 +1,27 @@
+{
+  "id": "01a0f9c4-0a11-7462-a0bd-4a8d9a7a7d08",
+  "external_ref": null,
+  "title": "A read-only `node scripts/review-freeze-fingerprint.mjs --check` in the worktree voids a carried gate's credit, though the review procedure requires it after a fan-in",
+  "outcome": "A command that provably did not change the worktree does not refuse a carried gate's credit, and the required freeze check can run while a gate is carried",
+  "acceptance": [
+    "A read-only `node scripts/review-freeze-fingerprint.mjs --check` in the worktree voids a carried gate's credit, though the review procedure requires it after a fan-in is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-gates",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

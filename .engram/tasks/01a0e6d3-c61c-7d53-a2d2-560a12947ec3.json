@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-560a12947ec3",
+  "external_ref": "tm-m6r1.3",
+  "title": "Work project scope: preserve explicit selection across dock remounts",
+  "outcome": "Round-1 Codex Low, WorkPanel.tsx:12: after choosing project B with session A focused, switching to Files and back remounts Work and initialProject chooses A ahead of the saved B. Preserve explicit selection above the remount boundary while keeping the agreed focused-project default for initial selection. Evaluate dock-origin default only as a separate context decision, not an automatic change to the user's independent selection.",
+  "acceptance": [
+    "Dock remount regression retains explicitly selected B with A focused; initial/default and removed-project fallback remain intentional."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a1b69b-a67c-7412-ac26-65a978cc92ee",
+  "external_ref": null,
+  "title": "Name the source-change reason when native credit is withheld because the full source_id changed between S0 and after",
+  "outcome": "Name the source-change reason when native credit is withheld because the full source_id changed between S0 and after",
+  "acceptance": [
+    "When a native declared run's full source_id after the run differs from S0, the withheld record and the host's turn notice name that reason specifically (source changed during the run) and list what changed, per the w-e072 criterion: an edited tracked file, a new non-ignored untracked file, or a changed submodule HEAD, with the changed paths. This is reported separately from a reservation or terminal mismatch.",
+    "Withholding behaviour is unchanged: no credit when S0 differs from after, and credit when they are equal. No new condition; the change is the reason text and structure only.",
+    "A behavioural test drives a run whose source changes mid-run, for each of the three change kinds, and asserts the named reason and paths; no text-pin of unrelated wording."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-credit",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered named source-change diagnostics separately from native reservation mismatches, with complete retained entries and bounded turn notices; landed fdbb53c8 and confirmed live after restart.",
+    "completed_at": "2026-11-07T21:24:16.695261100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

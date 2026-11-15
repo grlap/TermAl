@@ -1,0 +1,29 @@
+{
+  "id": "01a146a7-a07f-7fb2-aa80-b0638788f33e",
+  "external_ref": null,
+  "title": "A Codex root parked on an MCP elicitation (\"Codex needs MCP input\") waits silently: peers get no signal, and mailbox messages queue unread",
+  "outcome": "A Codex root parked on an MCP elicitation (\"Codex needs MCP input\") waits silently: peers get no signal, and mailbox messages queue unread",
+  "acceptance": [
+    "A Codex root parked on an MCP elicitation (\"Codex needs MCP input\") waits silently: peers get no signal, and mailbox messages queue unread is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "approvals",
+    "codex",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

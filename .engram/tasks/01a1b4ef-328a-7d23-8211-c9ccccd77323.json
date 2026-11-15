@@ -1,0 +1,27 @@
+{
+  "id": "01a1b4ef-328a-7d23-8211-c9ccccd77323",
+  "external_ref": null,
+  "title": "Replace the 40 s real-sleep source-bound test with a controlled-clock boundary test",
+  "outcome": "The 30 s source-capture boundary is tested through the existing deadline seam with a controlled clock, without real 9 s and 31 s sleeps in the default cargo test suite.",
+  "acceptance": [
+    "Replace the 40 s real-sleep source-bound test with a controlled-clock boundary test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "eo-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

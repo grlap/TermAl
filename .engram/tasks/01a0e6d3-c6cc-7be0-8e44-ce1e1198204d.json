@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6cc-7be0-8e44-ce1e1198204d",
+  "external_ref": "tm-s5e5",
+  "title": "Refuse overlapping runs of the same checks (Greg: same tests must not run concurrently)",
+  "outcome": "From Greg's decision after the tm-ncc6.8.6 consultation (Termal::Codex, Termal::Fable, 2026-09-27). Today nothing stops a second run in the same worktree (execution.lock only guards one run dir; 'one run per worktree' is slice-3 admission, tm-ncc6.3.3). Decide the key first, Greg's call: the worktree alone (stricter than his rule; it also refuses a different focused check) or worktree plus plan (full vs focused argv). Requirements from the consultation: the refusal names the running run's id and directory so the caller can register a wait on it instead of retrying; the lock is released by the index's liveness rule (pid plus creation time, only proof of exit counts), never left for a human to delete after a killed launcher; one lock authority shared by the launcher and slice-3 host admission; atomic acquisition. Not part of the UI/Test Runs correctness patch.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

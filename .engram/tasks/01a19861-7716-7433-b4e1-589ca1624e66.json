@@ -1,0 +1,31 @@
+{
+  "id": "01a19861-7716-7433-b4e1-589ca1624e66",
+  "external_ref": null,
+  "title": "Make the child-refresh commit-to-enqueue ordering regression discriminate an unlock gap",
+  "outcome": "Replace or supplement the ordered child-refresh commit test with a deterministic competing-committer schedule that fails if refresh releases StateInner between revision/persistence and delta enqueue, using existing test ownership and no production diagnostic owner.",
+  "acceptance": [
+    "Make the child-refresh commit-to-enqueue ordering regression discriminate an unlock gap is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "greg-reported",
+    "performance",
+    "review-followup",
+    "state-lock",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a192eb-9e83-77c0-9b55-c17ed893adeb",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1cd78-541b-7633-9bdc-9d23dea51152",
+  "external_ref": null,
+  "title": "No supported read route exposes a session's Engram-disabled state",
+  "outcome": "An operator or runner can check, through one supported read-only route and without store access, whether each TermAl session's Engram integration is disabled, and why and since when.",
+  "acceptance": [
+    "A behavioural test disables a session's Engram integration through a genuine session-disabling control error and shows that the supported read-only route reports that session as disabled, with the disabling code and time; a session that was never disabled reports enabled.",
+    "The route needs no store access and grants no new authority; existing disable and re-enable behaviour is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-integration",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

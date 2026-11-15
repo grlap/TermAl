@@ -1,0 +1,36 @@
+{
+  "id": "01a19ef1-e559-7cc0-a4bd-7e7be7ea056c",
+  "external_ref": null,
+  "title": "Read-only inventory of Linux, Mac and federation-host recovery after EO cutover",
+  "outcome": "Read-only inventory of Linux, Mac and federation-host recovery after EO cutover",
+  "acceptance": [
+    "A timestamped per-host inventory distinguishes actual build evidence at 87f49ed0, current federation/SSH status, remote session visibility, and runner/test-ref/evaluation readiness without assuming a shared Unix cause.",
+    "Evidence and unknowns are recorded with links to existing build, SSH diagnostics and remote-dispatch items, plus proposed owners and next actions; no remote commands, source/config edits, installations or restarts are performed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-machine",
+    "diagnostics",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; Read-only inventory delivered (no code commit), basis87f49/47fd; timestamped per-host unknowns/owner proposals and WindowsB ACK6d0e7bc8. Historical inventory, not current host certification.",
+    "completed_at": "2026-11-08T19:23:00.405690900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

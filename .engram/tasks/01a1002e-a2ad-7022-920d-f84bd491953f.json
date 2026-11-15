@@ -1,0 +1,42 @@
+{
+  "id": "01a1002e-a2ad-7022-920d-f84bd491953f",
+  "external_ref": null,
+  "title": "The same-session carried-failure refusal tells a blocked executor to unpin the task's evaluation mode, which Engram now refuses",
+  "outcome": "When termal_evaluate_acceptance refuses a same_session evaluation because a carried failure needs acknowledgement by an evaluator that never held the run, the refusal names only remedies the requester can actually take. A blocked executor is pointed to admitting independent_session in the project policy, or to asking a never-holder planner or the coordinator to change the pin. It is never told to unpin the mode itself, which Engram refuses under Engram w-360e6ca406fb.",
+  "acceptance": [
+    "A test first fails on unchanged code: the same-session carried-failure refusal (src/acceptance_evaluation_api.rs, the `supersedes_required` branch around line 1303) tells the requester to 'unpin the task's evaluation mode'.",
+    "The refusal text names the remedies the requester can take (admit independent_session in the project's Engram policy; ask a never-holder planner or the coordinator to change the pin) and no longer advises the executor to unpin; its HTTP status, refusal condition and every other refusal are unchanged. A test asserts the new text and the absence of the self-unpin advice.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

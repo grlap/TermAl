@@ -1,0 +1,40 @@
+{
+  "id": "01a1d97c-f962-78d3-8e32-dc27e35ad201",
+  "external_ref": null,
+  "title": "Advance causal completion recovery past a malformed retained custody row",
+  "outcome": "A malformed or oversized retained custody row is visibly refused without permanently pinning the recovery cursor or preventing later valid originals in either table from being examined.",
+  "acceptance": [
+    "A behavioral test places malformed custody before a valid original and observes later valid work reached while the malformed request remains uncredited.",
+    "The row/page/keyset visit and result bounds, alternating-table fairness, and authority/source validation remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "large",
+    "mailbox-recovery",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d3bf-d29f-7780-88cc-b979715a441f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a11bf5-c4c6-7920-8e06-08843fed032e",
+  "external_ref": null,
+  "title": "Acceptance evaluation refuses checks from an earlier naming generation of the same root even when the source content is identical, forcing a full-gate rerun",
+  "outcome": "A recorded check stays citable after the holder re-names the same worktree (for example after claim recovery) when its source content is unchanged, or the refusal names a supported way to carry it, so no full gate is rerun only to refresh a generation number.",
+  "acceptance": [
+    "The cause is classified with evidence: which layer (TermAl's evaluation request or Engram's) refuses on naming generation, and why generation rather than source content decides.",
+    "Either a check recorded under an earlier naming generation of the same root, with identical source content and the same claim lineage, is accepted as evidence, or the refusal names that case and a supported remedy cheaper than a full rerun; a test covers the case."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "efficiency",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

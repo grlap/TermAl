@@ -1,0 +1,32 @@
+{
+  "id": "01a1b271-ea70-7d00-a6c6-84eac5726997",
+  "external_ref": null,
+  "title": "Federation shutdown witness stalls behind its held receive and aborts through a poisoned control guard Drop",
+  "outcome": "The past-writer receive/shutdown witness establishes stop and join ordering without relying on a worker that may be blocked by its own held receive, and control-guard teardown cannot turn a preceding failure into a process abort while preserving security retirement.",
+  "acceptance": [
+    "The original Windows FULL failure, exact input and journal chain are preserved, and the shutdown scheduling cause is distinguished from the destructor abort using source and a discriminating controlled test; no timeout is inflated and no assertion is weakened.",
+    "The receive/shutdown witness deterministically proves stop-before-release, one admitted receive committed once, and executor joins before persistence; controlled error paths release owned gates so the test can report its first failure.",
+    "FederationControlGuard teardown remains fail-closed for its exact owner/incarnation and cannot panic again during unwinding from a poisoned link; regression coverage discriminates poison teardown, normal teardown and stale-owner isolation.",
+    "The separate repair candidate has a fresh complete review pair and relevant focused and maintained full gate evidence on its exact input before landing; the failed trie candidate is not treated as gated by this repair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "gate-failure",
+    "panic-unwind",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1b270-bc5c-7532-9e36-2d9589eb35fd",
+  "disposal_reason": "Crossed coordinator creation: Fable2 created the exact same two-defect repair at19:58:15Z while my dedupe/read-only investigation was active; Opus2 mailbox305 delivered after my creation/name. No source edit or test on this duplicate. Continue exclusively on assigned w-2d9589eb35fd using the already-created clean disposable root; original evidence and hypotheses carried there.",
+  "completion": null
+}

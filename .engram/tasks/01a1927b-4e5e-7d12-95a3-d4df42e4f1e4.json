@@ -1,0 +1,29 @@
+{
+  "id": "01a1927b-4e5e-7d12-95a3-d4df42e4f1e4",
+  "external_ref": null,
+  "title": "State how a test-ref remote gate relates to a candidate-commit landing",
+  "outcome": "State how a test-ref remote gate relates to a candidate-commit landing",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md say explicitly whether a recorded test-ref full gate on the candidate's tree, with the same parent, counts as a candidate commit's final gate while the landing stays the candidate commit itself, or whether candidate landings need a local gate on the candidate commit",
+    "The change lands under the instruction-change conditions (a), (b) and (c), with a clean review pair and full gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

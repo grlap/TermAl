@@ -1,0 +1,31 @@
+{
+  "id": "01a0f50a-e5db-78f3-a1ba-55cfd2cc6244",
+  "external_ref": null,
+  "title": "Witness the independent evaluator brief's minimal omission detail and refusal floor",
+  "outcome": "Witness the independent evaluator brief's minimal omission detail and refusal floor",
+  "acceptance": [
+    "A discriminating evaluator-brief test crosses the Compact floor into Minimal while retaining complete criteria, and one byte below the actual Minimal floor refuses with the correctly reported floor."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0ea91-e695-7472-8e21-67e7b8bdcade",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1418a-6195-7e43-b902-63e7fccf1dd4",
+  "disposal_reason": "The parent is completed. Continue as independent work: a small test-only witness (Termal::Opus3's triage, TermAl mailbox 03723eab #2675).",
+  "completion": null
+}

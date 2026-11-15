@@ -1,0 +1,28 @@
+{
+  "id": "01a19e92-accd-76b1-ace0-bcc11bedcb31",
+  "external_ref": null,
+  "title": "Two Engram host tests leak their test-state directory, failing the full gate's temp-cleanup guard",
+  "outcome": "The full gate's rust-tests stage passes its temp-cleanup guard: the named tests remove their termal-test-state directories and owner files before the run ends, because no AppState clone outlives the test.",
+  "acceptance": [
+    "A full gate run on a commit that contains the fix reports no 'Test temp leftover' lines for recognised_tests_name_the_bound_claim_and_the_other_live_named_claim and a_background_command_still_running_in_its_own_turn_overlaps_that_turns_later_check.",
+    "The cause is identified (which owner keeps the state alive) and fixed without weakening the cleanup guard, Arc::get_mut exclusivity or lock bounds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "test-hygiene"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Duplicate of w-6bb54cae56aa, which Termal::Fable2 filed for the same C4 FULL 6580d0ce temp-cleanup leak. My notes (the two creating tests, the retained run root, the hypotheses, and Greg's verbatim deferral) are recorded on w-3fe8.",
+  "completion": null
+}

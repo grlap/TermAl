@@ -1,0 +1,38 @@
+{
+  "id": "01a111c5-fd9d-71f3-bd26-a40efb6e3b33",
+  "external_ref": null,
+  "title": "D — CONTROL AND WORK-READ BOUNDARY PREPARATION",
+  "outcome": "D — CONTROL AND WORK-READ BOUNDARY PREPARATION",
+  "acceptance": [
+    "D — CONTROL AND WORK-READ BOUNDARY PREPARATION, cap +550. Depends on A/C. Prepare separate local routing and asserted scope at control transport, adapter, held/work reads, work-view HostReader, inspection/reconciliation and external-reference boundaries. New strict paths remain unreachable from production issuance until F; existing legacy path keeps its exact wire identity and behavior. Do not introduce a newly automatic local-id fallback. Acceptance subset: I6 exact argv/env/target-session/current reverse routing and per-store process ownership; I3 legacy wire equivalence; I7 no fresh-id reachability. Central eligibility checks must run before I/O and before response application. Where plumbing alone changes active signatures, prove byte-identical legacy calls."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-backup",
+    "engram-host",
+    "identity-stage-d"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0fa84-7f43-7782-b76d-47338f8245e3",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a111c5-fca2-7d71-a3b2-d3e6910a9679",
+    "01a111c5-fd68-75b3-872f-28bbf0c41e19"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

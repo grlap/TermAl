@@ -1,0 +1,28 @@
+{
+  "id": "01a1bc27-01b3-7641-8995-2b7a81b9e525",
+  "external_ref": null,
+  "title": "Update the termal_name_source_root description to say a rename or clear seals the private source identity",
+  "outcome": "The termal_name_source_root tool description no longer says a rename or clear seals the old root's revision. It describes the private source identity that new naming seals, without showing the identity value. The matching assertion in the unknown-fields test is updated to that wording.",
+  "acceptance": [
+    "src/delegation_mcp_source_root.rs no longer says that a rename or clear seals the old root's revision. The description says a private source identity is kept, and shows no source_id value.",
+    "The matching assertion text in src/tests/engram_source_root_unknown_fields.rs is updated, and that test passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "source-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,35 @@
+{
+  "id": "01a1dc10-6112-74a2-85ac-ca9e0f6cb318",
+  "external_ref": null,
+  "title": "Gate Telegram fix (9f89) as 296758a6 on b9186b44 with a Windows focused check and one full launcher run on a DL560 test ref; Opus2 lands",
+  "outcome": "edfd's review-clean Telegram fix for w-9f891a688f51 is on master as 296758a6, parent b9186b44. It is 0562a423's contribution carried byte-identical, so it adopts R2 pair 18090/18091, which has no Medium or higher; Fable2 concurred in #6236. It has a registered Windows focused check of its new filesystem-fixture tests on the exact commit, and one passing full launcher gate on its exact tree via a DL560 test ref. The integration checks hold, master is fast-forwarded to 296758a6 and pushed, and the test ref is deleted.",
+  "acceptance": [
+    "A full launcher run on a fresh checkout of test ref test/w-<this item>-<fp8>, whose commit has 296758a6's tree, passed every stage, with the runner's own review-freeze fingerprint the same before and after. The run id, host, test-ref commit, tree and fingerprints are recorded on this item.",
+    "A registered Windows focused committed-input check on 296758a6 in this item's named root on Central passed tests::telegram_missing_sessions:: (the four new filesystem-fixture tests).",
+    "Before the push, origin/master equals b9186b44a026d51fbefdf8c5e9c9331f3cbd647a, so the landing is a fast-forward. After the push, ls-remote origin master equals 296758a6, which is recorded, and the test ref is deleted with its push and deletion recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The Telegram fix (edfd's 0562a423, carried byte-identical as 296758a6) landed on master as a fast-forward from b9186b44. It was pushed at 23:20:27Z, verified by ls-remote, and its test ref was deleted. Gate: the DL560 FULL test-2befa76b passed every stage on the identical tree f07dc4ff, in a fresh worktree. Windows: the registered focused check test-fcf82ce4 passed 4/0 (verification 0d9a12d0). The independent re-evaluation (Codex 18113) passed all 3 criteria.",
+    "completed_at": "2026-11-14T23:47:43.886651100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

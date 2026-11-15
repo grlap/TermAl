@@ -1,0 +1,30 @@
+{
+  "id": "01a177bc-a5cf-75a1-aaad-4e44aca45353",
+  "external_ref": null,
+  "title": "Mailbox wakes reach recipients tens of minutes late while their turn retries a dropped provider connection; the row still reads deliveredToIdleSession",
+  "outcome": "A coordinator can tell from the mailbox row and the session API whether a wake has actually reached the recipient's model, and how long it has been waiting and why (for example \"turn retrying provider connection, attempt N of 5\"). A wake whose dispatched turn is stalled in provider retries is no longer shown as deliveredToIdleSession with nothing more.",
+  "acceptance": [
+    "A research note on current master identifies, with file and line, the code that sets the mailbox row's notificationState to deliveredToIdleSession and what happens to the dispatched wake turn while the provider connection retries. It confirms or refutes, with a deterministic reproduction, that the wake turn and later queued wakes are held until the retries end.",
+    "Acceptance criteria for any fix are proposed in a separate note and concurred by the coordinator before implementation. No implementation starts under Greg's 2026-10-24 STOP for new fixes until it is lifted or this item is explicitly exempted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "cross-project",
+    "engram-reported",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

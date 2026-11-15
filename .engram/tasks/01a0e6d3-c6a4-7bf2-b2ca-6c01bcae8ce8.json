@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6a4-7bf2-b2ca-6c01bcae8ce8",
+  "external_ref": "tm-px5",
+  "title": "Add termal_followup_session MCP tool — send a follow-up message to an existing delegation child",
+  "outcome": "New TermAl delegation MCP tool (user request). Lets a parent send a follow-up turn to an EXISTING\ndelegation child instead of spawning a fresh session, so the child keeps its context.\n\nSignature:\n  termal_followup_session({\n    delegationId,   // required — an existing parent-scoped delegation id\n    message         // required — the follow-up prompt to run as a new turn in that child\n  })\n\nWHY: today the only delegation tools are spawn / status / result / cancel / resume_after_delegations\n(src/delegation_mcp.rs:268-273). After a delegation completes there is no way to ask the same child a\nfollow-up — you must spawn a new session and lose its context. This adds that.\n\nIMPLEMENTATION ANCHORS (src/delegation_mcp.rs):\n - Add dispatch arm in handle_tool_call (near line 268): \"termal_followup_session\" => self.tool_followup_session(arguments).\n - Register the tool + JSON schema in the tools/list response (same place the other termal_* tools are advertised).\n - Implement tool_followup_session: resolve delegationId -> child session id (parent-scoped, must still\n   exist), then deliver `message` as a new prompt/turn to that child — reuse the existing session\n   message route (POST /api/sessions/{id}/messages, the same path spawn/telegram forwarding use) rather\n   than inventing a new one. Re-arm the delegation to running so the parent can wait again.\n - Result retrieval reuses the existing tools with the SAME delegationId: termal_resume_after_delegations\n   (mode all/any) then termal_get_session_result / termal_get_session_status. No new wait primitive.\n\nDESIGN DECISIONS TO RESOLVE:\n - Child currently running a turn: queue the message behind the active turn (consistent with the\n   session pending-prompt queue) vs reject with a clear error. Prefer queue.\n - Child no longer exists / was cancelled or reaped: return a clear MCP error, do not silently spawn.\n - Slash-command resolution: should `message` resolve agent slash-commands like spawn's `prompt` does\n   (resolve_spawn_prompt_if_agent_command, delegation_mcp.rs:316) or be delivered literally? Decide and\n   document.\n - Write policy / mode: the follow-up runs in the child's EXISTING policy; do not accept new policy args.\n - Delegation status/revision bump so termal_get_session_status reflects the re-run.\n\nTESTS: add to src/tests/delegations.rs — happy path (followup delivers + delegation re-arms + result\nretrievable via resume/get_result), unknown/cancelled delegationId error, and queued-behind-active-turn\nbehavior. Note: this is the user's minimal spec; confirm the queue-vs-reject and slash-resolution\nchoices before implementing.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. The follow-up tool shipped in fa13d81 (ancestor of master); residuals live in w-433120db4113 and w-7a8aa9ad5818.",
+  "completion": null
+}

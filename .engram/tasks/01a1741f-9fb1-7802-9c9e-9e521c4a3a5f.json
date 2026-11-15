@@ -1,0 +1,27 @@
+{
+  "id": "01a1741f-9fb1-7802-9c9e-9e521c4a3a5f",
+  "external_ref": null,
+  "title": "The unmarked test-fixture startup sweep fails a whole test run with Access is denied when a concurrent test process owns a fixture",
+  "outcome": "The unmarked test-fixture startup sweep fails a whole test run with Access is denied when a concurrent test process owns a fixture",
+  "acceptance": [
+    "The unmarked test-fixture startup sweep fails a whole test run with Access is denied when a concurrent test process owns a fixture is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-infra",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

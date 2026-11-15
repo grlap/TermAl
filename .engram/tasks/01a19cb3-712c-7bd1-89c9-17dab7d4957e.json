@@ -1,0 +1,41 @@
+{
+  "id": "01a19cb3-712c-7bd1-89c9-17dab7d4957e",
+  "external_ref": null,
+  "title": "Diagnose runtime-outcome fallout in six harness and Human startup tests",
+  "outcome": "Fable2346/messagee6cb18d4-d98d-49d5-9076-be63f869b062 requests 20-minute read-only diagnosis of seven new failures in test-5f8ebb30 TREE92a1830d vs94cbdd33, possibly392640a0 classification fallout. Distinguish real provider error =>Failed/T port from cleanup-only diagnostic =>P refinement. Report file:line table; no edits.",
+  "acceptance": [
+    "Read exact seven failure excerpts and relevant complete test/helper paths on92a1830d compared with94cbdd33 and original classification; identify actual terminal error argument and source event.",
+    "Report each harness/Human test with file:line causal path, real provider error vs cleanup-only/other cause, and evidence-backed T/P disposition without weakening other assertions; disclose uncertainty.",
+    "Deliver table to Fable2 and integrator with exact tree/run/log pointers and no source edits, Cargo/compiler/tests/parser/formatter/linter/live/agents/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "engram-host-adapter",
+    "failed-check-investigation",
+    "gated-control",
+    "greg-directed",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered seven-row read-only diagnosis: six Unknown matrix fixtures directly supply Some diagnostic and need T semantic fixture correction; Human failure is second idempotent Resume409 from H3 restoration, separate P. Existing log/source and master contract cited; no edits/reruns/READY.",
+    "completed_at": "2026-11-02T14:42:25.632663Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

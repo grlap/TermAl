@@ -1,0 +1,27 @@
+{
+  "id": "01a123b0-c524-72e0-b96b-54f5abc386d6",
+  "external_ref": null,
+  "title": "Decide whether the prepared-Begin durable fence should stop at the Begin-guard deadline and honour test_dispatch_budget",
+  "outcome": "A recorded decision, with a change if needed, on whether prepare_engram_begin_durable -> confirm_engram_admission_durable (src/engram_queued_admission.rs:383, deadline started_at + ENGRAM_DISPATCH_BUDGET_MS, ignoring test_dispatch_budget) should be bounded by the same Begin-guard deadline, so a stalled writer at that fence cannot spend Begin's reserved share either.",
+  "acceptance": [
+    "Decide whether the prepared-Begin durable fence should stop at the Begin-guard deadline and honour test_dispatch_budget is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "host-persistence",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

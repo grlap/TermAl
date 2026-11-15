@@ -1,0 +1,28 @@
+{
+  "id": "01a16827-bfc6-7af3-948f-ba7f38f569aa",
+  "external_ref": null,
+  "title": "Test recognition rejects a quoted '|' inside one argument as a compound command (node --test-name-pattern regex)",
+  "outcome": "A correctly quoted single focused command containing '|' inside one argument is recognized and credited by its result",
+  "acceptance": [
+    "A focused command whose only '|' characters are inside a single- or double-quoted argument is recognized as one command and judged on its result when it is an unwrapped command (no bash -c, pwsh -Command or cmd /c wrapper) whose shell dialect is known to the host (today: commands from Claude's Bash tool, POSIX quoting); a command of unknown dialect, and every wrapper form containing a quoted '|', stays ineligible (UNKNOWN) with a truthful reason; an unquoted '|' is still rejected as compound.",
+    "Regression tests cover a quoted regex alternation in a node --test-name-pattern argument, an unquoted pipeline, and mixed quoting, through the same recognizer the host uses for credit.",
+    "Focused tests and the full gate pass on the final input, and independent reviews find no unresolved in-scope Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

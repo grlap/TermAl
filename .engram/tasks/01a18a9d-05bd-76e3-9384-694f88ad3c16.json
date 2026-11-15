@@ -1,0 +1,34 @@
+{
+  "id": "01a18a9d-05bd-76e3-9384-694f88ad3c16",
+  "external_ref": null,
+  "title": "An incoherent-checkpoint-cut refusal fails pending fences, so a deferred owner row permanently hides causal details",
+  "outcome": "A delta write refused only because a well-formed, owner-correct checkpoint mirror disagrees with its ledger index keeps its pending fences, with their original deadlines, for the next coherent tick, so a routine bounded-collector race no longer permanently hides causal details. Every other refusal stays terminal, and the causal-failure fixture follows the production persist worker's retry cadence.",
+  "acceptance": [
+    "When a delta write refuses a cut solely because a well-formed, owner-correct checkpoint mirror disagrees with its ledger index before COMMIT, it reports a typed retryable error. The fences, hooks and targets pending in that tick are retained with their original deadlines, rollback and watermark behaviour are unchanged, and a later coherent tick resolves only targets proven committed or already durable. Other errors reported under the incoherent-cut wrapper (SQL, missing ledger, decode, malformed, noncanonical or wrong-owner) remain terminal, and no error kind other than this one and the existing transcript-predecessor change is made retryable.",
+    "A deterministic test forces the bounded collector's double-Changed outcome on the tick carrying a pending causal card (closing checkpoint reply loss), shows that the refused tick keeps the cause's fence and that the next coherent tick publishes the cause, with no new persist request, no sleep and no timeout change; the same test fails on master e58fe489.",
+    "A test shows a second target pending in the refused tick resolves only on its own commit proof, and that a retained fence still fails at its original deadline and on writer shutdown, drop or a genuine write failure.",
+    "The causal-failure fixture writer follows the production persist worker's retry contract (failure retry and fence retry), and its publication join accepts only the typed refusal between ticks.",
+    "The checkpoint-watermark test asserts that the refused cut's fence stays pending and is resolved by the coherent retry instead of WriteFailed; its atomicity and reload assertions are unchanged, and the full-snapshot path's refusal is unchanged.",
+    "The causal_failure, persist_fence and project_containment checkpoint_watermark test modules pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "gate-failure",
+    "persist",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

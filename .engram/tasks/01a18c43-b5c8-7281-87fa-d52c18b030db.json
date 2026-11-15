@@ -1,0 +1,29 @@
+{
+  "id": "01a18c43-b5c8-7281-87fa-d52c18b030db",
+  "external_ref": null,
+  "title": "Avoid decoding and MAC-verifying every review custody slot twice per selected packet/page read, and the key write transaction on reads",
+  "outcome": "Avoid decoding and MAC-verifying every review custody slot twice per selected packet/page read, and the key write transaction on reads",
+  "acceptance": [
+    "Avoid decoding and MAC-verifying every review custody slot twice per selected packet/page read, and the key write transaction on reads is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "performance",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c643-73a1-b8c5-fb35d7e76d72",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

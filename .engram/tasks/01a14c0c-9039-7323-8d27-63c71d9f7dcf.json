@@ -1,0 +1,33 @@
+{
+  "id": "01a14c0c-9039-7323-8d27-63c71d9f7dcf",
+  "external_ref": null,
+  "title": "Distinguish pending federation durability from a changed authority fence",
+  "outcome": "Federation requests can recognize a temporary unresolved durability fence separately from real authority invalidation, preserve unrelated healthy links, and recover the exact write without admitting uncertain work.",
+  "acceptance": [
+    "Use a distinct bounded retryable pending-durability result while retaining stale-authority rejection for actual identity/configuration/incarnation changes.",
+    "Document and test L1 handling plus exact explicit durability reconciliation; pending or failed persistence never grants admission."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-3740-7bc3-8f26-14c782d0d16f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

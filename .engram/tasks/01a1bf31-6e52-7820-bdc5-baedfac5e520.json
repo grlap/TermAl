@@ -1,0 +1,30 @@
+{
+  "id": "01a1bf31-6e52-7820-bdc5-baedfac5e520",
+  "external_ref": null,
+  "title": "Retain native held-read race refusal coverage alongside launcher tests",
+  "outcome": "Native and launcher named-root resolve branches both retain behavioral ambiguity and own-root/fence race refusal coverage.",
+  "acceptance": [
+    "Exercise held-read ambiguity and own-root/fence race refusal through native and launcher readers with production resolve_locked assertions, without changing valid foreign-sibling native behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "low",
+    "review-followup",
+    "test-credit",
+    "verification-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a183bd-a8cb-7f22-a511-600257272d37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

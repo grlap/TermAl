@@ -1,0 +1,29 @@
+{
+  "id": "01a13165-a66d-7592-96df-00d47e03640f",
+  "external_ref": null,
+  "title": "Per-project opt-in control in the TermAl UI for Git task sync (off unless the user enables it)",
+  "outcome": "Git task sync stays optional and is controlled per project in the TermAl UI. The setting shows its current state and a short description of its effect. While it is disabled, there is no export, import or sync activity. Only an explicit user action enables it, and nothing turns it on by default. This is a B2 design and acceptance requirement. UI implementation waits for a design decision and a scoped implementation item.",
+  "acceptance": [
+    "Per-project opt-in control in the TermAl UI for Git task sync (off unless the user enables it) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-direction",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

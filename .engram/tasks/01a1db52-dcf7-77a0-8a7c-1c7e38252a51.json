@@ -1,0 +1,32 @@
+{
+  "id": "01a1db52-dcf7-77a0-8a7c-1c7e38252a51",
+  "external_ref": null,
+  "title": "Cover failed mixed evidence batches and duplicate association final-image fences",
+  "outcome": "Regressions pin conservative durability for mixed live/compacted batch write failure and one exact final-image fence when multiple checks resolve to one observation.",
+  "acceptance": [
+    "A failed shared batch with live and compacted rows leaves compacted revalidating set, preserves prior compacted durability flags and never reports the newly read proof as durably safe.",
+    "Two checks resolving to the same live observation under queued persistence produce one exact fence containing the final evidence image."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "host-persistence",
+    "persistence",
+    "review-followup",
+    "state-lock",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

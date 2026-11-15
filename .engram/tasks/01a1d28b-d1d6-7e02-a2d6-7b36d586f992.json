@@ -1,0 +1,28 @@
+{
+  "id": "01a1d28b-d1d6-7e02-a2d6-7b36d586f992",
+  "external_ref": null,
+  "title": "Integrate combo79 on a5b01576: a7bb 4a46b552 (w-78ec retire legacy observation sources, byte-identical carry of 7650d16b)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 4a46b5526a1d460820c1871de6a9c6b6af3590d3 (tree e2500b4e59fa59e5efb7099a1e9c7b716a7d0eb3) is on origin/master, where master was moved to it by a fast-forward from a5b0157650399ad568fe14f0816273c3c51c282d.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is e2500b4e passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against a5b01576 is byte-identical (same 13 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 7650d16b's contribution against 42851443, whose fresh whole-13 Codex and Claude review pair (reported by Sol-a7bb in mailbox 07868e86 #1540 and #1542) left no Medium or higher finding, and the candidate adopts that pair.",
+    "The release binary built from tree e2500b4e was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,33 @@
+{
+  "id": "01a1dc3c-7084-7c32-ac76-3b84515ad1c8",
+  "external_ref": null,
+  "title": "Bound and disambiguate Kimi question choice labels",
+  "outcome": "Kimi choice labels and option counts have sensible input bounds, and equal visible labels cannot leave the user guessing which choice is being sent.",
+  "acceptance": [
+    "The Kimi permission question adapter bounds choice label size/control characters and option count using appropriate existing input-bound conventions, with an explicit refusal or display policy for exceeded bounds.",
+    "Equal labels are either refused visibly or distinguished in the rendered UI while exact offered option IDs and unmodified ordinary tool approval semantics are preserved; behavioral tests exercise the selected policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "greg-reported",
+    "kimi",
+    "review-low",
+    "ui",
+    "user-input"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dbb6-58b9-7cf1-9bc0-65b096fb3238",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

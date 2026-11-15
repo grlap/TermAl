@@ -1,0 +1,52 @@
+{
+  "id": "01a18379-831f-71d1-a9f5-ef4ea92e40bd",
+  "external_ref": null,
+  "title": "B16 recovery boundary witnesses: concurrent triggers, interrupted ACK, owner/successor drift",
+  "outcome": "Executable boundary witnesses establish that original-checkpoint result recovery uses one current owner, retains accepted receipt custody across local ACK interruption, and preserves successors and independent duties under owner drift.",
+  "acceptance": [
+    "Concurrent triggers for the same retained original checkpoint produce at most one in-flight exact replay, preserve the immutable original request/report/key and exclusive receipt custody, and do not introduce Bind, Evaluate, Begin or provider redispatch.",
+    "After an authoritative Accepted checkpoint result is retained and its local durable ACK fails or is interrupted, a same-process accounting continuation completes without another wire checkpoint or host restart, preserving the exact canonical operation and any successor.",
+    "If current ownership, a successor or an independent duty changes while a replayed result is returned, the exact original Accepted result remains in canonical durable custody while no wrong head is consumed, no independent exclusion is released and no replacement provider delivery is sent."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "b16",
+    "control-plane",
+    "engram-control",
+    "engram-host-adapter",
+    "gated-control",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete gated-control path deleted by87f49ed0 and absent on649d77d5; The original in-flight checkpoint replay and interrupted-local-ACK latch owners were removed (src/engram_checkpoint_result_recovery.rs). Current boundaries fixture explicitly says former replay/ACK races have no executable owner; now it checks passive canonical/mirror storage. Historical PASS5 and three open typed obligations are preserved, not re-certified or waived as passed. Fable2#1347 and sweep5954218a provenance recorded. Withdrawn as obsolete, not fixed/tested or newly credited.",
+  "completion": null
+}

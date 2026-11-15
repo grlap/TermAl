@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c42a-77f2-8988-94b766dd8dc0",
+  "external_ref": "tm-8p62",
+  "title": "Nothing signals that the served UI is behind master, so a shipped fix can look like a live bug",
+  "outcome": "ROOT CAUSE OF A REAL INCIDENT TODAY, not a hypothetical.\n\nA scroll fix landed in master on 2026-09-07 (commit 6759c84, \"Put a returning reader back on the message they were reading\"). ui/dist was never rebuilt from it. Two days later the principal reported the fixed behaviour as a live defect. Two sessions then spent hours investigating current source that was already correct, wrote probes against it, and got greens that were true and irrelevant - because the browser was running a bundle built at 09-07 01:03, eleven hours before the fix was committed.\n\nThe served bundle was four UI commits behind master. NOTHING ANYWHERE SAID SO. Not the page, not a log, not a startup check, not the tracker. The only way it surfaced was that someone finally searched the served bundle for an identifier the fix introduces and found zero occurrences.\n\nWHY THIS IS WORSE THAN AN ORDINARY STALE ARTEFACT: the failure presents as A DEFECT IN CURRENT CODE. Everyone reads master, master is correct, the report says otherwise, and the natural conclusion is that the fix is broken or incomplete. That sends the investigation into the one place where nothing will be found. It also destroys the value of the fix silently - a repair that never reaches the user is indistinguishable from no repair, and it accrues confidence in the meantime because it is committed, reviewed and green.\n\nWHAT WOULD ACTUALLY FIX IT, in the order established elsewhere in this tracker (make the wrong state fail; else put the warning where it is met; periodic review last):\n  - The host knows the commit it was built from and can know the commit of the tree it is running in. A mismatch is computable at startup, and the check is cheap.\n  - Surfacing it must change BEHAVIOUR, not merely add a line - a warning that is printed and never read reproduces the same defect one layer up. A visible marker in the UI, or a startup refusal in development, are the two shapes that actually work.\n  - The build must stamp its provenance INTO the artefact, so the question \"what is being served\" is answerable from the served bytes rather than by searching them for a symbol that happens to be new. Today that check only worked because a suitable identifier existed by luck.\n\nNOTE ON THE INSTRUMENT USED TODAY, since it should not be mistaken for a solution: searching the served bundle for a symbol introduced by the fix answers ONE question about ONE change. It cannot tell you the bundle is stale in general, only that it lacks the specific thing you already suspected. A provenance stamp answers the general question; a symbol search answers a question you must already have guessed.\n\nRELATED: the deployment gap was closed manually today by copying a prepared clean-export build over ui/dist and verifying the served bytes by hash. That was correct, and it is not a fix for this issue - it is one instance of the failure being cleared by hand.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0e6d3-c6a5-79f1-86b0-57a27c345b49",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-DUP. \"Nothing signals the served UI is behind master\" is covered by w-57a27c345b49 (build and UI identity reporting, KEEP-NOW for the pilot).",
+  "completion": null
+}

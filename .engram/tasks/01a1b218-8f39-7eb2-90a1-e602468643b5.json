@@ -1,0 +1,31 @@
+{
+  "id": "01a1b218-8f39-7eb2-90a1-e602468643b5",
+  "external_ref": null,
+  "title": "Exercise cancellation inside a running received-source observer and its Git child",
+  "outcome": "Received-notice tests distinguish cancellation before observer execution from cancellation during source work and before publication.",
+  "acceptance": [
+    "A deterministic test parks inside TEST_RECEIVED_NOTICE_SOURCE_READ after run() starts, cancels the owner, and proves publish_received_launcher_notice does not rewrite advice.",
+    "An independently controlled pinned-Git child cancellation case verifies existing CaptureLifetime ownership and cleanup without raising production budgets or claiming queued cancellation covers an in-flight child."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "diagnostics",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

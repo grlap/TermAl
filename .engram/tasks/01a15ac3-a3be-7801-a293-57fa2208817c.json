@@ -1,0 +1,28 @@
+{
+  "id": "01a15ac3-a3be-7801-a293-57fa2208817c",
+  "external_ref": null,
+  "title": "Clarify direct-exec scope and build provenance of the CLI body diagnostic",
+  "outcome": "The troubleshooting fixture paragraph identifies the one-off direct-argv diagnostic and its relationship to the earlier CLI build without implying PowerShell argument coverage or maintained test coverage.",
+  "acceptance": [
+    "The fixture paragraph explicitly states that the diagnostic launched the installed CLI directly through Node execFile with shell:false, is a one-off evidence helper, and does not exercise PowerShell quoting.",
+    "The paragraph states the limited source comparison with the earlier original-send build, or deliberately removes the version linkage while retaining precise evidence limits."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "documentation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

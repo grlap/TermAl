@@ -1,0 +1,31 @@
+{
+  "id": "01a1c0d8-f5ea-7ba1-8d8c-626118fd660e",
+  "external_ref": null,
+  "title": "Integrate combo27 on a06f2c92: evaluation source handoff, unconfirmed-root notice, work view search, fixture release",
+  "outcome": "The composed candidate is on master as one commit, gated on DL560 and Windows, pushed, installed on Central and DL560, with ui/dist rebuilt from the clean master tip and reported.",
+  "acceptance": [
+    "Integrate combo27 on a06f2c92: evaluation source handoff, unconfirmed-root notice, work view search, fixture release is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No acceptance evaluation exists (evaluation is off for TermAl); closed self_asserted. Combo27 is on master as one commit, 8f544b45 (tree d8c6d1c3), fast-forwarded from a06f2c92 and pushed at 16:35:33Z, with the remote verified.\n- Landing gate: Windows B FULL test-6e7e82b8, PASS and eligible.\n- Linux: DL560's FULL on the test ref was cut by Greg's machine power-off. The confirmation FULL on master, test-e7c1775c, then passed eligible: Rust 7520/0, vitest 5083.\n- Review pair 17046/17047: no Medium or higher.\n- Installed on Central (4415310c) and DL560 (cb6bb2a4). ui/dist rebuilt from the clean tip and served (index-CKIOaTMl).\n- Test ref deleted. Combo worktree removed.",
+    "completed_at": "2026-11-09T17:37:53.533104400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

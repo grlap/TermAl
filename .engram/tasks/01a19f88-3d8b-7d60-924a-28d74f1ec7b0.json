@@ -1,0 +1,31 @@
+{
+  "id": "01a19f88-3d8b-7d60-924a-28d74f1ec7b0",
+  "external_ref": null,
+  "title": "Cover MonacoCodeEditor layout-frame component wiring and zero-size/unmount behavior",
+  "outcome": "Add focused component-level coverage for the actual MonacoCodeEditor routing to the frame owner; helper scheduling coverage already exists.",
+  "acceptance": [
+    "A component test with stubbed Monaco, requestAnimationFrame and ResizeObserver verifies that multiple mount/options/resize requests produce one editor.layout per frame, zero dimensions skip layout, and unmount prevents a pending layout.",
+    "The test fails if component routing bypasses the frame owner or disposal is removed, and relevant focused checks pass on the exact candidate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "review-low",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f45-4449-7d20-86da-ee3a64e5d7d0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

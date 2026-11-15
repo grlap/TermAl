@@ -1,0 +1,58 @@
+{
+  "id": "01a1b9bf-a75b-7e00-a402-706f72a94f0e",
+  "external_ref": null,
+  "title": "Remote CLI mailbox read via relay intermittently returns 423 'authenticated native mailbox relay refused'; a stale-receipt ack is then accepted",
+  "outcome": "A satellite CLI mailbox read through the native relay either succeeds or returns a specific, actionable reason. The generic 'refused; check original identity, home and request' message, which hides the home's actual 4xx reason, no longer appears. Acknowledging with a receipt from an earlier, already processed page has a defined, documented result.",
+  "acceptance": [
+    "Record a code-only diagnosis of the native relay page-read paths that can return HTTP 423, separating the reported DL560 incident from source-inferred causes. No new live probe or other sessions' mailbox read is used; the incident's exact home refusal remains unknown unless existing evidence identifies it.",
+    "An authenticated native mailbox relay refusal preserves the original HTTP status and exposes only a closed, bounded home reason code with safe actionable guidance. Known home persistence-settling refusals are distinguished from identity or receipt failures. Unknown, malformed, oversized or unsupported reason data fails closed with a reason-unavailable fallback; raw home error text, message bodies and sensitive identity/store data are never forwarded. Authentication, identity, membership, authority, request and outcome-uncertainty gates remain unchanged, with behavioral positive and negative tests.",
+    "Document and test the existing native receipt rule: an issued receipt remains bound to its original participant and mailbox; a later read does not revoke it. Re-acknowledging a valid older receipt at or behind the current cursor succeeds idempotently without moving the cursor backward, acknowledging newer unread messages, issuing a new receipt or suppressing their owed wake. Foreign or unissued receipts and acknowledgements that skip unprocessed visible messages remain refused.",
+    "Record passing registered focused coverage on the final source, an independent Codex/Claude review pair with no outstanding in-scope Medium-or-higher finding, and a passing full five-stage gate on the exact final committed input before landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "needs-triage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed bounded authenticated native relay refusal diagnostics and documented/tested older-receipt ACK behavior in bf7ff309; own28PASS including5newtests, independent Codex/Claude source pair0Medium+, finalcombinedpair and two eligible same-tree FULLs recorded. Three Low follow-ups remain separate.",
+    "completed_at": "2026-11-08T18:21:52.390744800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

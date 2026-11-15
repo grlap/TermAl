@@ -1,0 +1,30 @@
+{
+  "id": "01a1a543-183b-7412-b495-10daa08df91c",
+  "external_ref": null,
+  "title": "A validated review result is stranded when its parent is lost before the explicit attempt read: eligible roots can neither publish it nor discover its resultId",
+  "outcome": "A review that ended with a validated submission can be recovered by an eligible root of the same project even when the commissioning parent was lost before it read the result, without weakening read-only eligibility or exact-identity reads.",
+  "acceptance": [
+    "A review attempt that reaches a validated terminal state is published, or otherwise becomes readable, without depending on the parent's explicit submissionAttempt read or follow-up",
+    "An eligible root of the original project can discover the exact delegationId, submissionAttempt and resultId of such a result through a supported read-only route, while a child, hidden or removed session, proxy or root of another project still can't",
+    "A deterministic test covers a parent lost before any explicit read: discovery and exact read succeed for an eligible root and stay refused for an ineligible one, and an attempt-only read keeps its existing refusal"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "delegation-results",
+    "review-custody"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

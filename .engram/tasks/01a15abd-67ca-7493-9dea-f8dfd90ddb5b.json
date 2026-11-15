@@ -1,0 +1,32 @@
+{
+  "id": "01a15abd-67ca-7493-9dea-f8dfd90ddb5b",
+  "external_ref": null,
+  "title": "Pin the intended validation branch in Git run-directory refusal controls",
+  "outcome": "Give Git run-directory refusal rows an expected diagnostic so malformed one-line/control inputs cannot pass through the filesystem-rejection branch unnoticed. Preserve the no-artifact and no-registration assertions.",
+  "acceptance": [
+    "The refusal table distinguishes the one-nonempty-absolute-path diagnostic from the unavailable-or-inaccessible filesystem diagnostic, while retaining the existing refusal side-effect witnesses.",
+    "Focused maintained controls pass on the final input, with review and full-gate evidence before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "macos",
+    "multi-machine",
+    "remote",
+    "review-low",
+    "test-coverage",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a158c2-3930-70e0-9196-5346dcbdc540",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

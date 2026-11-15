@@ -1,0 +1,24 @@
+{
+  "id": "01a180be-6f93-7710-b9ca-80f5ce6f6d63",
+  "external_ref": null,
+  "title": "Launcher toolchain record: move resolution into test-launcher-source.mjs and isolate fixtures from ancestor Cargo config",
+  "outcome": "Launcher toolchain record: move resolution into test-launcher-source.mjs and isolate fixtures from ancestor Cargo config",
+  "acceptance": [
+    "Launcher toolchain record: move resolution into test-launcher-source.mjs and isolate fixtures from ancestor Cargo config is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

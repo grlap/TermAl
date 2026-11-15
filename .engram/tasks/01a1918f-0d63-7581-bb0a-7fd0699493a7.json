@@ -1,0 +1,28 @@
+{
+  "id": "01a1918f-0d63-7581-bb0a-7fd0699493a7",
+  "external_ref": null,
+  "title": "Stop the remote-peer observer thread once its connection is superseded or its ssh child has exited",
+  "outcome": "Each RemoteConnection::start_process starts a termal-remote-peer thread (src/engram_host_identity.rs, engram_observe_connection) that reads the whole system TCP table every 250 ms for up to 30 s. It keeps polling after its generation is superseded (every managed-to-tunnel fallback and reconnect) and after its ssh child has exited; only the publish step checks the generation. A remote that reconnects repeatedly keeps several threads polling at once, their results discarded. Before each poll the observer stops, returning maybe this machine, when the remote's entry no longer holds its generation or the child has exited; a test with an injected table and a superseding connection covers it.",
+  "acceptance": [
+    "An observer whose connection was superseded, or whose ssh child exited, stops polling at its next look and publishes nothing; an injected-table test shows it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "credit",
+    "review-low",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

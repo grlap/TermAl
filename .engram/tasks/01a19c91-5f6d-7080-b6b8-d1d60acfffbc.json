@@ -1,0 +1,36 @@
+{
+  "id": "01a19c91-5f6d-7080-b6b8-d1d60acfffbc",
+  "external_ref": null,
+  "title": "Keep ordinary Resume409 guard while preserving exact Stop receipt custody",
+  "outcome": "Fable2334/messagebedea8c5-4b10-4b10-a5e0-f72a382b8ac2 RETRACTS H3 and assigns fresh named-root540f-v3 on TREE0c00: identical receipt-owner Stop proof as540f5d2a, but original busy/reset/Stop409 guard and message byte-identical. Exact2 session_lifecycle.rs+prompt_delivery.rs. Supersedes540f source dependency, no Cargo.",
+  "acceptance": [
+    "Claim/name a fresh source root in a separate turn. Against TREE0c00 reproduce exactly540f5d2a receipt-owner Stop changes in src/session_lifecycle.rs and src/prompt_delivery.rs, without removing or changing the original Resume busy/reset/Stop409 guard/message.",
+    "Native Git proves v3 differs from540f5d2a only by restoring the C1 guard byte-identically; preserve exact receipt custody, retained queued alternative and runtime/Stop/generation fences. Record diagnostic conclusion that two assigned Resume failures are addressed while three Stop-fixture failures remain independent.",
+    "Return immutable tree, before/after blobs, scoped exact2 patch and rationale to Sol-03d4 cc Fable2; declare540f superseded and diagnostic/source-only limits. No Cargo/compiler/tests/parser/formatter/linter/live/agents/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "regression-fix",
+    "resume",
+    "source-only",
+    "stop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "SUPERSEDED before materialization or source edits by Fable2338/messageed7dde7f-de89-4f01-9887-684945015ce9: integrator Sol-03d4 will mechanically reverse only H3 hunk in assembly, restoring0c00 guard byte-identically. Own fresh g2571 root is --no-checkout only, no source patch/tree returned and no further freeze. Proceed directly to separately claimed/named post_receipt exact1 test port. This cancellation waives no parent integration obligation.",
+  "completion": null
+}

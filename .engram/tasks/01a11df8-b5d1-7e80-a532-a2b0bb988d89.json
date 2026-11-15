@@ -1,0 +1,29 @@
+{
+  "id": "01a11df8-b5d1-7e80-a532-a2b0bb988d89",
+  "external_ref": null,
+  "title": "Unit-test the PersistFence on_acknowledged contract, and stop generic fake-ACK test persisters from publishing causal cards",
+  "outcome": "Unit-test the PersistFence on_acknowledged contract, and stop generic fake-ACK test persisters from publishing causal cards",
+  "acceptance": [
+    "Focused tests in src/tests/persist_fence.rs show, with a counting hook, that on_acknowledged runs exactly once and only when that call records Ok, never after Deadline (including a late finish(Ok) after the deadline), abandon, Drop, Shutdown or WorkerStopped, and that it runs after the completion mutex is released; resolve_at reports true only for the call that recorded Ok.",
+    "Generic fake-ACK test persisters (ScriptedPersister, engram_post_receipt's) no longer fake-ACK EngramCausalCard fences, or each such test states why a non-durable publication is acceptable there."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "causal-diagnostics",
+    "low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

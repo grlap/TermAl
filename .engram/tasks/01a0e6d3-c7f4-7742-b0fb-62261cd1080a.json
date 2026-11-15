@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7f4-7742-b0fb-62261cd1080a",
+  "external_ref": "tm-yfxs",
+  "title": "Kimi parity with OpenCode: TermAl Ask/Auto-approve, Kimi's own mode, default reasoning effort",
+  "outcome": "Greg 2026-09-26: 'same parity, expose Kimi approve mode + TermAl auto approve'; 'reasoning is available in session, but not in TermAl settings (as a default reasoning level)'. Contract: .tmp/kimi-approvals-contract.md (Fable-reviewed, 6 MUST + SHOULDs) -> docs/features/kimi-cli-integration.md 'Approvals and mode'. Evidence: Kimi 2.0.2 captures (AskUserQuestion answers are allow_once options; yolo/auto never asked). Children: backend (Opus), UI (Codex).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

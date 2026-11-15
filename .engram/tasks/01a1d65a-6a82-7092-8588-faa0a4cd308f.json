@@ -1,0 +1,27 @@
+{
+  "id": "01a1d65a-6a82-7092-8588-faa0a4cd308f",
+  "external_ref": null,
+  "title": "Integrate combo97 on X'': 8e1f a700eb94 carried as cca3d3b2 (w-f5dc named-root stranded predecessor fix)",
+  "outcome": "The w-f5dc fix is on master as one commit, gated by a full launcher run on the exact tree, reviewed clean, and pushed.",
+  "acceptance": [
+    "Commit cca3d3b2e9380cf8772efdde96090385c430f08d (tree 670672216f3cb0b102f35df4c75a4e2630203ee7, sole parent a6071ef883144756b785fec3ebe5a2125953b7e3 = X'') is on origin/master, where master was moved to it by a fast-forward from a6071ef8 after X'' landed; its contribution is byte-identical (git diff --raw --no-abbrev --no-renames) to 8e1f's a700eb94 contribution vs 05062f47, as recorded on this item.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 67067221 passed every stage, with equal source ids before and after and an eligible clean input; and Sol-8e1f's R1 pair (Codex 17886, Claude 17887) on 05062f47..a700eb94, adopted for the byte-identical contribution, found no Medium or higher outstanding, with its Low filed as w-fa98c0fc9474."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

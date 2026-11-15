@@ -1,0 +1,29 @@
+{
+  "id": "01a194ac-eac4-70f1-b80d-5dcb0deb40f1",
+  "external_ref": null,
+  "title": "real_process_startup_code_evicts_and_reaps_the_worker fails on macOS: next call gets control_cleanup_pending after the test reaped the worker",
+  "outcome": "The cause of the macOS failure is classified from code and evidence as product or fixture. Either the evict-and-reap path confirms control cleanup before the next request, so a later call starts a new worker, or the test waits for the documented cleanup confirmation. No timeout increase, no retry, and no weakening of the assertion.",
+  "acceptance": [
+    "The macOS failure of real_process_startup_code_evicts_and_reaps_the_worker (control_cleanup_pending at engram_control_startup_codes.rs:180) is classified from code and evidence as product or fixture.",
+    "Either the evict-and-reap path confirms control cleanup before the next request, so a later call starts a new worker, or the test waits for the documented cleanup confirmation. There is no timeout increase, no retry and no weakening of the assertion. The test passes on macOS in a launcher run on the fixed tree and still passes on Windows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-control-transport",
+    "found-by-gate",
+    "macos"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

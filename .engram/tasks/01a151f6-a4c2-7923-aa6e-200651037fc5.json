@@ -1,0 +1,27 @@
+{
+  "id": "01a151f6-a4c2-7923-aa6e-200651037fc5",
+  "external_ref": null,
+  "title": "Move the batch-member launch glue out of engram_turn_checks.rs into engram_batch_binds.rs",
+  "outcome": "The batch-member capture currently sits inline in note_engram_command_finished_with_capture: the off-lock held-claims read, the member collection and the unbindable lines. It moves into one helper in engram_batch_binds.rs, leaving a single call in engram_turn_checks.rs. That helper returns the read target before the lock is released, and the targets and lines after. The move is a pure code move with behaviour unchanged. engram_turn_checks.rs stops growing past the ~3,000-line Rust module threshold (3,177 lines on freeze 741a9b7d).",
+  "acceptance": [
+    "Move the batch-member launch glue out of engram_turn_checks.rs into engram_batch_binds.rs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "carried-checks",
+    "file-size"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

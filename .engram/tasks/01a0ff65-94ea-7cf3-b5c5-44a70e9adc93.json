@@ -1,0 +1,36 @@
+{
+  "id": "01a0ff65-94ea-7cf3-b5c5-44a70e9adc93",
+  "external_ref": null,
+  "title": "Read-only child's PowerShell runs in ConstrainedLanguage mode, so harmless read-only helpers (e.g. HTML decoding) are refused",
+  "outcome": "Read-only child's PowerShell runs in ConstrainedLanguage mode, so harmless read-only helpers (e.g. HTML decoding) are refused",
+  "acceptance": [
+    "A note establishes where the ConstrainedLanguage mode comes from (TermAl's read-only containment, the Codex runtime's sandbox, or a machine policy), with the source or the observed session configuration.",
+    "A decision is recorded: either read-only children get a supported way to run read-only inspection helpers, or the read-only reviewer guidance says which inspection forms work (plain reads) and which are refused; the related workaround memory read-only-codex-children-use-default-shell (w-380e6ea9951a) is updated if affected."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "codex-runtime",
+    "read-only-review",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed read-only ConstrainedLanguage/Unicode research: established TermAl -> Codex restricted-token -> PowerShell policy boundary, preserved the unobserved incident-branch limitation, recorded adopted native inspection guidance and ranked host-reader design, updated live-workarounds r4. Independent evaluation 319cd09c4a0c4c0489fc8778cfedc7a1 passed both criteria. No source/config changes or landing; implementation proceeds separately.",
+    "completed_at": "2026-10-05T20:07:07.155298900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

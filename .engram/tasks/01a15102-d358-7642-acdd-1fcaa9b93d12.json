@@ -1,0 +1,30 @@
+{
+  "id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "external_ref": null,
+  "title": "Persistence writer ticks of 2-4.5 s under full-gate load miss durable-write deadlines across test registration, evaluation submission, and named-root naming and release",
+  "outcome": "Persistence writer ticks of 2-4.5 s under full-gate load miss durable-write deadlines across test registration, evaluation submission, and named-root naming and release",
+  "acceptance": [
+    "A recorded measurement (tick duration, queue depth and what each tick writes) under one running full gate plus one warm establishes the cause of the 2-4.5 s writer ticks seen on 2026-10-18, with falsifiable hypotheses discriminated (I/O contention with the gate, state-snapshot size, lock hold in StateInner, or something else)",
+    "The fix keeps durable-write acknowledgement within budget under the documented concurrent-run cap, or every affected surface (test registration, evaluation submission, root naming, clear and release) returns a typed, retry-safe 'not applied' or 'pending, retry the same request' instead of an unknown-outcome 500; deadlines are not blindly inflated",
+    "Focused tests and a reproduction under load show the affected surfaces succeed or answer definitively; full gate plus an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "host-persistence"
+  ],
+  "assigned_to": "Termal::Codex-WorkspaceLookupsFresh",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

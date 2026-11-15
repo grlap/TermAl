@@ -1,0 +1,28 @@
+{
+  "id": "01a10af9-7606-7d80-b405-683ade28cd9c",
+  "external_ref": null,
+  "title": "A read-only Kimi reviewer child is refused the read-only Engram MCP words (show), so it reviews without the item's acceptance criteria; Claude read-only children are not",
+  "outcome": "A read-only (writePolicy readOnly) Kimi delegation child can call the read-only Engram MCP words (show, ls, memories, search), as a read-only Claude child already can. Write words stay refused, and the CLI route stays refused as it is today. A test covers a Kimi read-only child: show succeeds and a write word is refused.",
+  "acceptance": [
+    "A read-only Kimi reviewer child is refused the read-only Engram MCP words (show), so it reviews without the item's acceptance criteria; Claude read-only children are not is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "kimi",
+    "read-only-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

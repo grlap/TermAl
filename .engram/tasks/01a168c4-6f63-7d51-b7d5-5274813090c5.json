@@ -1,0 +1,29 @@
+{
+  "id": "01a168c4-6f63-7d51-b7d5-5274813090c5",
+  "external_ref": null,
+  "title": "A persisted negative review-result recovery probe can hide a result durably appended later",
+  "outcome": "A delegation review result that was durably appended to the mailbox is recovered at boot even when a recovery probe for the same attempt had earlier found no envelope and its negative result reached disk before the append's primary record did.",
+  "acceptance": [
+    "A regression with the write-behind persistence worker connected (not the synchronous test fallback): a recovery probe records a miss for attempt N, the result for attempt N is then durably appended, and the host crashes before the primary record lands; after boot the result is recovered and the delegation is not left failed/unavailable.",
+    "Negative probes are invalidated at boot, or bound to a durable mailbox generation, so a cached miss never suppresses reading an envelope that exists."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "durability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

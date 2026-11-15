@@ -1,0 +1,28 @@
+{
+  "id": "01a12bcf-6950-7dc0-be4a-7696404b2355",
+  "external_ref": null,
+  "title": "A claim re-fence after a lapse (e.g. across a host restart) forces a re-name that invalidates an already-passed gate on unchanged content",
+  "outcome": "A claim re-fence after a lapse (e.g. across a host restart) forces a re-name that invalidates an already-passed gate on unchanged content",
+  "acceptance": [
+    "A claim re-fence after a lapse (e.g. across a host restart) forces a re-name that invalidates an already-passed gate on unchanged content is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "evaluation",
+    "host-recording",
+    "throughput"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,34 @@
+{
+  "id": "01a199b4-51e1-78f3-8114-23c0f7147ad6",
+  "external_ref": null,
+  "title": "w-3fe8 slice C: UI, settings and wire: replace the gated-control setting with the Execution Observability ON/OFF setting and delete gating UI",
+  "outcome": "w-3fe8 slice C: UI, settings and wire: replace the gated-control setting with the Execution Observability ON/OFF setting and delete gating UI",
+  "acceptance": [
+    "The UI, the API types and the wire no longer carry turnGatedControl, control-recovery UI or gated settings; a project-level Execution Observability ON/OFF setting replaces it, controls only non-blocking host observation and never gates a turn, and no stored or imported value reactivates gating",
+    "UI tests for the deleted gating are deleted, ordinary UI tests are kept or migrated, and new tests cover the Execution Observability setting",
+    "cd ui && npx tsc --noEmit is clean and the affected Vitest files pass",
+    "The slice is handed to the w-3fe8 integrator (Sol-03d4) as one reviewed-ready diff against the agreed base, with the exact setting key and label confirmed with the integrator"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "ui",
+    "zero-legacy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the w-3fe8 integrator's split: settings, readiness and UI are now required child w-ed00fdaac064 (Sol-c593). The original 15-path UI draft is kept in .tmp/wt-observability-ui-23c0-13170 for porting; the coordinator's UI path allocations carry over into w-ed00's reserved UI tree.",
+  "completion": null
+}

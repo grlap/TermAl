@@ -1,0 +1,28 @@
+{
+  "id": "01a11e31-d4ba-7e70-9e21-a41e9afde844",
+  "external_ref": null,
+  "title": "Align declared-command index and sibling documentation with implemented TRX support",
+  "outcome": "The feature index, test-runs brief, host-adapter brief and SKILL.md describe declared-command support as implemented with TRX since 2b1e3f85; JUnit remains a proposed follow-up. No runtime or authority change.",
+  "acceptance": [
+    "docs/features/README.md, docs/features/test-runs.md, docs/features/engram-host-adapter.md and SKILL.md no longer describe implemented TRX declared-command checks as planned or imply that JUnit is implemented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "declared-checks",
+    "documentation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

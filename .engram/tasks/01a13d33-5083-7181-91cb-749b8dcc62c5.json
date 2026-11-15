@@ -1,0 +1,42 @@
+{
+  "id": "01a13d33-5083-7181-91cb-749b8dcc62c5",
+  "external_ref": null,
+  "title": "The global test-runs GET returns every registered run unpaged (4.7 MB / 2995 rows); bound or page it before any UI or agent polls it",
+  "outcome": "The host's global test-run listing returns a bounded page (with a continuation) or a bounded recent window by default, so a UI view or agent query never transfers the whole registry history in one response.",
+  "acceptance": [
+    "The global test-run listing route returns at most a documented bounded number of rows per response, with a continuation or explicit window, and existing exact-ID GETs are unchanged.",
+    "Callers in the UI and launcher that list runs use the bounded form; none fetches the unbounded history.",
+    "Tests cover the bound, the continuation (or window) and exact-ID lookup; the full gate is green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "api",
+    "coordination-cost",
+    "host-recording",
+    "performance",
+    "restart-safety",
+    "test-launcher",
+    "test-run-visibility",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Committed the exact seven-path staged tree as d8fdd2dc3978f4447ba08e8de2529c95bb1b7cf7 (tree d93d1a4eeafff51255c8852253e86e1a6182369d), matching the tree gated by test-88ac272f-cd0a-4f8e-a64f-42fd6c2ea7e8 and the schema-1 review freeze. Full gate passed all five stages; Codex and Claude reviews had no Medium-or-higher findings; independent acceptance evaluation 2bed2187eafd4023ae98e7789de54cc1 passed 3/3. Commit is on the detached worktree and awaits integration by Opus2.",
+    "completed_at": "2026-10-15T19:20:12.786965500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

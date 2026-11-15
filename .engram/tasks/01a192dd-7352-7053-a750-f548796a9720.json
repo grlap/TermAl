@@ -1,0 +1,29 @@
+{
+  "id": "01a192dd-7352-7053-a750-f548796a9720",
+  "external_ref": null,
+  "title": "Move the review-changes candidate-commit paragraph next to the committed-input text and name the bullet as its authority",
+  "outcome": "Move the review-changes candidate-commit paragraph next to the committed-input text and name the bullet as its authority",
+  "acceptance": [
+    "In .claude/commands/review-changes.md Step 1 the candidate-commit paragraph sits with the committed-input text, so 'such a committed input' has its antecedent, and says the authority to create the commit comes from the candidate-commits bullet in CLAUDE.md and AGENTS.md, not from this command",
+    "The change lands under the instruction-change conditions (a), (b) and (c), with a clean review pair and full gate"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

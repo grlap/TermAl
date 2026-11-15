@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3d3-7790-9156-c4c23405b12b",
+  "external_ref": "tm-43f4",
+  "title": "Coordinator waits for a peer by sleep-polling inside its turn: teach the yield once and show queued mailbox wakes on the working session",
+  "outcome": "Reported by Greg via Engram::Codex (2026-09-22, mailbox #49). Evidence (read-only, /api/sessions/session-7002/history): Engram::Coder/session-7002 issued 42 'pwsh -Command Start-Sleep -Seconds 55' commands inside ONE turn (16:53-17:40 local) while it said it was awaiting Termal::Coder/session-7223; the UI showed 'Agent is working' (truthfully: the turn was active); Greg stopped it at 17:41:48 ('Turn stopped by user'). Not a transport failure.\n\nWHAT TERMAL ALREADY DOES (src/mailboxes.rs append_mailbox_message_and_notify + dispatch_turn; docs/features/agent-mailboxes.md): the message is committed first; an idle target is woken (deliveredToIdleSession); a target with an active turn gets the wake QUEUED and delivered as its next prompt when the turn ends (queuedBehindActiveTurn) - so a completion arriving before/during a yield is not lost; boot recovery re-materializes never-woken rows once (recoveredWake) and coalesces (this session received 10 messages as one wake after a restart); user Stop pauses automatic dispatch until an explicit resume (tm-oixt, tm-pukb). Delegation children have termal_resume_after_delegations. Ending the turn IS the yield; the wake IS the event. No wait-for-event tool, second scheduler, ledger or ACK loop is needed.\n\nROOT CAUSE: the teaching. src/coordination_instructions.rs TERMAL_MAILBOX_GUIDANCE (shared text; Codex managed section today, other root agents via tm-uvsv) has no rule for waiting, and the termal_send_to_session description ends with 'FIRE-AND-FORGET - there is no reply to await', which an agent reads as 'you cannot wait for a reply' and substitutes sleep/poll loops. A sleeping turn also HOLDS queued wakes behind it (they are delivered only when it ends), so polling is strictly worse than yielding.\n\nMINIMAL PLAN\nSlice 1 (strings + docs + one pinned test): add to the shared guidance: 'Waiting for a peer: send, then END YOUR TURN with one status line naming what you wait for. A mailbox wake resumes you; a message sent while your turn is active is queued and becomes your next prompt, never lost. Never wait with sleep/timer commands or repeated reads: a sleeping turn shows as working and holds queued wakes.' Reword the send tool: 'No reply arrives inside this call; to receive one, end your turn and let the mailbox wake resume you.' Add a 'Waiting for a peer' paragraph to docs/features/agent-mailboxes.md. Acceptance: a test pins that the shared guidance and the tool description carry the wait rule (one text, so the copies cannot drift; tm-uvsv delivers the same text to non-Codex roots); wake body unchanged (tm-2jql).\nSlice 2 (small, agent-independent UI signal): expose the number of mailbox wakes queued behind a session's active turn (rows in queuedBehindActiveTurn targeting it) in the session summary, and show it on the session activity strip and board ('working - 1 mailbox wake queued'). Acceptance (HTTP/state test): send to an active session -> snapshot shows 1 queued wake; turn ends -> wake delivered, count 0; no new wake row, no duplicate delivery (tm-039y stays separate).\nRelated, not duplicated: tm-a9w7 covers the SENDER side (counterpart went idle owing a reply, session/board 'awaiting reply' visibility) - 'waiting for peer vs working' for a yielded session belongs there; tm-oixt/tm-pukb own Stop-and-resume (session-7002's authorized completion wake will sit paused until an explicit resume); tm-uwx.10.12/.13 own wake coalescing and cancellation.\nOptional, needs Greg's decision (not in this item): flag or interrupt a root coordination turn that issues repeated sleep-only commands while a wake is queued behind it.\nScope of this item is investigation and plan; implementation needs Greg's word.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

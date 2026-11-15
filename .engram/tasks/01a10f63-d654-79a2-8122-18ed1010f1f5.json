@@ -1,0 +1,78 @@
+{
+  "id": "01a10f63-d654-79a2-8122-18ed1010f1f5",
+  "external_ref": null,
+  "title": "Dormant Begin wire contracts and durable exact ACK",
+  "outcome": "Tested unused typed Begin/persistence prerequisite, with no active recovery or cancellation-proof claim.",
+  "acceptance": [
+    "Production is limited to typed format/include and unused ACK/fence. No recovery fields in live or persisted records, loader/serializer integration, admission/Begin/delivery callers, held-state policy, raw decoder or cancellation verifier; ordinary production cannot enter this support.",
+    "Round-trip and reconstruction tests preserve every original TurnBegin wire component, including routing_token, grant_id, ordered delivery_tokens and idempotency_key, plus immutable original head inputs, operation/revision, authority and phase/settlement; reconstruction consults no current routing or authority. Controls also preserve the grant basis, dispatch identity, session/project/store/connection/settings/work-binding data and distinct local prepare-ACK, result-ACK, invalid-reply and stale-owner failure kinds. These establish data contracts only, not first-send ownership, replay or provider delivery.",
+    "The unused ACK reads metadata and the complete ordered transcript from the real separate messages table on the same cached writer connection. Fixtures use the production serializer; matching, each component mismatch, absent metadata/message, SQL failure/unknown/deadline and cancellation-message-outside-resident-tail controls establish exact durable readback.",
+    "No state lock spans a persistence wait; existing fence variants and healthy persistence/admission/bind/abort/initial delivery retain their behavior under regression controls.",
+    "Documentation states dormancy and leaves raw validation, cancellation proof, foundation, automatic recovery and incident claims open. Provisional roots/logs remain preserved.",
+    "Native production count against authorized exact base, including test seams, stays at or below200 ADDED. Complete-context formatted forecast and final recount precede application/landing; overrun stops for split without compression. Own named-root exact full gate/host Test credit, independent read-only Codex/Claude pair with earlier Mediums in this scope fixed/re-reviewed, filed residual Lows and independent acceptance are required. All C1-C6 Test-bound."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "begin-recovery",
+    "dormant",
+    "stage-a",
+    "stage-a-core"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Dormant Begin wire contracts and durable exact ACK delivered in origin/master dcdbab5f904664a306a93a163938ee0d87f2e499 (train52, treef9610cecfeee5dec27bfb028e9c64af29e477871; featurec280e767). Own exact gate05c92/source906d, whole7 Codex/Claude pair3 clean of Medium+, independent evaluation661073fb6/6. Opus2 train gate/pair/landing/install reported FULL; remote confirmed. No active recovery or cancellation-proof claim.",
+    "completed_at": "2026-10-06T08:35:49.312302500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

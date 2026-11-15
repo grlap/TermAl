@@ -1,0 +1,41 @@
+{
+  "id": "01a19c45-ae47-77e3-b1e6-9c0737bcc6fd",
+  "external_ref": null,
+  "title": "Diagnose delegation stop/cancel failures and restore owned ordinary handoff proof after failed Stop",
+  "outcome": "Fable2295 source diagnosis extended by Fable2298 to an exact one-file product repair in src/session_lifecycle.rs on before-image TREE0c00cea3. Product fix requires present/matching delivery owner and current ordinary-handoff proof, no gate/grant arm or new semantics. Sol-03d4 must identify originating slice/rationale before edit. Cancel fixture diagnosis remains separate; no test-file edits in this slice.",
+  "acceptance": [
+    "Determine whether each of the four failing test bodies changed between master5dd913d2 and C1 TREE0c00cea3, classify product/test causes with exact source/artifact evidence, and report whether cancel failures share the Stop cause.",
+    "After Sol-03d4's originating-slice/rationale answer and a separate fresh-root naming turn, change only src/session_lifecycle.rs relative to TREE0c00cea3: require a present matching delivery owner and current ordinary-handoff proof, without restoring the grant arm or adding semantics.",
+    "Return immutable tree, before/after blobs, exact one-path patch, rationale and expected affected tests to Sol-03d4, cc Fable2; no Cargo/compiler/tests/parser/formatter/linter/live API/agents/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "delegation",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only diagnosis and exact1 product repair returned: TREE05bb9d86 vs0c00, session_lifecycle.rs+7/-6 restores present matching ordinary HandingOff owner proof after failed Stop and removes separately assigned H3 Resume409 refusal. Full provenance, before/after blobs and scoped patch/manifest delivered root172/Fable2307. No executed validation or READY; separate two test-port repairs remain assigned outside this source-only child.",
+    "completed_at": "2026-11-02T12:52:07.673207300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

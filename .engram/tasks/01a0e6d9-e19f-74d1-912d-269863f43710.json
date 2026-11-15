@@ -1,0 +1,35 @@
+{
+  "id": "01a0e6d9-e19f-74d1-912d-269863f43710",
+  "external_ref": null,
+  "title": "tm-y9b2 follow-up: count a one-call test's failure as its own once its runner stated a result; Git Bash DIR spelling as a near miss (PI-21)",
+  "outcome": "tm-y9b2 follow-up: count a one-call test's failure as its own once its runner stated a result; Git Bash DIR spelling as a near miss (PI-21)",
+  "acceptance": [
+    "tm-y9b2 follow-up: count a one-call test's failure as its own once its runner stated a result; Git Bash DIR spelling as a near miss (PI-21) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-21",
+    "host-recording",
+    "post-import"
+  ],
+  "assigned_to": "Termal::Opus2 (session-8111)",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed as commit d772c8b690fe8f1287eb2379c51a901ab7e5cbb3 (parent 99d262e, tree f857a9587306a9c93f4b1ba59b6f98eaeb4b15e3, 9 files, +763/−175), committed locally by Termal::Fable2 07:22:32Z under Greg's standing commit rule after review round 5 (Codex session-8284 and Claude session-8285, no findings) and Termal::Fable2's exact-delta review (no findings); gate test-634a9611-e590-45ff-b49e-017e25d3f057 PASS on exactly that tree. Executor verification (note b1811092ec914ed4b95d32d6b1337ba2): tree, nine blobs and byte-exact message match the freeze; local master fast-forwarded to d772c8b; not pushed (awaiting Greg's own push line or tm-4prp). Criterion 1 passed by the independent evaluator (Codex session-8292, delegation-a0257b4e, recorded 07:26:48Z).",
+    "completed_at": "2026-09-28T07:31:55.513691100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

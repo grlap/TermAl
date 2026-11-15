@@ -1,0 +1,28 @@
+{
+  "id": "01a18661-0930-78e0-8a8c-2a8274fb7548",
+  "external_ref": null,
+  "title": "Host-architecture brief: the section 1 and section 2 marking convention is broader than the markers the changed text uses",
+  "outcome": "In docs/features/host-architecture.md, the section 1 status and the section 2 opening describe exactly the markers the brief's changed statements use. Those markers are \"on master\", \"On master, read at 8e438fbf\", \"Fixed since this brief's base by <commit>\", and \"today\", \"landed\" or \"since landed on master\". Alternatively, the changed statements adopt the one marker the convention names. The section 1 sentence no longer parses as \"since that base was read at 8e438fbf\".",
+  "acceptance": [
+    "Host-architecture brief: the section 1 and section 2 marking convention is broader than the markers the changed text uses is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "architecture",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

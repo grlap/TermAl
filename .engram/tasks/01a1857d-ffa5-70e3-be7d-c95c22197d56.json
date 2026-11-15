@@ -1,0 +1,31 @@
+{
+  "id": "01a1857d-ffa5-70e3-be7d-c95c22197d56",
+  "external_ref": null,
+  "title": "Decide retention for settled test-run evidence with missing or uncertain prospective attribution",
+  "outcome": "An explicit documented policy covers artifact-correlated test runs whose recorder associations are terminal/settled but prospective attribution is Missing or Uncertain, accounting for retained history growth while preserving original authority, unknown-proof and compaction safety boundaries.",
+  "acceptance": [
+    "Decide retention for settled test-run evidence with missing or uncertain prospective attribution is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "retention",
+    "review-followup",
+    "test-credit",
+    "test-runs",
+    "verification-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a183bd-a8cb-7f22-a511-600257272d37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

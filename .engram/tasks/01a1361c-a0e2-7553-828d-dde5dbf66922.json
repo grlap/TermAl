@@ -1,0 +1,28 @@
+{
+  "id": "01a1361c-a0e2-7553-828d-dde5dbf66922",
+  "external_ref": null,
+  "title": "A failed or expired prompt-delivery write-ahead returns the head to Pending with no retry or wake, so an unpaused queue idles",
+  "outcome": "A failed or expired prompt-delivery write-ahead returns the head to Pending with no retry or wake, so an unpaused queue idles",
+  "acceptance": [
+    "After a write-ahead fence fails or expires (settle_prompt_delivery_write_ahead's Err arm, src/prompt_delivery.rs), or its settlement thread cannot be spawned, the receipted head on an unpaused queue is either retried by a bounded, existing-event-driven wake or shown as stalled in the session preview or error state; no new poller, watchdog or sleep is introduced, matching the item's no-timer rule.",
+    "A test fails a write-ahead on an unpaused queue and pins the chosen behaviour (retried once by the wake, or a visible stall)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

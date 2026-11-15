@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3c9-76b0-a71f-e080ae841921",
+  "external_ref": "tm-3bub",
+  "title": "Extract workspace pane destination routing and focused routing tests",
+  "outcome": "Current-tree audit 2026-09-22: ui/src/workspace.ts is 3,699 lines and workspace.test.ts is 5,041. The pane destination policy is cohesive: resolveWorkspaceOpenTargetPaneId, resolveSessionOpenTargetPaneId, resolveViewerOpenTarget, resolveCanvasOpenTargetPaneId, remembered content/viewer targets, nearest-control-surface selection and pane destination predicates. Extract these pure routing helpers and their routing tests into a focused module while keeping public entry points stable. This is distinct from tm-rqd session-reference/reconciliation helpers and tm-m6r1.15 Work-tab reducer. Do not implement the placement-policy proposals in tm-wmpn as part of the move.",
+  "acceptance": [
+    "Same selected pane, tab identity, remembered destinations and layout mutations for existing inputs. No new layout policy or persistence schema. Avoid circular imports by passing existing values through a narrow boundary, without broad signature redesign. Ownership header and unchanged routing test inventory; validate affected tests and full gate through maintained launcher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

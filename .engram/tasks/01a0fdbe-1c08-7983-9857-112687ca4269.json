@@ -1,0 +1,30 @@
+{
+  "id": "01a0fdbe-1c08-7983-9857-112687ca4269",
+  "external_ref": null,
+  "title": "Prevent mixing real and scripted Engram clock domains in fixtures",
+  "outcome": "Fixture clock installation rejects domain changes after operations begin; removed-root TLS hooks cannot silently mix with scripted clocks; timing diagnostics use their originating clock.",
+  "acceptance": [
+    "Prevent mixing real and scripted Engram clock domains in fixtures is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "gate-nondeterminism",
+    "review-follow-up",
+    "test-architecture",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0fcdc-8cce-7d61-b79c-6b09d2362fe4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

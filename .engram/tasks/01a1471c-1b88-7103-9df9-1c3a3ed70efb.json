@@ -1,0 +1,28 @@
+{
+  "id": "01a1471c-1b88-7103-9df9-1c3a3ed70efb",
+  "external_ref": null,
+  "title": "Reconcile Codex serverRequest/resolved with pending interaction cards",
+  "outcome": "Determine the supported producer resolution/withdrawal semantics and retire only the correlated live pending interaction so neither manual submit nor an automatic recovery sweep answers a withdrawn request or records a false accepted audit.",
+  "acceptance": [
+    "Reconcile Codex serverRequest/resolved with pending interaction cards is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "approvals",
+    "codex"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

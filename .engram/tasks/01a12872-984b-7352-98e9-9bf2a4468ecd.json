@@ -1,0 +1,41 @@
+{
+  "id": "01a12872-984b-7352-98e9-9bf2a4468ecd",
+  "external_ref": null,
+  "title": "Unadmitted observation builders: enforce the routing_token shape before sending",
+  "outcome": "engram_unadmitted_turn_request and engram_observed_check_request (src/engram_unadmitted_observation.rs) refuse a routing_token that is blank, untrimmed or over 128 bytes, as Engram's execution_observe contract requires (behavioral-control-plane.md:886), instead of failing at the producer.",
+  "acceptance": [
+    "Both builders refuse a blank, a padded and a 129-byte routing_token and accept a 128-byte one; unit tests show each.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

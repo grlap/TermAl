@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c7c5-7f23-86ec-0a8da15a51ec",
+  "external_ref": "tm-wkq",
+  "title": "Harden persistence-isolation diagnostics and skipped backfill bookkeeping",
+  "outcome": "The final persistence-isolation review found two low-severity diagnostic/bookkeeping gaps: remote or invalid overview-backfill candidates without an overview are selected and logged again on every startup, and the invalid-session persistence warning claims it is preserving a last good row even when a newly created invalid record has never been persisted. Make expected remote skips quiet or durably excluded, keep malformed-row isolation observable without repeated boot noise, and distinguish preservation of an existing row from rejection of an unpersisted invalid record.",
+  "acceptance": [
+    "Repeated startups do not emit the same expected remote-proxy backfill skip warning; malformed candidates remain isolated and diagnosable; invalid-session persistence logs accurately distinguish an existing preserved row from a never-persisted record; focused regressions cover both cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

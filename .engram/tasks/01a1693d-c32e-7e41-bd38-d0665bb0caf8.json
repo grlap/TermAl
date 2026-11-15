@@ -1,0 +1,28 @@
+{
+  "id": "01a1693d-c32e-7e41-bd38-d0665bb0caf8",
+  "external_ref": null,
+  "title": "Exercise every accepted optional delegation MCP field through public dispatch",
+  "outcome": "Public handle_tool_call positive controls exercise accepted optional fields of the eleven guarded delegation MCP tools, alongside schema/handler drift checks, so helper-only tests do not conceal a public argument-name regression.",
+  "acceptance": [
+    "Exercise every accepted optional delegation MCP field through public dispatch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mcp-tools",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a1909d-54de-7233-8948-ff2c2e151729",
+  "external_ref": null,
+  "title": "Split the shared Base binding owner out of engram_source_roots.rs (3301 lines, over the ~3000-line Rust threshold)",
+  "outcome": "src/engram_source_roots.rs is back under the architecture lens's ~3,000-line Rust threshold. The shared Base binding owner (bind_fresh_engram_base_session_until and its target and adoption helpers) moves into its own module by a pure code move: no behaviour change, with a provenance header. Provenance: the w-decd61d62831 review round 1 Low (Claude delegation a618298f). The file was already 3049 lines at base 030472df; the committed-input change brought it to 3301, after moving the advisory-bind code into src/engram_advisory_bind.rs.",
+  "acceptance": [
+    "Split the shared Base binding owner out of engram_source_roots.rs (3301 lines, over the ~3000-line Rust threshold) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

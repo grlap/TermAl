@@ -1,0 +1,36 @@
+{
+  "id": "01a13cdb-ef04-7842-b09b-8d07accf7d01",
+  "external_ref": null,
+  "title": "Cap the active test-run rail badge display at 99",
+  "outcome": "Cap the active test-run rail badge display at 99",
+  "acceptance": [
+    "When 100 or more test runs are active, the rail badge displays 99 while its accessible name and tooltip retain the exact active-run count.",
+    "Counts below 100 and the zero-active-run state retain their existing display behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Badge cap landed on master as 8dd0f6ce3978f4447ba08e8de2529c95bb1b7cf7 after the integration owner verified the pre-push conditions and pushed origin/master at 2026-10-15T17:38:44Z. Full gate passed on the exact tree and the fresh independent acceptance evaluation passed 2/2. No Rust change; no binary install.",
+    "completed_at": "2026-10-15T17:39:30.643463600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0fbed-01aa-7c00-8484-a665596079a9",
+  "external_ref": null,
+  "title": "Preserve per-call timeout semantics for standalone Engram binding",
+  "outcome": "Preserve per-call timeout semantics for standalone Engram binding",
+  "acceptance": [
+    "Preserve per-call timeout semantics for standalone Engram binding is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

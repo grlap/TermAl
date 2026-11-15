@@ -1,0 +1,28 @@
+{
+  "id": "01a1ae51-61ee-73b1-aa87-ef9b3a5f9aa4",
+  "external_ref": null,
+  "title": "Host start via `cargo run --release` rebuilds target/release/termal.exe from the master checkout, overwriting the installed binary, so the recorded install hash is not what runs",
+  "outcome": "What runs after a restart is exactly the binary that the integration owner installed and recorded, or the documented install procedure matches how the host is actually started. Either way, the build hash reported to Greg in 'restart now' is the hash that runs.",
+  "acceptance": [
+    "Host start via `cargo run --release` rebuilds target/release/termal.exe from the master checkout, overwriting the installed binary, so the recorded install hash is not what runs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-stability",
+    "install",
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0f4a3-f2ad-7601-a646-17f762b99ae2",
+  "external_ref": null,
+  "title": "Define and enforce body-loss authority across all stream discontinuities",
+  "outcome": "Architect1 decides loss scope and recovery contract for ordinary EventSource reconnect, shared-worker rejoin, fallback adoption and instance restart; inherited uncovered-body behavior is not silently treated as repaired.",
+  "acceptance": [
+    "For every in-scope discontinuity, a runtime regression loses a resident update then admits a disjoint tail and proves no stale body is certified while selected navigation remains valid.",
+    "The coordinator and architect record which stream discontinuities invalidate resident-body authority and why."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "architecture-escalation",
+    "conversation-view",
+    "scope-decision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

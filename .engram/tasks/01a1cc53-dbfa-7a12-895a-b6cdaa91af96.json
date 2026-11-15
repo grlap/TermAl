@@ -1,0 +1,32 @@
+{
+  "id": "01a1cc53-dbfa-7a12-895a-b6cdaa91af96",
+  "external_ref": null,
+  "title": "Cover Codex stdin command-loop budget selection and reset after an interrupt",
+  "outcome": "Behavioral tests exercise the production per-command stdin budget selection and prove that an InterruptTurn uses its thirty-second budget while the next ordinary command on the same writer returns to the sixty-second budget.",
+  "acceptance": [
+    "A behavioral test drives the production command-dispatch path for InterruptTurn followed by an ordinary command on the same watched writer and observes their distinct deadline behavior.",
+    "The coverage fails if the production budget-selection call is removed or if the ordinary command stops resetting the previous interrupt budget, without real thirty- or sixty-second waits.",
+    "Existing stdin guard cleanup and Stop behavior continue to pass; source review and relevant verification evidence are recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "greg-directed",
+    "limits",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

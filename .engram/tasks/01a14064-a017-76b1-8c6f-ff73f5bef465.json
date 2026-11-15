@@ -1,0 +1,32 @@
+{
+  "id": "01a14064-a017-76b1-8c6f-ff73f5bef465",
+  "external_ref": null,
+  "title": "Pin runtime-exit pause retention and completed-wake exclusions with regression controls",
+  "outcome": "Regression controls distinguish factual unfinished-wake settlement from already completed exact-WAL bookkeeping under a pause, and pin intentional operator-pause retention for an exiting non-wake Engram session.",
+  "acceptance": [
+    "A paused Error session whose exact wake WAL already completed remains free of a new wake failure, notice, replay or provider enqueue when the current runtime exit is applied; a paired unfinished wake control still retains its Accepted/Unknown failure.",
+    "A non-wake Engram session with an independent operator pause retains that pause across its exact runtime exit, with ordinary unpaused exit behavior covered as a positive control."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "fan-in",
+    "follow-up",
+    "provider-error",
+    "testing",
+    "wake-recovery",
+    "wakes"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a11d9d-2bd0-7af1-b87b-5656beda1d33",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

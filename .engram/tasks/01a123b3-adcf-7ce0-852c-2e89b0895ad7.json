@@ -1,0 +1,30 @@
+{
+  "id": "01a123b3-adcf-7ce0-852c-2e89b0895ad7",
+  "external_ref": null,
+  "title": "Strengthen the failed-retirement-save test so a dropped resume dispatch fails it, not only a missing WaitConsumed delta",
+  "outcome": "acceptance_spawn_unacknowledged_first_brief_hands_off_a_wait_when_the_retirement_save_fails (src/tests/acceptance_evaluation_spawn_ack.rs) also observes the resume-dispatch boundary. It asserts that the parent's wait-resume prompt was queued and that its dispatch was attempted (dispatch_delegation_wait_resumes ran for that parent), so a regression that publishes the delegationWaitConsumed delta but skips publish_delegation_refresh_side_effects fails the test. It also shows the queued resume stays recoverable while persistence is unavailable.",
+  "acceptance": [
+    "Deleting the publish_delegation_refresh_side_effects call in retire_unacknowledged_acceptance_evaluator's failed-save path makes the strengthened test fail, while the current code passes it.",
+    "The test asserts on the parent's queued or dispatched wait-resume prompt, not only on the delegationWaitConsumed delta."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "delegation-waits",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

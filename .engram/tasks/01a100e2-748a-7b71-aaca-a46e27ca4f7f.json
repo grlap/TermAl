@@ -1,0 +1,24 @@
+{
+  "id": "01a100e2-748a-7b71-aaca-a46e27ca4f7f",
+  "external_ref": null,
+  "title": "Give source-observation delegation holds an accurate reason",
+  "outcome": "Observation-gated children are labeled PersistenceUnknown and say Resume replays authorization. Represent their accounting/local-ACK hold accurately after the retry synchronization correction.",
+  "acceptance": [
+    "Give source-observation delegation holds an accurate reason is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

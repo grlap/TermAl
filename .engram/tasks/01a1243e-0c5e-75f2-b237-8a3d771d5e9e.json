@@ -1,0 +1,27 @@
+{
+  "id": "01a1243e-0c5e-75f2-b237-8a3d771d5e9e",
+  "external_ref": null,
+  "title": "Pin the guard-before-Begin path in the unsent-Begin regression witness (boundary and retry card code)",
+  "outcome": "Pin the guard-before-Begin path in the unsent-Begin regression witness (boundary and retry card code)",
+  "acceptance": [
+    "Pin the guard-before-Begin path in the unsent-Begin regression witness (boundary and retry card code) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

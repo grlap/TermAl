@@ -1,0 +1,48 @@
+{
+  "id": "01a1486b-afae-7192-a5f3-7635e5349aab",
+  "external_ref": null,
+  "title": "An Engram admission deadline (deadline_exceeded) strands the queue: interrupted head isn't released by Resume and needs a manual cancel",
+  "outcome": "An Engram admission that exceeds its budget never leaves a session silently stranded. The host reconciles the retained authorization automatically when it's safe (for example a head that is only a mailbox notification, whose content stays durable), and the operator's Resume either reconciles and continues or refuses with a stated reason and the exact next action.",
+  "acceptance": [
+    "For a pure structured root mailbox-notification head with live, matching pre-Evaluate Bind-retry ownership, a nonfatal Bind Reconcile failure retains and automatically replays the exact original Bind request/key through the bounded recovery scheduler, without Resume, Cancel or a settings toggle. If reconciliation authorizes continuation, provider handoff occurs once; mailbox content remains durable and its cursor is not acknowledged by recovery. A deterministic test drives the actual admission failure and due ticks.",
+    "For a deadline-origin retained user/turn head, including one with no disable/re-enable history, Resume either makes durable progress through the existing exact reconciliation path or returns a typed non-2xx refusal naming the retained operation and supported next action. It never returns200 with the same interrupted, paused head and no durable progress. Tests cover the same-head post-drain race and distinguish a durably scheduled retry from provider delivery.",
+    "Tests preserve Unknown application identity, explicit Refuse/Defer, prepared or possibly-sent Begin, uncertain/active grant, real user/delegation content, local persistence uncertainty, Stop/operator pause, Cancel, successor replacement and changed authority. No content loss, duplicate provider handoff, fabricated NotStarted or blanket retry-code broadening is permitted. At bounded exhaustion the reason and next action remain visible; exact-input verification and independent acceptance establish the implemented cases."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-control",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

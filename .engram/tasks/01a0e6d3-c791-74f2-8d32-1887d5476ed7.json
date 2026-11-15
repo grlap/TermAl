@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c791-74f2-8d32-1887d5476ed7",
+  "external_ref": "tm-uyx2",
+  "title": "Remove policy-administration Reason from TermAl end to end",
+  "outcome": "Coordinated Greg request relayed by Engram peer messages 167-170: remove policy-change justification UI/state/API/CLI and bootstrap reason arguments, recovery payload requirement, tests and docs. Reason-free CLI rejects old flag. Retain authorization, CAS, idempotency, confirmation, evaluation/refusal/waiver reasons; no legacy fallback, autofill or recovery migration. No commit/install/restart/live changes.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The policy Reason is removed; EngramProjectSettingsDialog.test.tsx:112 and AcceptanceEvaluationSettings.test.tsx:78 assert its absence on master f7db2c58. Closed by evidence.",
+  "completion": null
+}

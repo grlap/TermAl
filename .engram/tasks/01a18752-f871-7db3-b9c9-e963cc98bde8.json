@@ -1,0 +1,27 @@
+{
+  "id": "01a18752-f871-7db3-b9c9-e963cc98bde8",
+  "external_ref": null,
+  "title": "Batch bind collision: make the restart witness real and add a restart-from-unsettled-store positive control",
+  "outcome": "In src/tests/engram_batch_gate_flow.rs, the verification_bind collision tests prove the restart boundary with a host that has actually booted. A host restarted from a settled store runs run_post_listen_boot with a scripted binding and token, and its owed-binds tick sends no verification_bind. A positive control restarts a host from the trigger-unsettled store of the failed-write test: it sends exactly one verification_bind, identical to the first request under the same key, and then stores the collision settlement durably.",
+  "acceptance": [
+    "Batch bind collision: make the restart witness real and add a restart-from-unsettled-store positive control is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

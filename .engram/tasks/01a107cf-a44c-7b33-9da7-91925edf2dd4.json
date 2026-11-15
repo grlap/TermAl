@@ -1,0 +1,27 @@
+{
+  "id": "01a107cf-a44c-7b33-9da7-91925edf2dd4",
+  "external_ref": null,
+  "title": "Engram control-process teardown ignores a failed process-tree kill and then waits without a deadline, so a recovery or call can hang forever",
+  "outcome": "Engram control-process teardown ignores a failed process-tree kill and then waits without a deadline, so a recovery or call can hang forever",
+  "acceptance": [
+    "Engram control-process teardown ignores a failed process-tree kill and then waits without a deadline, so a recovery or call can hang forever is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

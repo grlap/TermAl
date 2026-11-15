@@ -1,0 +1,28 @@
+{
+  "id": "01a1104c-23e1-72b0-9c3a-0e44b302c19c",
+  "external_ref": null,
+  "title": "Retain a typed reviewer finish observation when completion arrives under held Engram revocation",
+  "outcome": "Pair7 both retain Low M6/E-held×C5 at src/codex_reviewer_mcp_lifecycle.rs:304. allow_stop=false refuses admission and generic callbacks preserve duty but omit typed finish status. Add ownership-safe unavailable diagnostics for actual completed/error admission under the held fence, without fabricating a clean result or changing submission precedence. Inventory only: no assigned implementation owner or scheduled trigger. Holder must establish concurred acceptance before evaluation.",
+  "acceptance": [
+    "Retain a typed reviewer finish observation when completion arrives under held Engram revocation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

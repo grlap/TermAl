@@ -1,0 +1,29 @@
+{
+  "id": "01a1a663-59de-7063-b195-a29c7c9b060b",
+  "external_ref": null,
+  "title": "Preserve named committed-input capture refusal in acceptance diagnostics",
+  "outcome": "Acceptance retains the capture's named unavailable reason and a suitable remedy instead of advising all unsupported or unavailable states to commit or remove changes.",
+  "acceptance": [
+    "Preserve named committed-input capture refusal in acceptance diagnostics is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

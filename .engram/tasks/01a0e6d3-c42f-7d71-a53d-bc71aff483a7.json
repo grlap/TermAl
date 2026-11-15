@@ -1,0 +1,41 @@
+{
+  "id": "01a0e6d3-c42f-7d71-a53d-bc71aff483a7",
+  "external_ref": "tm-9c5n",
+  "title": "Prevent Engram MCP self-deadlock on cold runtime dispatch",
+  "outcome": "After process restart, dispatch_turn owns the global StateInner mutex while starting an idle runtime. The new Engram MCP config lookup reacquires the same non-reentrant mutex through engram_mcp_stdio_config_for_session, deadlocking the request and every state-dependent route. Pass a lock-safe configuration snapshot into runtime startup and add regression coverage.",
+  "acceptance": [
+    "Cold Claude runtime dispatch can build its MCP configuration without reacquiring StateInner; existing Claude, Codex, and ACP Engram MCP configuration behavior remains covered; focused tests and required quality gates pass."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed with evidence; the fix was already on master.\n\nCommit 13573d9 (2026-08-28) makes cold Claude dispatch (turn_dispatch.rs) and session-config startup (session_config.rs) build the Claude MCP config from an Engram descriptor taken by engram_mcp_stdio_config_for_session_locked. The caller already holds StateInner, so nothing re-locks the mutex.\n\nEvidence at master 169fc8b, in the named root .tmp/wt-p0-close-9474:\n- pinned by claude_mcp_snapshot_composition_is_state_lock_safe and cold_claude_turn_start_does_not_reenter_state_mutex_for_engram_config: the focused run passed 2 of 2, verification 3b53e530;\n- the credited full gate test-d09db305 passed all five stages;\n- independent evaluation delegation-f603d078 (Codex) passed 1 of 1.\nThe first evaluation, delegation-873fea6b, was insufficient-evidence until the gate was credited on this item.\n\nThe landing commit and time are the fix commit's own; the original push time is not recorded.",
+    "completed_at": "2026-10-02T09:36:14.714903400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

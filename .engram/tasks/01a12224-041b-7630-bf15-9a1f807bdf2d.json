@@ -1,0 +1,26 @@
+{
+  "id": "01a12224-041b-7630-bf15-9a1f807bdf2d",
+  "external_ref": null,
+  "title": "A failed Claude background full gate gets no failed record: the host reports \"no verified completion\" and records nothing",
+  "outcome": "When a Claude session's full gate launched in the documented Bash background form (pushd \"DIR\" && node scripts/test-launcher.mjs full) exits nonzero, the host records a failed verification record for that run on the claim, just as it records a credited pass. It does not treat the failed background task as unverified work and withhold the run with \"earned no credit ... Run the gate again\".",
+  "acceptance": [
+    "A failed Claude background full gate gets no failed record: the host reports \"no verified completion\" and records nothing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

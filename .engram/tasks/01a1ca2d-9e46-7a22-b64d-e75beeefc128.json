@@ -1,0 +1,31 @@
+{
+  "id": "01a1ca2d-9e46-7a22-b64d-e75beeefc128",
+  "external_ref": null,
+  "title": "Land boot state-load subphase measurements before the next Central restart",
+  "outcome": "The next Central host build can report the actual state-load subphase costs while optimization and cold/warm comparison remain separate follow-up work.",
+  "acceptance": [
+    "Boot state loading emits fixed-label aggregate durations for SQLite open, schema and metadata, session loading with transcript-tail and prompt-history sub-phases, session and derived-state reconstruction, and federation binding, without changing the persistence format or restore behavior.",
+    "Disposable-state validation preserves restored transcript tails, prompt history and malformed-row quarantine with measurements enabled and disabled; fixture measurements label the first load and reopens as write-warmed and make no cold-cache claim.",
+    "The instrumentation-only change has no outstanding in-scope Medium-or-higher review finding, passes the full gate on its exact landing input, and is committed and pushed on master; optimization and real Central cold/warm evidence remain on the parent task."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "boot",
+    "greg-reported",
+    "instrumentation",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c9dc-250e-75c3-8dea-999580c92a55",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

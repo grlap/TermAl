@@ -1,0 +1,27 @@
+{
+  "id": "01a15438-7508-7202-9632-dd06840d14dc",
+  "external_ref": null,
+  "title": "A pending batch whose grant recovery finds closed without a receipt waits 30 minutes before its members are told",
+  "outcome": "When the host learns that the grant carrying a pending batch closed with no receipt naming the gate's record, it drains that grant's pending batches at once, with an explicit line to each member. Two cases: a rebind's session_status reports no open grant after the closing checkpoint's answer was lost, so clear_engram_stale_binding_record clears it; or another checkpoint of the same grant answers with a report lacking the gate's Test input. Today the pending batch is settled only by a Checkpointed receipt, an explicit refusal, or the 30-minute expiry, so members wait 30 minutes and are told only \"not confirmed within 30 minutes\".",
+  "acceptance": [
+    "A pending batch whose grant recovery finds closed without a receipt waits 30 minutes before its members are told is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

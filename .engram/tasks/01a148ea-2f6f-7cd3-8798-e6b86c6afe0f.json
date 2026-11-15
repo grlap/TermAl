@@ -1,0 +1,29 @@
+{
+  "id": "01a148ea-2f6f-7cd3-8798-e6b86c6afe0f",
+  "external_ref": null,
+  "title": "Attribute admission-binding time on the host: state-lock wait/hold and work-binding CLI subprocess timings on the admission card",
+  "outcome": "When queued admission ends with deadline_exceeded in admission_binding, the card or trace records how the budget was spent on the host: time waiting for and holding the state mutex, each work-binding CLI subprocess (read_work_binding and held-claims reads) from spawn to exit, and each control frame. Then a 20 s admission can be attributed to the host or to Engram without guesswork.",
+  "acceptance": [
+    "Admission phase timings are recorded per phase (mutex wait, mutex hold, each CLI read subprocess, each control frame) and surfaced on the degraded card or in a bounded trace. A test with a scripted slow CLI reader and a held state lock shows the time attributed to the right phase.",
+    "On the live host, the per-phase breakdown is recorded for a real admission (any queued admission in ordinary operation, not a constructed burst), showing every phase field populated end to end, and the observed breakdown is recorded on this item for Engram w-58af6958d8ae. No synthetic concurrent-burst reproduction is required (Greg's direction, b9d13887 #997)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

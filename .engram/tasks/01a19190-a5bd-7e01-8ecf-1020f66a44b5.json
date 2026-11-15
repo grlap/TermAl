@@ -1,0 +1,30 @@
+{
+  "id": "01a19190-a5bd-7e01-8ecf-1020f66a44b5",
+  "external_ref": null,
+  "title": "Make the control-process deadline evidence fixture accept unsent admission exhaustion",
+  "outcome": "The pre-existing real_process_deadline_reports_the_running_control_process test uses a 100 ms call budget after readiness and unconditionally requires controlProcess evidence. Scheduling may exhaust that budget before worker handoff; the documented unsent Deadline has no controlProcess evidence, so the fixture can fail on correct product behavior. Assert both documented dispositions through the shared deadline child-state helper (or equivalent owner assertions), preserve evidence requirements for sent calls, and retain/clean up the exact child for unsent calls without increasing the timeout or changing product semantics.",
+  "acceptance": [
+    "The evidence fixture deterministically distinguishes a possibly sent deadline with exact process evidence from an unsent admission-exhaustion deadline with the exact healthy registered child retained; neither outcome invents process evidence or attributes explicit cleanup to the deadline.",
+    "The 100 ms deadline and production transport behavior are unchanged; focused validation records the tested input and result, and independent review checks the branch assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram-host-adapter",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c54d-7a72-ada3-b496c8097a73",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a109a4-745b-7680-a147-24ee847565d8",
+  "external_ref": null,
+  "title": "Document the Windows symlink privilege required by resolved Engram alias tests",
+  "outcome": "The test documentation or launcher preflight states the Windows file-symlink prerequisite and classifies unavailable privilege as environment failure without silently counting an unexecuted witness as passing.",
+  "acceptance": [
+    "Document the Windows symlink privilege required by resolved Engram alias tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

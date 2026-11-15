@@ -1,0 +1,28 @@
+{
+  "id": "01a184ae-44ed-73e0-b012-edf1247d65de",
+  "external_ref": null,
+  "title": "When the gate write guard overturns a user's Accept, the approval card turns Rejected with no reason shown in TermAl",
+  "outcome": "When the gate guard's delayed-approval re-check denies a request a user accepted, TermAl records the reason on the approval message or as a session notice: which gate, and when it is released. The user sees why the request was rejected.",
+  "acceptance": [
+    "When the gate write guard overturns a user's Accept, the approval card turns Rejected with no reason shown in TermAl is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

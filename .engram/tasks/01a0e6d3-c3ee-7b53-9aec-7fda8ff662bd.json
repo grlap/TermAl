@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-7fda8ff662bd",
+  "external_ref": "tm-5fsy.5",
+  "title": "Claude: authorize each review control-plane capability independently",
+  "outcome": "Claude session-6885 Medium, src/claude_spawn.rs:678 and src/claude.rs:250. Production caller supplies only SubmitReviewResult authority, classifier allows every recognized capability. ReviewFreeze requires ReadOnly but that policy is not consulted on Claude; endpoint still rejects with 409. Classify first and authorize exact capability. Existing tm-5fsy.2 is the general tool-set policy, not this routing defect. Also advertise freeze guidance only where authorized.",
+  "acceptance": [
+    "Exercise production state-backed routing for readOnly and non-readOnly reviewers; ReviewFreeze cannot inherit SubmitReviewResult access, and existing submit-result behavior remains valid."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

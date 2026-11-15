@@ -1,0 +1,29 @@
+{
+  "id": "01a0e6d3-c7b1-7fb2-a418-879dee6efcd9",
+  "external_ref": "tm-wau5",
+  "title": "Git status panel: expand a modified submodule into its own changed files with per-file diffs and actions",
+  "outcome": "Greg feature request (2026-09-05, screenshot: project questly, Unstaged shows `rincon-common M`): be able to see the diffs inside a submodule. Today the parent status (`git status --porcelain=v1 -uall`) lists a modified submodule as one entry, and opening it renders one read-only raw patch from `git diff --submodule=diff` (language `git-submodule`, src/git.rs) with per-file headers buried in the text: no file tree, no per-file Monaco/Markdown diff, no stage/unstage/discard inside the submodule, and no distinction between a moved pointer and a dirty worktree. Design: (1) `/api/git/status` reports, for every submodule the parent marks modified, a nested status taken with `git -C <parent_root>/<submodule> status --porcelain=v1 -uall`, plus the pointer state (recorded commit vs checked-out HEAD, and whether the worktree is dirty), so the UI can render the submodule as an expandable node with its own Staged/Unstaged sections; (2) `/api/git/diff` and `/api/git/file` accept an optional submodule path and run against that repository (`git -C <submodule> diff [--cached] -- <file>`, stage/unstage/discard scoped there), reusing the existing repo-relative path normalization against the submodule root and rejecting any path that escapes the parent repo; (3) the submodule node itself keeps a one-line summary (pointer old -> new, dirty/clean) and the existing raw `--submodule=diff` view as its own preview; (4) nested submodules follow the same mechanism one level deep; (5) nested status runs only for submodules the parent reports as modified, so the polling cost stays bounded (see tm-5buh). Out of scope, separate follow-up: committing/pushing inside a submodule and updating the parent pointer from the panel.",
+  "acceptance": [
+    "A parent repo with a dirty submodule shows the submodule as an expandable node under Staged/Unstaged with the submodule files listed like parent files; clicking a submodule file opens the normal per-file diff (Monaco/Markdown) for that file; stage/unstage/discard on a submodule file act inside the submodule repo and refresh the nested status; the node summary states pointer moved and/or dirty; a clean-but-pointer-moved submodule shows the pointer change without a file list; paths cannot escape the parent repo; Rust tests cover nested status, per-file diff, actions and path rejection with a real nested repository fixture; UI tests cover the tree rendering and actions; cargo/tsc/Vitest gates green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "beads-migrated",
+    "feature",
+    "git",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

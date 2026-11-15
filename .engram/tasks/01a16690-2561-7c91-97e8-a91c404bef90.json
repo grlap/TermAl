@@ -1,0 +1,43 @@
+{
+  "id": "01a16690-2561-7c91-97e8-a91c404bef90",
+  "external_ref": null,
+  "title": "Revalidate mailbox Bind-retry eligibility atomically when parking",
+  "outcome": "A narrow mailbox Remote Bind reconciliation cannot schedule retry authority after its delegation, recovered-admission, observation, durability or cleanup exclusions change between failure-time selection and the park. Exact original identity and later authority fences remain intact.",
+  "acceptance": [
+    "The mailbox-specific exclusions are revalidated under the same StateInner lock that decides and persists retry eligibility, without weakening the existing owner, head, authority, runtime, grant and payload guards.",
+    "Deterministic interleaving tests introduce relevant holds after failure-time selection and before park, assert a conservative retained outcome without a mailbox-specific retry grant, and preserve exact request/key, content and no duplicate provider handoff.",
+    "Focused verification passes on the exact input and independent review has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "concurrency",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

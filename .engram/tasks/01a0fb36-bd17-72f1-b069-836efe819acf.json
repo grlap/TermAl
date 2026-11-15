@@ -1,0 +1,27 @@
+{
+  "id": "01a0fb36-bd17-72f1-b069-836efe819acf",
+  "external_ref": null,
+  "title": "Heavy Vitest category omits two virtualizer measurement-lifecycle suites its definition covers",
+  "outcome": "HEAVY_TEST_FILES in ui/test-categories.ts and the heavy definition in docs/test.md agree: every suite that exercises the virtualizer/measurement lifecycle is in heavy, or the criterion is narrowed and documented so the placement follows it.",
+  "acceptance": [
+    "Heavy Vitest category omits two virtualizer measurement-lifecycle suites its definition covers is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "tests",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

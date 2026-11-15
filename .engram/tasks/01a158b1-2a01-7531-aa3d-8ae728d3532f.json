@@ -1,0 +1,32 @@
+{
+  "id": "01a158b1-2a01-7531-aa3d-8ae728d3532f",
+  "external_ref": null,
+  "title": "Triage the 10 npm audit vulnerabilities (6 low, 4 moderate) in ui/ dependencies",
+  "outcome": "Dated ui/ dependency audit census and source-based reachability classification are recorded, with minimal remediation proposals filed separately for runtime or reachable dependencies. No dependency, lockfile or deployed UI change occurs during triage; fixes require their own review and gate.",
+  "acceptance": [
+    "Record a dated npm audit census covering every affected package entry and distinct advisory, installed versions/dependency paths, runtime versus dev-only use, source-based reachability and available fixed versions, with limitations.",
+    "Record minimal remediation proposals for reachable or runtime dependencies as separate reviewed-and-gated work; make no dependency, lockfile or deployed UI change during triage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed read-only census of10 affected npm package entries and32distinct advisories with installed paths, runtime/tooling classification, conditional reachability and fixed-version availability; filed separate P2Mermaid and P3conditional math/sanitizer work.",
+    "completed_at": "2026-10-20T10:27:09.514488300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

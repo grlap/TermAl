@@ -1,0 +1,30 @@
+{
+  "id": "01a1a34d-da7b-7ee2-9210-27b684638221",
+  "external_ref": null,
+  "title": "Delegated Codex worker on Windows cannot start its shell: pwsh.exe via the WindowsApps alias fails in a new Engram worktree",
+  "outcome": "A TermAl-delegated worker on Windows can run its first local shell commands in a newly created worktree, or fails with the native error text reported back to its parent.",
+  "acceptance": [
+    "The cause is identified with evidence: the native error from a reproduced child launch is recorded on this item.",
+    "A delegated worker on Windows whose default shell is the WindowsApps pwsh alias can run a read-only command in a new worktree, or the delegation fails before work starts with a named reason that includes the native error, by a test or recorded reproduction.",
+    "Any shell-path change is made inside TermAl and changes no user or global configuration."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "host-feedback",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4c0-7e90-8c51-6d4c255d7248",
+  "external_ref": "tm-baf",
+  "title": "Use a lighter persist for ignore-set-only mutations",
+  "outcome": "suppress_orphaned_codex_thread and clear_external_session_id_if_runtime_matches commit via commit_locked, bumping revision and broadcasting SSE for a client-invisible ignored_discovered_codex_thread_ids change; a persist-without-revision path would avoid the needless client refresh.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1708c-a60a-7781-b45a-c7b546116c5a",
+  "external_ref": null,
+  "title": "Allow source-root naming with Base MCP enabled and turn-gated control off",
+  "outcome": "Source-root naming depends on Base MCP availability independently of turn-gated admission, without adding any host-credit, acceptance-evaluation or merge prerequisite.",
+  "acceptance": [
+    "With project Base MCP enabled and turnGatedControl=false, a valid root-session source-root naming request succeeds.",
+    "With Base MCP disabled, the existing source-root naming refusal remains; existing ownership, path and identity guards remain effective.",
+    "Relevant/new tests and independent read-only reviews accompany the exact candidate in a READY handoff; no acceptance evaluation or host-credit requirement is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-control",
+    "greg-reported",
+    "host-recording",
+    "source-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16caf-31a4-7e93-8883-4af0c7eb90ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

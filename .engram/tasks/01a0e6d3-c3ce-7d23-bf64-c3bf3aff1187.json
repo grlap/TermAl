@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3ce-7d23-bf64-c3bf3aff1187",
+  "external_ref": "tm-3hld",
+  "title": "Acknowledge a mailbox page by server receipt instead of a caller-computed sequence",
+  "outcome": "THE API PERMITS SILENTLY DROPPING AN OBLIGATION. termal_acknowledge_mailbox takes processedThrough as an integer the caller computes. Nothing binds that integer to what the server actually returned, so a caller can acknowledge a range it never received, and the skipped message is then marked processed with no trace.\n\nOBSERVED, not hypothesised: on 2026-09-09 this coordinator acknowledged through sequence 254 without having read 253. It was caught retroactively and 253 was read afterwards. Contiguous processing IS required by the current protocol, so this was a protocol violation - the point is that the interface could not tell it from a correct contiguous advance, and therefore accepted it.\n\nDIRECTION. A read returns an opaque receipt bound to the participant, the mailbox and the contiguous range it delivered. A separate acknowledgement, issued after processing, confirms that receipt. The caller never computes a boundary.\n\nREQUIREMENTS, carried over from the design discussion with Engram::Advisor:\n- retry stays idempotent, replaying the same receipt is safe after a lost response;\n- an advance across an unacknowledged gap is refused rather than accepted;\n- correct behaviour across multiple pages and across concurrent reads by the same participant;\n- the receipt is opaque: callers must not be able to synthesise or edit one.\n\nTHE BOUNDARY, and it belongs in the acceptance criteria so nobody reads more into this than it gives. What the change WOULD guarantee: the server refuses to acknowledge a range it never issued to that caller, and refuses to skip an unacknowledged gap. What it CANNOT guarantee: that the returned messages were read, understood, or acted on. This narrows what the interface permits; it is not evidence of processing, and the phrase receipt-based acknowledgement must not be used as if it were.\n\nRELATED BUT DELIBERATELY NOT MERGED HERE: tm-uwx.5 covers exact retrieval and presentation truncation, which is a different concern; extending it was rejected in favour of a separate item. Also out of scope: acknowledging in the same action as the read - explicitly rejected, because a read is not evidence of processing and collapsing them would make the audit trail assert work that did not happen.\n\nSECOND FIELD OBSERVATION for whoever implements this, from the same day: a read starting at the cursor returns the participant own sent messages interleaved with inbound ones, while unreadCount excludes them. With the cursor at 300 and a limit of 1, the read returned sequence 301 - a message this session had sent - and the inbound message being reacted to was 303. Page semantics (hasMore, continuation) should be explicit rather than leaving callers to equate unreadCount with the number of records after the cursor.\n\nPriority set from concrete impact rather than inherited from the epic: a dropped obligation is recoverable by re-reading with an explicit boundary and no data is lost, but the failure is silent and the audit trail actively misreports it as processed.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. Acknowledge-by-receipt landed in 942fd3c (ancestor of master).",
+  "completion": null
+}

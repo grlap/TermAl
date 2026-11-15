@@ -1,0 +1,29 @@
+{
+  "id": "01a0e6e2-44c2-7843-84f8-f23a694c9bc5",
+  "external_ref": null,
+  "title": "A root session paused on \"Engram: interrupted/unknown delivery\" (retained prompt, queue paused) tells no peer and queues their mailbox messages silently for hours",
+  "outcome": "A root session paused on \"Engram: interrupted/unknown delivery\" (retained prompt, queue paused) tells no peer and queues their mailbox messages silently for hours",
+  "acceptance": [
+    "A root session paused on \"Engram: interrupted/unknown delivery\" (retained prompt, queue paused) tells no peer and queues their mailbox messages silently for hours is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-32",
+    "control-plane",
+    "mailbox",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": "2026-10-03T00:00:00Z",
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a12660-fb49-78a1-be53-88e5c2fe6985",
+  "external_ref": null,
+  "title": "Read-only Claude delegations refuse `git check-attr`, a read-only command reviewers need to check .gitattributes effects",
+  "outcome": "A read-only Claude delegation can run `git check-attr` (for example `git check-attr -a <path>`) to see the attributes, such as eol and text, that Git's clean/eol normalization applies to a reviewed file. Options that could write or run external programs stay refused, as for the other allowed subcommands.",
+  "acceptance": [
+    "CLAUDE_READ_ONLY_GIT_SUBCOMMANDS (src/claude_read_only_refusal.rs) admits `check-attr`, with an option check equivalent to the other allowed subcommands; a regression test shows `git check-attr -a <path>` and `git check-attr --all -- <path>` admitted in a read-only Claude delegation, and an unchecked or writing option still refused.",
+    "The Codex and Kimi read-only policies are checked for the same gap, and either already admit `git check-attr` or are fixed the same way, with a test each.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "read-only-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

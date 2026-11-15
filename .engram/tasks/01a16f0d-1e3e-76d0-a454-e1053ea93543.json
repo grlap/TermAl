@@ -1,0 +1,51 @@
+{
+  "id": "01a16f0d-1e3e-76d0-a454-e1053ea93543",
+  "external_ref": null,
+  "title": "revalidate_test_run_lifecycle holds the StateInner lock for 7.2 s with no tests running (src/test_run_evidence.rs:223)",
+  "outcome": "Revalidating test-run lifecycle evidence after a named-root read no longer holds StateInner for seconds. The scan, matching and cloning of test_run_observations, and the persistence of changed rows, run without holding the state mutex for work proportional to the whole test-run history. Only a short, bounded critical section applies the already-computed changes under the current owner and generation. The existing evidence semantics (which associations get lifecycle_read, lifecycle_revalidated, compacted revalidation) are preserved exactly.",
+  "acceptance": [
+    "Within its StateInner hold, revalidate_test_run_lifecycle builds no full-history test-run summary projection. The changed-row → run lookup uses single-identity selection, and a test shows it equals the full projection's first match across entry, fallback, merged-artifact, unmerged-observation and compacted cases.",
+    "Compaction selection after a revalidation no longer runs inline under that hold. It is deferred to the existing idle compaction selection, which runs at the new revision. Ordering, durability fences and eventual compaction are unchanged, and a test proves a revalidated, now-eligible run is still compacted.",
+    "Deterministic witness tests show the work under the lock (projections built, association visits) does not grow with unrelated history, in the style of idle_state_lock.rs. Existing lifecycle, revalidation and compacted-proof semantics are preserved: every existing test passes, plus the new tests.",
+    "The independent review pair finds no Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-persistence",
+    "state-lock"
+  ],
+  "assigned_to": "Termal::Sol-d50d",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "revalidate_test_run_lifecycle no longer holds StateInner for seconds. Changed rows are found by single-identity selection instead of a full-history summary projection, and compaction after a revalidation is deferred to the idle compaction selection. Deterministic witness tests show the work under the lock does not grow with unrelated history. Landed in 5b10b2a34f2b26ab3c5e924bc2b57100784e46fd, gated by landing FULL test-9dcc68b2 on the identical tree.\nClosure (case a, after the carried non-pass on C4): the binding was restored at revision 9, and a registered narrow run test-3a854248 passed 550/0/2 at master 847e6c59 (verification ca5bca87). The independent evaluation delegation-788de646 (session-18069) passed all 4 criteria, superseding 1faae3d2.",
+    "completed_at": "2026-11-14T18:29:06.707375300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

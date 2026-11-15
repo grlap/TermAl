@@ -1,0 +1,29 @@
+{
+  "id": "01a1b939-cf2b-7e22-ae2f-1232bbf065e9",
+  "external_ref": null,
+  "title": "Preserve the artifact reader's UNKNOWN reason in late declared Codex settlement",
+  "outcome": "A late declared completion with an exact retained binding keeps its existing UNKNOWN verdict and the reason produced by the existing artifact-and-exit judge.",
+  "acceptance": [
+    "For a matched original retained binding, missing or invalid artifacts and an unknown exit preserve the existing judge's UNKNOWN detail on the observation instead of dropping it or retaining stale text.",
+    "Behavioral late and carried-completion fixtures assert the row's named reason without changing verdict precedence, original-binding ownership, native verification or wait identity."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "declared-commands",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e93a-e079-7e62-874c-51cb911ce20d",
+  "external_ref": null,
+  "title": "A followed shell's position is stored physically, so a later relative `cd ..` after a cd through a link is resolved where bash's logical cd does not go",
+  "outcome": "engram_settle_shell_move anchors a followed shell at the canonical (physical) path that engram_resolve_shell_move returns. After a lone `cd /repos/a/link`, where link points to /repos/b/sub, TermAl presumes /repos/b/sub. A later lone `cd ..` is then resolved from there to /repos/b, while bash's default logical cd lands in /repos/a. Credit and overlap then follow the wrong worktree for that shell. engram_resolve_shell_move already refuses a `..` within one target whose logical and physical readings differ. The gap is across commands, because only the physical position is kept. Pre-existing in base 13c7023. Found out of scope by the Codex reviewer of PI-26a round 3 (delegation-3cc1c406, session-8365). That change no longer bounds any relative target of a lost line, so it does not widen this gap.",
+  "acceptance": [
+    "The followed shell keeps the logical path it was moved to (as bash's `cd -L` would), or marks its position unknown when a link lies on it, so a later relative `cd ..` is resolved where bash lands or TermAl stops following; a regression test covers a lone cd through a link followed by a lone cd .. across two commands"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

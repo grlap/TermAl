@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6f1-7641-8d1b-e49467b5320e",
+  "external_ref": "tm-ug25",
+  "title": "OpenCode unit tests require optional CLI installed",
+  "outcome": "The full Rust gate fails 25 otherwise in-memory OpenCode/ACP tests when the developer machine lacks the optional opencode executable. Session setup calls production PATH readiness even though test AppState disables runtime spawning and tests use in-memory ACP handles. Make test builds hermetic for OpenCode setup while preserving production readiness validation and dedicated readiness-resolution tests; rerun the complete Rust wrapper.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The injected readiness resolver is present (src/agent_readiness.rs:16-17, collect_agent_readiness_with) on master f7db2c58. Closed by evidence.",
+  "completion": null
+}

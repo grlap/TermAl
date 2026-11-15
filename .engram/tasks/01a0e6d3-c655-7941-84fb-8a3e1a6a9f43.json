@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-8a3e1a6a9f43",
+  "external_ref": "tm-ncc6.2",
+  "title": "Backend: TestRun record, index of review-runs directories, boot reconciliation (worker gone without terminal results = unknown)",
+  "outcome": "HOW (split into tm-ncc6.2.1 record+persistence, .2.2 disk index, .2.3 boot reconciliation - see children)\n- New include! module src/test_runs.rs (same style as src/work_visualizer*.rs: small file, header comment saying what it owns/does not own).\n- TestRunRecord { run_id, project_id, root, preset (full|focused|live), stages: Vec<{name}>, requester_session_id, expected_fingerprint, state, pid, started_at, ended_at, run_dir, reason: Option<String> } kept in StateInner (state.rs, next to delegation_waits at ~1439/1498) and persisted through persisted_state.rs exactly like delegation_waits (lines ~47, 91, 135, 185).\n- results.json on disk stays the verdict: TermAl reads it (serde structs mirroring the launcher's results.json: state, stages[{name,state,code,signal,started,ended,log,diagnostics}], pid, owner, preflight) and mirrors into the record; it never computes pass/fail itself.\n- Expose in the state snapshot (wire.rs StateResponse next to delegation_waits ~2383/2412) as bounded summaries (no diagnostics text, no logs) and push a live delta 'testRunChanged' (live-updates.ts:124 pattern; app-live-state.ts:576 pattern).\n\nDEPENDS ON: tm-ncc6.1. BLOCKS: tm-ncc6.3, .4, .5, .6.\n\nREVIEW FIXES (F2, F8, F9, F13)\n- Carve-out: canceled and unknown are host verdicts evidenced by a non-terminal results.json; TermAl never derives passed/failed itself but DOES own those two states (sticky across boot; boot reconciliation visits only non-terminal records).\n- results.json mirror: every field Option + #[serde(default)], unknown fields tolerated; fields per launcher: runId, state, started, ended, exitCode, error, stages[{name,state,started,ended,command,cwd,log,code,signal,error,diagnostics{text,truncated}}], pid, owner, preflight[...], clearedToolchainOverrides, notificationEligible (launcher:222-227, 391-411, 455-470, 532, 546-549, 555-572, 581-583, 595-597). Terminal predicate = the launcher's (603-604): state in {passed,failed} and ended and integer exitCode.\n- Host-started runs are spawned with TERMAL_SESSION_ID=<requester> so request.json.owner/results.json.owner (launcher:218, 470) are populated; the disk index reads owner from there.\n- Live delta 'testRunChanged': besides live-updates.ts:124 and app-live-state.ts:576, add the DeltaEvent variant at src/wire.rs:3038-3052 and the exhaustive matches at src/remote_sync.rs:38, src/remote_routes.rs:810, src/remote_delta_apply.rs:1443, plus ui/src/types.ts:1237 (DeltaEvent union; delegationWaitCreated at 1159) and ui/src/app-live-state-delta-events.ts.\n- Optional executedTests per stage only when the launcher reports it (out of scope until tm-orxu lands).",
+  "acceptance": [
+    "- A TestRunRecord round-trips through persisted state (persist, reload, equal) including host verdicts canceled/unknown with their reasons.\n- A minimal initial results.json (state running, one stage, no ended) parses; the terminal predicate equals the launcher's summarize predicate (fixture files for passed, failed, running, and a killed run).\n- StateResponse carries testRuns summaries with no log/diagnostics content; a testRunChanged delta reaches UI state in the existing live-updates test harness and every exhaustive DeltaEvent match compiles.\n- results.json passed with a missing stage log -> record passed (logs are evidence, not the verdict).\n- results.json running with no live worker at boot -> unknown with reason; never passed. Canceled/unknown host verdicts survive a reload unchanged.\n- Runs on disk not started by TermAl are listed read-only with owner from request.json."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

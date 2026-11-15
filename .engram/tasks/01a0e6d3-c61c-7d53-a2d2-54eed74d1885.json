@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-54eed74d1885",
+  "external_ref": "tm-m6r1.12",
+  "title": "Work notes: preserve references or disclose their omission",
+  "outcome": "Codex session-6888 Low, src/work_visualizer_detail.rs:39. Engram note refs are separate from summary and silently discarded. Evidence-only notes can appear complete without their locator. Carry refs as inert data or explicitly disclose omission; no active link execution or new write surface.",
+  "acceptance": [
+    "Normalization and drawer tests with nonempty refs and bodyOmitted=false/summaryTruncated=false; references visible as inert data or accurate omission notice."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 4, spot-checked by Termal::Fable2): CLOSE-DONE. Work notes keep references: src/work_visualizer_detail.rs:44 `refs: Option<Vec<String>>` on master.",
+  "completion": null
+}

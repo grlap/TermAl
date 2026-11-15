@@ -1,0 +1,29 @@
+{
+  "id": "01a15b42-3c42-73e0-bbc4-38be3e5d7825",
+  "external_ref": null,
+  "title": "Define restart-risk treatment for an unbound test task completed with an Unknown verdict",
+  "outcome": "An explicitly completed test task with no Engram work binding has a documented, truthful restart-risk and history-retention treatment even when its native test verdict remains Unknown, without inventing a verification or native PASS.",
+  "acceptance": [
+    "The design distinguishes positive absence of a work/report binding from an unknown native test result and specifies whether a completed unbound Unknown row must remain in unresolved backlog; the chosen behavior is documented with evidence limits.",
+    "Production-path controls cover durable and failed/pending observation persistence plus completed Unknown versus genuinely live unbound rows, without minting Passed/Failed-style proof or dropping unresolved bound evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

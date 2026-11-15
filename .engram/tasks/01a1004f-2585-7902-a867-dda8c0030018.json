@@ -1,0 +1,27 @@
+{
+  "id": "01a1004f-2585-7902-a867-dda8c0030018",
+  "external_ref": null,
+  "title": "termal_name_source_root ignores an unknown argument, so a call with a misnamed path (e.g. `root`) is taken as a clear",
+  "outcome": "termal_name_source_root ignores an unknown argument, so a call with a misnamed path (e.g. `root`) is taken as a clear",
+  "acceptance": [
+    "termal_name_source_root ignores an unknown argument, so a call with a misnamed path (e.g. `root`) is taken as a clear is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Duplicate of completed w-098007e9ffa6, landed master47516f56722e03f923ccde6abfd5eb9d2b4c489c. Explicit disposition authorized by Fable2 mailbox930 mailbox-message-1c7f2a45-8caa-4b80-9bdd-e69b83691cbd (read FULL/ACK33cc8f16) and earlier910. Integration owner87/fullnote5db15667 reports landed gate+pair; task seal7b2c32b8 consumed independent4/4 evaluation874564f0. No separate source implementation or acceptance assertion for duplicate.",
+  "completion": null
+}

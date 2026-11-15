@@ -1,0 +1,29 @@
+{
+  "id": "01a1091a-9e34-7d90-ac23-5bfb41017302",
+  "external_ref": null,
+  "title": "Safely credit one verified test run to several items that share an identical frozen root and test coverage, without rerunning it for each",
+  "outcome": "When two or more items have an identical frozen root and test coverage, one verified run can be bound to each of them explicitly and auditably, instead of being repeated only to produce separate evidence. TermAl owns the recording and credit binding, and validates each item's root, revision and criterion separately. Engram owns the explicit binding and evidence model. One-session/one-focus is preserved, and shared credit never bypasses evidence.",
+  "acceptance": [
+    "Safely credit one verified test run to several items that share an identical frozen root and test coverage, without rerunning it for each is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-project",
+    "greg-approved-2026-10-04",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

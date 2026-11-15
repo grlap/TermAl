@@ -1,0 +1,31 @@
+{
+  "id": "01a1daeb-a5e5-7123-bee6-c4089fa3e5d5",
+  "external_ref": null,
+  "title": "Explain when an acknowledged next-turn source selection is discarded",
+  "outcome": "When an acknowledged deferred selection cannot apply because its authority or root image changed, the session receives a clear diagnostic rather than silently opening on the previous claim.",
+  "acceptance": [
+    "A behavioral test changes a deferred selection's previous binding or root image before its next opening; the invalid selection stays refused and a session notice explains why it did not apply.",
+    "A valid acknowledged selection still applies exactly once at the next eligible opening without extra warning or weakened authority guards."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

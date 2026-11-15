@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3d5-7440-b626-af03115505c2",
+  "external_ref": "tm-487",
+  "title": "Revalidate delegation caller eligibility if session roles can change",
+  "outcome": "The delegation MCP bridge caches caller eligibility for its lifetime. That is security-safe today because a session classified as a root by both parent_delegation_id and the durable delegation-child index is never converted into a child under the same id. Revisit the cache if either trigger occurs: (a) any feature allows root-to-child conversion, adoption, id reuse, or late attachment to a delegation (mandatory revalidation), or (b) the existing child-to-root adoption path needs peer tools without restarting the bridge (quality improvement). Evaluate TTL refresh versus an explicit immutable caller-role capability without restoring a full /api/state fetch per message.",
+  "acceptance": [
+    "The bridge revalidates or receives an authoritative immutable role whenever root-to-child conversion becomes possible; child-to-root adoption can optionally refresh without restart; exact-id sustained messaging does not regress to a full-state fetch per call."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

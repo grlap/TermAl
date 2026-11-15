@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6da-676c-7532-8d12-9a300f25a84c",
+  "external_ref": null,
+  "title": "Test helper CheckedTurn::wait_for_snapshots ignores each capture wait's timeout result",
+  "outcome": "Test helper CheckedTurn::wait_for_snapshots ignores each capture wait's timeout result",
+  "acceptance": [
+    "Test helper CheckedTurn::wait_for_snapshots ignores each capture wait's timeout result is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-3",
+    "post-import",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

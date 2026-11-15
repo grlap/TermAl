@@ -1,0 +1,37 @@
+{
+  "id": "01a1b825-86f2-7550-a5cd-573c3e287680",
+  "external_ref": null,
+  "title": "Agent-facing federation status: read-only MCP/CLI view of hosts, links and peer state over existing routes",
+  "outcome": "Greg has no UI. Agents therefore read the federation's state and each host's CPU, memory and disk usage through one supported read-only MCP/CLI facade instead of raw HTTP. The facade is a thin wrapper over the existing GET /api/federation and GET /api/federation/host-utilization routes. It adds no new state, sampler, authority or mutation. Agents decide where to place tasks themselves. Scope was agreed jointly by Fable2 and Kimi::Consultant (#133, #135) on Greg's word „niech uzgoni z KIMI”.",
+  "acceptance": [
+    "One read-only MCP tool and matching CLI command form a thin wrapper over two EXISTING routes, GET /api/federation and GET /api/federation/host-utilization. They return those routes' bounded, redacted projection without changing its meaning. From the federation view: this host's role and identity, and (on Central) each peer's enrollment, verification, activation, link and worker attempt/park/quarantine state; on a satellite, the existing satellite block. From host utilization, per host: CPU busy percent and logical count; memory total/available/in-use; configured-volume total/free/available; measurement time and source age; every metric's state and reason, including stale/unavailable/unsupported; and rosterState/complete. No new sampler, aggregation, persisted state, field, authority, mutation, retry, recovery or placement logic. No running build is claimed. A verified profile binary hash may be shown only if already present, and only labelled as the verified profile. Historical lastObserved is never presented as the current link.",
+    "Deterministic tests cover: Central with several peers in different states (active, parked, quarantined, unverified, disconnected with stale utilization); a satellite; a standalone host; an incomplete or unavailable utilization roster; strict size bounds; and redaction. No pair secret, MAC or control payload, credential, path or unrestricted raw stderr appears. Tests check observable output, are not tautological, and read no Markdown or instruction files.",
+    "User docs describe the tool and the CLI command and link both ways with docs/features/federation-link.md and docs/features/host-utilization.md. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "agent-api",
+    "federation",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the bounded read-only federation status MCP tool and matching CLI over the existing federation and utilization routes. Landed in fdd8d035 with clean independent final pair and two same-tree landing FULLs; own registered landed-input focused check passed46 and native verification c64afb49 confirms its actual claim and root.",
+    "completed_at": "2026-11-08T01:48:49.798328900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

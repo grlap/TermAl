@@ -1,0 +1,29 @@
+{
+  "id": "01a18b31-198d-7781-a295-38a6fe848943",
+  "external_ref": null,
+  "title": "An ordinary prompt behind a CertifiedNotApplied-only closing checkpoint has no automatic settlement trigger and waits for Resume or Send",
+  "outcome": "An ordinary prompt behind a CertifiedNotApplied-only closing checkpoint has no automatic settlement trigger and waits for Resume or Send",
+  "acceptance": [
+    "An ordinary prompt behind a CertifiedNotApplied-only closing checkpoint has no automatic settlement trigger and waits for Resume or Send is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "mailbox",
+    "restart",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a109d1-99ae-7811-923b-fc87855784a7",
+  "external_ref": "engram:w-723c67128ce0",
+  "title": "Recognise Engram's terminal control-startup codes (control_startup_busy, control_startup_refused): evict the worker, re-admit on busy, fail closed on refused",
+  "outcome": "Engram proposes two reserved terminal control-startup codes, in the existing strict envelope {\"status\":\"error\",\"error\":{\"code\",\"message\"}}: control_startup_busy and control_startup_refused. Each is one flushed JSON line answering the first frame, followed by a nonzero exit. TermAl's reader must land FIRST or together with Engram's producer.\nTermAl recognises both as TERMINAL remote errors. It discards and reaps the cached control worker; the generic 'keep every Remote process alive' rule (engram_host_adapter.rs ~1013-1014 at 3a8b7f9c) must not apply to them. Busy is retry-eligible only through the safe re-admission, status and rebind machinery, on w-7224e6317e55's common schedule. Refused fails closed, like a fatal disabled_reason.\nNeither code is treated as process_never_started or as 'no durable mutation'. No blind replay of a possibly executed request, and no generic reopen around resume-nonce rotation. Healthy-frame storage_error replies keep their current meaning. Tests cover: each code evicting the worker; busy re-admitted on the schedule; refused held; and an unknown code still handled as today.",
+  "acceptance": [
+    "TermAl classifies Engram's control_startup_busy and control_startup_refused, matched on the error code only, as terminal remote errors: the control worker that returned one is evicted and reaped, and a later call starts a new worker; neither is treated as process-never-started or as certified non-application. A live storage_error and unknown codes keep their worker as before. Tests cover each code's eviction with a real fixture process and the unchanged cases.",
+    "control_startup_busy re-enters only the existing safe re-admission (replay of the exact retained request and key, with status and rebind as the existing recovery requires) on the common recovery schedule and is delivered once on recovery; control_startup_refused fails closed like a fatal disabled_reason, holding the retained prompt with nothing sent automatically. Tests cover busy on evaluate and on bind, refused held, and an unknown code handled as today.",
+    "The full five-stage gate passes on the exact committed tree, and an independent Codex plus Claude read-only review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "engram-control-transport",
+    "engram-host",
+    "reader-first"
+  ],
+  "assigned_to": "Termal::BarA2",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

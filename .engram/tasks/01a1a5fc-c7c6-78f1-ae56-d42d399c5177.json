@@ -1,0 +1,31 @@
+{
+  "id": "01a1a5fc-c7c6-78f1-ae56-d42d399c5177",
+  "external_ref": null,
+  "title": "Preserve unavailable post-run commit evidence instead of dropping interrupted v1 records",
+  "outcome": "A versioned committed-input run whose post-capture cannot read HEAD retains a coherent structured ineligible record and its named reason; ordinary interrupted clean runs retain their existing Indeterminate handling. No absent post-capture evidence can earn eligible credit and historical record interpretation is preserved.",
+  "acceptance": [
+    "Preserve unavailable post-run commit evidence instead of dropping interrupted v1 records is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-finding",
+    "source-identity",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

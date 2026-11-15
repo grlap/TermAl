@@ -1,0 +1,30 @@
+{
+  "id": "01a1cb07-83dc-70f1-b1a4-680c466b9b3f",
+  "external_ref": null,
+  "title": "Nested source-operation deadline floors can overrun the metadata client's allowance",
+  "outcome": "A source observation retains one admitted absolute window through nested owner helpers; queue/lock waits do not silently re-floor it beyond the metadata client's funded wait.",
+  "acceptance": [
+    "The source-owner metadata and observation entry/caller inventory identifies each admission point and passes its admitted absolute deadline through nested helpers without repeatedly adding a new minimum window; longer caller windows remain supported and zero/expired admission remains refused.",
+    "A deterministic scripted-clock or controlled-admission behavioral check covers blocking-queue/authority delay and proves the metadata client can receive the definitive host result within its funded envelope; no real minute waits and no timeout-formula pins are added.",
+    "No effective limit on an already issued operation becomes shorter without Greg's recorded word; any required change to the existing longer metadata window is coordinated with the separate funded-metadata-window work."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-adapter",
+    "follow-up",
+    "limits"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

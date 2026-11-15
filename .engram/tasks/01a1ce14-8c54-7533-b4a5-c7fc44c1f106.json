@@ -1,0 +1,35 @@
+{
+  "id": "01a1ce14-8c54-7533-b4a5-c7fc44c1f106",
+  "external_ref": null,
+  "title": "Integrate combo71 on 1a17cf8a: a7bb e3970152 (w-ee28 source-owner version probe window, byte-identical carry of bc02f86e)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit e39701529b15074fafddd8b781456cb9147900dd (tree ea19a9f118fb932b9940d5cb6b0c578cb9cafdb6) is on origin/master, where master was moved to it by a fast-forward from 1a17cf8ae71393542908bca505a529c846e79743.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is ea19a9f1 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 1a17cf8a is byte-identical (same 9 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to bc02f86e's contribution against 046951e8, which the whole-9 pair Codex session 17612 and Claude session 17613 reviewed with no Medium or higher finding (its 3 Lows filed), and the candidate adopts that pair.",
+    "The release binary built from tree ea19a9f1 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo71 integrated. a7bb's w-ee28 carry e3970152 (tree ea19a9f1; the bounded source-owner version probe window, byte-identical to the reviewed bc02f86e) is on origin/master by a fast-forward from 1a17cf8a, and the DL560 full launcher gate test-645f7850 passed on the exact tree (rust 7699/0, vitest 5102/0). It is installed on DL560 (35bbb790) and Central (5e93f22c), with the previous binaries kept aside. An independent evaluation (Codex session 17626, delegation-1597b84c) passed all 3 criteria.",
+    "completed_at": "2026-11-12T05:51:23.124602500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

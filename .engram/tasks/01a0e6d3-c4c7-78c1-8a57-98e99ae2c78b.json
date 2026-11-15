@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4c7-78c1-8a57-98e99ae2c78b",
+  "external_ref": "tm-c1t7",
+  "title": "Restore split-suite provenance headers and misplaced Rust regression comments",
+  "outcome": "Follow-up to landed 905e570, ca81e09 and dd8f18c, consolidated from Codex7435 and Claude7436 reviews. No correctness defect. Add ownership/exclusions/split-from headers required by CLAUDE.md to the five new DiffPanel and AgentSessionPanel TSX suites; complete shared_codex_thread_setup.rs header with exclusions and provenance (shared_codex.rs and mod.rs helper). Move stale-command-state comment currently around shared_codex_thread_setup.rs:861 and dangling handoff-rollback comment at EOF back above their corresponding tests in shared_codex.rs. Documentation-only change; preserve test bodies, fixtures and behavior.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1a275-6753-7c03-852a-f1ffd0ce84df",
+  "external_ref": null,
+  "title": "Assert all sixteen counters in captured TRX shape regressions",
+  "outcome": "Captured failed and zero-test TRX reports cannot silently drift in counters that the current four-field assertion omits.",
+  "acceptance": [
+    "The captured-shape tests assert all sixteen counters for all nine fixtures, including failing reports and MTP zero, without weakening the existing outcome or verdict assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "dotnet",
+    "greg-directed",
+    "review-low",
+    "team-pilot",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a111ee-c262-71e1-a59e-59d270b393d3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

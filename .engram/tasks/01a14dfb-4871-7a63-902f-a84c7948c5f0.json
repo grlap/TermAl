@@ -1,0 +1,30 @@
+{
+  "id": "01a14dfb-4871-7a63-902f-a84c7948c5f0",
+  "external_ref": null,
+  "title": "Test launcher has no supported stop for a detached run, so a gate whose input is already known bad holds the shared gate slot to its END",
+  "outcome": "Test launcher has no supported stop for a detached run, so a gate whose input is already known bad holds the shared gate slot to its END",
+  "acceptance": [
+    "scripts/test-launcher.mjs offers a supported stop for a detached run by its run directory or id, which terminates the run's whole process tree, records a typed terminal result (stopped, never passed) with the reason and the stopping caller, and notifies the run's notify target.",
+    "A stopped run frees its execution lock and leaves no orphaned cargo, rustc, test-binary or vitest process; tests cover stop during each stage and a stop racing a natural END.",
+    "docs/test.md documents when to stop (for example, the gated input already has an in-scope Medium) and that a stopped run is never landing evidence.",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "scheduling",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

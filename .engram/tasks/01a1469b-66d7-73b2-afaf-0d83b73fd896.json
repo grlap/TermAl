@@ -1,0 +1,29 @@
+{
+  "id": "01a1469b-66d7-73b2-afaf-0d83b73fd896",
+  "external_ref": null,
+  "title": "Named-root slots of COMPLETED items with no retained run association are stuck forever: no claim-based clear applies and reclamation never retires them",
+  "outcome": "Named-root slots of COMPLETED items with no retained run association are stuck forever: no claim-based clear applies and reclamation never retires them",
+  "acceptance": [
+    "Named-root slots of COMPLETED items with no retained run association are stuck forever: no claim-based clear applies and reclamation never retires them is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "control-plane",
+    "cross-project",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

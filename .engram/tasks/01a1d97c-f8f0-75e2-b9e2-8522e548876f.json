@@ -1,0 +1,40 @@
+{
+  "id": "01a1d97c-f8f0-75e2-b9e2-8522e548876f",
+  "external_ref": null,
+  "title": "Causal completion reader should prefer live registration when the same run has a pending compacted survivor",
+  "outcome": "A causal original completion remains readable while one run is present in both live and compacted registration maps; only distinct run identities are ambiguous, and the current live registration remains canonical.",
+  "acceptance": [
+    "A behavioral test holds a real pending compaction fence so the same run exists in both maps and the authenticated original reader still returns its truthful native completion.",
+    "Distinct run ids sharing the causal selector remain refused; durable/source/authority checks are preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "compaction",
+    "criteria-proposed",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "large",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d3bf-d29f-7780-88cc-b979715a441f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a17e14-0fef-7231-af19-018b32014619",
+  "external_ref": null,
+  "title": "Coalesce per-tab full-state cut requests so N open tabs don't each capture a state cut under StateInner per repair delta",
+  "outcome": "Opus3's runtime measurement of the w-99c7 in-chain repair cut (TermAl mailbox 03723eab #3769, host 86c882dc, 15:26:50–15:55:58Z, read-only /api/diagnostics/persistence each minute):\n- cutRequests +145 in 29 min, in bursts of multiples of 5, which suggests five cut-capable tabs;\n- full states fell to about 1.7% of emissions (7/414), from about 12% (35/294) in the w-919a-only window.\n\nEach tab sends its own POST /api/events/full-state mode=cut per repair delta, so N tabs cost N publish_state_locked captures under StateInner per delta. Goal: coalesce concurrent cut requests at the same base and target revision into one capture shared by all waiting requesters, without changing per-client correctness (each still receives a cut valid for its base). Measure before and after with the same counters. Related to the StateInner hold-time work (w-de6021f4b32f, w-6a3855441e24).",
+  "acceptance": [
+    "Coalesce per-tab full-state cut requests so N open tabs don't each capture a state cut under StateInner per repair delta is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "performance",
+    "sse",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

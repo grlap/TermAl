@@ -1,0 +1,28 @@
+{
+  "id": "01a165c1-185d-7e01-9105-f1ec043c0ee2",
+  "external_ref": null,
+  "title": "Windows run of the captured focused-launcher tests no longer checks the backslash-separated results line",
+  "outcome": "src/tests/engram_focused_launcher_credit.rs captured_run applies the backslash-to-slash rewrite only on non-Windows hosts (or builds the summary paths with the host separator), so the Windows gate keeps checking the verbatim backslash-separated `results:` line the launcher actually prints.",
+  "acceptance": [
+    "On Windows, the captured passing focused run tests assert the launcher's verbatim backslash-separated `results:` line; on Unix the rewrite still normalises the fixture's literal backslash suffixes.",
+    "The maintained full gate passes on the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

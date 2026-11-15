@@ -1,0 +1,27 @@
+{
+  "id": "01a16a08-b36d-74e0-ae9d-4b7e2159525b",
+  "external_ref": null,
+  "title": "Preserve NotFinished for backgrounded compound piped checks",
+  "outcome": "A backgrounded compound piped test remains visibly running until its process ends.",
+  "acceptance": [
+    "A regression test demonstrates a backgrounded piped test stays NotFinished before process exit while remaining ineligible for check credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16827-bfc6-7af3-948f-ba7f38f569aa",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

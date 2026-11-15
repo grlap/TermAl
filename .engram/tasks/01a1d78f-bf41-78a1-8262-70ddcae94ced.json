@@ -1,0 +1,28 @@
+{
+  "id": "01a1d78f-bf41-78a1-8262-70ddcae94ced",
+  "external_ref": null,
+  "title": "Align carried-check comments with lifecycle retirement and honest restart disclosure",
+  "outcome": "Comments describe current ordinary launcher retirement and runtime-reported ownership without obsolete lost-credit promises.",
+  "acceptance": [
+    "Update stale comments for ENGRAM_CARRIED_CHECK_TTL_SECONDS, EngramCarriedLaunchMarker, EngramSessionState::carried_checks, persisted_state into_record and engram_fence_carried_checks to agree with the actual lifecycle.",
+    "Keep this comment cleanup free of authority or product behavior changes; do not add phrase-pinning tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "carried-checks",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

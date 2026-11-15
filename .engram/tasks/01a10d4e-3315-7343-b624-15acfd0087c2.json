@@ -1,0 +1,38 @@
+{
+  "id": "01a10d4e-3315-7343-b624-15acfd0087c2",
+  "external_ref": null,
+  "title": "Safety-net stall scan (host half of Engram w-3123ce57e780): poll Engram's stalled-holder read and send a keyed, durable mailbox wake to a silent holder and its coordinator",
+  "outcome": "TermAl's host timer polls Engram's read-only stalled-holder read. That read lists unexpired claims with no holder progress for at least S, and lapsed-but-unrecovered claims, each with a stable stall key. TermAl skips holders that are mid-turn or have a registered wait (w-5043851f081f, including the existing delegation and test-run waits) with a live dependency. It sends one durable mailbox wake to the holder, copied to its coordinator, using the stall key as the idempotency key, and escalates once at the longer bound. It also covers TermAl-only queued or retained work with no Engram claim. This is a safety net; the primary mechanism is the registered wait contract (w-5043851f081f).",
+  "acceptance": [
+    "Safety-net stall scan (host half of Engram w-3123ce57e780): poll Engram's stalled-holder read and send a keyed, durable mailbox wake to a silent holder and its coordinator is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "autonomy",
+    "wakes"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a10d50-6d14-7eb3-bdea-bda485dac2fa",
+      "kind": "manual",
+      "detail": "PARKED by Greg's scope correction (Engram::Advisor b9d13887 #298): no watchdog and no timer-based automatic wakes now. The procedure comes first (memory greg-decision-2026-10-05-wait-condition-wakes rev 2).",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-05T18:25:37.039904700Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

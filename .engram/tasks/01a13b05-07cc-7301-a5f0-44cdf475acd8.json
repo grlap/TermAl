@@ -1,0 +1,37 @@
+{
+  "id": "01a13b05-07cc-7301-a5f0-44cdf475acd8",
+  "external_ref": null,
+  "title": "Validate focused Vitest artifacts before duration parsing reads them",
+  "outcome": "Validate focused Vitest artifacts before duration parsing reads them",
+  "acceptance": [
+    "Focused Vitest execution rejects oversized, symlink and non-regular artifacts before the duration path reads or parses them; validated normal reports retain their counts and duration output.",
+    "An integration regression shows that a rejected artifact cannot reach duration parsing and that a normal owned report still preserves native outcome and count validation."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "severity-low",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a13894-4981-7120-b08b-ac4361c284dc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

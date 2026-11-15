@@ -1,0 +1,27 @@
+{
+  "id": "01a18bd1-71e9-7be3-8664-d2d7a3ef4e48",
+  "external_ref": null,
+  "title": "Replace coordination downgrade reset advice with compatible-binary guidance",
+  "outcome": "When coordination schema refusal concerns a newer or unknown reader floor, the current binary advises preserving the database and using a compatible binary rather than moving or deleting coordination state.",
+  "acceptance": [
+    "Replace coordination downgrade reset advice with compatible-binary guidance is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c643-73a1-b8c5-fb35d7e76d72",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

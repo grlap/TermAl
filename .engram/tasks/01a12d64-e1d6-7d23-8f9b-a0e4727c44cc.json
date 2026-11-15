@@ -1,0 +1,50 @@
+{
+  "id": "01a12d64-e1d6-7d23-8f9b-a0e4727c44cc",
+  "external_ref": null,
+  "title": "The \"recognised test gets no credit … ran after another command on its line\" warning appeared in a turn whose shell commands contained no recognised test",
+  "outcome": "TermAl raises the near-miss notice (engram_one_call.rs:172-206; engram_source_roots.rs:959-962) only for a command whose segment after an unquoted `;` or `&&` is a recognised test (engram_check_recognition.rs:384-444), and the notice names that command, so a holder can tell what it refers to. A turn that ran no such command gets no such notice.",
+  "acceptance": [
+    "The holder's note identifies, from host records or a reproduction, which command or event produced the notice in the occurrence below (for example a Codex code-mode or JS orchestration call whose text holds launcher command strings, a late attribution of an earlier turn's command, or a carried check), with file:line.",
+    "A test reproduces the false notice from that input and shows that, after the fix, no near-miss notice is raised for it, while the genuine `A && TEST` near miss still raises one.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed the false test near-miss notice for non-test commands and retained the genuine A && TEST notice. Independent acceptance evaluation b0127db81c0e440f81fe1a2596498053 passed 3/3; full gate test-1708ffa4-aa37-4c37-9a31-8fb60b12e0fa passed 5/5. Integration owner pushed bd83915341786d2137d7c63668b7adc9e0add50e to origin/master as a fast-forward from c6216f31; local master and origin/master both verify at that commit.",
+    "completed_at": "2026-10-13T01:51:55.530772300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

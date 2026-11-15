@@ -1,0 +1,32 @@
+{
+  "id": "01a1cc54-1998-7841-9b5a-d291a57d772d",
+  "external_ref": null,
+  "title": "Report the configured Codex stdin warning threshold and useful safe context",
+  "outcome": "The non-aborting shared Codex stdin warning formats its actual configured warning threshold and identifies the affected command or session using safely bounded context, keeping warning timing, deduplication and timeout behavior unchanged.",
+  "acceptance": [
+    "The warning reports SHARED_CODEX_STDIN_WARNING_AFTER rather than a separately hardcoded duration and includes useful command/session context without adding sensitive payload content.",
+    "Warning emission remains once per ordinary write or flush after the original threshold, outside the activity lock, and does not reset or shorten any deadline.",
+    "The existing thirty-second typed interrupt behavior and sixty-second ordinary deadline remain unchanged, and relevant verification/review evidence is recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "codex",
+    "diagnostics",
+    "greg-directed",
+    "limits",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca2f-725a-7c72-a713-56cd63ecf04d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

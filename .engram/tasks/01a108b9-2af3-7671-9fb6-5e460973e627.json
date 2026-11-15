@@ -1,0 +1,28 @@
+{
+  "id": "01a108b9-2af3-7671-9fb6-5e460973e627",
+  "external_ref": null,
+  "title": "On Windows, ending the shared Codex app-server does not end its descendant tree: vendor housekeeping (git plugin sync) outlives the root by seconds",
+  "outcome": "When TermAl ends a shared Codex app-server (clear_shared_codex_runtime_if_matches), every descendant process the app-server started ends with it, or the product records it as an unowned survivor. Today SharedCodexRuntime owns only a SharedChild for the root and has no process-tree owner. In the first real vendor proof for w-24055bbb2390, the root PID 92328 was gone at the after-cleanup snapshot, but five git processes it had started for its own plugin catalogue sync (git fetch https://github.com/openai/plugins.git, plus remote-https and index-pack) were still running, with cwd in the disposable CODEX_HOME and in the host directory. They exited on their own about 3 s later. They held no cwd in the delegating worktree, so w-24055bbb2390's criteria do not cover them. This is the Windows counterpart of w-aac85dbd4c4c, which covers Unix descendant cleanup.",
+  "acceptance": [
+    "On Windows, ending the shared Codex app-server does not end its descendant tree: vendor housekeeping (git plugin sync) outlives the root by seconds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "process-cleanup",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c801-7ce3-8ca2-e65794241eed",
+  "external_ref": "tm-z8re",
+  "title": "Move the startup schema guards out of persist.rs and scan sessions once",
+  "outcome": "From /review-changes on tm-85im (Claude, 2 Low findings, 2026-09-26). (1) With tm-85im, src/persist.rs grows to about 3,795 lines, above the ~3,000-line Rust module threshold. The startup guards for unsupported schemas (validate_no_legacy_embedded_state, embedded_state_field_has_records_or_invalid_shape, the prompt-history and queued-prompt scans, and their sqlite_schema_tests) can move to their own module, e.g. src/persist_schema_guard.rs, as a pure code move with the standard split header. (2) Each load scans the sessions table's JSON twice, once for session.promptHistory and once for queuedPrompts, running json_valid/json_type on every row each time. Combine them into one pass that returns the session id and the rejection reason, keeping the nested-CASE json guards and every existing rejection and quarantine case. Related: tm-v9r.20 (extract normalized transcript persistence from persist.rs).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "file-size",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

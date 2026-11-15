@@ -1,0 +1,29 @@
+{
+  "id": "01a1b211-e175-72f2-acd9-d1ba0fb1dc4a",
+  "external_ref": null,
+  "title": "Refresh Git diff tabs with repository-relative paths when the workspace workdir is a subdirectory",
+  "outcome": "Git diff tabs for missing files and rename sources refresh on matching exact or covering workspace notifications when their request paths are relative to the repository root and the session workdir is nested inside that repository.",
+  "acceptance": [
+    "Git diff request paths are resolved against their actual repository root or otherwise matched without confusing a nested workdir with that root.",
+    "Automated regressions cover exact and covering notifications for a deleted file or rename source with a nested workdir, while same-relative-path events from another workspace remain isolated."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "ui",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

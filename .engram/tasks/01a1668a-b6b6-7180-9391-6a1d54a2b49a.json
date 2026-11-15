@@ -1,0 +1,55 @@
+{
+  "id": "01a1668a-b6b6-7180-9391-6a1d54a2b49a",
+  "external_ref": null,
+  "title": "A Codex review child's termal_review_identity returns input_unavailable (observer status 1, OS error 2 \"file not found\") before any source inspection",
+  "outcome": "A Codex review child's identity check either succeeds on a valid frozen input, or fails naming the exact missing path, so the review pair is not silently left incomplete.",
+  "acceptance": [
+    "An entry of the observed git metadata trees (objects/ and refs/ of the own and common git dir) that vanishes between listing and inspection no longer fails termal_review_identity: a vanished entry cannot be a link or escape, so it is skipped and the capture/check completes (verified on an unchanged input). A deterministic test removes such an entry mid-walk (cfg(test) seam) and asserts a complete, verified result.",
+    "Any other io failure of the identity observer names the path it could not read in the observer's stderr (no bare \"os error 2\"); a failure inside the shared Git runner's own setup names the review root. A test forces one such failure and asserts the path appears.",
+    "The full gate passes on the exact landed tree, with a clean independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "reliability",
+    "review-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed: all 3 acceptance criteria passed in fresh independent evaluation 34b543ec; full gate 2089cab5 passed on the exact landed tree. Commit 852c0a98 is on origin/master and installed as target/release/termal.exe.",
+    "completed_at": "2026-10-23T08:24:17.938523500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

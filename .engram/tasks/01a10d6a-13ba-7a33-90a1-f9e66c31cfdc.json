@@ -1,0 +1,31 @@
+{
+  "id": "01a10d6a-13ba-7a33-90a1-f9e66c31cfdc",
+  "external_ref": null,
+  "title": "Make tick-owned confirmation explicit for host-wake removal routes",
+  "outcome": "Clarify or improve the confirmation owner of host-wake retirements returned by Stop-request, admission-head, rejected-admission and revocation removal routes, retaining exact disposition/accounting and honest response semantics.",
+  "acceptance": [
+    "Make tick-owned confirmation explicit for host-wake removal routes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "inventory",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

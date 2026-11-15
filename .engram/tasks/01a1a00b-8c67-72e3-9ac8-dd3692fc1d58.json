@@ -1,0 +1,42 @@
+{
+  "id": "01a1a00b-8c67-72e3-9ac8-dd3692fc1d58",
+  "external_ref": null,
+  "title": "Three session transcripts hydrate 63 of 64 expected tail entries after a Central restart",
+  "outcome": "After a restart every session transcript tail hydrates completely, or the gap is explained by a correct design rule and reported without a warning.",
+  "acceptance": [
+    "Disposable regression evidence reproduces an incomplete remote-proxy tail, a one-message read-through fetch and a subsequent reload through the existing loader, hydration and persistence owners; it establishes whether every original peer message remains fetchable and whether a full tail fetch survives reload.",
+    "The confirmed cause is corrected: permitted sparse proxy caches have an accurate boot hydration state and diagnostic, or any demonstrated unrecoverable content is restored. Regression evidence preserves peer-message fetchability, local-corruption quarantine and invalid-remote-response refusals, and the change has a clean review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "persistence",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,40 @@
+{
+  "id": "01a1dbb6-58b9-7cf1-9bc0-65b096fb3238",
+  "external_ref": null,
+  "title": "Kimi AskUserQuestion shows raw JSON with Approve/Reject, and Approve silently answers with the first option",
+  "outcome": "A Kimi AskUserQuestion appears as a readable question card: the question in plain text and one button per answer, labelled with that answer's name. Choosing a button sends exactly that answer's optionId, and dismissing sends the reject option. No generic \"Approve\" ever answers a question for the user.",
+  "acceptance": [
+    "The real Kimi contract is checked and recorded on this item, from a fresh capture on the current Kimi Code version or the cited kimi-code source: for AskUserQuestion, the session/request_permission params carry the question text and options, with optionId, name and kind. The note states whether each answer is an allow_once option and what reject means (skip, or dismiss).",
+    "When Kimi sends a session/request_permission that is an AskUserQuestion, or that offers more than one allow_once option, TermAl shows the question text as plain text, not raw JSON, and offers one choice per option labelled with its name. Selecting a choice sends {outcome: selected, optionId: <that option's id>}, and a dismiss or skip sends the reject option when one exists.",
+    "For such a request, TermAl never answers with whichever allow_once option happens to come first, so no single generic 'Approve' picks an answer on the user's behalf. Requests with exactly one allow_once option, such as tool permissions, keep today's Approve/Reject behaviour.",
+    "Tests check the observable behaviour from a captured-shape fixture: the rendered question and choice labels, the exact optionId sent for a non-first choice, and the reject path. The tests do not pin implementation text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acp",
+    "approvals",
+    "greg-reported",
+    "kimi",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed Kimi question cards at 978989df: named choices submit the exact optionId, Skip rejects or cancels, generic Approve cannot answer a question, and ordinary single-option permissions retain their behavior. Original independent evaluation 8f24dc3205be46c68b825a0a18236f0e (session18118, attempt1) was read in full immediately before completion: all four criteria PASS, fresh revision5 at the clean landed tree. Source contract, behavioral author checks, clean adopted review pair, exact-tree landing FULL and admission-only verification are recorded on the item. Four optional Low follow-ups remain separate.",
+    "completed_at": "2026-11-15T02:24:58.044343300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a14a97-6a94-7032-be71-4750dd784f7d",
+  "external_ref": null,
+  "title": "Summary last-response time, current-turn prompt/command identity and pending approval head come from authoritative metadata, not resident transcript bodies",
+  "outcome": "The tab tooltip's last response time, the current turn's prompt and command identity, and the OpenCode approval head are read from explicit host metadata. They come out the same whichever transcript window happens to be resident.",
+  "acceptance": [
+    "Summary last-response time, current-turn prompt/command identity and pending approval-head identity come from explicit authoritative metadata, not resident bodies. Same transcript under empty metadata view, 20-tail, 64-tail and historical middle/start windows gives the same authoritative values; appropriate unknown is explicit. Stop, approval ordering and turn/revision fences remain.",
+    "The focused regressions and the full gate pass on the final input, and an independent read-only review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "residency",
+    "session-state",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c408-7451-8bb4-8b005a6c4687",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

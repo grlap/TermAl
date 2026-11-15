@@ -1,0 +1,28 @@
+{
+  "id": "01a0f858-66cb-7d81-97a6-84f50f192697",
+  "external_ref": null,
+  "title": "The abort-retry tick runs retried admissions on the test-run index thread, blocking test-run detection and carried-gate polling for up to the admission budget",
+  "outcome": "The abort-retry tick runs retried admissions on the test-run index thread, blocking test-run detection and carried-gate polling for up to the admission budget",
+  "acceptance": [
+    "The abort-retry tick runs retried admissions on the test-run index thread, blocking test-run detection and carried-gate polling for up to the admission budget is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a108cd-711d-72c2-ab0d-b712da405d98",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate. Retry attempts run on the test-run index tick thread; covered by w-b712da405d98.",
+  "completion": null
+}

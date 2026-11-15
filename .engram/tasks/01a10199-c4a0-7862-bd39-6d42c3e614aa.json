@@ -1,0 +1,29 @@
+{
+  "id": "01a10199-c4a0-7862-bd39-6d42c3e614aa",
+  "external_ref": null,
+  "title": "In a read-only Codex child, `Get-ChildItem Env:` fails with \"An item with the same key has already been added\", suspect a case-variant duplicate in the child's environment block",
+  "outcome": "In a read-only Codex child, `Get-ChildItem Env:` fails with \"An item with the same key has already been added\", suspect a case-variant duplicate in the child's environment block",
+  "acceptance": [
+    "Identify the duplicated variable name pair in a delegated Codex child's environment on Windows (the exact names, and which layer adds each: TermAl spawn, Codex app-server, or the shell tool).",
+    "If TermAl's spawn adds the duplicate: TermAl deduplicates the environment case-insensitively before spawn on Windows, keeping one deterministic value, and a test pins it. If another layer adds it: the item records that layer with evidence and is handed to its owner.",
+    "`Get-ChildItem Env:ENGRAM*` succeeds in a fresh delegated Codex reviewer on Windows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

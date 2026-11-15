@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c77e-7f62-b6ba-641f18098705",
+  "external_ref": "tm-uw7j.3",
+  "title": "Extract Engram authority ledger and lifecycle tests from oversized modules",
+  "outcome": "The immediate-revocation work has grown src/session_crud.rs beyond the Rust module review threshold and src/tests/engram_host_adapter.rs far beyond the test-module threshold. Extract store identity, retired-authority ledger merge/confirm/migration/ingress invariants into a dedicated module with a provenance/ownership header, and move focused authority rotation/ledger/race tests into dedicated test modules without changing behavior.",
+  "acceptance": [
+    "Dedicated production and test modules own the authority-ledger concerns; session_crud.rs contains only thin orchestration call sites; module headers document fail-closed hash blocking, unconfirmed retention, confirmed bounds, and ownership; the full Rust suite remains green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c77b-7901-8ecf-b0328e4c3f93",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

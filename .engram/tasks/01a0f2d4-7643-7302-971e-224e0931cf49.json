@@ -1,0 +1,31 @@
+{
+  "id": "01a0f2d4-7643-7302-971e-224e0931cf49",
+  "external_ref": null,
+  "title": "After a background gate launch, every later Bash command of the Claude holder is placed in the gate's worktree and refuses its credit",
+  "outcome": "A Claude session that launches the full gate in the documented background form, `pushd \"DIR\" && node scripts/test-launcher.mjs full`, keeps its shell where it was in the host's model, so a later command it runs in another worktree does not fence the carried gate, while a command it runs in DIR still does.",
+  "acceptance": [
+    "A foreground `pushd \"DIR\" && COMMAND` that succeeds still moves the shell as today; a test pins it.",
+    "A test launches the gate in the background one-call form from a Claude session whose shell is in another worktree, then reports a writing command with no pushd prefix: the carried check is not fenced and the session's shell directory is still the earlier one.",
+    "A test shows the same launch followed by a writing command in the form `pushd \"DIR\" && …` naming the gate's worktree still fences the carried check.",
+    "The full gate passed on the exact landed input; a note cites the launcher run and the credited check recorded on w-a450af06e8bd for the same commit.",
+    "docs/test.md and docs/features/engram-host-adapter.md say where a Claude session's later commands are placed after a background launch."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch 10f6b1ad, spot-checked by Termal::Fable2): CLOSE-DONE. A background Claude launch preserves its shell location; landed in 204b95b8 (ancestor of master), with regressions at src/tests/engram_carried_checks.rs:1843,1884. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

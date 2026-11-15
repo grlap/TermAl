@@ -1,0 +1,42 @@
+{
+  "id": "01a128ad-0475-7312-a475-dcac7229d59e",
+  "external_ref": null,
+  "title": "Drift barrier witness: prove the retry also withholds the prompt until the replay is accounted",
+  "outcome": "the_drift_observation_gates_the_provider_handoff (src/tests/engram_drift_reaches_store.rs) pins the order on the first delivery only. The retry half (the replay is accounted before the prompt is handed over) is checked after the fact, because the retry tick runs advance+release on a spawned thread. The witness also loses the replay's reply, settles that retry attempt deterministically (a phase hook, not polling), asserts the runtime channel is still empty, then ticks again and expects the prompt. Tighten Held to Held { error: None } with a parked continuation, and try_recv to TryRecvError::Empty.",
+  "acceptance": [
+    "The barrier witness shows a retry whose replay reply is also lost leaves no prompt on the runtime channel after that attempt settles deterministically, and the following retry hands the prompt over only after the replay is accounted; the focused test passes.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

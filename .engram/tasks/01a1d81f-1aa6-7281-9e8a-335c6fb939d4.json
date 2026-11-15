@@ -1,0 +1,30 @@
+{
+  "id": "01a1d81f-1aa6-7281-9e8a-335c6fb939d4",
+  "external_ref": null,
+  "title": "Use the runnable relay carrier when classifying a mailbox revalidation hold",
+  "outcome": "Mailbox revalidation error classification and direct-send refusal capture select the same runnable relay carrier even behind retained history.",
+  "acceptance": [
+    "The error handler in revalidate_queued_mailbox_wakeups_before_dispatch selects a relay carrier using ordinary_queue_position, or an explicit documented contract explains and tests a deliberate late-only classification.",
+    "A behavioral regression with a non-runnable historical front and refused runnable relay behind it discriminates the early revalidation hold path while preserving the late authority check."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "prompt-delivery",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d73f-656b-7b32-a712-610b5060255e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

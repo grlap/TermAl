@@ -1,0 +1,27 @@
+{
+  "id": "01a16a08-b3b8-7c13-a90c-039fc5fe8b72",
+  "external_ref": null,
+  "title": "Test quoted-pipe Build completion matching and mismatch",
+  "outcome": "Quoted-pipe Build commands have explicit completion-match and mismatch coverage.",
+  "acceptance": [
+    "Tests cover a matching quoted-pipe Build completion and refusal of a changed completion command."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16827-bfc6-7af3-948f-ba7f38f569aa",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

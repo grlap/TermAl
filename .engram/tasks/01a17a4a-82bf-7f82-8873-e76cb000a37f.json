@@ -1,0 +1,31 @@
+{
+  "id": "01a17a4a-82bf-7f82-8873-e76cb000a37f",
+  "external_ref": null,
+  "title": "Cover self-host-qualified mailbox refusal boundaries using existing route fixtures",
+  "outcome": "Cover self-host-qualified mailbox refusal boundaries using existing route fixtures",
+  "acceptance": [
+    "Existing route fixtures prove self-host-qualified sends to missing roots, delegation children, remote proxies and the sender refuse without appending, using the existing local-native checks and no new authority mechanism."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-reported",
+    "federation",
+    "follow-up",
+    "mailbox",
+    "regression-candidate",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17986-c6ba-7830-b904-623c0e4ca176",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

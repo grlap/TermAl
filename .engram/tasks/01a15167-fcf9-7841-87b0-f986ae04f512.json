@@ -1,0 +1,27 @@
+{
+  "id": "01a15167-fcf9-7841-87b0-f986ae04f512",
+  "external_ref": null,
+  "title": "A host line set just before a TermAl restart is lost: pending source-root lines are not persisted",
+  "outcome": "A line the host has set for a session's holder but not yet delivered (EngramSessionState::pending_source_root_line, together with its delivery state) survives a TermAl restart and is delivered after it, so no check, credit or bind outcome is lost to a restart.",
+  "acceptance": [
+    "A host line set just before a TermAl restart is lost: pending source-root lines are not persisted is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

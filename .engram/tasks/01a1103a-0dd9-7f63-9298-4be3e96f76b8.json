@@ -1,0 +1,30 @@
+{
+  "id": "01a1103a-0dd9-7f63-9298-4be3e96f76b8",
+  "external_ref": null,
+  "title": "Host-enforced Engram store quiescence across a backup restore: no startup, reconnect, bind, MCP or CLI admission until the completed occurrence and identity mapping are durable",
+  "outcome": "Host-enforced Engram store quiescence across a backup restore: no startup, reconnect, bind, MCP or CLI admission until the completed occurrence and identity mapping are durable",
+  "acceptance": [
+    "Host-enforced Engram store quiescence across a backup restore: no startup, reconnect, bind, MCP or CLI admission until the completed occurrence and identity mapping are durable is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "backup-restore",
+    "cross-project",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a0fa84-7f43-7782-b76d-47338f8245e3"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

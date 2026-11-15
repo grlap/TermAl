@@ -1,0 +1,29 @@
+{
+  "id": "01a1be5a-ed21-7a90-b8f3-3ad407b5bfd7",
+  "external_ref": null,
+  "title": "Reserve actual private verification costs before optional acceptance note paging",
+  "outcome": "Optional note history remains available for tasks with many unbound criteria, while complete mandatory verification scans retain their existing fail-closed budget and product deadline.",
+  "acceptance": [
+    "Optional notes reservation uses known binding/private scan counts or separately justified control-read costs, preserving complete scans and every existing product deadline.",
+    "Simulated-clock behavioral controls cover many unbound criteria and multiple supported bound criteria with continuations; history is shortened only as necessary and incomplete mandatory evidence is refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "budget-reservation",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

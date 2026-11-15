@@ -1,0 +1,54 @@
+{
+  "id": "01a164ff-dc1b-71f3-bda3-de6021f4b32f",
+  "external_ref": null,
+  "title": "StateInner is held for seconds on an idle host: every commit_locked builds the full 19.3 MB, 6,793-session snapshot under the lock and the writer's tail trim runs under it too, starving the persistence writer (missed fences, withheld turns) and API readers (Greg P0, 2026-10-22)",
+  "outcome": "General commits capture immutable snapshot inputs for deferred publication, avoiding repeated full session-summary projection under StateInner while preserving snapshot/delta ordering, exact commit cuts, cache validation and shutdown drain. The live idle-host writer-wait and admission outcome formerly stated here is preserved in w-7bc33299e17a and remains unproved until that linked item's post-restart observation passes.",
+  "acceptance": [
+    "A measurement note records the observed multi-second StateInner waits on the idle 6,793-session host and identifies the source paths for full-snapshot construction and writer tail trimming. It distinguishes measured waits from source-inferred causes and states explicitly that exclusive holder shares are unmeasured: no existing acquisition-site diagnostics were supplied, and a new capture is not authorized.",
+    "Tests show that a general commit no longer builds the full snapshot under the state lock, with the cross-referenced items w-919a18aecf19 and w-b17b985f5dbc either consumed or left with their remaining scope stated. The original C2 live clause is preserved verbatim in linked item w-7bc33299e17a; that item's post-restart measurements and turn_begin proof remain open and are not claimed by this source item.",
+    "The full five-stage gate passes on the exact committed tree with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "greg-reported",
+    "host-persistence",
+    "p0-profiling-2026-10-22",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed deferred snapshot publication and warm queue-identity validation in bf7ff309; exact registered closure check PASS6 and received verification recorded. Historical measured waits remain distinguished from inferred causes; post-restart live proof remains open in the linked item. No acceptance evaluation exists.",
+    "completed_at": "2026-11-08T19:55:23.632889800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

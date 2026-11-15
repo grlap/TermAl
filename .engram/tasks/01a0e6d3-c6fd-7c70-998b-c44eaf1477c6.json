@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6fd-7c70-998b-c44eaf1477c6",
+  "external_ref": "tm-ncc6.2.2",
+  "title": "Disk index of review-runs directories (read-only)",
+  "outcome": "Resolve Git's review-runs path as the launcher does (git rev-parse --path-format=absolute --git-path review-runs, scripts/test-launcher.mjs:199); list run dirs; read request.json (owner, stages, expectedFingerprint) and results.json; merge with records (host-started runs win); mark not-host-started runs read-only. Bounded: at most M newest dirs per root.\n\nREVIEW FIXES (F9, F5): index at most M = 50 newest run dirs per root; owner from request.json (host runs populate it via TERMAL_SESSION_ID); a results.json 'running' whose pid is alive with matching identity counts as an active CLI-started run for admission; a dead-pid 'running' is unknown and never blocks; malformed files -> entry unknown with a parse reason.\n\nOUTPUT TO FILE (Greg, 2026-09-23): the record carries host_log_path for host-started runs; the disk index leaves it empty for CLI-started runs.",
+  "acceptance": [
+    "- A CLI-started run dir appears with owner from request.json and cannot be canceled/rerun (409).\n- Malformed request/results.json -> listed as unknown with a parse reason, no panic.\n- At most 50 newest dirs per root are indexed; a dead-pid running results.json is reported unknown and does not block admission."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a3e1a6a9f43",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

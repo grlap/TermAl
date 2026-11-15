@@ -1,0 +1,39 @@
+{
+  "id": "01a19c70-cc6b-7c93-874f-9388b145a262",
+  "external_ref": null,
+  "title": "Preserve Kill's no-Engram-resource transport shutdown guard",
+  "outcome": "Preserve Kill's no-Engram-resource transport shutdown guard",
+  "acceptance": [
+    "Restore the current equivalent of master's bound-only control shutdown guard in Kill after prepare_source_observation_delete, preserving disabled/unconfigured no-sidecar effects and actual-resource cleanup; touch only the Kill block in session_lifecycle.rs and compose separately with 540f5d2a's Stop/Resume hunks.",
+    "Return an immutable source-only patch and exact before/after provenance to Sol-03d4 with Fable2 cc from a fresh named root on tree0c00cea3 after the naming turn; preserve the two original S0 witnesses and run no Cargo."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gate-failure",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only Kill guard restored using current resource facts; frozen9cb97be6 exact1path/Kill block +19/-1, S0 witnesses unchanged. Fable2592 independently audited and accepted for C2. Exact scoped patch/native before-after provenance sent root88/Fable2591; compose only Kill hunk with540f5d2a samefile.",
+    "completed_at": "2026-11-02T13:34:34.764993100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "id": "01a10476-5262-7632-86da-24055bbb2390",
+  "external_ref": null,
+  "title": "A cancelled delegated child keeps its runtime and MCP server processes alive, with cwd inside the delegating worktree, which blocks worktree removal",
+  "outcome": "When a delegated child is cancelled or finishes, TermAl ends that child's runtime and the MCP server processes it started (termal.exe delegation-mcp and engram.exe mcp for that child session), so no process keeps a cwd or handle inside the delegating worktree. Alternatively, child MCP servers are started with a cwd outside the worktree. A cancelled child leaves no running process. Tests cover cancel before any command, cancel mid-turn, and normal finish. The process cleanup guarantees in this item apply to Windows; Unix launch and cleanup behavior remain unchanged, and this item makes no Unix descendant-cleanup guarantee.",
+  "acceptance": [
+    "Before the product correction, reproduce the reported cancellation leak and finished-control-sidecar worktree pin with deterministic owned-process regressions through the public lifecycle paths; preserve the failing output and classify each cause. Fixtures and stores stay under repository .tmp, and no manual process kill or host restart supplies the asserted cleanup.",
+    "On Windows, canceling a delegated child through the public cancel route releases that child's runtime ownership and terminates its child-specific runtime/MCP subprocesses and descendants, including TermAl delegation-mcp and Engram mcp where configured. Tests cover cancellation before the first command and during an active turn, and verify actual process exit rather than only local status or runtime-map removal. A shared app-server serving other sessions may remain running, but it retains no canceled-child MCP process or handle in the delegating worktree. Verify with host-recorded process-lifecycle regression checks at the judged source revision.",
+    "On Windows, a normally completed or failed delegated child releases its child-specific runtime/MCP resources, and its host-managed Engram control sidecar cannot keep a cwd or handle inside the delegating worktree while awaiting idle reaping. Preserve the explicit project, store and session authority when changing sidecar cwd. Real-process regressions demonstrate prompt removal of an otherwise empty disposable worktree directory after cancellation and normal completion, without waiting for the idle timeout or restarting TermAl. Verify with host-recorded process-lifecycle regression checks at the judged source revision.",
+    "Cleanup remains scoped to the terminal child: concurrently active children and sessions sharing its app-server continue to operate, normal completed-child follow-up/release behavior remains valid, and cancellation preserves existing durable Engram observation/grant recovery duties. Failed or ambiguous cleanup remains diagnosable and retains the ownership needed for safe retry; it must not be reported as confirmed process exit. Verify with host-recorded lifecycle and recovery regression checks at the judged source revision.",
+    "The maintained five-stage full gate passes on the exact final source input, compiled from that input, with its host verification recorded before independent acceptance evaluation. The independent Codex/Claude read-only review pair has no unresolved in-scope Medium or higher finding on that same input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "agent-workflow",
+    "delegation",
+    "pilot",
+    "process-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

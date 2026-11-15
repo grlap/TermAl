@@ -1,0 +1,33 @@
+{
+  "id": "01a1c3f4-7031-7bf0-9e3f-b19e3456ec63",
+  "external_ref": null,
+  "title": "Integrate 8ab420b0 on a6978c03: native source admission (w-5c7d) alone",
+  "outcome": "Candidate 8ab420b0 is on master as one commit, gated by a full launcher run on its exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate 8ab420b0 on a6978c03: native source admission (w-5c7d) alone is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No acceptance evaluation exists; self-asserted under the evaluation-OFF policy. Candidate 8ab420b0 (w-5c7d native source admission, tree 46b1e87d) was fast-forwarded onto master from a6978c03 and pushed to origin at 06:19:35Z, with origin/master verified. Landing gate: DL560 FULL test-dd4996b7 on test ref commit 151d4f57, which has the same tree. It was eligible and all six stages passed; the main Rust binary ran 7515 passed, 0 failed. The test ref was deleted at 06:19:46Z. Installs: Central termal.exe 7bb5c605 at 06:30:22.500Z, with the old binary backed up as termal-before-8ab420b0-a62efcda.exe; DL560 termal f62fe012 at 06:25:29Z, with backup termal.5fbb347a.bak. Neither host was restarted.",
+    "completed_at": "2026-11-10T06:31:48.224680900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

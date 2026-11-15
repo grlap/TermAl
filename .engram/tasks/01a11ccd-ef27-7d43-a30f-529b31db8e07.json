@@ -1,0 +1,44 @@
+{
+  "id": "01a11ccd-ef27-7d43-a30f-529b31db8e07",
+  "external_ref": null,
+  "title": "Live proof: declared dotnet test runner after install and restart",
+  "outcome": "Live proof: declared dotnet test runner after install and restart",
+  "acceptance": [
+    "LIVE PROOF (aa219353), exactly one, after install and restart: a scratch git repository under this repo's `.tmp` with one xUnit v2 project, `termal-tests.toml`, and `.termal-results/` git-ignored. A root session names that root and runs the declared `dotnet test --logger \"trx;LogFileName=results.trx\" --results-directory .termal-results` in the pushd form: (a) passing → a credited check with the TRX counters on its record; (b) one failing test → FAIL published; (c) the command run without the logger flag (so not matching an entry) → not a check, and the declared command with the artifact deleted before resolve → UNKNOWN withheld with its reason."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "live-proof",
+    "restart-required",
+    "test-runners"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10cfc-06d2-7f81-82e0-8e72f7e16778"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Pre-pilot technical qualification (not a pilot) of the declared dotnet test runner on the restarted host built from f5a96582, which contains 2b1e3f85. The fixture is a clean, no-submodule xUnit v2 project in the TermAl worktree .tmp/wt-csharp-proof-11410, per the 04:02Z placement ruling, with untracked termal-tests.toml and .termal-results/ Git-ignored. Phoenix was untouched. All four witnesses ran in the Claude pushd one-call form, on naming generation 695: (a) PASS credited, 8056fce4, with TRX counters; (b) FAIL published, f355b6f3; (c) the command without --logger, no record, not a check; (d) the artifact deleted after VSTest, UNKNOWN withheld with its reason (\"the artifact is missing at the end\"). Independent evaluation 248ee795 (delegation-9ca31fe0): criterion 1 passed. Earlier generation-684 records 9d70cb10/91dd5682 were superseded after a re-naming on claim recovery voided their citation. Nothing committed or landed.",
+    "completed_at": "2026-10-09T06:20:54.499198400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

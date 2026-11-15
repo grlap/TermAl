@@ -1,0 +1,28 @@
+{
+  "id": "01a1012c-82d5-7d91-9f6b-09782b9d85a2",
+  "external_ref": null,
+  "title": "The authority total-deadline test's expired control accepts any publication error, not specifically the Deadline",
+  "outcome": "source_root_authority_review_one_total_deadline_covers_prepare_read_and_publish (src/tests/engram_root_authority.rs) asserts that the expired control fails with the Deadline classification, as the sibling prepared-ack expiry test does with error.message.contains(\"(Deadline)\"), so an unrelated publication failure cannot satisfy it. Optionally, the Candidate-fence guard asserts the pending count separately, so its panic names the right condition.",
+  "acceptance": [
+    "The expired control asserts the Deadline classification of the publication error, and a publication failure for another reason fails the test.",
+    "The test passes on the unchanged product code."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

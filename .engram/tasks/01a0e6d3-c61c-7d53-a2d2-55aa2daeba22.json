@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-55aa2daeba22",
+  "external_ref": "tm-m6r1.23",
+  "title": "Clarify Beads item mapping and Work read contract structure",
+  "outcome": "Claude session-6981 Note proposals consolidated after tracker search. beads_item_view has ten positional arguments including same-typed Strings; use named fields or a small input struct in a behavior-preserving cleanup. Split the dense Beads read contract into detection/binary, transport, admission/deadlines, mapping/refusals and disclosure sections. Keep this separate from behavioral fixes; do not expand the existing Work reducer extraction task.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03; no \"beads\" remains in src/work_*.rs on master.",
+  "completion": null
+}

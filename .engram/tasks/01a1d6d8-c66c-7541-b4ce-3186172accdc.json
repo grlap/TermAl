@@ -1,0 +1,36 @@
+{
+  "id": "01a1d6d8-c66c-7541-b4ce-3186172accdc",
+  "external_ref": null,
+  "title": "Adopted runtime-started Claude turns report a known success or error to Engram as outcome=unknown (first close records Unknown and removes the trace)",
+  "outcome": "An adopted Claude turn's observed terminal result (success or error) is the outcome reported to Engram; no earlier Unknown close pre-empts it.",
+  "acceptance": [
+    "For adopted runtime-started Claude turns, the known result reaches the single runtime-observation close (pass it into the first close, or let the guarded terminal path perform the sole close), so the closing job/report carries Succeeded or Failed.",
+    "Behavioural tests cover the adopted success callback and the adopted error callback (including the unresolved adopted interval path) and assert the reported outcome."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "claude",
+    "execution-observability",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Adopted Claude terminal success/error now reaches the first guarded observation close. Landed on master with five behavioral outcome cases, Linux 221/0 author validation, native Windows test compilation and the exact-tree landing FULL. Independent acceptance a68124d3afa3497c9e19f2590f2d15de passed both criteria on clean landed 73177116; the launcher-only admission run is not item coverage. Optional Low follow-ups remain separate.",
+    "completed_at": "2026-11-14T09:41:14.147203100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

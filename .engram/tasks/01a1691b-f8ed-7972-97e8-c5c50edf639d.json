@@ -1,0 +1,28 @@
+{
+  "id": "01a1691b-f8ed-7972-97e8-c5c50edf639d",
+  "external_ref": null,
+  "title": "Test the remaining uncarried-test reasons and both fallback reasons",
+  "outcome": "Every reason the uncarried-test closure line can give is asserted by a regression test, so the reasons' order and the fallback wiring cannot regress silently.",
+  "acceptance": [
+    "Table-driven regression tests assert the closure line's reason for: a check of another grant at the turn's close (ENGRAM_UNCARRIED_OTHER_GRANT), a cached close in a named root (ENGRAM_UNCARRIED_UNRESOLVED_CLOSE), a missing runtime token, a delegated session, a target outside the named root, and an outstanding-work fence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1691b-f8a6-7162-8cfd-2dcd927cfb4d",
+  "disposal_reason": "Its tests are absorbed into w-2dcd927cfb4d's C3 (concurred by Termal::Fable2, dcac180e).",
+  "completion": null
+}

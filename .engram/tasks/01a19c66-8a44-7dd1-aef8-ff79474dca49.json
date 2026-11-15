@@ -1,0 +1,42 @@
+{
+  "id": "01a19c66-8a44-7dd1-aef8-ff79474dca49",
+  "external_ref": null,
+  "title": "w-3fe8 tests::test_runs C1 diagnosis and test-port corrections",
+  "outcome": "Diagnose all22 assigned test_runs failures, then correct deterministic test-port defects in failing test files only under Fable1065; preserve production behavior and raw producer evidence, return source/per-test notes without execution claims.",
+  "acceptance": [
+    "All22 assigned C1 tests::test_runs failures have an attributed first panic/assertion and source/master classification with supporting locations; the compact table is sent to Fable2.",
+    "In a fresh named root on exact0c00 before-image, correct the native registration helper to canonical test-UUID, narrowly equate omitted optional empty post_run.dirty_paths with explicit[] in test comparison only, and use the source-sighting receipt validator. Change only failing test files, with no product, artifact-guard or raw producer evidence edit.",
+    "Read each of the22 complete test bodies for next assertions on the corrected fixture; fix only clear test-port defects of the same kind and report any product behavior to Fable2. Return frozen scoped tree, blobs and per-test notes to Sol-03d4, cc Fable2; no Cargo or execution claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gated-control",
+    "greg-directed",
+    "source-diagnosis",
+    "test-port",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 tests::test_runs ports; exact4/five-case intake40a9fd50 +22-failure ledger. Source-only completion map; earlier first failures retained.",
+    "completed_at": "2026-11-08T19:22:53.174338300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

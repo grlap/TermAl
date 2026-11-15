@@ -1,0 +1,29 @@
+{
+  "id": "01a1aca3-739a-77e0-bd70-4d6c2b4a1f62",
+  "external_ref": null,
+  "title": "Tighten evaluation-matrix negative assertions to specific refusal causes",
+  "outcome": "Negative matrix rows distinguish the intended source-currency or evidence-provenance refusal from an unrelated refusal, retaining the existing status, seal and immutable-history assertions.",
+  "acceptance": [
+    "The source-refusal, asserted-note, newer-failed-check and policy-off rows assert specific typed codes or source/evidence refusal reasons rather than generic words such as source, input, bound, eligible or commit.",
+    "A focused regression demonstrates that an unrelated refusal cannot satisfy each affected helper while genuine intended refusal and successful controls retain their existing behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "review-follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,41 @@
+{
+  "id": "01a12e71-f889-7483-aa6f-f2cdc8bf15cc",
+  "external_ref": null,
+  "title": "A source-capture refusal is logged twice to the host log (old eprintln plus the published check notice)",
+  "outcome": "A source-capture refusal reaches the host log once: the older eprintln in engram_resolve_turn_checks_with_notices is dropped or merged now that engram_publish_check_notice logs the published notice with its cause.",
+  "acceptance": [
+    "A source-capture refusal writes exactly one host-log line, and a test asserts the single line through the notice's log writer.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

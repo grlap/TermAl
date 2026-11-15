@@ -1,0 +1,28 @@
+{
+  "id": "01a1c8f0-6560-7812-9129-e7c56d4c2ae3",
+  "external_ref": null,
+  "title": "Document the unchanged host-origin requirement for standalone notification recovery",
+  "outcome": "Note docs/test.md:665 guidance to retry once host returns assumes same scheme/host/port. A changed origin is intentionally refused; clarify same-origin requirement and that on-disk result remains evidence.",
+  "acceptance": [
+    "Recovery guidance explicitly states original sender and same host origin are required, and changing origin leaves preserved result evidence rather than transferring notification authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-follow-up",
+    "review-note",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

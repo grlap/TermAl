@@ -1,0 +1,29 @@
+{
+  "id": "01a100b6-64bc-75a0-a1c9-8188a4927764",
+  "external_ref": null,
+  "title": "Sighting preflight refusal branches without scripted coverage: identity mismatch, head_cut < read_cut, positions past the cut, 16 KiB cap, no run, no work id, spent budget",
+  "outcome": "Several host-side refusal branches in src/acceptance_named_root_sighting.rs have no scripted test:\n- incoherence on a project, work or run mismatch;\n- head_cut < read_cut;\n- positions outside the read cut (binding_position or sighting position > read_cut);\n- generation < 1;\n- the 16 KiB answer cap;\n- \"the task has no active run\" and \"the task has no canonical work id\";\n- the spent-budget path.\nEach is a decision a malformed or hostile answer would exercise. Extend the table in acceptance_request_treats_an_unreadable_sighting_as_unknown_never_as_absent (src/tests/acceptance_evaluation_sighting.rs) with these cases, each asserting \"could not be determined\" and that no evaluator or brief is created, plus a task fixture without an active run or work id.",
+  "acceptance": [
+    "Each listed refusal branch has a scripted test that asserts the unknown refusal and that no evaluator or brief exists.",
+    "Each new test fails if its branch's check is removed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

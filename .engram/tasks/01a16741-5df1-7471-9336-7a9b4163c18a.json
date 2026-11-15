@@ -1,0 +1,29 @@
+{
+  "id": "01a16741-5df1-7471-9336-7a9b4163c18a",
+  "external_ref": null,
+  "title": "v3 admission recovery: post-restart live verification",
+  "outcome": "After the repaired v3 input has actually landed and Greg has restarted the host, verify the moved live boot-class, lazy-first-use and two-minute sidecar criteria for the admission recovery batch. This linked item retains the exact original w-9a356000735e criteria 1 and 2, including their existing code/test context; it does not replace or claim their live observations from fixture tests. Linked source items: w-a108efba750a, w-b9b17d9735ad, w-9a356000735e.",
+  "acceptance": [
+    "A note states, from code with file:line, which boot-recovery targets need an eager rebind at boot (an open or uncertain grant, a retained queued intent, an unsettled finished child) and which can be left to lazy rebind at first admission (idle sessions with only a routing token or rebind flag), and records the live count of each class on the host (25 eager targets on 2026-10-22).",
+    "With the fix, after a restart only sessions in the eager classes are rebound at boot and the rest rebind lazily on their first admission with no change to correctness (a lazily rebound session's first turn still reconciles its token and grants exactly as boot recovery did); covered by tests over the candidate filter and by a count of control sidecars spawned within two minutes of boot on the live host recorded in a note (at most the eager-class count)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "admission-recovery",
+    "live-proof",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

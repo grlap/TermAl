@@ -1,0 +1,36 @@
+{
+  "id": "01a1bf4a-e632-7d23-984f-ea93ab12af38",
+  "external_ref": null,
+  "title": "Independent acceptance evaluation drops the retained task root when the requester holds no claim",
+  "outcome": "A coordinator allowed by independent-session policy evaluates the task's retained Engram-bound tree without re-naming; claim ownership never redirects its cwd.",
+  "acceptance": [
+    "An independent-session requester holding no claim evaluates the retained exact-store/work root only when Engram's canonical sighting confirms its path and generation; a behavioral regression fails before and passes after. Same-claim handoff and recovery by another holder remain passing controls without re-naming. Unbound, moved-path, changed-generation and unavailable-source cases still refuse before an evaluator starts.",
+    "A review pair has no Medium or higher, and the normal gate passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "evaluation",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed retained-root evaluation for independent no-claim requesters with canonical sighting, capture/journal/committed-input fences and preserved handoff/recovery controls; PASS83 and Windows B full gate, no outstanding Medium+.",
+    "completed_at": "2026-11-09T16:40:17.108044400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

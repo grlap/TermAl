@@ -1,0 +1,28 @@
+{
+  "id": "01a1670e-f7a9-7ad0-9168-4652224dae4a",
+  "external_ref": null,
+  "title": "The notice for a self-started Claude turn opened while a prompt waits says it runs beside that prompt's turn, even when the prompt then takes it up",
+  "outcome": "The transcript notice for a self-started turn that was not adopted because a prompt is in progress does not claim it is separate from that prompt's turn when the prompt's start, output or result then takes it up (adjust the notice, or add a notice at take-up).",
+  "acceptance": [
+    "A self-started turn opened while a prompt waits, then taken up by that prompt, leaves no transcript notice saying the turn is not part of the prompt's turn; covered by a test.",
+    "The maintained full gate passes on the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "claude-runtime",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

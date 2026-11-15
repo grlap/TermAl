@@ -1,0 +1,27 @@
+{
+  "id": "01a13021-2a3b-7ad1-9467-3ce310888d0b",
+  "external_ref": null,
+  "title": "Automatic Engram retries spin on a paused receipted head that only an explicit Resume can start",
+  "outcome": "Automatic Engram retries spin on a paused receipted head that only an explicit Resume can start",
+  "acceptance": [
+    "An automatic Engram retry (admission, bind or abort) that meets a receipted head that is Pending on a paused queue is dropped or held explicitly, with no retry slot taken and no begin-preparation attempt counted on later ticks, and the preview says the head waits for an explicit Resume. An end-to-end test of a bind-retry or admission-retry park on a receipted head followed by Resume shows the prompt sent once."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

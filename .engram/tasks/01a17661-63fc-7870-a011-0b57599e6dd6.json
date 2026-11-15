@@ -1,0 +1,29 @@
+{
+  "id": "01a17661-63fc-7870-a011-0b57599e6dd6",
+  "external_ref": null,
+  "title": "Validate a prospective retained Bind-to-Evaluate ledger before publishing its live successor",
+  "outcome": "Validate a prospective retained Bind-to-Evaluate ledger before publishing its live successor. Keep the existing authority, ownership, validation and persistence contracts.",
+  "acceptance": [
+    "Validate a prospective retained Bind-to-Evaluate ledger before publishing its live successor is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "containment-followup",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

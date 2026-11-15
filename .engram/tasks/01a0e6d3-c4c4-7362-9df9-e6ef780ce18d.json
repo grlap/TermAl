@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4c4-7362-9df9-e6ef780ce18d",
+  "external_ref": "tm-bmj",
+  "title": "Add Codex /mcp status command",
+  "outcome": "Expose Codex MCP inventory in the TermAl composer through /mcp and /mcp verbose. Query the owning Codex app-server via mcpServerStatus/list, support local and remote sessions, render server/auth/tool status without sending /mcp as a model prompt, and add backend/frontend regression coverage.",
+  "acceptance": [
+    "Codex sessions expose /mcp; /mcp lists configured MCP servers with auth and tool counts; /mcp verbose exposes tool details; invalid arguments show usage; non-Codex sessions do not expose the control; remote Codex sessions proxy the read; errors and loading are visible; Rust/UI tests and production UI build pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

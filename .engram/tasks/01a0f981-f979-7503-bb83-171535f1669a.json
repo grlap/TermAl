@@ -1,0 +1,35 @@
+{
+  "id": "01a0f981-f979-7503-bb83-171535f1669a",
+  "external_ref": null,
+  "title": "Rust 1.99 deprecates AtomicUsize::fetch_update (renamed try_update): cargo check on master now warns in three places",
+  "outcome": "`cargo check --bin termal` and `cargo test --bin termal` build without warnings on Rust 1.99.0 (installed by Greg's rustup update on 2026-10-01 at about 21:49Z). Gate test-338cbb53 (Termal::Opus3, w-3bd74078208d) shows the deprecation warning \"use of deprecated method std::sync::atomic::Atomic::<usize>::fetch_update: renamed to try_update for consistency\" at src/content_revision.rs:293, src/engram_source_roots.rs:978 and src/tests/engram_abort_retry.rs:44. All three are master code, not that change. CLAUDE.md requires cargo check clean. Mechanical fix: rename fetch_update to try_update with identical semantics. Watch for other 1.99 warnings in the same build. TermAl has no rust-toolchain pin, and the gate runs no clippy.",
+  "acceptance": [
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "cargo check --bin termal and the test build produce no warnings on rustc 1.99.0; the cargo-check log of the gate cited in a note shows none."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "rust",
+    "toolchain"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The rustc 1.99 fetch_update deprecations are renamed to try_update; landed in train 11 as 2a3506a, pushed.",
+    "completed_at": "2026-10-02T00:21:23.078586Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

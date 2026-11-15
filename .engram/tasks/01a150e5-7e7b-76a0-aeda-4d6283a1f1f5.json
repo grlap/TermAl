@@ -1,0 +1,37 @@
+{
+  "id": "01a150e5-7e7b-76a0-aeda-4d6283a1f1f5",
+  "external_ref": null,
+  "title": "Named-root capacity: legacy rows and unbound roots of held or idle items occupy the 64-slot cap indefinitely, and a session cannot release its own root while it is in a turn",
+  "outcome": "Named-root capacity: legacy rows and unbound roots of held or idle items occupy the 64-slot cap indefinitely, and a session cannot release its own root while it is in a turn",
+  "acceptance": [
+    "A named root with no live claim binding whose item is completed, cancelled, superseded, or held is reclaimed or released without an operator round, by a documented, audited rule that never touches a live claim",
+    "Legacy rows with no canonical run association have a supported one-time disposition (for example, a release when the root path no longer exists or the claim is closed), recorded per row",
+    "A session can release its own unbound named root through a supported surface (for example an MCP tool or a clear-name call) without the busy-session refusal that the operator route applies; focused tests, the full gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "host-recording",
+    "named-roots"
+  ],
+  "assigned_to": "Termal::BarA1",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Named-root capacity, landed as dd4ccaf3.\n- C1: the automatic reclamation pass also retires a root whose Engram claim is released or completed, or, while no session holds or may hold its binding (including a naming session kept aside at restore), lapsed beyond a 2 h grace or with its naming session gone. A later fence is not closure. The claim journal is retired so compaction drops it.\n- C2: a disposition pass in the same flight releases legacy roots (path gone, item completed or cancelled read through the Work host reader, or naming session gone) and claim-refused roots by an audited rule (route automatic). It is bounded at 8 s from the pass start with a 6 s read reserve, and confirms unacknowledged releases on later passes.\n- C3: a naming session releases its own unbound root mid-turn via termal_release_named_root / POST /api/sessions/{id}/engram-named-root-release (route own). Every release, including a resume, takes the single flight with a 10 s wait and its own 10 s authority budget, answers a definitive 409 when nothing was applied, and a 422 lists all missing fields.\n- Also fixes the codex_terminal_reset child-test temp-root race.",
+    "completed_at": "2026-10-19T09:29:16.445786100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

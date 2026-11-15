@@ -1,0 +1,28 @@
+{
+  "id": "01a18bf6-175f-7d30-aeee-704134211d5d",
+  "external_ref": null,
+  "title": "termal_get_session_result reports totalBytes as characters, not UTF-8 bytes, for non-ASCII output",
+  "outcome": "termal_get_session_result reports totalBytes as characters, not UTF-8 bytes, for non-ASCII output",
+  "acceptance": [
+    "totalBytes reports the UTF-8 byte length of the complete output (or the field is renamed and documented to match what it counts), with a regression test using non-ASCII output.",
+    "outputOffset/outputLimit use the same documented unit as totalBytes, and a multi-page read of non-ASCII output reassembles the exact original bytes with no split or duplicated character, covered by a test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation-results",
+    "mcp-tool"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

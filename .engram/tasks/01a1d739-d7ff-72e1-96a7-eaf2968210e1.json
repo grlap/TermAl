@@ -1,0 +1,30 @@
+{
+  "id": "01a1d739-d7ff-72e1-96a7-eaf2968210e1",
+  "external_ref": null,
+  "title": "Report early native S0 refusal when local naming authority cannot supply a binding",
+  "outcome": "A refused local native opening tells the agent that native declared-command credit is unavailable, while provider enqueue and conservative credit admission remain unchanged.",
+  "acceptance": [
+    "An early local naming-authority refusal surfaces a bounded opening refusal notice through the existing notice path.",
+    "Provider enqueue remains free of synchronous Engram authority RPCs; uncertain openings still receive no native credit.",
+    "Behavioral coverage checks the delivered refusal notice and unchanged provider handoff and credit refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

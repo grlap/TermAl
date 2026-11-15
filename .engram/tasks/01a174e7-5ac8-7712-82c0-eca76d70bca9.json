@@ -1,0 +1,31 @@
+{
+  "id": "01a174e7-5ac8-7712-82c0-eca76d70bca9",
+  "external_ref": null,
+  "title": "Remove Cartesian terminal-artifact retention work from test-run rescan state-lock holds",
+  "outcome": "Terminal artifact retention no longer performs historical terminal-run by observation scans under the test-run rescan StateInner guard; exact terminal identity/proof semantics are preserved and remaining history-sized rescan work is explicitly recorded.",
+  "acceptance": [
+    "Terminal-artifact retention during a rescan performs no observation-by-terminal Cartesian scan under StateInner. Its additional association work is proportional to changed or unfinished exact artifact associations, and an unchanged pass performs no association matching for unrelated completed history.",
+    "Exact run, owner, worktree, run-directory, request identity and terminal-result digest predicates remain enforced. Retention preserves original execution identity, provenance, durable terminal proof, persistence-failure retry, alias ordering and current evidence authority; it creates no verification or durability acknowledgement.",
+    "Deterministic witness tests show that adding unrelated completed runs and observations leaves terminal-retention candidate/matcher visits unchanged, while matching unfinished associations settle correctly and wrong-owner, wrong-directory or wrong-request associations are refused. Existing publication, registration, compaction and persistence boundary guards remain green without weaker oracles.",
+    "A source inventory explicitly records all remaining history-sized work under the rescan commit guard, including summary projection, compacted-metadata processing, conditional persistence/publication and direct compaction selection. Post-fix runtime evidence distinguishes the cold first scan from subsequent idle backstop scans and reports observed holds honestly; the parent live criterion remains unmet until its own observation passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

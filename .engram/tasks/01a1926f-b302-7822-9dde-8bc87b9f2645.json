@@ -1,0 +1,24 @@
+{
+  "id": "01a1926f-b302-7822-9dde-8bc87b9f2645",
+  "external_ref": null,
+  "title": "verification_record tick: back off after a routing-token refusal or a terminal-pending reason, and skip settled/rejected runs under the lock",
+  "outcome": "The verification_record sender's tick (src/engram_verification_record.rs, from w-decd61d62831) does bounded work per pass:\n- registrations whose host ack is Settled or Rejected are skipped inside the locked selection;\n- runs in a terminal-pending state (PostRunNotClean, UnclassifiedStages, StartedBeforeRegistration, RootGenerationOutOfRange, BodyMismatch, BodyNotBuilt, CapabilityUnsupported, InitiatingSessionGone) back off, or wait for a state change, instead of re-reading request.json, results.json and the body and rebuilding every 2 s;\n- after a RoutingTokenRefused, it doesn't send another SessionStatus with the same refused token until the session's token changes.\nTests show the bounded behaviour. Provenance: w-decd review round 3 Low L10 (Claude delegation a7f9d7d4) and round 4 Low (Claude delegation 8e895e93).",
+  "acceptance": [
+    "verification_record tick: back off after a routing-token refusal or a terminal-pending reason, and skip settled/rejected runs under the lock is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

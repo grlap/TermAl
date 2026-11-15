@@ -1,0 +1,27 @@
+{
+  "id": "01a16eb8-ca0e-7001-8f8e-d0aca429e842",
+  "external_ref": null,
+  "title": "A focused test whose launcher records are consistent is recorded \"Test Unknown: interval validation rejected (early run.ended < observed_start)\" when the host observes the command start after the run already ended",
+  "outcome": "A test or build check whose launcher records are internally consistent keeps its real verdict (Passed or Failed) when the only discrepancy is host-observation latency, including the case where the host first observes the command after the launcher's run has ended. Genuinely inconsistent intervals still reject, and the refusal names the failed comparison.",
+  "acceptance": [
+    "A focused test whose launcher records are consistent is recorded \"Test Unknown: interval validation rejected (early run.ended < observed_start)\" when the host observes the command start after the run already ended is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "check-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

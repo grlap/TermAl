@@ -1,0 +1,36 @@
+{
+  "id": "01a0f098-e721-7fe1-bcee-14ddc4e4ca4f",
+  "external_ref": null,
+  "title": "Produce sub_agent acceptance evaluations, or report the gap before the request, when a project's policy admits sub_agent",
+  "outcome": "TermAl's host does not produce sub_agent evaluations. src/acceptance_evaluation_api.rs:887-890 answers 501 \"the task or its policy requires a sub_agent evaluation, which this host does not produce yet\", and project settings refuse sub_agent as a default (src/acceptance_settings.rs:26).\nThe failing path: with no pin, select_acceptance_evaluation_mode (src/acceptance_evaluation.rs:94-109) takes the first admitted mode in the order independent_session, sub_agent, same_session. Engram policies may admit [sub_agent, same_session] or [sub_agent] alone (Engram::Coder, TermAl mailbox 62e0c56d #47). Such a project therefore gets 501 on every unpinned request.\nFalling back to same_session is ruled out. Engram's planned rule (Engram w-a5f404605e07, revision 7) rejects unpinned same_session whenever another mode is admitted, and a silent fallback would permit self-evaluation.\nThe fix is one of:\n(a) produce sub_agent evaluations as Engram defines them;\n(b) until then, report the capability gap where a project's policy is read (settings and readiness), so a request isn't the first place it shows.",
+  "acceptance": [
+    "A sub_agent evaluation TermAl produces is submitted by a distinct child session under its own session id, never the parent's, with the executor as parent_session; a test shows that the submission's evaluator session is none of the run's holder, executor or former holders.",
+    "sub_agent is produced; the project's acceptance settings offer it as an available mode, the 'not produced' warning and disabled option are removed; a test covers each admitted-list case showing the selected mode.",
+    "With a project policy admitting [sub_agent, same_session] or [sub_agent] and no pin, an evaluation request never falls back to same_session: it either produces a sub_agent evaluation that Engram accepts, or refuses with a reason naming the capability gap; and a task pinned to sub_agent under a policy that admits it gets the same outcome. Engram's acceptance is shown by a pinned disposable-Engram run through the `live` launcher with the stable pin, on the real host submission path: one positive case recorded as sub_agent, and one producer refusal that the host's preflight does not pre-empt, surfaced as final; mocked receipts do not establish it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered sub_agent acceptance production and settings through exact author commit3261b8805dc2693bb1a1b8532fd6dd11599aec39; integration owner Opus2 mailbox74/message-bf52e686-e69a-4c31-b17a-a3cf642f8af5 reports unchanged inclusion in train27 master d6ea73c0edd02c4c68b41b12b3ec89acf5cc17ec, pushed and verified. Owner-attributed integrated gate test-a9b1bcad-cdd4-4fc4-8306-23278f71f5cd PASS, Rust3703/Vitest4555, fingerprint2488a810…; integration Codex8dabd3e2 and Claude54ff9032 pair no blocking findings. Current independent acceptance642d43313e664228aeb01b7c3af1ab85 rev5 all3pass/stale:null read full; exact author gate/original+delta pair/current credit and historical real-live continuity remain recorded. Install/UI deployment pending owner, no installed/running-host claim.",
+    "completed_at": "2026-10-03T22:54:08.864723800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

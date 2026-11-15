@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c68d-7bd2-b74a-42798b071800",
+  "external_ref": "tm-p6jy",
+  "title": "Doctor deadline expiry is reported as HTTP 400 and calls itself an enablement deadline on the Verify path",
+  "outcome": "run_engram_doctor_result_within returns ApiError::bad_request (HTTP 400) with the text 'Engram doctor exceeded the N second enablement deadline'. Two problems, raised by the Claude reviewer of the deadline change.\n\n1. The same function now backs Verify as well as Enable, so a Verify timeout tells the user about an 'enablement' deadline it never attempted.\n2. A server-side deadline expiry is a client error only by accident of construction; a gateway-timeout status describes it.\n\nThere is also an inconsistency in how the frontend receives these: doctor-result VALIDATION failures come back as a structured errors[] on a 200 Verify response, while a TIMEOUT escapes as a bare 400, so the panel renders them through different paths (setError versus verification.errors). A user sees two unrelated-looking failures for the same underlying operation.\n\nFix direction: neutral wording ('Engram doctor exceeded the N second deadline') and a gateway-timeout status, with the frontend rendering it through the same path as other verification outcomes.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7f3-7fe3-9766-b6670bd17730",
+  "external_ref": "tm-yb61",
+  "title": "Extract and rename Engram binding-target scope helpers",
+  "outcome": "Claude7199 maintenance follow-up: src/engram_host_adapter.rs exceeds module size guideline; shape/child/root target selection and scope predicates form a cohesive extraction seam. Pure move into focused module with provenance header; rename parent helper/local identifiers to root or non-child naming. Preserve reset-access and child authority semantics. Distinct from tm-81vf one-shot CLI reader extraction. No behavior change or current implementation requested.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

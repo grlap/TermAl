@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c41d-7342-9047-f113925276c3",
+  "external_ref": "tm-7g40",
+  "title": "Encode Engram's assurance ladder once and move the older refusal predicates beside it",
+  "outcome": "Follow-up from the tm-winf step-1b round-5 review (Claude /review-code, Low and Note). Step 1b added src/engram_evaluation_refusal.rs with engram_evaluation_refusal_heals_by_rebind, engram_host_assurance_covers and engram_assurance_rank (advisory < turn_gated < action_gated, compared against ENGRAM_CONTROL_ASSURANCE). Two duplicates remain:\n\n1. src/engram_readiness.rs (around line 203) hard-codes a matches! over the literal levels advisory and turn_gated for the same question, so a new or reordered Engram level could drift between the two encodings. Switch it to engram_host_assurance_covers / engram_assurance_rank.\n2. The older pure refusal predicates in engram_host_adapter.rs (engram_evaluation_refusal_requires_rebind, engram_error_is_stale_fence, engram_begin_refusal_allows_reevaluation, engram_status_error_requires_fresh_bind) have no AppState dependency and belong in the same fragment. Move them in a pure code-move commit (no renames or signature changes), shrinking the 6.6k-line adapter.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

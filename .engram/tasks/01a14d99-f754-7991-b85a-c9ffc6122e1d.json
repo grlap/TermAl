@@ -1,0 +1,27 @@
+{
+  "id": "01a14d99-f754-7991-b85a-c9ffc6122e1d",
+  "external_ref": null,
+  "title": "Add HTTP route tests for the handoff ledger endpoints, including the effect begin, done and observe routes",
+  "outcome": "Add HTTP route tests for the handoff ledger endpoints, including the effect begin, done and observe routes",
+  "acceptance": [
+    "Add HTTP route tests for the handoff ledger endpoints, including the effect begin, done and observe routes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "handoff",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

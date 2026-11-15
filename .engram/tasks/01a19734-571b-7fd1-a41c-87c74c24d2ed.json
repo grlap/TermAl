@@ -1,0 +1,24 @@
+{
+  "id": "01a19734-571b-7fd1-a41c-87c74c24d2ed",
+  "external_ref": null,
+  "title": "Test-back the reading-only stamp fixes with DurableSessionSnapshot",
+  "outcome": "Each stamp fix that rests only on code reading has a regression test: wrap an existing scenario test that reaches the path, or build a minimal fixture, with the DurableSessionSnapshot guard (src/tests/session_stamp_delta.rs). The test fails without the stamp and passes with it. The paths:\n- turn_dispatch.rs: the relay-refusal abandon before queue promotion (relay authority lost during the off-lock Engram evaluation), the Human-source abandon, and the host-shutdown abandon;\n- engram_retry_schedule.rs: a begin-preparation budget dropped for naming another head;\n- session_lifecycle.rs: the expedited source-observation gate retry_at;\n- engram_source_sightings.rs: finish_source_observation_handoff_locked taking the gate when the head has no engram intent;\n- human_prompts.rs: the start-failure rollback after a runtime reset dropped carried checks.\nSource: the stamp audit, whose evidence note lists these as reading-backed.",
+  "acceptance": [
+    "Test-back the reading-only stamp fixes with DurableSessionSnapshot is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

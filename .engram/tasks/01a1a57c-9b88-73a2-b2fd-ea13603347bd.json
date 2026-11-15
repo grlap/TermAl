@@ -1,0 +1,24 @@
+{
+  "id": "01a1a57c-9b88-73a2-b2fd-ea13603347bd",
+  "external_ref": null,
+  "title": "Review export's publish rename fails outright on a Windows sharing error, failing the Windows gate",
+  "outcome": "scripts/export-review-attempt.mjs publishes its staging directory with a single fs.rename. On Windows a transient sharing error (EPERM, EACCES, EBUSY) from another process's handle on a just-written file fails the export and any gate running its tests. The rename waits within a bounded budget on Windows for those codes only, any other error or platform fails at once, the first error is reported past the budget, staging cleanup and the identical-export path are unchanged, and deterministic tests with an injected rename pin each case. Evidence: Windows B FULL test-53c2fc1c on ae0b5d38, tree 01312f45, two tests EPERM at export-review-attempt.mjs:153, the first two tests of the fingerprint-tests stage; probe termal-n6d-rename-probe-1, 3000 cycles, zero failures, so the holder is not identified.",
+  "acceptance": [
+    "Review export's publish rename fails outright on a Windows sharing error, failing the Windows gate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a194ca-3508-7040-b92c-9a7e253d7b39",
+  "disposal_reason": "Duplicate I filed before finding the existing item for the same EPERM rename; its evidence is recorded there.",
+  "completion": null
+}

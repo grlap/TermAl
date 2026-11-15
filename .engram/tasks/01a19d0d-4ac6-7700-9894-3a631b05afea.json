@@ -1,0 +1,42 @@
+{
+  "id": "01a19d0d-4ac6-7700-9894-3a631b05afea",
+  "external_ref": null,
+  "title": "Repair four composed C2 test oracles for withheld roots and legacy recovery capture",
+  "outcome": "Fable2370/messagea1a8854b-8c15-45a3-b793-532c730053b4 accepts diagnosis w-1b4a9a59923b as four T and assigns ONE test-only source return on current assembly TREE502263704cf4429911dd3a58560d64fc4eb5e7c4 in fresh named root. No cargo/execution. Return to Sol-03d4 cc Fable.",
+  "acceptance": [
+    "For both legacy uncertain closes assert exact retained local withheld closing/no external report, preserving warning, quotation, provider, prospective-only and no-credit checks and same-root proof; restore existing test-only capture seam after actual SQLite reload with production250ms budget unchanged.",
+    "For root-authority stale modes assert each exact expected variant (including EvidenceWithheld CanonicalHistory where appropriate), successor projection and unresolved state; retain all eight loop cases, stop/report any product mismatch, never accept genericOk.",
+    "Deliver one immutable test-only source return to integrator cc Fable with master-to-current ledger per changed assertion; no sleeps/budget changes, product edits, cargo/tests/compiler/parser/fmt/lint/live/agents/review/evaluation/gate/commit/push/READY."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "assigned-slice",
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered exact2 test-only source return TREEf4f1d50f on BASE50226370 with full per-assertion master ledger. Four T repairs implemented without runs/product edits/budget changes.",
+    "completed_at": "2026-11-02T16:26:45.143860600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

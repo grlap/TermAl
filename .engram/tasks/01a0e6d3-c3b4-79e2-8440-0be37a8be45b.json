@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3b4-79e2-8440-0be37a8be45b",
+  "external_ref": "tm-15zb",
+  "title": "Validate aggregate structured review envelope size",
+  "outcome": "Per-field structured review limits can still produce a serialized envelope larger than the 256 KiB mailbox body cap. Add a review-protocol-level aggregate size validation with an actionable error before mailbox append, plus boundary tests.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-DONE. Aggregate review-envelope size is validated: src/delegation_review_results.rs:439-441 (MAX_MAILBOX_BODY_BYTES \"aggregate envelope limit\").",
+  "completion": null
+}

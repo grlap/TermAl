@@ -1,0 +1,32 @@
+{
+  "id": "01a17644-2f09-7e90-a9b3-b683792fba63",
+  "external_ref": null,
+  "title": "Pin deterministic outcomes for mailbox alias inventory-name controls",
+  "outcome": "Inventory-name tests assert the exact outcome of each adapter instead of accepting either success or refusal.",
+  "acceptance": [
+    "The complete central basis resolves the exact literal recipient for the inventory names, while basis-less satellite and MCP selectors refuse ambiguous legacy :: forms with actionable guidance.",
+    "A regression that flips any adapter's expected outcome fails its focused test without weakening exact-recipient checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "mailbox-alias",
+    "pre-existing",
+    "review-follow-up",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a174c9-ea52-79e1-a235-8837ca2accca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

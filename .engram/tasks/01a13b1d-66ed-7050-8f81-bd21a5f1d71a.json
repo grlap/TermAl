@@ -1,0 +1,27 @@
+{
+  "id": "01a13b1d-66ed-7050-8f81-bd21a5f1d71a",
+  "external_ref": null,
+  "title": "Make positively rejected wake notices distinguish retained safe queue admission",
+  "outcome": "An Unaccepted failure notice cannot imply that a coordinator must manually reconstruct/retry work that already remains queued.",
+  "acceptance": [
+    "Make positively rejected wake notices distinguish retained safe queue admission is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "wake-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

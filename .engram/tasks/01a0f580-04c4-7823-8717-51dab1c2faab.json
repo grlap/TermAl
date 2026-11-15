@@ -1,0 +1,55 @@
+{
+  "id": "01a0f580-04c4-7823-8717-51dab1c2faab",
+  "external_ref": null,
+  "title": "The acceptance evaluator brief never says which criteria are bound to a check kind, so evaluators submit test-bound passes Engram must refuse",
+  "outcome": "Found on w-a450af06e8bd, evaluation 5bc7bccd9ef84c4f810696e190d65ce9, Codex evaluator delegation-16f984ed-81fd-455c-b2ab-b12c571003e2, 2026-10-01. Diagnosed with Engram::Opus (TermAl mailbox 37bcca97 #162), who read Engram's source.\n\nCriterion 3 is bound to test. The host-minted passed verification f6e5cb12fbc44d768f81f84dc282f2f5 satisfies its obligation at the evaluated revision. The evaluator still recorded insufficient_evidence: it first submitted a pass with basis judgment, citing a landing note beside the verification, and Engram refused it. For a bound criterion Engram requires two things:\n- the pass must have basis observed (observed_basis_required, acceptance_evaluation.rs:1383);\n- every citation must be a passed verification record of the bound kind (passed_verification_required or bound_verification_mismatch, :1430–1449).\n\nThe admissible form was `3=pass:observed` citing only f6e5cb12….\n\nTermAl's brief and submission schema never tell the evaluator any of this:\n- src/acceptance_evaluation.rs carries no criterion bindings into either brief;\n- the schema in src/acceptance_evaluation_api.rs describes basis as \"Defaults to judgment\" and evidence as \"A pass needs at least one\".\n\nSo every test-bound criterion depends on the evaluator guessing the rule after a refusal whose text is misleading (Engram w-43dde4cda5f6). This blocks closing items with bound criteria, which is the evaluation loop Greg asked to finish first.\n\nFix direction: carry each criterion's binding (check kind, and fingerprint if pinned) into both briefs. State the admissible pass shape: basis observed, citing only verification record ids of the bound kind that passed at the judged revision, with no notes or gates beside them. Mark those record ids in the evidence list. Keep notes for unbound criteria.",
+  "acceptance": [
+    "Both the independent and the same-session briefs name each bound criterion's check kind (and its pinned fingerprint, if any) and state Engram's admission rule: a pass with basis observed cites only passed host-minted verification records (of the bound kind, for a bound criterion); a bound criterion's pass must use basis observed; a judgment basis may cite notes and gates; on a citation refusal, resubmit without the citation that does not qualify rather than downgrade the verdict. A test covers both briefs.",
+    "TermAl refuses before submission, with a plain message naming the rule, a pass on a bound criterion whose basis is not observed; a test covers it.",
+    "The evidence list in both briefs marks each host-minted verification record with its check kind, result and source revision; a test covers it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed in train 9 (3ccf095). Independent evaluation eef959a889f64efc811ea15dff31927a (delegation-d239217a, Codex) passed all 4 criteria at source root .tmp/wt-51dab-eval, revision content-v1:94a61d95.",
+    "completed_at": "2026-10-02T00:30:24.876922200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

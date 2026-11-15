@@ -1,0 +1,28 @@
+{
+  "id": "01a0fe4f-7e2e-71e1-9c24-e32ecd258492",
+  "external_ref": null,
+  "title": "A delegated child's environment holds case-insensitive duplicate variable names, so PowerShell's Env: enumeration throws",
+  "outcome": "On Windows, the environment TermAl builds for a spawned child holds each variable name once, compared without regard to case, so `Get-ChildItem Env:` and its filters work in every child.",
+  "acceptance": [
+    "A delegated child's environment holds case-insensitive duplicate variable names, so PowerShell's Env: enumeration throws is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "environment",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fbd6-0d6f-7be3-a692-64b4f4cfde4e",
+  "disposal_reason": "Duplicate. w-64b4f4cfde4e already tracks the same defect: spawned sessions carry environment keys differing only in case, so PowerShell's Env: enumeration throws. Engram::Opus's new occurrence (child session-9895) is recorded there.",
+  "completion": null
+}

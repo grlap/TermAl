@@ -1,0 +1,27 @@
+{
+  "id": "01a1a3ac-2cd9-7d92-ba14-5bfdb6cf7c52",
+  "external_ref": null,
+  "title": "A stale manual authority write whose image was superseded gets an internal error instead of the retryable conflict",
+  "outcome": "In a test state with no writer thread, a manual authority write whose capture went stale and whose image was superseded reaches the caller as the same conflict as the non-stale order, so the outcome no longer depends on timing.",
+  "acceptance": [
+    "A stale manual authority write whose image was superseded gets an internal error instead of the retryable conflict is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test-infrastructure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

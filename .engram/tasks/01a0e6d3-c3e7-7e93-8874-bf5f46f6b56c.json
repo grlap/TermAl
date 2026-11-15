@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3e7-7e93-8874-bf5f46f6b56c",
+  "external_ref": "tm-56g",
+  "title": "Vitest 10-second gate collapses under sustained multi-agent host CPU saturation",
+  "outcome": "The UI gate has a fixed 10-second per-test diagnostic budget and maxWorkers=2, but on 2026-07-31 the host was saturated by a Virtualization VM at about 88% CPU, Docker, and many long-lived agent processes. Full Vitest took 889.97s and reached 2593/2615 before one timeout caused overlapping-act cascades across preferences, visibility, workspace-layout, and DnD. A single-file App.preferences diagnostic reproduced the timeout: first heavy test 10.78s, transform 69.45s, import 111.40s, with Vitest receiving about 12% CPU. The vite.config comment refers to tm-g4z, but that ID is absent from the current Beads DB. Do not solve by increasing timeouts or retries. Add a deterministic resource preflight or runner isolation/CPU reservation so the unchanged 10-second budget remains meaningful under supported multi-agent operation.",
+  "acceptance": [
+    "A full 2615-test Vitest gate and the isolated App.preferences suite pass without retries, sleeps, quarantine, or increased timeouts while the supported TermAl multi-agent workload is active; when host resources are insufficient, the gate fails fast before running tests with an explicit resource diagnostic instead of cascading React act failures."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

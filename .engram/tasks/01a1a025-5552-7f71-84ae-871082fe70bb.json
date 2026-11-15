@@ -1,0 +1,30 @@
+{
+  "id": "01a1a025-5552-7f71-84ae-871082fe70bb",
+  "external_ref": null,
+  "title": "Validate required queue hashes at the remaining UI ingestion boundaries",
+  "outcome": "Optional Low from Claude whole-input R2 review on8858f895: SSE state/stateDiff validate queueProjectionHash at runtime, while HTTP state resync, fetched/created sessions, sessionCreated/orchestratorsUpdated and messageCreated.sessionQueue rely on TS types. Current Rust remote decoders/producers supply the field, so reviewer found no reachable current production defect. Consolidate runtime validation at an existing shared ingestion owner or explicitly cover remaining paths without compatibility fallbacks or changing hash ownership.",
+  "acceptance": [
+    "Missing or null queueProjectionHash is rejected before adoption at each applicable current UI ingestion boundary, with existing recovery behavior and valid payload behavior retained; source locators and focused regression evidence cover the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated",
+    "legacy-cleanup",
+    "protocol",
+    "review-followup",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3b8-74b2-b398-36b76a54c347",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

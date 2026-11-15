@@ -1,0 +1,41 @@
+{
+  "id": "01a13181-f642-72b2-9738-6b33a21ffb61",
+  "external_ref": null,
+  "title": "A check whose end marks no judgeable outcome is dropped silently in engram_resolve_turn_checks_with_notices",
+  "outcome": "When engram_check_command_outcome returns None for an in-turn check's end (for example an Unknown exit with no result lines), the holder gets an engram_unrecorded_check_line notice saying its end marks no result the host can judge, and the host logs it, as the carried path already does. The check is no longer skipped with a bare continue.",
+  "acceptance": [
+    "A test ends an in-turn check with no judgeable outcome and shows the holder notice and no record.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

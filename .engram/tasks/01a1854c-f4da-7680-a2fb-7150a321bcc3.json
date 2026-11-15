@@ -1,0 +1,32 @@
+{
+  "id": "01a1854c-f4da-7680-a2fb-7150a321bcc3",
+  "external_ref": null,
+  "title": "Do not charge an in-flight recovery ownership conflict as a preflight failure",
+  "outcome": "Concurrent Send/Resume recovery triggers preserve the active pass token and do not consume the consecutive pre-allocation failure budget merely because that pass owns the receipt.",
+  "acceptance": [
+    "Do not charge an in-flight recovery ownership conflict as a preflight failure is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "b16",
+    "checkpoint-recovery",
+    "control-plane",
+    "engram-control",
+    "gated-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1850d-6776-7721-8ed0-4c0e53d89846",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete removed-feature path; not fixed or tested by this sweep. Fable2722/message43b9a7df-11b7-403a-a0d1-1e21100b4562 authorizes disposition. Full original outcome/criteria read; retained note provenance fdfb9e1e4aba41d395326d2fb1029f28. At current master2e03d1a9f0357862cf26e4c6a4f8ddccdadeff00, landed87f49ed0 deleted active admission/begin/replay, containment/reset and checkpoint result-recovery owners (native deleted-path diff inspected). src/engram_session_obligations.rs and engram_containment_checkpoint.rs explicitly retain only passive validated historical records, never restore active exclusion/replay/accounting/admission. The specific old behavior in this item's title/criteria is therefore no longer an executable product contract. Current ordinary delivery/queue/transport/SQLite compatibility concerns were separately preserved in the sweep; this cancels no such behavior. Historical failures, unknown incident causes and existing delivered-work/credit caveats remain unchanged. No source edit, Cargo/test, new verification, old experiment execution or acceptance PASS claimed; keep raw evidence while other open items still cite it.",
+  "completion": null
+}

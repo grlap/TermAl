@@ -1,0 +1,27 @@
+{
+  "id": "01a0f520-afde-7713-9354-3a1da2e1fac2",
+  "external_ref": null,
+  "title": "Keep single-wire Codex exit fixtures from retaining a dead second slot",
+  "outcome": "For Default-profile exit and retirement fixtures, install only the Default slot or explicitly clear/assert both test slots. The opt-in single-wire helper aliases the same runtime into both homes; production runtime-id lookup removes Default first, leaving a stale ReadOnly clone and command sender. Preserve distinct two-profile witnesses.",
+  "acceptance": [
+    "Exit and retirement fixtures cannot leave a dead aliased runtime or retained command sender in the second slot; meaningful lifecycle tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f435-1ebc-7890-82b9-53ab42df726c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

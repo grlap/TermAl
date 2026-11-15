@@ -1,0 +1,30 @@
+{
+  "id": "01a17b38-8081-7402-abd9-0af3d6efdb42",
+  "external_ref": null,
+  "title": "Resolve ordinary legacy checkpoint authority outside the global state lock",
+  "outcome": "Ordinary legacy checkpoint route resolution performs filesystem work outside StateInner while preserving the frozen original route and final owner checks.",
+  "acceptance": [
+    "Move or cache legacy marker/home/store resolution through the existing binding or checkpoint owner without holding StateInner across filesystem calls.",
+    "Preserve conservative unconfirmed legacy authority, exact original request and owner fencing, OFF enablement validation and both pre-send durability cuts.",
+    "Cover changed-marker or stale-owner refusal and the healthy already-bound missing-executable route with appropriate focused tests and independent reviews."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "review-followup",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a16b2a-e523-7a13-ac81-3432c372e8bc",
+  "external_ref": null,
+  "title": "Carried-binding refusal repeats one loss up to three times for repeated words, and says \"1 current criteria\"",
+  "outcome": "In src/acceptance_evaluation_carried_binding.rs, the per-wording cap check runs even when the main matching has already reported every judged binding with those words. One loss is then reported up to three times. Example: judged [\"A test covers it\" x2], both bound to `test`; current [\"A test covers it\"] unbound. The result is two per-binding lines plus a per-word line. The refusal stays correct. Fix: skip the per-word line for a wording whose members the main matching already left unmatched, or merge the lines, and pin the line count in a test. Also use singular and plural forms in \"{n} current criteria still carry those words\". Add a clause to the refusal-content sentence in docs/features/engram-host-adapter.md for the per-word line.",
+  "acceptance": [
+    "Carried-binding refusal repeats one loss up to three times for repeated words, and says \"1 current criteria\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

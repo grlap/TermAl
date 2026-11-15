@@ -1,0 +1,56 @@
+{
+  "id": "01a1693b-47d5-7cc1-a704-4990f2a1d042",
+  "external_ref": null,
+  "title": "Retain an unmatched full-launch window when a missing-authority diagnostic loses association",
+  "outcome": "A missing-authority full launch whose diagnostic loses completion association cannot have its run borrowed by a later mediated gate in the same worktree.",
+  "acceptance": [
+    "For a recognized full-gate start recorded without binding or grant and with a known root/start stamp, every diagnostic retirement that may leave a running or late-published run—mismatched completion, stale runtime/turn pruning, pending-cap eviction, and own abandonment—retains the original root/start unmatched window under the existing bounded policy before discarding diagnostic tracking.",
+    "A later ordinary mediated launch in the same root and run-search window cannot borrow such a retired launch's run for verification or batch-member credit. Unknown roots create no invented root; foreign/replaced/unowned observations cannot consume a current diagnostic; disabled observations remain silent.",
+    "Deterministic recorder-to-carry settlement regressions cover missing authority, mismatched completion, authority recovery, and an earlier unclaimed running or late-published run within search slack; retirement-route witnesses cover pruning, cap and abandonment. Matched ordinary carry still credits its own run. Use retained timestamps/barriers, not sleeps or retries.",
+    "Focused validation and an independent Codex/Claude Opus review pair cover the exact stack, with no outstanding in-scope Medium or higher; Merger runs the final exact Windows full gate and owns acceptance/landing. This package lands after w-ba7f and preserves its shared-argv, typed ACP command and qualified-full refusal controls."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "association",
+    "host-recording",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

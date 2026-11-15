@@ -1,0 +1,26 @@
+{
+  "id": "01a0fbbf-19a1-71b2-b246-225cd7604896",
+  "external_ref": null,
+  "title": "Claude background-task frames during an open host attempt bar a pre-effect transient error from its automatic retry",
+  "outcome": "It is settled, on evidence about Claude Code's producer semantics, whether a background task's system frames (task_notification, task_started, task_updated, background_tasks_changed) arriving inside an open host attempt leave that attempt safe to replay. The automatic retry follows that decision, with a test for each subtype after `started` and the prompt-hook barrier as the negative control.",
+  "acceptance": [
+    "Claude background-task frames during an open host attempt bar a pre-effect transient error from its automatic retry is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

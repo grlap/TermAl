@@ -1,0 +1,28 @@
+{
+  "id": "01a1a61e-87fc-7650-ac51-23c0256d6f41",
+  "external_ref": null,
+  "title": "Avoid context observer reservations for undeclared Engram projects",
+  "outcome": "Ordinary prompt dispatch in a project without an Engram declaration does not create an advisory context observer that can only return NotApplicable.",
+  "acceptance": [
+    "The scheduler uses the current local declaration cache to skip reservation and observer creation for undeclared projects, while a later marker addition still enables context preparation through the existing off-lock declaration refresh.",
+    "A deterministic test proves repeated sends or queue drains without a marker create no context observer and retain correct prompt delivery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

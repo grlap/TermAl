@@ -1,0 +1,38 @@
+{
+  "id": "01a0f981-f25c-7ee3-b73b-5276fbbc403e",
+  "external_ref": null,
+  "title": "Keep sequenced session reads from advancing the global event revision",
+  "outcome": "Keep sequenced session reads from advancing the global event revision",
+  "acceptance": [
+    "A public local-session regression receives an eligible paired tail read at global revision R+3 before a queued SessionCreated at R+1 and proves the new session and metadata remain visible without an unrelated later snapshot; a refused local paired read cannot advance the global ledger.",
+    "Eligible paired local tail and body-bearing creation/fork adoption leave the latest global revision unchanged in every session-read admission/refusal branch. Excluded remote, foreign-epoch and unpaired session reads preserve master's classifier and revision effects. Normal global action-response processing is not promoted to a body certificate.",
+    "The exact corrected input passes focused regressions, the full five-stage gate and a fresh complete independent Codex/Claude pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0fe83-8e3a-7b02-b65c-773c661fc473",
+  "disposal_reason": "Greg closed the parent P0 w-1b692f268123 at about 21:25Z on 2026-10-02 (note 13ee75cf). This required child continues as standalone work in w-773c661fc473, so it no longer blocks the parent. Coordinator: Termal::Fable2.",
+  "completion": null
+}

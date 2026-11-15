@@ -1,0 +1,26 @@
+{
+  "id": "01a10a03-1ab6-7573-b0fa-d654998d4a06",
+  "external_ref": null,
+  "title": "park_unknown_engram_authorization reads the Engram budget clock on entry even when it schedules no retry",
+  "outcome": "In src/engram_queued_admission.rs (~:573), park_unknown_engram_authorization calls self.engram_budget_clock().now() on function entry, before it knows the park is current or will schedule an admission retry. A superseded or unscheduled park takes a clock it never uses, the pattern removed from four readers by 19564b5 ('read the clock only where it is used'). Move the read to just before the scheduling call, as inner.engram_budget_clock_snapshot().now() under the lock. No functional impact today: production runs on the constant real clock, and the tests reaching the park choose their clock.",
+  "acceptance": [
+    "park_unknown_engram_authorization reads the Engram budget clock on entry even when it schedules no retry is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

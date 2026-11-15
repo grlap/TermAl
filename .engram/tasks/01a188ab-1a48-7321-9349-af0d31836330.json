@@ -1,0 +1,61 @@
+{
+  "id": "01a188ab-1a48-7321-9349-af0d31836330",
+  "external_ref": null,
+  "title": "Propagate owned SSH stdout EOF to the federation control stream before startup expires",
+  "outcome": "When the owned federation SSH child closes stdout or its reader terminates, the production pipe bridge closes its async write side so startup sees terminal transport loss promptly instead of waiting for a misleading startup timeout, while preserving exact child ownership and cleanup.",
+  "acceptance": [
+    "A deterministic isolated child-process regression exercises the production federation_stdio_control/take_control_stream path: terminal stdout EOF or read error closes the async control input before the startup deadline and is classified as linkDownBeforeHello rather than startupExpired.",
+    "Deterministic negative controls distinguish an alive silent or partial-hello child reaching the unchanged startup deadline from a terminated child; no startup timeout is increased and no real SSH or live peer is required.",
+    "Regression checks cover child/local-stream closure and bounded thread/process cleanup, retaining owned-child reap-before-replace, no-overlap and every credential, material, enrollment, authentication and authority fence.",
+    "The exact final input passes the required independent review pair and full five-stage gate; the test record names the deterministic EOF and ownership regressions actually executed."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "EOF",
+    "diagnostics",
+    "federation",
+    "greg-reported",
+    "mac",
+    "regression",
+    "remote-mailbox",
+    "ssh"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a187f2-acc8-7242-8ab8-39b36c866297",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

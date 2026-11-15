@@ -1,0 +1,37 @@
+{
+  "id": "01a155f2-2557-7331-8fad-2a46e1d3cd10",
+  "external_ref": null,
+  "title": "Win2 (DESKTOP-9BFCGFI) O1 non-secret preparation by agents (sshd forwarding, host key, PATH, inactive settings)",
+  "outcome": "Agents perform every non-secret preparation for Win2 (DESKTOP-9BFCGFI, 192.168.50.57, remote session-13475) as the second satellite, per Greg via Engram::Advisor (TermAl mailbox b9d13887 #1298). Covered: effective sshd forwarding policy, checked with whatever elevation the remote session legitimately has (or reported as needing elevation); host-key verification against central's pinned entry; a Git-ignored known-hosts pin file on A for Win2 if needed; the TermAl launch PATH and toolchain as the process inherits them; the Win2 local federation settings only where safe. Only protected credential creation and placement and the separate post-O1 activation word stay with Greg. No secret value appears in messages, Git or shell history. It runs independently of the Mac work and never delays M4→M6. Follows the read-only precheck w-99fbb5bf6aca.",
+  "acceptance": [
+    "A note records, per preparation step (sshd forwarding policy, host-key verification, A pin file for Win2, Win2 launch PATH and toolchain, Win2 local federation settings), what was done or verified, by which agent and session, with commands, outputs and times, or why the step was deferred as unsafe or needing elevation; no secret value is recorded.",
+    "The note states the remaining acts that only Greg performs (protected credential placement, any step needing elevation the agent lacks, and the activation word), each with host and exact account or setting."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "greg-directed",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed Win2 non-secret preparation: verified strict SSH/repository pin and non-secret known-hosts reference, actual running TermAl PATH/toolchain, safe durable disabled satellite binding and assigned port availability. Recorded exact elevated SSH/admin-key actions, protected pair accounts/reference pwin2-a-win2-pair-v1, and separate post-O1 activation word. Independent Sonnet evaluation a47eb097226749249b536f9a6d060271 passed both criteria at cut68; no O1/activation or secret placement performed.",
+    "completed_at": "2026-10-19T21:26:58.921097800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

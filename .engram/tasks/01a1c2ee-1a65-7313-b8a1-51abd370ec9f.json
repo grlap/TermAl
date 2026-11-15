@@ -1,0 +1,24 @@
+{
+  "id": "01a1c2ee-1a65-7313-b8a1-51abd370ec9f",
+  "external_ref": null,
+  "title": "Remove self-comparing EOOwnerSources assertions from source-observation tests",
+  "outcome": "No test asserts that the test-only EOOwnerSources map equals or differs from itself. The assertions at engram_turn_observations.rs:356 and :654, engram_source_root_naming.rs:4942 and the final one in engram_drift_reaches_store.rs are deleted, or their messages move onto the checkout_state comparisons that carry the guarantee. No replacement tests are added.",
+  "acceptance": [
+    "Remove self-comparing EOOwnerSources assertions from source-observation tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a1413e-d27b-7e22-80ba-be63d3592407",
+  "external_ref": null,
+  "title": "Replace the isolated HOME consumer accept barrier busy-spin with a bounded blocking wait",
+  "outcome": "Replace the isolated HOME consumer accept barrier busy-spin with a bounded blocking wait",
+  "acceptance": [
+    "The isolated-HOME consumer barrier in src/tests/home_fixture.rs no longer yields in a nonblocking accept loop: it waits in a blocking or parked wait bounded by phase_sync::DEADLOCK_GUARD and fails with its barrier message when the consumer never connects.",
+    "The home_fixture tests pass in a full five-stage gate on a master tree that contains the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Train-2 package landed at 9c80a234; acceptance evaluation 13151844dc95462387c2c26d34d975e9 passed 2/2.",
+    "completed_at": "2026-10-16T00:01:01.872771400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

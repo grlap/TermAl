@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8a8cda2de313",
+  "external_ref": "tm-7cu.34",
+  "title": "Honor prompt-send FOLLOW intent and resize unfocused visible transcripts",
+  "outcome": "Fix the two findings from the September 4 scroll review against the September 3 FOLLOW/STAY specification: an explicit composer submit must reattach and request the true tail when needed, without reattaching on tab switches or after newer reader navigation; visible non-focused panes must observe late layout growth. Add regression coverage, including preserving STAY and approval behavior. Existing baseline: 197 focused scroll tests pass but send test enforces obsolete STAY behavior; differential resize probe reproduces focused top 1100 vs unfocused top 800.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 856d5df and 9dd8c59 (ancestors of master f7db2c58).",
+  "completion": null
+}

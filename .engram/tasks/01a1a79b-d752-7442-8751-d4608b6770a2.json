@@ -1,0 +1,32 @@
+{
+  "id": "01a1a79b-d752-7442-8751-d4608b6770a2",
+  "external_ref": null,
+  "title": "Exercise Rust late child association and nested gitlink checkpoints with real mutations",
+  "outcome": "Real Git fixture mutations reach the final child materialization and nested-pin checks, with restoration positives, and distinguish them from the earlier child preflight refusals.",
+  "acceptance": [
+    "Exercise Rust late child association and nested gitlink checkpoints with real mutations is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "commit-input-v1",
+    "greg-directed",
+    "low",
+    "review-followup",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

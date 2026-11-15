@@ -1,0 +1,30 @@
+{
+  "id": "01a177cc-a9ca-79c1-9e06-debbed6734b6",
+  "external_ref": null,
+  "title": "Graceful shutdown joins the entire post-listen recovery worker without a deadline",
+  "outcome": "Shutdown keeps the required inventory-loader ownership and persistence drain while bounding or cancelling later recovery stages; a blocked recovery cannot indefinitely delay final persistence and host-lifecycle finish.",
+  "acceptance": [
+    "Graceful shutdown joins the entire post-listen recovery worker without a deadline is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "review-follow-up",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

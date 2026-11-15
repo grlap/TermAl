@@ -1,0 +1,29 @@
+{
+  "id": "01a19466-2d79-7f42-9cf6-3551b1d9102f",
+  "external_ref": null,
+  "title": "Windows B TermAl runner layout is invalid for gates: deep clone path exceeds Windows path limits and sits under a 'target' ancestor (1273 environment failures)",
+  "outcome": "Windows B can run TermAl full and focused gates whose results reflect the input, not the runner layout. The clone and job worktrees live at a short path with no component named target (or any other watcher-ignored name), inside the runner's write scope, git-ignored and protected from Engram cleanup. Per-job TEMP is short, and a known-good input passes the full gate there.",
+  "acceptance": [
+    "Windows B TermAl runner layout is invalid for gates: deep clone path exceeds Windows path limits and sits under a 'target' ancestor (1273 environment failures) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "remote-runner",
+    "test-runs",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

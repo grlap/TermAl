@@ -1,0 +1,32 @@
+{
+  "id": "01a1b17b-271b-7392-afc6-964840974764",
+  "external_ref": null,
+  "title": "Avoid repeated Codex launcher artifact observation after an unchanged locator",
+  "outcome": "A Codex launcher locator is validated and observed when first established or changed, without repeating canonicalization, disk reads, unchanged persistence and run refresh for every later output delta.",
+  "acceptance": [
+    "Unchanged later output deltas do not repeat launcher artifact I/O or unchanged persistence.",
+    "First locator, conflicting locator, runtime/generation fences and native association behavior remain covered; no check or credit is invented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "codex",
+    "cross-project",
+    "diagnostics",
+    "performance",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

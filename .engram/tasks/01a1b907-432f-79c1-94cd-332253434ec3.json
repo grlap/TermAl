@@ -1,0 +1,30 @@
+{
+  "id": "01a1b907-432f-79c1-94cd-332253434ec3",
+  "external_ref": null,
+  "title": "Make the restored declared-row regression detect a fresh END-time rebinding",
+  "outcome": "The restored-row control fails if ordinary task END reconstructs a missing original declaration binding.",
+  "acceptance": [
+    "Make the restored declared-row regression detect a fresh END-time rebinding is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "declared-commands",
+    "greg-reported",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1b88b-a533-71a0-aa76-104f4061e14f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1ba27-9587-72d0-9955-4b35db93fa64",
+  "disposal_reason": "Continue as independent work after w-104f4061e14f completed on landed d3499b97. This optional Low/Note follow-up remains open and is not claimed fixed; preserve its evidence and acceptance.",
+  "completion": null
+}

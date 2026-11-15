@@ -1,0 +1,36 @@
+{
+  "id": "01a18a20-8a69-7ae1-ad1c-b7c81c59f96e",
+  "external_ref": null,
+  "title": "A test run wait on a durably registered run that the index has not caught up with is refused 404 after one bounded rescan",
+  "outcome": "A native wait naming a run that this host has durably registered is accepted and settles once the index catches up, or is refused with a typed reason distinct from an unknown id; an agent never needs to poll or create a duplicate wait to observe such a run.",
+  "acceptance": [
+    "A root session can create one native wait for a same-project run durably registered on this host even when its artifact index entry is absent after the bounded rescan. The wait remains pending during index lag and settles through the existing any/all resume mechanism when that same registered run is indexed and reaches a terminal wait verdict; no polling or replacement wait is required. If the registered run's directory or artifacts become unreadable, or its registration is retired, before a matching index entry appears, the wait settles with a typed unknown verdict naming that reason instead of staying pending indefinitely.",
+    "Unknown ids and runs from another project remain refused; a different request or native locator under the same run id cannot satisfy the registered wait. A durable registration lacking the identity required for safe admission receives an actionable typed refusal distinct from unknown-id 404. Deterministic tests cover registration-only admission, delayed matching-index arrival and terminal delivery, identity/project refusals, and preservation of existing indexed-run and Stop behavior; no test verification credit or run verdict is invented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "native-wait",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed acceptance of the already-landed registration-only native-wait fix; today's Engram launcher label is a separate presentation issue.",
+    "completed_at": "2026-11-11T13:35:58.948560200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

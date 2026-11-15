@@ -1,0 +1,32 @@
+{
+  "id": "01a180ac-c545-7280-8c17-479b8a9cf905",
+  "external_ref": null,
+  "title": "Retain Windows image-base context with bounded raw panic stack addresses",
+  "outcome": "Retain Windows image-base context with bounded raw panic stack addresses",
+  "acceptance": [
+    "Windows raw panic addresses carry sufficient image-base or relative-address context for later mapping, while bounded capture, hook chaining and honest unavailable behavior are preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "deferred",
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18073-bc4d-7e21-8d46-a81c8a3f5351",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

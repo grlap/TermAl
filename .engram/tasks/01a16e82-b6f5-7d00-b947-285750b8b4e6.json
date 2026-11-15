@@ -1,0 +1,62 @@
+{
+  "id": "01a16e82-b6f5-7d00-b947-285750b8b4e6",
+  "external_ref": null,
+  "title": "grant_expired after restart: evaluate→begin gap of 34–49 s on every lane's first turn (TTL 30 s), on the TermAl side; w-c75f did not fix it",
+  "outcome": "Under normal post-restart parallel multi-lane work, a newly issued grant reaches Begin within Engram's unchanged 30-second TTL. TermAl attributes the path by phase, preserves its original 20-second admission budget through the actual transport send boundary, and withholds a proven-unsent Begin when that budget is spent. Retained/possibly-sent Begin recovery remains exact and is never treated as a fresh grant or retired merely by inferred age.",
+  "acceptance": [
+    "Bounded per-admission evidence identifies the session/head/runtime generation and fresh Evaluate request versus retained Evaluate or prepared-Begin replay, and records monotonic boundaries sufficient to separate: pre-Evaluate workdir/bind/held-claims preparation; Evaluate durable preparation and transport queue/write/reply; post-Evaluate state revalidation/promotion/delivery scheduling; exact Begin durable preparation, writer acknowledgement and owner recheck; named-root authority acknowledgement/revalidation; Begin transport queue/write/reply; and post-Begin source capture/provider handoff. State-lock wait and hold are reported separately where measured. Missing phase or producer issuance/expiry data is explicitly unknown; aggregate helper latency and UUID age are not mislabeled as wire time or an authoritative expiry. Evidence remains bounded and excludes routing/delivery tokens and credentials. Evidence is read through host API or diagnostics endpoints and launcher records only, never by opening the live store.",
+    "A first-send Begin retains the original admission/queue-head deadline through all host pre-send work and the control-worker send boundary: a delay in state acquisition, durability acknowledgement, authority preparation, process acquisition or the per-session transport queue cannot reset the budget or authorize a frame after that deadline. The exact Begin must still be durably acknowledged and current before transmission. A stale relative timeout is not a new budget. No Engram TTL increase, durability bypass, authority weakening, guessed producer expiry, or automatic retirement of a possibly-sent request is introduced.",
+    "Phase-controlled regression tests reproduce the confirmed in-scope defect before repair and pass afterward. Coverage includes a healthy fresh grant that begins with time remaining, delays at the post-Evaluate state/promotion, Begin durability/owner-recheck and transport-queue boundaries, expiry before a proven-unsent frame, retained Evaluate returning an older grant, pending exact Begin, and lost-reply/possibly-sent recovery. Tests assert send/non-send and exact request identity, no duplicate provider handoff, original deadline preservation and retained intent after ambiguous outcomes; they do not obtain success by retries, larger timeouts or weakening assertions. Existing root-authority, queued admission, Stop/runtime supersession and replay suites remain green. If the discriminating regression reproduces no in-scope defect, no repair is made under these criteria; the holder reports the result, and the outcome and criteria are re-agreed before any implementation.",
+    "On the final candidate's running build, observe the first admission on five active lanes after a coordinator-approved host restart and at least 20 fresh admissions total across those lanes during at least 15 minutes of ordinary parallel work, without synthetic load or forced retry loops. All fresh successful admissions begin before the unchanged 30-second TTL; no new unexplained 34–49-second first-send gap or fresh-grant grant_expired occurs. Correlated phase evidence attributes any retained-grant expiry or withheld attempt instead of excluding it as an outlier. Report counts, maxima, failures and unavailable timestamps; do not claim producer issuance-to-Begin duration from local reply time alone. An unavailable live window remains unmet, not replaced by unit-test success. Host restart authority/timing remains the existing coordinator/Greg process.",
+    "The exact final input has the required independent review pair with no outstanding in-scope Medium-or-higher findings, a host-recorded green full gate and relevant focused checks, and evidence for C1–C4 tied to their source/build identities. Deterministic tests and an installed-but-not-running binary do not satisfy C4. Existing sibling holds and retry/expiry settlement ownership remain in force."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "admission",
+    "engram-control"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

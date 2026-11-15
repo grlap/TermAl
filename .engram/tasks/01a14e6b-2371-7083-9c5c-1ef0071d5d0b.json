@@ -1,0 +1,34 @@
+{
+  "id": "01a14e6b-2371-7083-9c5c-1ef0071d5d0b",
+  "external_ref": null,
+  "title": "Recover unresolved delivery intents retained after their native owner is deleted",
+  "outcome": "An operator can inspect and safely reconcile retired-owner delivery intents without releasing uncertain canonical outcomes or permanently exhausting the sender-host pending bound.",
+  "acceptance": [
+    "Retired-owner pending and unknown intents remain fenced from recreated sessions, and recovery consults canonical outcomes before terminal settlement or payload collection.",
+    "A supported operator recovery path handles retained committed/refused/abandoned outcomes; uncertain delivery is never treated as absent.",
+    "Regression evidence covers owner deletion with pending/unknown rows, same native id recreation, global quota accounting and recovery after restart."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-891c-7991-8001-8b21e7066000",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

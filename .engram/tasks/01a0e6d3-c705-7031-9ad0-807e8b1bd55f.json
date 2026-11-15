@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c705-7031-9ad0-807e8b1bd55f",
+  "external_ref": "tm-ncc6.3.2",
+  "title": "Cancel: terminate the process tree, then record canceled from the launcher's terminal evidence",
+  "outcome": "Cancel -> TerminalProcessTree::kill_before_reap (job object / process group) -> bounded wait -> read results.json; record state canceled with reason 'canceled by <session/user>'; TermAl never writes into the run dir.\n\nREVIEW FIXES (F2): after TerminateJobObject / killpg the launcher writes nothing: results.json remains state running with the killed stage running and later stages unrun, no ended; `summary` prints UNKNOWN. TermAl records the host verdict canceled + reason 'canceled by <session/user>' (sticky across boot) and never touches the run dir.",
+  "acceptance": [
+    "- Grandchild processes are gone after cancel (fixture spawns a grandchild).\n- results.json stays running/unrun for the killed run; the record is canceled with the reason; `summary` on that dir prints UNKNOWN.\n- Cancel of a terminal (passed/failed/canceled/unknown) run -> 409."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a426f8314ee",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

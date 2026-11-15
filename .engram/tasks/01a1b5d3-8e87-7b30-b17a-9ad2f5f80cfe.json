@@ -1,0 +1,28 @@
+{
+  "id": "01a1b5d3-8e87-7b30-b17a-9ad2f5f80cfe",
+  "external_ref": null,
+  "title": "Read-only delegation observation no longer sees writes to Git-ignored paths",
+  "outcome": "The host's read-only write-policy observation for delegations decides deliberately whether writes into Git-ignored paths are observed, using the pre-filter observations if needed.",
+  "acceptance": [
+    "Read-only delegation observation no longer sees writes to Git-ignored paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "review-followup",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,41 @@
+{
+  "id": "01a1d5c0-38d4-7610-9db4-a7e55a39af8e",
+  "external_ref": null,
+  "title": "Gemini harness: launch Antigravity CLI (`agy acp`) through the existing ACP adapter",
+  "outcome": "TermAl's Gemini harness launches Antigravity CLI as `agy acp` through the existing ACP runtime (initialize, session/new, prompt, cancel; resume/load only when advertised), with approval modes mapped to agy's flags and readiness and docs updated, so EO criterion 6's Gemini row can be evidenced once Greg has done agy's one-time login.",
+  "acceptance": [
+    "The Gemini harness resolves the `agy` executable through the normal executable/configuration path (no hard-coded user profile) and launches `agy acp`; approval modes map Yolo→--dangerously-skip-permissions, AutoEdit→--mode accept-edits, Plan→--mode plan, Default→no flag; readiness checks agy instead of gemini; behavioural launch tests cover each mode; file:line.",
+    "The existing ACP runtime is reused unchanged in protocol terms. Session resume/load and permission handling stay capability- and advertisement-driven, the auth flow selects only advertised methods, and TermAl never runs agy --login or mutates credentials or settings.",
+    "A bounded ACP contract smoke test against the real agy binary covers: initialize, recording the protocol version and advertised authMethods; session/new; one harmless prompt; a permission response; and cancel. It reports load/resume capability as observed. Steps that need a login are reported as blocked-on-auth, not as passing.",
+    "docs/features/gemini-cli-integration.md (and readiness help) describe Antigravity CLI, cite Google's transition note, and keep the old Gemini CLI path only where it is still supported. The change has a clean review pair and passes the full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "gemini",
+    "greg-directed",
+    "harness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Gemini harness delivered via agy acp, capability-driven ACP/auth, readiness/docs, exact approval-mode launch tests. Fresh independent acceptance71df772ceef84ea9b2848f4854b835da passed4/4 at revision2 on a6f605aa; original real smoke3/0 reused with full8-path byteidentity proof, finalpair noMedium+ and comboXsame-treeFULL passed. Binding-only revision authorisedFable, criteriontexts unchanged; no duplicateFULL/liveagy/login/config. Admission-only9/0 separately recorded.",
+    "completed_at": "2026-11-14T17:43:06.254291Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

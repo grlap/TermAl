@@ -1,0 +1,29 @@
+{
+  "id": "01a17b1b-e3f4-7360-9a5d-99c74c5f3c1a",
+  "external_ref": null,
+  "title": "Delegation and wait repairs void the stateDiff baseline, costing an alignment broadcast and a stale window per event",
+  "outcome": "Delegation and wait repairs void the stateDiff baseline, costing an alignment broadcast and a stale window per event",
+  "acceptance": [
+    "Measured after the state-diff landing: the stateBroadcast counters (markedFullStates.alignmentRequest vs diffsEmitted, on GET /api/diagnostics/persistence) over a delegation-heavy window are recorded.",
+    "If alignments are a material fraction of cuts, delegation and test-run-wait repairs no longer void the diff baseline on every event: for example a covering HTTP repair keeps the baseline when provably safe, or the repair is answered from a marked cut. This comes with deterministic tests and no loss of the exact-base guarantee."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "performance",
+    "review-low",
+    "state-broadcast"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

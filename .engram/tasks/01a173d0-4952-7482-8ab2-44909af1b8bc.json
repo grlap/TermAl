@@ -1,0 +1,38 @@
+{
+  "id": "01a173d0-4952-7482-8ab2-44909af1b8bc",
+  "external_ref": null,
+  "title": "Keep domain exact-read summaries consistent with verified wake causes",
+  "outcome": "Domain exact-message summaries agree with the existing verified wake cause while preserving receipt, acknowledgement and delivery behavior.",
+  "acceptance": [
+    "On a domain exact-message read, notification_summary and current_status.summary describe the existing verified receiver outcome cause, including its recorded observation time when present, without contradicting that cause with the stored wake disposition. Pending or unavailable evidence remains pending or unavailable, and acknowledgement alone never becomes provider handoff.",
+    "The fix reuses the current cause and shared summary owners. It leaves the immutable append receipt, notification-state vocabulary, recipient acknowledgement, existing identity/authority checks and native relay progress unchanged, and adds no RPC, poller, durable state or native wake implementation.",
+    "An ordinary regression through the production domain exact-read path fails before the fix and passes afterward, covering a retained unconfirmed disposition with verified handoff and pending/unavailable evidence, while retaining receipt and acknowledgement semantics. Fresh focused coverage passes on the candidate, a fresh Codex/Claude pair has no outstanding in-scope Medium-or-higher finding, and one READY with exact commit/tree and evidence is sent to Opus2; final exact-input FULL and landing remain integration-owned."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered cause-consistent domain exact-message summaries on master1098a838; production regression, focused coverage, fresh final pair and exact-tree FULL recorded.",
+    "completed_at": "2026-11-09T07:43:29.513029200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

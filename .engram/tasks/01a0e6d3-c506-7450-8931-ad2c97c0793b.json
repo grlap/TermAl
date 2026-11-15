@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c506-7450-8931-ad2c97c0793b",
+  "external_ref": "tm-fjx",
+  "title": "Add Codex Fast mode support",
+  "outcome": "Expose Codex's catalog-advertised Fast service tier as session-scoped TermAl authority. Persist and hydrate the setting, send serviceTier on Codex app-server thread/turn requests, provide settings and slash-command controls, surface effective state, and cover backend/frontend behavior without enabling Fast for unsupported models.",
+  "acceptance": [
+    "Codex sessions show Fast only when the active model catalog advertises it; users can toggle it from settings and /fast; the choice persists and is included in subsequent app-server requests; changing to an unsupported model safely disables Fast; remote sessions proxy the setting; relevant Rust and UI tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

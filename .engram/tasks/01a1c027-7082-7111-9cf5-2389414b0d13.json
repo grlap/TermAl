@@ -1,0 +1,24 @@
+{
+  "id": "01a1c027-7082-7111-9cf5-2389414b0d13",
+  "external_ref": null,
+  "title": "live_naming=false arm of send_engram_root_event_until is reachable only from test code",
+  "outcome": "The non-test build carries no unreachable branch: remove the parameter and let the test driver own its strict-learning variant, or delete the driver and historical_cleanup_keeps_strict_owner_learning_after_the_live_association_moves if historical cleanup no longer exists in production. Source: Claude session-17028 review of a06f2c92, src/engram_named_root_binding.rs:1855.",
+  "acceptance": [
+    "live_naming=false arm of send_engram_root_event_until is reachable only from test code is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

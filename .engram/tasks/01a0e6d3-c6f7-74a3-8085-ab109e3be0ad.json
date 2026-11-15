@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6f7-74a3-8085-ab109e3be0ad",
+  "external_ref": "tm-uvsv",
+  "title": "Teach the mailbox protocol and CLI fallback once to non-Codex root agents through their managed instructions",
+  "outcome": "Raised by the Claude reviewer on the compact-wake slice (2026-09-06): the metadata-only mailbox wake names only termal_read_mailbox, and the read -> process -> acknowledge protocol plus the TERMAL_CLI / TERMAL_SESSION_ID / TERMAL_BASE_URL fallback are now taught once - in the MCP tool descriptions, the coordination CLI help, docs/features/agent-mailboxes.md and the TermAl-managed Codex AGENTS.md section. That managed section exists only for Codex homes. A Claude, Gemini or Cursor root session whose MCP tools are unavailable therefore has no in-band pointer to the CLI route. Desired: an equivalent managed-instructions surface for the other hosted agents (whatever each runtime reads once per session: Claude's injected instructions, ACP agents' instruction channel), carrying the same short protocol and the CLI fallback with env-supplied identity, kept in one shared text so the four copies cannot drift; the wake itself stays metadata-only. Acceptance: each supported root agent receives the teaching exactly once per session; a test pins the shared text and its presence per agent; the wake body unchanged.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in a0e3d29 (ancestor of master f7db2c58).",
+  "completion": null
+}

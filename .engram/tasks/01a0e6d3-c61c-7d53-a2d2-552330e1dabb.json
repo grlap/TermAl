@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-552330e1dabb",
+  "external_ref": "tm-m6r1.16",
+  "title": "Beads adapter: Unix test for npm-symlink resolution through canonicalize",
+  "outcome": "Review round 14 (Claude Note, test gap). beads_native_beside has two resolution paths: the sibling node_modules/@beads/bd/bin layout (Windows npm launcher) is tested; the fs::canonicalize(launcher) path - a Unix npm symlink into the package bin directory, resolved to the native binary beside the symlink target - is not exercised by any test. That path decides the production binary on Linux and macOS. Follow-up: a #[cfg(unix)] test that symlinks bd to a bd.js file with a shebang, places a native stand-in beside it, and asserts resolve_beads_binary_on_path / beads_native_beside return the native binary (and that a shebang stand-in is rejected). Not written on the Windows host because it could not be run there; an unrun test is not evidence.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03; no \"beads\" remains in src/work_*.rs on master.",
+  "completion": null
+}

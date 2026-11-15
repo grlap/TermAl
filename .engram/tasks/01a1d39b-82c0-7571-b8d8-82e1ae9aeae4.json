@@ -1,0 +1,27 @@
+{
+  "id": "01a1d39b-82c0-7571-b8d8-82e1ae9aeae4",
+  "external_ref": null,
+  "title": "Check whether monitoring-disposition confirmation should publish the merged public test-run card",
+  "outcome": "It is decided, with a behavioural test, whether the monitoring-disposition confirmation path in src/test_run_observations.rs (about line 440), which finishes a pending row as durable, publishes the merged public card (test_run_public_observation) for a row merged into a launcher artifact, instead of the raw provider-row summary. If the raw summary can put the provider-only row back next to its card in the client, the path publishes the public card.",
+  "acceptance": [
+    "Check whether monitoring-disposition confirmation should publish the merged public test-run card is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

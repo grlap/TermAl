@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6ae-7531-9609-bed43ab6913a",
+  "external_ref": "tm-r0v9",
+  "title": "termal_resume_after_test_runs rejects the run's own owner with 400 'run is not in the waiting session's project'",
+  "outcome": "Seen 2026-09-27 about 00:50Z. Termal::Codex (session-7809, workdir C:\\github\\Personal\\TermAl) started full gate test-465d8783-dfd8-41a4-84b6-ffbc58656bc2 in the TermAl main checkout and called termal_resume_after_test_runs on it: 400 'run is not in the waiting session's project'. The same call from Termal::Opus (session-7304, same workdir) was accepted at once (wait test-run-wait-f2d2765a-e285-4273-a921-f08634805ca6). Its wait record shows the run indexed in the TermAl project, worktree C:/github/Personal/TermAl, ownerSessionId session-7809, so the run's own owner, in the same project, was refused. The wait delivered PASS and was forwarded by mailbox as a workaround. Not diagnosed: how session-7809's project binding differs from session-7304's (a different or missing projectId on the session record, or path normalisation such as case, separators or a trailing slash in the project-membership check). Wanted: find the membership check used by POST /api/sessions/{id}/test-run-waits, reproduce with the owner session, fix, and add a regression where a session waits on its own run.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

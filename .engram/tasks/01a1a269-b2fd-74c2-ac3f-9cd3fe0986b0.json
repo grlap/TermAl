@@ -1,0 +1,30 @@
+{
+  "id": "01a1a269-b2fd-74c2-ac3f-9cd3fe0986b0",
+  "external_ref": null,
+  "title": "Remove retired Engram init flags from acceptance-policy and readiness live tests",
+  "outcome": "The two ignored real-binary acceptance-policy/readiness tests initialize their disposable stores with the current pinned Engram CLI while preserving their policy and readiness assertions.",
+  "acceptance": [
+    "The init invocations in src/tests/acceptance_settings.rs and src/tests/engram_readiness.rs use only arguments accepted by the selected approved pinned Engram, with existing explicit disposable home/project placement retained.",
+    "Existing acceptance-policy reason-free write/replay and readiness assertions are preserved, or any obsolete precondition has an explicit reviewed disposition.",
+    "Relevant focused or pinned disposable checks pass on the exact candidate, and the independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

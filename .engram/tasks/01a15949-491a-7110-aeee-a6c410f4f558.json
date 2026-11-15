@@ -1,0 +1,24 @@
+{
+  "id": "01a15949-491a-7110-aeee-a6c410f4f558",
+  "external_ref": null,
+  "title": "A delegation spawn held for persistenceUnknown offers only \"cancel\" and retryEligible=false although it recovers automatically",
+  "outcome": "When a spawned delegation is held because Engram authorization persistence is not yet durable and the host will retry automatically, the hold response says so (automatic recovery pending, with an expected bound) and does not present cancel as the only action, so a parent following the actions list does not cancel a delegation that is about to run.",
+  "acceptance": [
+    "A delegation spawn held for persistenceUnknown offers only \"cancel\" and retryEligible=false although it recovers automatically is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

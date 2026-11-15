@@ -1,0 +1,68 @@
+{
+  "id": "01a112e4-b83e-7a81-9fb7-7a5ea1183a8f",
+  "external_ref": null,
+  "title": "Make reviewer and evaluator roles harness-agnostic; remove operating-procedure provider restrictions",
+  "outcome": "Any registered harness can run a reviewer or evaluator through a common host-owned delegation/result protocol. Adapter transport and isolation differences are implemented at the adapter boundary; role eligibility, evaluator selection and UI contain no privileged vendor lists or encoded team operating procedures.",
+  "acceptance": [
+    "Reviewer and evaluator role admission uses one provider-independent contract for delegation identity, role, attempt, required workspace access and result submission. No role-specific whitelist of Claude/Codex/Kimi or equivalent renamed table determines eligibility; adding a conforming harness requires no change to review/evaluation policy logic.",
+    "All currently registered harnesses (Codex, Claude, Cursor, Gemini, OpenCode and Kimi) have an implementation path for both roles, including the required result submission and enforced read-only access. Existing adapter gaps are repaired and covered by adapter conformance tests; an unavailable installation/session may fail with its actual technical reason, but missing implementations cannot be hidden by marking the overall feature complete.",
+    "The common authenticated submission boundary derives identity, delegation, role, attempt and evaluation target from host-owned state; validates schema and permitted operations; preserves exact retries, terminal/Stop behavior, source/evidence freshness and caller isolation. Wrong-child, wrong-role, expired/stale attempt, spoofed tool identity and malformed submission tests refuse without unintended effects. Free-form final text is not converted into an authoritative passing result.",
+    "Project evaluator defaults, request overrides, automatic selection, model attribution and existing UI selector all use the registered harness data without two-vendor filters or hardcoded 'other vendor' selection. Explicit choices are respected, existing valid settings remain compatible, unavailable choices produce actionable reasons, and harness identity is kept separate from the actual model/provider used.",
+    "Tests replace operating-procedure assertions with shared role-contract tests, adapter protocol conformance tests and an end-to-end reviewer/evaluator matrix. A new fake conforming harness and provider-label permutations work without changes to the role rules. Existing authorization, isolation, malformed-result, cancellation, retry and stale-evidence controls remain.",
+    "Documentation and errors explain technical contracts and adapter support accurately. Team review-pair preferences and temporary substitutions stay outside product role eligibility. Existing reviewer/evaluator choices are broadened without an unrelated UI redesign or new general-purpose policy engine.",
+    "Each independently landable change is reviewed and tested on its exact input; remaining adapter or integration gaps are explicit. Completion requires the common path and all registered-harness role implementations, rather than a Kimi-only exception or merely returning true from the old support methods."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "architecture",
+    "delegations",
+    "user-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a119bf-ef2e-7c23-a71c-d06a9b5bff47"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

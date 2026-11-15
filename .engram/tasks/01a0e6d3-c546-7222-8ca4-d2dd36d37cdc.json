@@ -1,0 +1,35 @@
+{
+  "id": "01a0e6d3-c546-7222-8ca4-d2dd36d37cdc",
+  "external_ref": "tm-kei8",
+  "title": "Tail hydration request burst while a session streams: identical ?tail=20 fetched dozens of times per second-scale window",
+  "outcome": "A local session that is streaming does not cause repeated identical tail requests, whether or not it is the selected pane. Sessions outside the owner's domain (remote sessions, deltas without a body sequence and epoch) keep master's repair retry, tracked under w-5dae8178b905.",
+  "acceptance": [
+    "A note records the reproduction result on master d705038: the two legacy cases, the classification of each answer, and that no redundant queued fetch occurs.",
+    "The residual legacy retry cycle is recorded on w-5dae8178b905 with the two cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed without a product change, on Greg's word (\"you could close that now, this is hard to repo / if I see any issues I will file a new bug\"), recorded by Termal::Architect1 in note cef94a13; that withdrew the post-restart capture criterion. Criterion 1: Termal::Opus3's reproduction on master d705038 (note 1d1d7ce6) found no redundant queued fetch. Criterion 2: the residual legacy retry cycle for sessions outside the owner's domain is recorded on w-5dae8178b905 (note a9460478, reproduced here in note 65c0c26b). That cycle ends when those sessions move to the owner path. Independent evaluation d6751a68 passed 2/2 at revision 4. Unverified, stated plainly: that the burst is gone for local sessions is inferred, not observed. The five source_mutation obligations come from Opus3's unlanded reproduction attempts.",
+    "completed_at": "2026-10-02T23:07:01.352330400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

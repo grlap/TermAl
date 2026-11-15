@@ -1,0 +1,33 @@
+{
+  "id": "01a14b8b-b850-7b22-b225-923c41f0c72c",
+  "external_ref": null,
+  "title": "Define session retention and implement a non-destructive compaction eligibility report",
+  "outcome": "Document the agreed archive/retention policy and provide a bounded read-only dry-run report of eligible archived sessions. This slice changes no transcript, result, receipt, launcher artifact or verification record and enables no destructive purge. Separate implementation of cleanup requires its own explicit policy/authority and criteria.",
+  "acceptance": [
+    "The policy defines root archival only on explicit close/archive or trusted terminal evidence, never idle/error; one enumerated settled predicate covers runtime, queues/holds, delegation/result submission, waits, run ownership, carried checks/source fences, restart-voidable registration, unread targeted wake/retained prompt, watches/restores and pins; unknown eligibility remains retained.",
+    "The policy proposes eligibility review after 14 days and compaction of verbose bodies and previews no earlier than 30 days after the later of verified terminal time and final obligation settlement, with purge off by default, no automatic deletion, and any operator enable requiring Greg's separate recorded authorization; compact audit identity and required result/receipt/evaluation evidence stay lossless, launcher artifacts and Engram records are excluded, and parent deletion does not make retained history undiscoverable.",
+    "A bounded dry-run report returns at most 100 candidates per page with exact reasons, versions and hold/reference evidence, performs no deletion or compaction, and has tests covering age boundaries, missing timestamps, pins, pending obligations, new follow-up/hold races and absent child rows; documentation explicitly states a dry-run is not authorization to apply.",
+    "The exact implementation receives the required independent review pair and full passing gate; this task contains no automatic destructive maintenance or global VACUUM.",
+    "The report measures daily and weekly growth of sessions, delegations, test runs and their bytes from existing records (no new collector or background task), records the figures on this item to size archive capacity, and the documentation states that Engram remains the standard operational status source and historical TermAl data is loaded only on demand."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "non-destructive",
+    "performance",
+    "retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a147c0-22a0-7983-8bb2-b17b985f5dbc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

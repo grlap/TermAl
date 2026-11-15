@@ -1,0 +1,29 @@
+{
+  "id": "01a11c4d-24d8-7512-bf27-f673a2e9ce71",
+  "external_ref": null,
+  "title": "A Kimi session's detached full gate is refused credit: \"its command at completion did not match its start\"",
+  "outcome": "A Kimi (ACP) root session can launch the full gate in a supported way and have its terminal result recorded as a host verification, or the refusal names a launch shape that will be credited.",
+  "acceptance": [
+    "The cause is classified with evidence: which command text the host saw at start and at completion for a Kimi detached gate, and why they differ.",
+    "A documented launch shape for Kimi root sessions gets a passing detached full gate recorded as a host verification, or the refusal names that shape; a test covers the start/completion matching for Kimi's reported commands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "kimi",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

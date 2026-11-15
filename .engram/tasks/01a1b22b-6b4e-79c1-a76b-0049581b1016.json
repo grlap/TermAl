@@ -1,0 +1,30 @@
+{
+  "id": "01a1b22b-6b4e-79c1-a76b-0049581b1016",
+  "external_ref": null,
+  "title": "Test backend SSE global workspace invalidation after file-event receiver lag",
+  "outcome": "An SSE-level regression observes the recovery frame when the real file-event broadcast receiver falls behind, proving empty-path subtree coverage and the current file-event revision used by UI ordering.",
+  "acceptance": [
+    "A regression drives real file-event broadcast receiver lag through the SSE handler and asserts a workspaceFilesChanged recovery frame containing empty path and kind subtree.",
+    "The asserted recovery revision is current and the test discriminates missing, stale or incorrectly scoped recovery without timing-only assumptions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "sse",
+    "tests",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

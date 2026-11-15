@@ -1,0 +1,26 @@
+{
+  "id": "01a109e5-98c1-77d1-885c-89afa57353b7",
+  "external_ref": null,
+  "title": "Delegation summary note: the numeric-range walk-back treats a preceding label number as a range and hides the note for 'Round 2: two issues remain'",
+  "outcome": "In src/delegation_result_parser.rs (~:480), the ForNote count check walks back over a numeric range even when the counting token is a word number, and it cannot tell ':' from '-' because tokenization drops separators. So 'Round 2: two issues remain.' or 'Step 3: 2 issues remain.' walk back to the label word and the count is taken as a step label: no inconsistency note, and a packet without a preamble looks clean. Only the advisory note is affected; AsBefore findings recovery is unchanged. Fix direction: walk back only from a numeric token, ideally only across a kept '-' separator; add both summaries to the note-positive test.",
+  "acceptance": [
+    "Delegation summary note: the numeric-range walk-back treats a preceding label number as a range and hides the note for 'Round 2: two issues remain' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

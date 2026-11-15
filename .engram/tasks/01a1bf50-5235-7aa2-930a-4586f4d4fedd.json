@@ -1,0 +1,31 @@
+{
+  "id": "01a1bf50-5235-7aa2-930a-4586f4d4fedd",
+  "external_ref": null,
+  "title": "Integrate combo25 on 1098a838: Stage A direct prompt foundation, current-holder naming, runtime observation counts",
+  "outcome": "The composed candidate is on master as one commit, gated on DL560 and Windows, pushed, installed on Central and DL560, with its floor advance stated in the landing report and restart message.",
+  "acceptance": [
+    "Integrate combo25 on 1098a838: Stage A direct prompt foundation, current-holder naming, runtime observation counts is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Combo25 landed as fa26ee07, gated on DL560 and Windows B, pushed and installed on Central and DL560; floor advance stated. No acceptance evaluation exists.",
+    "completed_at": "2026-11-09T09:45:01.995382300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

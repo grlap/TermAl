@@ -1,0 +1,28 @@
+{
+  "id": "01a0f858-5983-73d1-9bd6-d6f3508cf758",
+  "external_ref": null,
+  "title": "A Defer whose card cannot be saved takes its abort-retry authority from the state at failure time, not from the target its evaluation ran under",
+  "outcome": "A Defer whose card cannot be saved takes its abort-retry authority from the state at failure time, not from the target its evaluation ran under",
+  "acceptance": [
+    "A Defer whose card cannot be saved takes its abort-retry authority from the state at failure time, not from the target its evaluation ran under is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

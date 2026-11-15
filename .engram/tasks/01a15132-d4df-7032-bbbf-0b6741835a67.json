@@ -1,0 +1,36 @@
+{
+  "id": "01a15132-d4df-7032-bbbf-0b6741835a67",
+  "external_ref": null,
+  "title": "Check the unused common cleanup outcome variant in non-test builds",
+  "outcome": "Check the unused common cleanup outcome variant in non-test builds",
+  "acceptance": [
+    "Observe the non-test cargo-check stage on the exact common cleanup-contract input and determine whether DedicatedCleanupOutcome::Unresolved produces an unused-variant warning; preserve the actual diagnostic or a no-warning finding.",
+    "If confirmed, apply the existing intentional-unattached-code annotation convention without changing runtime semantics, and validate the resulting exact input with the maintained gate and independent review; if absent, close with the observed counterevidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "platform",
+    "process-cleanup",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-eca0-70a0-b9a7-c1af4362f3ef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

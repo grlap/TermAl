@@ -1,0 +1,51 @@
+{
+  "id": "01a122b5-d458-7ee0-9fdf-ae2cb3b52259",
+  "external_ref": null,
+  "title": "A focused launcher build whose evidence is valid is recorded \"Build Unknown: … interval validation rejected\", probably because the host observes the command start after the launcher's request start",
+  "outcome": "A focused launcher build whose own records are consistent and whose native exit is 0 is recorded as a passed Build when the only discrepancy is benign event latency between the command's real start and the host observing it. A genuinely inconsistent interval is still rejected, and the rejection says which comparison failed.",
+  "acceptance": [
+    "The holder's note identifies, with file:line, which comparison in src/engram_build_checks.rs:384-402 rejected test-dd83e7c2 (below) from its retained request.json and results.json and the host's observed started_at. It names the source of each timestamp: the host's observed command start, the launcher's request.started, the stage started and ended, and the run ended.",
+    "A fail-first test reproduces the rejection with consistent launcher records and a host-observed start slightly later than request.started (event latency), and after the fix records a passed Build. Tests show that a request.started earlier than the run could have begun, a stage outside the run, a run ended in the future and mismatched request/results started all still reject. The refusal line names the failed comparison.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "build-checks",
+    "coordination-cost",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed on master by the integration owner, Termal::Opus2.\n\nCommit 457714abf8519e07b69ec2675bd008d6c356c150 (tree eefd2444) was pushed to origin/master as a fast-forward from 5841a759, and ls-remote confirmed it at 22:17:33Z.\n\nPre-push checks:\n- 3 files, +229 −18, 0 CR; blobs equal the frozen package.\n- Full gate test-35e08e86: PASS 5/5 (host record 23e1b96f). Its trackedIndexDiff 86651296 was reproduced exactly IN wt-ae2c-carry-11865.\n- Review pair: Codex 753d093a and Claude sonnet d15226b8, zero Medium or higher; the Low is filed as w-eeac7f69c62b.\n- Carry: patch byte-equal.\n- Evaluation baa20ca7: 3/3, independent, not stale.\n\nNo install yet: it is batched with w-9b3a, outside any gate window.",
+    "completed_at": "2026-10-13T22:17:41.961395500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

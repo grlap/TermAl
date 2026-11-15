@@ -1,0 +1,29 @@
+{
+  "id": "01a1304d-2d0c-7071-a899-d597829c1e1b",
+  "external_ref": null,
+  "title": "Receipted delivery: explicit attempt ownership and transfer state, so pruning can settle only a positively known-untransferred attempt",
+  "outcome": "Receipted delivery: explicit attempt ownership and transfer state, so pruning can settle only a positively known-untransferred attempt",
+  "acceptance": [
+    "Every promoted receipted attempt carries an explicit ownership and transfer state, initialized before the attempt is exposed and updated atomically before its dispatch carrier is handed out (the immediate dispatch, a parked or deferred carrier, or a retained queued admission)",
+    "Pruning may reject only a positively known-untransferred attempt whose executable carriers have been revoked; missing, old, restored or default ownership evidence stays unresolved or Ambiguous and is never read as a rejection",
+    "The guard backs up the explicit settlements at each known retirement and discard site and replaces none of them; tests show a restart with old state never infers a rejection and never authorizes a second delivery"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "delivery",
+    "follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1a30d-8611-7073-a2a5-b0e08ddf4115",
+  "external_ref": null,
+  "title": "Assess ordinary source capture refusal of merged case-variant tracked directories",
+  "outcome": "The ordinary no-gitlink source-capture boundary has an explicitly decided policy and evidence for a clean checkout whose case-variant tracked ancestor directories merge on an insensitive filesystem.",
+  "acceptance": [
+    "A disposable ordinary repository reproduces the merged-ancestor case layout with distinct tracked regular-file identities and records the current admission result.",
+    "Any proposed widening of ordinary admission is explicitly decided and documented independently of the child-only change, with ordinary byte encoding preserved and true collisions/redirects refused.",
+    "The agreed behavior has meaningful counterexamples and restored positives on applicable platforms."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "compatibility",
+    "review-follow-up",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

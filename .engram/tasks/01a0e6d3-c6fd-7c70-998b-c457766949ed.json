@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6fd-7c70-998b-c457766949ed",
+  "external_ref": "tm-ncc6.2.3",
+  "title": "Boot reconciliation: adopt terminal results, re-attach live workers, mark lost workers unknown",
+  "outcome": "At startup after persisted state load (where delegation waits are refreshed on boot), for each non-terminal TestRunRecord: read results.json -> terminal? adopt; else pid alive and identity matches (started_at + run_dir in the process' cmdline where available)? re-attach a reaper; else state unknown, reason 'worker lost at restart' (host restart) or 'no worker after reboot' (OS boot id changed). Then refresh run waits (tm-ncc6.5). Distinguish TermAl restart from OS reboot via a boot identifier recorded at start.\n\nREVIEW FIXES (F3, F11, F20, §5): this task only ADOPTS terminal results and MARKS lost workers unknown; live-worker re-attach moves to tm-ncc6.3.4. Where: run_post_listen_boot_after_readiness (src/app_boot.rs:844-867) - run reconciliation runs BEFORE reconcile_delegation_waits_after_boot (line 860, delegations.rs:2186) and before dispatch_orphaned_workflow_prompts (866). Boot identity: record a boot id at start (Windows: system boot time from GetTickCount64 with +/-2 s tolerance; Linux: /proc/sys/kernel/random/boot_id; macOS: kern.boottime); identity rule for a pid: process creation time within tolerance of started_at. Reasons: 'worker lost at TermAl restart' vs 'no worker after OS reboot'. Single finalizer: the reaper (tm-ncc6.3.1) and boot reconciliation serialize on the record (finalize once).",
+  "acceptance": [
+    "- Restart with a dead worker -> unknown with reason 'worker lost at TermAl restart'; never passed.\n- Reboot (boot id changed) -> unknown with the reboot reason even if a pid coincidentally exists.\n- Restart with a live worker -> record left running for tm-ncc6.3.4 to re-attach; no finalization here.\n- Reconciliation runs before delegation-wait reconciliation on boot (test asserts call order via the boot harness in src/tests)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a3e1a6a9f43",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

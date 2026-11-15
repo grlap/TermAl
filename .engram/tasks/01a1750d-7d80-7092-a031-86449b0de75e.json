@@ -1,0 +1,31 @@
+{
+  "id": "01a1750d-7d80-7092-a031-86449b0de75e",
+  "external_ref": null,
+  "title": "Strengthen routing-only duplicate receipts and unchanged-obligation regression assertions",
+  "outcome": "The raw Send and retained SendExact duplicate regressions assert the exact neutral notification cause and demonstrate the original routing-only wake obligation remains unchanged across retry.",
+  "acceptance": [
+    "Both duplicate tests assert the expected exact neutral cause and compare stored obligation state before and after retry, retaining message/receipt identity assertions.",
+    "Relevant focused duplicate and wake tests pass with no relaxation of receipt, settlement or execution-authority checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

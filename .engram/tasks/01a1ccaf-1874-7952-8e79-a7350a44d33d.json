@@ -1,0 +1,27 @@
+{
+  "id": "01a1ccaf-1874-7952-8e79-a7350a44d33d",
+  "external_ref": null,
+  "title": "Restore native Warm Light accents inside the website control-room demo",
+  "outcome": "Restore native Warm Light accents inside the website control-room demo",
+  "acceptance": [
+    "The control-room demo uses the product's Warm Light coral and cyan tokens while the surrounding website retains its editorial palette; additions and deletions remain visually distinct."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "website"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

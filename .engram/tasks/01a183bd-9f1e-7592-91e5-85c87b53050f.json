@@ -1,0 +1,29 @@
+{
+  "id": "01a183bd-9f1e-7592-91e5-85c87b53050f",
+  "external_ref": null,
+  "title": "Panic journal hook's thread::current() can turn a post-TLS-teardown panic into an abort",
+  "outcome": "Panic journal hook's thread::current() can turn a post-TLS-teardown panic into an abort",
+  "acceptance": [
+    "The panic journal hook obtains the thread name without calling std::thread::current() unconditionally, so a panic raised after the thread's TLS is torn down is journaled or skipped without aborting the process, or the gap is explicitly accepted and documented in the hook's header with the reason.",
+    "The review pair finds no Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "panic-journal",
+    "review-low",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,39 @@
+{
+  "id": "01a0f464-5746-7802-a6ec-37947c46aafc",
+  "external_ref": null,
+  "title": "Require resident-body coverage before clearing transcript loss",
+  "outcome": "Loss remains outstanding for retained resident bodies not covered by an admitted authoritative read; detached history is repaired without changing navigation intent.",
+  "acceptance": [
+    "A regression displays a detached historical window, loses an update to a resident message, admits a disjoint recent-tail response, and proves that the stale resident body does not become authoritative and is eventually repaired without replacing the chosen window.",
+    "Loss coverage is spatial as well as generation-fenced: complete resident heads outside a bounded tail and historical windows cannot be certified by matching metadata or by a disjoint tail read.",
+    "The exact corrected input passes the full five-stage gate and fresh independent Codex/Claude complete-branch review with no outstanding in-scope Medium-or-higher findings."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect",
+    "review-medium",
+    "scope-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0eeb3-2b65-7c22-8b19-1b692f268123",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Coordinator e07d441d02c343a0a21949b908f9c51b authorizes cancellation, not completion. Architect1 1c7927235c884b56a8ec0ca98f88d352 and Fable concurrence 7adbe386f2c1466983e95725bdb96a59 remove spatial coverage/range repair under D1/D3/D5/D6. M1 disappears by deleting held-page admission, not by satisfying this child's superseded criteria. Parent retains local attached-tail repair plus strengthened T1/T2; detached and remote remainders are named scope exclusions, not passing checks.",
+  "completion": null
+}

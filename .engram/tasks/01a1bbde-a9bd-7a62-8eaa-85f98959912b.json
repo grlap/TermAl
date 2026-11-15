@@ -1,0 +1,28 @@
+{
+  "id": "01a1bbde-a9bd-7a62-8eaa-85f98959912b",
+  "external_ref": null,
+  "title": "Skip owner seal captures that cannot match the turn root generation",
+  "outcome": "Rename and clear avoid owner I/O when the turn root's generation or common directory already excludes sealing.",
+  "acceptance": [
+    "The pre-capture sealability decision includes generation and common-directory identity alongside root and claim, while the final locked checks remain.",
+    "A behavioral clear/name/clear fixture confirms no extra owner capture for an ineligible generation and preserves the first seal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

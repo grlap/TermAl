@@ -1,0 +1,51 @@
+{
+  "id": "01a11d9d-16a0-7b50-8f37-462f66675bb4",
+  "external_ref": null,
+  "title": "A session with a registered fan-in wait shows as idle instead of Waiting",
+  "outcome": "A root session that ends its turn with a wait the host holds (a delegation wait, a test-run wait, or a carried background gate) shows Waiting in the session inventory and UI, distinct from idle, with what it awaits and since when; a session with no such wait still shows idle.",
+  "acceptance": [
+    "When a root session has finished its turn and the host holds at least one of its waits — a delegation wait (termal_resume_after_delegations), a test-run wait (termal_resume_after_test_runs), or a background full gate the host is carrying for it — termal_list_sessions and the UI show it as Waiting, not idle, until every such wait settles, is consumed or is cancelled; a test covers each of the three kinds.",
+    "The Waiting display gives a concise reason: the wait kind, what is outstanding (the count of delegations or runs, with their labels where the wait records them, or the carried gate's worktree), and when the wait started.",
+    "When the last wait settles or is cancelled, or the session resumes for any other reason, the status leaves Waiting with no manual refresh; a test shows it.",
+    "A session that has finished its turn and holds none of these waits still shows idle; a test shows it.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "fan-in",
+    "session-status",
+    "ux"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

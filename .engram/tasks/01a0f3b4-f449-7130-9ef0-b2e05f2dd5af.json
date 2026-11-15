@@ -1,0 +1,28 @@
+{
+  "id": "01a0f3b4-f449-7130-9ef0-b2e05f2dd5af",
+  "external_ref": null,
+  "title": "Host-architecture brief: bring its \"unknown place counts in every worktree\" target in line with the landed per-session scoping (204b95b)",
+  "outcome": "docs/features/host-architecture.md (committed 6ab70dc, base 28e9ed5) states as target that an unplaced command, and an admitted observation not yet resolved, counts as a possible write in every worktree: section 2.6, section 4.4, section 8.3, and the fifth risk of section 12. Entry condition 2 of step 10a says another session is a writer for its whole turn. Since the brief's base, 204b95b (in train-1 merge c4197f3) has landed the coordinator's option C: a command TermAl cannot place counts where its session works (its workdir's worktree and its turn's named root), not in every worktree; being in a turn fences no carried gate; a Claude command that only reads counts nowhere. By the brief's own rule (section 9.5), a correctness fix that lands first is part of the base and is preserved. The target text should say so: an unplaced or unresolved observation counts in every worktree its session may work in, not in every worktree; step 10a's entry conditions carry the landed carried-gate rules. Also, section 5.3's table lists `work next --peek --context-generation termal-<n>` for the session's orientation read; once the read-only-peek change lands, a read-only delegation child's read carries no generation.",
+  "acceptance": [
+    "docs/features/host-architecture.md states the landed per-session scoping of unplaced and unresolved observations and the carried-gate rules of 204b95b wherever it now says 'every worktree' or treats a turn as a writer, and section 5.3 reflects the read-only orientation read; the change is docs only and passes the review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "architecture",
+    "check-credit",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

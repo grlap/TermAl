@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-567e75881ea5",
+  "external_ref": "tm-m6r1.5",
+  "title": "Document Work HTTP routes, reader lifetime and error semantics",
+  "outcome": "Deduplicated Codex+Claude Low: docs/architecture.md and docs/features/work-visualizer.md omit GET /api/projects/{id}/work and GET /api/projects/{id}/work/engram/{work_ref}. Document supported search/label/availability/after/readerSessionId parameters, normalized response models and 409 refresh, 429 retry, 502 failure semantics. Include the runtime-only installed binding limitation (no live matching runtime/after restart can mean unavailable), manual refresh and unsupported Windows shims. Do not claim a live source test or schema compatibility without evidence.",
+  "acceptance": [
+    "Both routes appear in the architecture endpoint table with a linked complete feature contract; documentation agrees with validated code and installed CLI behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

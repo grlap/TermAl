@@ -1,0 +1,43 @@
+{
+  "id": "01a1806a-a885-72a0-a621-7dd1bd72e13d",
+  "external_ref": null,
+  "title": "Bound large HTTP responses and SSE frames at the data source, so no response or frame can grow without limit",
+  "outcome": "Every HTTP route and SSE producer the host serves has an explicit data bound (pagination, a bounded projection, or a hard limit) at its source. The 64 MiB encoded-output cap from w-492e stays only as a safety fuse that ordinary workloads never reach, and clients handle paged and projected data without treating it as deletion or looping on it.",
+  "acceptance": [
+    "The P0 safety fuse w-492e7ae8a0fd (64 MiB encoded cap, typed refusal, history-clone fix, client terminal handling) has landed before any wave-1 item lands; it is a precursor, not a member of this epic's data-bounding work.",
+    "Wave 1, in order after w-492e: w-bf22f922e573 (transcript, history and text deltas), w-8710a74f642e (state and mutation responses), w-b6757f632670 (ResponseBoard), w-570f9f9331f8 (mailboxes, including the federation/relay aggregation). Each is completed with its own accepted criteria.",
+    "Wave 2: w-c4ccf7b1b89a (filesystem and search), w-1c7ebf109bbb (Git), w-156d9f667530 (workspace watcher batches); then the P2 items w-42506386538a (catalogs), w-bfd3875aea73 (reviews), w-d04506033449 (test and Work working sets). Each is completed with its own accepted criteria, or explicitly superseded or cancelled with a recorded reason.",
+    "After all members complete, a read-only re-census from the then-current master (the same method as w-9af00ebbaa71) finds no HTTP or SSE producer whose serialized object is unbounded by design; any remaining exception is recorded with its bound and justification."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "output-bounds"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a18050-e7c3-7ba3-8406-492e7ae8a0fd",
+    "01a18060-790f-7812-97e0-bf22f922e573",
+    "01a18060-7975-7490-aeb0-570f9f9331f8",
+    "01a18060-79d0-7f60-9788-b6757f632670",
+    "01a18060-7a28-74b0-a664-8710a74f642e",
+    "01a18060-7bda-7893-9b0e-c4ccf7b1b89a",
+    "01a18060-7c30-7b43-bbb0-1c7ebf109bbb",
+    "01a18060-7c6b-7ef3-9918-42506386538a",
+    "01a18060-7cb3-7f43-862b-bfd3875aea73",
+    "01a18060-7cfa-7a00-b20d-d04506033449",
+    "01a18064-9eb9-7562-b6c1-156d9f667530"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

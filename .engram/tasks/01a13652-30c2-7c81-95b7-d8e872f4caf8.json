@@ -1,0 +1,28 @@
+{
+  "id": "01a13652-30c2-7c81-95b7-d8e872f4caf8",
+  "external_ref": null,
+  "title": "note_prompt_delivery_outcome stamps the session row even when no receipt moves; narrow the receipt module's blanket allow(dead_code)",
+  "outcome": "note_prompt_delivery_outcome stamps the session row even when no receipt moves; narrow the receipt module's blanket allow(dead_code)",
+  "acceptance": [
+    "note_prompt_delivery_outcome (src/prompt_delivery.rs) checks for a HandingOff delivery of the given turn under an immutable borrow before taking the stamping session_mut_by_index, so Codex turn/started, turn finishes and Claude lifecycle frames of a session with only settled receipts no longer rewrite its row.",
+    "The #[cfg_attr(not(test), allow(dead_code))] on the receipt impl block is narrowed to the producer entry points awaiting wiring (w-6e77124334c1), so other unused helpers are reported."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "delivery",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

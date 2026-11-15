@@ -1,0 +1,46 @@
+{
+  "id": "01a0f2e6-8db0-7bb0-b23b-b9221a1b527a",
+  "external_ref": null,
+  "title": "A second termal server process loads, recovers and queues a persist of the live state before it fails to bind its port",
+  "outcome": "Starting `termal` in server mode while a host already runs on the same data directory cannot change that host's stored state: the second process refuses before it loads, recovers or persists anything, and says why.",
+  "acceptance": [
+    "A first start on a free port and data directory still boots as today; the existing boot tests pass unchanged.",
+    "A second server start against a data directory whose host is running exits with a message naming the running instance, before load_state_for_boot, recover_interrupted_sessions or any persist request; a test covers it with a temp data directory and a held listener or instance lock.",
+    "The full gate passed on the exact landed input.",
+    "The state database's rows are byte-identical before and after that refused start; the same test checks it."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-boot",
+    "persistence",
+    "pilot",
+    "safety"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A server-mode termal start now takes an exclusive OS file lock on <data dir>/termal-server.lock before it loads, recovers or persists anything, and holds it in a process-lifetime static until the process exits. A second server on the same data directory, on any port, exits with a message naming the data directory, the lock file and the holder, and leaves the store untouched. Landed as 98ad64fd (fast-forward on f5a96582) with a credited full gate test-5be31ad4 on the exact input (diff 3c6ad9cc), review pairs clean at Medium and above, and evaluation affc34cb 4/4. Installed by Opus2 (termal.exe sha256 d8a72331…). Follow-ups: w-32e08428722e, w-77cab466349b.",
+    "completed_at": "2026-10-09T04:41:54.103124Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

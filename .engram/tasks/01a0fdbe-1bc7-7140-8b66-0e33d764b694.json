@@ -1,0 +1,30 @@
+{
+  "id": "01a0fdbe-1bc7-7140-8b66-0e33d764b694",
+  "external_ref": null,
+  "title": "Test queued admission withholding when the final owner check crosses its deadline",
+  "outcome": "Scripted-clock witnesses cover the post-owner-check admission deadline on fence and synchronous fallback paths, requiring withheld provider delivery and AdmissionFence abortion.",
+  "acceptance": [
+    "Test queued admission withholding when the final owner check crosses its deadline is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "gate-nondeterminism",
+    "review-follow-up",
+    "test-coverage",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0fcdc-8cce-7d61-b79c-6b09d2362fe4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

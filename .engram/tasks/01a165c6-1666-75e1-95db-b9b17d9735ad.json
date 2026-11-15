@@ -1,0 +1,34 @@
+{
+  "id": "01a165c6-1666-75e1-95db-b9b17d9735ad",
+  "external_ref": null,
+  "title": "Resume reconciles a retained prepared Begin after its durable acknowledgement timed out",
+  "outcome": "Resume reconciles a retained prepared Begin after its durable acknowledgement timed out",
+  "acceptance": [
+    "On an idle gated session, Resume preserves the exact interrupted prepared Begin and reconciles it through the existing Begin replay when the uncertain grant matches; it neither discards the retained request nor dispatches without an accepted Begin.",
+    "Regression tests cover an expired never-begun grant, a possibly applied Begin, mismatched grant, different authority and an active or concurrent attempt; no duplicate provider delivery.",
+    "Focused tests, full gate and independent review pair pass on the final repair input.",
+    "The batch's live and post-restart criteria are preserved verbatim in linked item w-7a9b4163c18a, \"v3 admission recovery: post-restart live verification\"; this item's evidence links to that item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 5f7d7ac9; exact prepared-Begin recovery + focused/pair/FULL09650293; closure only, preserve separate live w-7a9b and later EO removal.",
+    "completed_at": "2026-11-08T19:21:35.589886400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0f9f7-f38a-74a1-9c1d-6c9c91d4a353",
+  "external_ref": null,
+  "title": "sync_delegation_attempt_for_child_session publishes consumed-wait deltas twice after the train 11 publish-under-lock integration",
+  "outcome": "Each consumed delegation wait is announced once per commit",
+  "acceptance": [
+    "sync_delegation_attempt_for_child_session publishes consumed-wait deltas twice after the train 11 publish-under-lock integration is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

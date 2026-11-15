@@ -1,0 +1,30 @@
+{
+  "id": "01a0fafb-721b-7112-8bac-6285d8847235",
+  "external_ref": null,
+  "title": "Make missing naming-history acceptance refusals actionable",
+  "outcome": "Make missing naming-history acceptance refusals actionable",
+  "acceptance": [
+    "Make missing naming-history acceptance refusals actionable is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

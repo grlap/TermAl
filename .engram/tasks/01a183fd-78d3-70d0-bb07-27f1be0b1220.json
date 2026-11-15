@@ -1,0 +1,53 @@
+{
+  "id": "01a183fd-78d3-70d0-bb07-27f1be0b1220",
+  "external_ref": null,
+  "title": "Keep ordinary checkpoint receipt effects recoverable across the first Accepted persistence cut",
+  "outcome": "An ordinary owned checkpoint cannot become durably Accepted/Confirmed and unrecoverably skip its verification and pending-batch receipt effects after restart; preserve exact receipt custody, successor ownership and acknowledgement boundaries.",
+  "acceptance": [
+    "The first durable owned ordinary Checkpointed cut includes the exact verification and pending-batch effects, or durable replay custody sufficient for a fresh host to finish them without another checkpoint or provider invocation.",
+    "A real SQLite cut after first Accepted persistence and before local acknowledgement, followed by a new AppState, proves the exact canonical receipt and non-vacuous evidence associations and batch targets are retained and applied once; no unresolved independent duty is released.",
+    "Failed persistence and non-owning or successor-drift results preserve canonical receipt custody without mutating the successor, bypassing current authority, or acknowledging effects absent from the durable cut."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "checkpoint-receipts",
+    "control-plane",
+    "crash-recovery",
+    "engram-control",
+    "gated-control",
+    "scope-review-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete removed-feature path; not fixed or tested by this sweep. Fable2722/message43b9a7df-11b7-403a-a0d1-1e21100b4562 authorizes disposition. Full original outcome/criteria read; retained note provenance 8bcb38048fad421f91ff93b8d3a207cc, 217c623b009d46a48f7acea0d211c8ee, db0b1fbc56b747b5863878f742300932, 1fae6074d83949c4b2e0b4c4ea3d3348. At current master2e03d1a9f0357862cf26e4c6a4f8ddccdadeff00, landed87f49ed0 deleted active admission/begin/replay, containment/reset and checkpoint result-recovery owners (native deleted-path diff inspected). src/engram_session_obligations.rs and engram_containment_checkpoint.rs explicitly retain only passive validated historical records, never restore active exclusion/replay/accounting/admission. The specific old behavior in this item's title/criteria is therefore no longer an executable product contract. Current ordinary delivery/queue/transport/SQLite compatibility concerns were separately preserved in the sweep; this cancels no such behavior. Historical failures, unknown incident causes and existing delivered-work/credit caveats remain unchanged. No source edit, Cargo/test, new verification, old experiment execution or acceptance PASS claimed; keep raw evidence while other open items still cite it.",
+  "completion": null
+}

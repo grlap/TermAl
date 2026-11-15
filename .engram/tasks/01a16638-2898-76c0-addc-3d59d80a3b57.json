@@ -1,0 +1,28 @@
+{
+  "id": "01a16638-2898-76c0-addc-3d59d80a3b57",
+  "external_ref": null,
+  "title": "File-watcher warning 'ownership changed before path resolution' on a test's own termal.sqlite-wal under a lane worktree's .tmp state",
+  "outcome": "File-watcher warning 'ownership changed before path resolution' on a test's own termal.sqlite-wal under a lane worktree's .tmp state",
+  "acceptance": [
+    "File-watcher warning 'ownership changed before path resolution' on a test's own termal.sqlite-wal under a lane worktree's .tmp state is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "attribution",
+    "greg-reported",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

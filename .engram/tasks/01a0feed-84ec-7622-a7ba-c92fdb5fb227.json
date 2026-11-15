@@ -1,0 +1,28 @@
+{
+  "id": "01a0feed-84ec-7622-a7ba-c92fdb5fb227",
+  "external_ref": null,
+  "title": "Test selection-loss notice retirement on canonical terminal and release proofs",
+  "outcome": "Add production-path controls for the terminal/release retirement branch, preserving immutable opening capture and testing that unrelated or still-live claims retain their notices.",
+  "acceptance": [
+    "Test selection-loss notice retirement on canonical terminal and release proofs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

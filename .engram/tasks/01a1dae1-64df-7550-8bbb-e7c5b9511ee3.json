@@ -1,0 +1,30 @@
+{
+  "id": "01a1dae1-64df-7550-8bbb-e7c5b9511ee3",
+  "external_ref": null,
+  "title": "Grant routine task-sync data-branch commits/pushes in CLAUDE.md and AGENTS.md (engram-data orphan branch only), per Greg's word",
+  "outcome": "TermAl's CLAUDE.md and AGENTS.md carry the coordinator-concurred task-sync data-branch paragraph granted by Greg's own word, so agents can commit task and memory exports to the orphan branch engram-data and push it fast-forward only, which lets the DL560 Engram store be bootstrapped for the TermAl project.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md (commit and push section) contain exactly the concurred task-sync data-branch paragraph (note bc9c5d09, without quotations of Greg) and the concurred R3 sentences (note 2d349912: the 'Apart from author test refs and task-sync data-branch pushes' exception, 'Before every push of master', and both 'Outside …' sentences naming the candidate-commits, test refs for remote runs, author test refs and task-sync data-branch bullets), and are otherwise unchanged apart from line wrapping; .claude/commands/review-changes.md and fix-bug.md carry the concurred closed-list clause (note d4ce1403); Greg's words and their source are recorded on this item, not in the instruction files; AGENTS.md and CLAUDE.md stay identical in content where they are meant to.",
+    "The authority-file rule is met before landing: both coordinators' concurrence on the exact wording recorded on this item, Greg sent the wording and its consequence (exports on a possibly public origin), Greg's own word on the widening recorded verbatim with its source, and the final-diff audit recorded as passed.",
+    "The landing is a normal candidate commit with a clean review pair and a passing full gate; no test reads or pins the instruction files."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "authority-file",
+    "greg-directed",
+    "task-sync"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

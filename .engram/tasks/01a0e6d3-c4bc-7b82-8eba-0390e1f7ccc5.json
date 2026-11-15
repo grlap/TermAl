@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4bc-7b82-8eba-0390e1f7ccc5",
+  "external_ref": "tm-avzd",
+  "title": "Triage: one packet produced four dual-review fan-ins; separate repeated reviews from duplicated notifications",
+  "outcome": "Filed now but NOT to be worked yet - the reporting project asked for triage after their maintenance window, and this is recorded rather than held in a session so a host restart cannot take it. Reported by the operator through a peer project: a single packet generated initial, corrected, final and final-clean dual-review fan-ins with near-identical result cards, even though that project policy is that only Critical and High findings block a check-in. Requested behaviour: ONE dual review per stable packet; Critical or High findings get a focused verification rather than a fresh pair; Medium and Low become durable follow-ups without automatic correction and re-review; and historical fan-in notifications must not be redispatched as fresh work. CAUSE NOT ESTABLISHED - explicitly do not assume. The candidates are at least: the command instructions themselves, which may invite a re-review after any fix; agent judgement choosing to re-run a pair; host replay or redelivery of a wait or fan-in notification; duplicated display of one result rather than repeated execution; or several of these together. The first triage step is therefore to DISTINGUISH repeated actual reviews from duplicated presentation of the same review, because they have different owners and different fixes, and the report cannot tell them apart. Evidence to gather: how many reviewer children were actually spawned per packet and with what delegation ids, versus how many fan-in cards appeared. OWNERSHIP: the host and the shared review command are ours; that project own review policy is theirs and no change is requested to any other repository policy. RELEVANT OBSERVATION FROM OUR OWN RUN TODAY, worth keeping because it suggests the command may be part of it: after a dual review returned one Medium on a small changeset, the coordinator had every intention of running a SECOND full pair over three bounded fixes that the reviewers themselves had asked for. That second pair was skipped only because an unrelated maintenance window made it inconsiderate, not because the process said it was unnecessary. If the command or the habit treats every corrected changeset as needing a fresh pair, four fan-ins for one packet is the predictable result rather than an anomaly.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,41 @@
+{
+  "id": "01a12872-d115-7f72-bb75-e20613fd9ff1",
+  "external_ref": null,
+  "title": "Unadmitted observation: mirror Engram's control-character refusal and sighting/root-basis generation agreement",
+  "outcome": "Engram definitively refuses, from the request alone, a workspace id or source revision holding a control or bidirectional formatting character (execution_observation_invalid, behavioral-control-plane.md:936-940), and a closing sighting whose named or ended root generation disagrees with root_basis (execution_observation_basis_mismatch). The unadmitted builder or the runtime-started turn path refuses both before sending, or the builder's header names the owner. The inter-turn builder already checks the generation agreement in from_intent.",
+  "acceptance": [
+    "An unadmitted request whose source text holds a control or bidi formatting character, or whose sighting's root generation disagrees with root_basis, is refused before sending by the builder or by the runtime-started turn path, and the module header names which; tests show each refusal.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

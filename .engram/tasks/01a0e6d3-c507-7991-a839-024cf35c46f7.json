@@ -1,0 +1,29 @@
+{
+  "id": "01a0e6d3-c507-7991-a839-024cf35c46f7",
+  "external_ref": "tm-fpgr.1",
+  "title": "Harden seeded Codex shell-policy parsing and RPC projection",
+  "outcome": "The Engram thread-level shell_environment_policy overlay currently deserializes the seeded mcp_servers and shell policy as one struct, so a structurally invalid policy can discard otherwise valid user MCP servers. It also forwards unknown policy keys verbatim into the app-server thread config without a pinned contract that the RPC schema tolerates them, and performs the merge through fallible untyped JSON surgery. Decouple the two parse failure domains, verify the pinned Codex app-server behavior for unknown policy keys, and use a typed policy projection/merge so malformed policy data degrades only that policy rather than thread setup or user MCP configuration.",
+  "acceptance": [
+    "Valid seeded mcp_servers survive a malformed or unsupported shell_environment_policy; supported policy fields and the three TermAl-owned ENGRAM_* values produce a typed deterministic thread/start and thread/resume config; unknown-key behavior is verified against the pinned Codex app-server and documented; focused and normal quality gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated",
+    "codex",
+    "config",
+    "mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

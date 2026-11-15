@@ -1,0 +1,31 @@
+{
+  "id": "01a19b0b-9522-7ae0-bac1-3ed252d21d84",
+  "external_ref": null,
+  "title": "Authority-file wording for Execution Observability: test credit and acceptance evaluation in CLAUDE.md and AGENTS.md",
+  "outcome": "CLAUDE.md and AGENTS.md describe test credit and acceptance evaluation as they actually work after the gating removal, changed only through the exact-wording process for authority files.",
+  "acceptance": [
+    "The exact old-to-new wording for each stale statement flagged by Opus3 (closing-checkpoint verification credit; termal-tests.toml 'eligible for verification'; the termal_evaluate_acceptance/done/host-recorded-check paragraph; Commit-and-push condition 3's acceptance evaluation) is recorded on this item",
+    "Both coordinators (Termal::Fable2 and Engram::Fable) record their concurrence on that exact wording in this item's notes, and Greg has been sent the wording and its consequence before the landing; any widening of agent authority carries Greg's recorded word verbatim",
+    "The test-credit wording (items 1 and 2) lands no earlier than w-3fe8f4472e5d's behaviour; the evaluation wording (items 3 and 4) follows the next-P0 evaluation design Greg directed on 2026-11-02 and does not land ahead of it",
+    "The /review-changes final-diff audit is recorded on this item as passed, naming the input fingerprint of the reviewed and gated input, before the landing"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "authority-files",
+    "docs",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

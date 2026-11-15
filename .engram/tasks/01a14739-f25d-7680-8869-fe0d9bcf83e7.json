@@ -1,0 +1,29 @@
+{
+  "id": "01a14739-f25d-7680-8869-fe0d9bcf83e7",
+  "external_ref": null,
+  "title": "Extract the cohesive AutoApprove router tests and fixtures from shared_codex.rs",
+  "outcome": "Move the cohesive AutoApprove request vectors/runtime/read-only fixtures and policy router tests into a focused test module without changing test behavior, selection names or coverage.",
+  "acceptance": [
+    "Extract the cohesive AutoApprove router tests and fixtures from shared_codex.rs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "refactor",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a13609-f805-7481-9a40-91917233d542",
+  "external_ref": null,
+  "title": "Settled-receipt pruning can evict a Rejected receipt that still holds the prompt's only retry copy",
+  "outcome": "Settled-receipt pruning can evict a Rejected receipt that still holds the prompt's only retry copy",
+  "acceptance": [
+    "prune_prompt_deliveries (src/prompt_delivery.rs) evicts settled receipts without a retry entry (Accepted, Ambiguous) before a Rejected receipt that still carries its entry, or exempts such Rejected receipts, and the rule is documented with the cap.",
+    "A test settles more than the cap of receipts after one rejection and shows the rejected prompt still re-queueable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

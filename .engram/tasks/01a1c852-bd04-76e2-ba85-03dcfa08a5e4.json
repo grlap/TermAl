@@ -1,0 +1,29 @@
+{
+  "id": "01a1c852-bd04-76e2-ba85-03dcfa08a5e4",
+  "external_ref": null,
+  "title": "Share the native Node predicate used by registered wrapper and doc-link classification",
+  "outcome": "The two exact-Node admissions share one maintained predicate or are explicitly retained with a documented reason, preserving all current accepted/refused executable forms.",
+  "acceptance": [
+    "The wrapper Test and doc-link Lint routes retain their existing Node path and .cmd/.bat/.ps1 refusal behavior.",
+    "Any helper extraction remains local to registered classification and does not widen ordinary command recognition."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "note",
+    "registered-runs",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

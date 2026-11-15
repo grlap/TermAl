@@ -1,0 +1,31 @@
+{
+  "id": "01a173e6-4ea8-7281-911d-d712933fd9c0",
+  "external_ref": null,
+  "title": "Wait for Windows owned-command descendants to release handles before declaring cleanup reaped",
+  "outcome": "Windows owned-job cleanup distinguishes zero job accounting from completion of descendant process handle release, while retaining exact process ownership and the existing cleanup budget.",
+  "acceptance": [
+    "Determine and document the completion guarantee for descendant handles independently of the direct command handle.",
+    "If strengthening completion, capture exact job-member process handles with identity/membership validation before termination and await release within the existing budget, with deterministic descendant and unrelated-process controls."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "launcher",
+    "review-low",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173cf-2c9e-7c23-b688-616edd0409b9",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

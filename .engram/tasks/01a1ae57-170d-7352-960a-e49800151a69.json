@@ -1,0 +1,28 @@
+{
+  "id": "01a1ae57-170d-7352-960a-e49800151a69",
+  "external_ref": null,
+  "title": "termal_followup_session to a reviewer keeps the child's original cwd; a follow-up naming a different worktree silently reviews the old root",
+  "outcome": "A follow-up to a delegation whose next input lives in a different worktree either moves the child to that worktree explicitly, with an approved cwd argument and the read-only policy applied to the new root, or is refused up front with a named reason. A reviewer never reviews a different tree than the one its prompt names.",
+  "acceptance": [
+    "termal_followup_session to a reviewer keeps the child's original cwd; a follow-up naming a different worktree silently reviews the old root is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

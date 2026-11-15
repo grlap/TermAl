@@ -1,0 +1,37 @@
+{
+  "id": "01a1c9f9-a6f9-7c82-8c53-410a50fc32b4",
+  "external_ref": null,
+  "title": "An ordinary focus switch between held items leaves the previous runtime turn uncaptured (terminal FocusChanged closing job)",
+  "outcome": "Switching an agent's focus from one held item to another no longer discards the observations of the turn that was running under the previous item; either the turn is captured against the item it ran under, or the loss is a deliberate, documented and rare outcome rather than the routine result of every item switch.",
+  "acceptance": [
+    "When a session's focus moves from one held, named item to another, the runtime turn that ran under the previous item is reported to Engram against that previous item (its binding at turn start), or a recorded design decision states why it must not be, with its consequences.",
+    "Ordinary item switches no longer produce terminal FocusChanged closing jobs; a behavioural test with two held named items and a switch between turns shows the earlier turn captured, or the documented outcome if the decision says otherwise.",
+    "The 'not reported to Engram (runtime_observation_scope_changed)' notice remains for genuinely ambiguous scope changes, and is not emitted for an ordinary switch."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "closing-job",
+    "engram-observation",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Preserve ordinary turn attribution across held-item focus switches, with exact opening claim/root proof, durable original report retention before prospective refresh, guarded cache/notice publication and behavioral positive/refusal coverage. Landed 046951e8; same-tree FULL all green; fresh independent acceptance 6c79501627fc48879f308972e1d8729c passes all3.",
+    "completed_at": "2026-11-12T00:47:24.128388900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

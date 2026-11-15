@@ -1,0 +1,33 @@
+{
+  "id": "01a1a252-01b2-7aa3-952f-f613afbd4b07",
+  "external_ref": null,
+  "title": "Extend source_id conformance evidence for ordinary-root edge states and read isolation",
+  "outcome": "The source_id conformance map explicitly covers ordinary-root admission edge cases and capture read isolation with deterministic public-boundary tests, while preserving the current no-gitlink compatibility contract.",
+  "acceptance": [
+    "Runtime pre-change/new capture comparisons cover actual sparse and conflicted ordinary roots plus controlled read races, recording identical success/value or identical existing refusal rather than adding new admission rules.",
+    "Direct source-capture fixtures cover raw path/Unicode ordering, unsafe encoding and case/alias behavior on the platforms where each is observable; unsupported platform cases are reported rather than silently treated as passed.",
+    "Controlled capture fixtures establish source, index, object and configuration preservation and denial of hook/filter/network execution; each mapped case cites its own exact-input validation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-identity",
+    "source-revision",
+    "team-pilot",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

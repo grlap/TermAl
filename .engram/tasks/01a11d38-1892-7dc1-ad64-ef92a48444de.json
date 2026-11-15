@@ -1,0 +1,28 @@
+{
+  "id": "01a11d38-1892-7dc1-ad64-ef92a48444de",
+  "external_ref": null,
+  "title": "PersistFence's Drop can panic on a poisoned lock during unwinding, turning a test failure into a process abort",
+  "outcome": "PersistFence::drop never panics. A poisoned completion or scripted-clock lock during unwinding is tolerated, so the first panic's message reaches the test result instead of a 0xc0000409 abort.",
+  "acceptance": [
+    "PersistFence's Drop can panic on a poisoned lock during unwinding, turning a test failure into a process abort is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "persist-fence",
+    "pre-existing",
+    "test-robustness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

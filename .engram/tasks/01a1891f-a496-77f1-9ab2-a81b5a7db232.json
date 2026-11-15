@@ -1,0 +1,29 @@
+{
+  "id": "01a1891f-a496-77f1-9ab2-a81b5a7db232",
+  "external_ref": null,
+  "title": "Propagate cleanup-unknown when the federation stderr diagnostic thread cannot start",
+  "outcome": "A failure to start the stderr diagnostic reader does not hide an unresolved cleanup of the already spawned owned SSH child or admit an overlapping retry.",
+  "acceptance": [
+    "On diagnostic-reader thread spawn failure after child spawn, the existing process owner explicitly reaps the child before returning; a reap failure propagates FederationSshCleanupUnknown to the existing runtime quarantine path.",
+    "A deterministic failure regression distinguishes successful cleanup from unresolved cleanup without live SSH, preserving exact child ownership, reap-before-replace and existing material, credential and quarantine fences."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

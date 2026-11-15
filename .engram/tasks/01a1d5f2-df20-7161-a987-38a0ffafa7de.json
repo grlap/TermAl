@@ -1,0 +1,36 @@
+{
+  "id": "01a1d5f2-df20-7161-a987-38a0ffafa7de",
+  "external_ref": null,
+  "title": "Admit a same-path predecessor-generation registered check when the named root was only recovered or renamed and its source is unchanged",
+  "outcome": "When a held claim's named root keeps the same canonical path but moved to a newer generation through claim-lapse recovery or renaming, and the source is unchanged against the host-acknowledged original verification body, termal_evaluate_acceptance admits the original registered check instead of refusing with registered_check_root_rebound. Every other root_rebound protection is unchanged.",
+  "acceptance": [
+    "A behavioural test drives the real evaluation request and spawn path. A live held requester with the same authority store, work, run, root execution and claim identity and a monotonic recovery fence, the same canonical workspace path, a strictly older registration generation, and a complete current owner SourceId unchanged against the host-acknowledged original verification body is ADMITTED. The historical registration is neither mutated nor relabelled, and no new credit is granted.",
+    "Negative controls in the same test file each still refuse with registered_check_root_rebound or the existing refusal:\n- a different path;\n- changed or dirty source;\n- another work item, run or store;\n- a missing or incoherent receipt or body digest;\n- a newer applicable terminal non-pass or unknown result;\n- an empty bindings list alone.\nThe existing tests a_new_naming_generation_does_not_reuse_the_original_evidence and the root_rebind tests keep their protection for every case outside this narrow lane.",
+    "file:line for the new admission lane in acceptance_committed_input.rs. The change has a clean review pair and passes the full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1d595-9e1d-76d0-9955-2ecb0cb4d6e6",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered narrow same-path predecessor-generation admission while preserving host-acknowledged complete SourceId and immutable historical registrations. Landed a33efa4b with clean R3 pair, author549 and exact-tree FULL318bd842. Fresh independent18028 evaluationb0d5b69f832b450cb00c2462272bafb9 passes all3rev3criteria at73177116; Node9 check is admission only, not feature coverage.",
+    "completed_at": "2026-11-14T09:47:37.753635200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

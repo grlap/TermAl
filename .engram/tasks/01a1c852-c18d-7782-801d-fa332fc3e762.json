@@ -1,0 +1,29 @@
+{
+  "id": "01a1c852-c18d-7782-801d-fa332fc3e762",
+  "external_ref": null,
+  "title": "Investigate nested detached launchers classified as registered focused Tests",
+  "outcome": "Determine whether a focused registered stage can earn an early passing Test from a nested or detached launcher exit, and document or repair the confirmed behavior separately.",
+  "acceptance": [
+    "Bounded behavioral evidence confirms or rules out an early passing Test record for nested/detached launcher inner commands before the actual suite completes.",
+    "If confirmed, a separate reviewed repair preserves genuine completed Test outcomes and refuses launch-only evidence; otherwise the reason the path is unreachable is recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "note",
+    "registered-runs",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

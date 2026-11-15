@@ -1,0 +1,43 @@
+{
+  "id": "01a17602-180b-77a1-a7ee-4018428df05f",
+  "external_ref": null,
+  "title": "Remaining federation test fixtures still attest on the real 10 s window (executor delivery, listener IO, relay review r2, establish)",
+  "outcome": "No federation test fixture's attestation depends on elapsed wall time. A loaded gate cannot fail any fixture with attestExpired, and the product's attestation expiry semantics are unchanged and still tested.",
+  "acceptance": [
+    "For every federation test fixture that attests, a deterministic regression with a real delay longer than its attest window during the handshake is RED before and GREEN after.",
+    "There is no product timeout, budget or expiry change, and the attestation-expiry tests stay green.",
+    "The affected suites stay green, a review pair is clean, and one READY goes to Merger2."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "gate-blocker",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

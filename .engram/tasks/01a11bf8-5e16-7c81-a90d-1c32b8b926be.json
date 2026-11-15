@@ -1,0 +1,28 @@
+{
+  "id": "01a11bf8-5e16-7c81-a90d-1c32b8b926be",
+  "external_ref": null,
+  "title": "Mailbox read: one request deadline shared by all its waits, or narrow the MAILBOX_CONNECTION_ADMISSION_TIMEOUT comment and docs to per-wait bounds",
+  "outcome": "Either a mailbox read's sequential waits (connection for the session check, writer admission and connection for the repair, writer admission and connection for the page issuance, plus SQLite busy waits) draw from one per-request deadline below the bridge's 30 s budget, so a slow store ends in the typed retry error rather than the transport timeout; or the comment on MAILBOX_CONNECTION_ADMISSION_TIMEOUT and docs/features/agent-mailboxes.md promise per-wait bounds only and say the waits add up.",
+  "acceptance": [
+    "The doc comment on MAILBOX_CONNECTION_ADMISSION_TIMEOUT and agent-mailboxes.md either describe a single per-request deadline that the implementation enforces (with a test driving two consecutive capped waits and asserting the typed error before the bridge budget), or state plainly that each wait is bounded separately and the bounds add up."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "mailboxes",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

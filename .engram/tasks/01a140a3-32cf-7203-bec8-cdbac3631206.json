@@ -1,0 +1,79 @@
+{
+  "id": "01a140a3-32cf-7203-bec8-cdbac3631206",
+  "external_ref": null,
+  "title": "Reclaim retained named-root slots with the claim-scoped lifecycle read",
+  "outcome": "Consume Engram's claim-scoped old-root lifecycle read after it ships, reclaiming only authoritatively ended or superseded selections while preserving unknown and active roots.",
+  "acceptance": [
+    "C1 (test): A causal regression reproduces the retained-slot failure on the applicable baseline using the production naming/reclamation path: a named selection on an authoritatively completed/cancelled, ended/released, or superseded claim remains counted despite a valid claim-scoped lifecycle read, or a prior transient startup/read failure prevents later recovery. The note identifies the running-build/source relationship and the exact blocking transition; original failure evidence is retained. If current source already fixes a reported occurrence, establish that fact with a discriminating historical or narrowly disabled-protection contrast and current passing evidence rather than introducing redundant product code.",
+    "C2 (test): Reclamation uses the existing read-only NamedRootRead path for the retained exact store/project/work/run/claim through an authorized current reader in that same store, without claiming/releasing completed work, changing a reader's focus, impersonating the original reporter, or issuing a producer Bound/Ended mutation. A validated fresh proof may retire only the exact obsolete local selection: completed/cancelled run, covering release/end, or a strictly newer canonical binding that supersedes it. Proof identity, ordered read cut and event/generation coverage must establish that it covers the retained selection. A matching live Bound, unknown/missing/malformed/refused/older or contradictory proof, merely expired lease, removed worktree, or absent held-list entry does not authorize retirement. Missing historical run association remains retained with an actionable reason unless recovered from an existing authoritative exact association; it is never guessed from current focus, path, title or a later run.",
+    "C3 (test): A startup-admission-exhausted, timeout, unavailable-reader or other transient read failure retains the original obligation and capacity reservation, but does not permanently suppress later attempts. Existing bounded single-flight scheduling retries with a fresh per-pass deadline after cooldown/readiness, including after host restart, and makes fair progress across eligible entries and stores. With a valid reader and responsive producer restored, an eligible terminal selection is reclaimed without manual re-claim/clear/release or an agent prompt. Repeated failures remain bounded, observable and retained; neither the global 64-root limit nor timeouts are raised, and no busy loop, provider turn or new scheduler is introduced.",
+    "C4 (test): Capture exact selection/journal/reconciliation-owner and reader/store/run/claim identities before off-lock reads; revalidate them before apply and again across durable publication as required by the existing authority-image protocol. Concurrent name/clear, claim/run replacement, pending cleanup/write, current-owner activity, reader removal/token/store change, stale callback, and restart cannot remove or revive a successor selection or discard unresolved obligations. Retirements reserve capacity until their exact durable image is acknowledged and published; failed/unknown persistence or superseded publication never reports a freed slot. Restart resumes existing durable obligations idempotently, without duplicate retirement or generation reuse.",
+    "C5 (test): Retirement of a selection does not erase immutable admitted source/test provenance, pending intent history, reconciliation guards, or other pinned journal/history references; ordinary compaction may remove only unreferenced settled history under existing rules. Retirement/retention diagnostics identify the affected selection, proof or concrete blocking reason and distinguish observed facts from pending acknowledgement. A production-path 64-slot test shows that proven reclaimable entries free capacity only after durable publication and a subsequent legitimate name can use the slot, while live/unknown/protected and wrong-store entries remain retained.",
+    "C6 (test): Focused deterministic checks cover the positive proof matrix and contrasting live/unknown/stale/mismatched cases, transient startup failure then successful later pass, no-reader then restored-reader recovery, missing association, cross-store fairness, concurrent rename/clear and stale read/ACK, and crash/restart before/after durable publication. Use scripted clocks/barriers and the existing persistence/transport seams, not sleeps or weakened assertions; include a pinned disposable producer integration check for NamedRootRead on a completed historical run/claim without a live holder. Preserve existing reclamation controls. The maintained full gate and independent review required by repository policy pass on the exact landing input, with source and evidence recorded on the item."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "PI-28",
+    "control-plane",
+    "engram-interop",
+    "named-root",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "All six acceptance criteria passed in evaluation 61a25324fa6f45668d8b42ecd45e11aa at content-v1:ffeb97e4 / commit 12e16176. C6 cites focused suite a40b060d, full gate 5e3c09b2, and current-generation pinned live witness 485aa95d; exact-input review pair found no Medium-or-higher findings.",
+    "completed_at": "2026-10-16T22:12:05.668372300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

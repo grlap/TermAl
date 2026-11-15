@@ -1,0 +1,31 @@
+{
+  "id": "01a176c5-92e0-74e0-991d-fb5770101097",
+  "external_ref": null,
+  "title": "Strengthen S3 expired-budget controls with exact prepared Begin and causal hold assertions",
+  "outcome": "The two expired-budget phase controls discriminate budget exhaustion from unrelated holds and verify retained prepared Begin identity.",
+  "acceptance": [
+    "The real-writer 35-second control captures the prepared Begin at its barrier and compares retained key, grant, delivery range/tokens and expiry basis after the ambiguous outcome, accounting for intentional phase-only transitions.",
+    "Both 35-second controls assert the actual causal hold reason and no provider handoff; healthy 15-second twins remain passing. A discriminating mutation of retained Begin identity or wrong withholding reason makes the corresponding control fail.",
+    "Reuse the existing phase harness/writer/clock and retain bounded sanitized reports, unchanged production budget/TTL/authority behavior, and the original review/run provenance."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "admission",
+    "engram-control",
+    "review-followup",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16e82-b6f5-7d00-b947-285750b8b4e6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

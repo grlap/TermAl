@@ -1,0 +1,30 @@
+{
+  "id": "01a148df-9949-7670-ac14-1e6f1b68d3c2",
+  "external_ref": null,
+  "title": "Clear stale grant fields in the target returned after ensure rebinds a session",
+  "outcome": "Clear stale grant fields in the target returned after ensure rebinds a session",
+  "acceptance": [
+    "After ensure successfully rebinds a session whose canonical grant was cleared, its returned target active and uncertain grant fields match canonical session state, consistent with the existing status-recovery convention.",
+    "A regression checks both canonical state and returned target after invalid-token reconciliation, while preserving existing same-key and ownership behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "hardening",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14882-9853-72f2-8565-339b57a1d89d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

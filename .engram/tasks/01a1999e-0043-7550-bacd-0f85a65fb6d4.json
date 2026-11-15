@@ -1,0 +1,30 @@
+{
+  "id": "01a1999e-0043-7550-bacd-0f85a65fb6d4",
+  "external_ref": null,
+  "title": "A worker delegation refuses an isolated worktree path inside the repository when cwd is the main checkout, though project rules require worktrees inside the repository",
+  "outcome": "A worker delegation refuses an isolated worktree path inside the repository when cwd is the main checkout, though project rules require worktrees inside the repository",
+  "acceptance": [
+    "The refusal rule 'isolated worktree path must be outside the source repository' is located in source, and the cases it intends to prevent are stated",
+    "A worker delegation can be given an isolated worktree under the repository's own ignored worktree folder (for example .worktrees/<name>) when cwd is the main checkout, without nesting the child inside a tracked source tree or weakening isolation; a test covers this case and the still-refused unsafe cases",
+    "The refusal message names the precondition that failed and the supported placement"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "worktree"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

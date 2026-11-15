@@ -1,0 +1,74 @@
+{
+  "id": "01a10aa3-d0f8-7941-877c-597515994684",
+  "external_ref": null,
+  "title": "A turn's closing source sighting is promoted to the claim's baseline even when its checkpoint report carries no turn observation, so the source change is never reported (source_changed=false next turn) and opens no test obligation",
+  "outcome": "After a host restart, the first observation of a named source root compares its current revision with the last revision Engram holds for that root. If they differ, it records the source change as changed, so a later done counts it as untested unless a check covers it. A restart never adopts the current tree as a silent baseline. A test drives an edit made before or across a restart and asserts that the change is recorded.",
+  "acceptance": [
+    "C1 (UNBOUND fail-first): At ae310b92, source_observation_unreported_closing_change_does_not_advance_the_accounted_baseline fails because the next opening captures no observation intent (it reads Equal). A holder note cites the host-recorded failed check.",
+    "C2 (test): When a turn's closing revision differs from the accounted baseline and its checkpoint does not carry an accepted change for that difference, the persisted accounted baseline does not advance, and the unaccounted closing change (from the accounted baseline to the closing revision) is persisted as pending accounting. The next measured opening of the same scope reports it on the inter-turn path, with Unknown causality, together with any further change up to its own revision, even when the tree has returned to the accounted baseline's revision by then. \"Not carried\" includes an observation withheld because the grant mediates no mutation, one withheld for mixed attribution, and a refused or dropped report. There is one test each for the no-mutation case, the refused-checkpoint case and the A->B->A excursion.",
+    "C3 (test): Controls. An accepted closing change still advances the baseline, so the next opening at that revision reads Equal and no change is accounted twice. An unchanged close still leads to Equal.",
+    "C4 (test): The accounted baseline and any pending unaccounted closing change survive a persist and reload between the unreported close and the next opening, and the next opening still reports from them.",
+    "C5 (test): With two live claims at distinct generations naming the same root, a change accepted on one claim's run does not advance the other claim's baseline, and the other claim's next opening accounts it.",
+    "C6: docs/features/engram-host-adapter.md's source-observation section states that the baseline advances only on an accounted change.",
+    "C7 (test): The full gate passes on the exact reviewed tree.",
+    "C8: The review pair has no outstanding Medium or higher, and an evaluator that never held the item evaluates the acceptance."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 7,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "correctness",
+    "host-recording",
+    "restart",
+    "source-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed in train 51. master = origin/master = 4d9d84b21480345632f5ed989542c78e60907b6e, tree bfd17532. It merges the author commit c045d319 (the gated tree 0df9da82 on ae310b92) onto 961b218a; the staged patch-id equals the author's. A turn's closing source sighting that its checkpoint did not account for is now kept as an owed close rather than promoted to the claim's accounted baseline, so the next measured opening reports it. Acceptance: evaluation 1d6a0dbc, 8/8 pass. The author tree's gate test-0703ef38 passed, and review round 8 was clean. Train gate test-3e256eed PASSED on the exact merged tree. Integration pair clean: Codex delegation-cf8d28c9, Claude delegation-66d859d7. Installed target/release/termal.exe sha256 e236a5854399aaa419e66a73151c02a1d08d8f7f54e17463204b26cd3c326b9a (build 06:17:28-06:19:33Z; backup termal.exe.4afd5dcd.bak). The running host keeps its build until the next restart. Pre-existing clock ordering limits stay on w-61b961afed6c.",
+    "completed_at": "2026-10-06T06:19:47.050195300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

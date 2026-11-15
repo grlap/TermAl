@@ -1,0 +1,26 @@
+{
+  "id": "01a13811-f31a-7e92-8ed6-0a140ab55fd9",
+  "external_ref": null,
+  "title": "declared-test-commands.md says \"PowerShell 7.3 or later\" but the declared-test runner says \"PowerShell 7\"",
+  "outcome": "docs/features/declared-test-commands.md states the same PowerShell requirement as the code that enforces it (src/engram_declared_tests.rs), so a colleague's setup does not ask for a version the host does not need, or miss one it does.",
+  "acceptance": [
+    "declared-test-commands.md says \"PowerShell 7.3 or later\" but the declared-test runner says \"PowerShell 7\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

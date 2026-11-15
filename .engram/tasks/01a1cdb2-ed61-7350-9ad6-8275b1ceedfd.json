@@ -1,0 +1,58 @@
+{
+  "id": "01a1cdb2-ed61-7350-9ad6-8275b1ceedfd",
+  "external_ref": null,
+  "title": "Replace the session conversation minimap with clickable checkpoint dots on the native scrollbar",
+  "outcome": "Each session shows the native scrollbar with one clickable dot per checkpoint (nearby dots grouped with a count and a per-checkpoint chooser); the overview minimap, its /overview endpoint and overview-only metadata are removed when nothing else uses them.",
+  "acceptance": [
+    "Behavioural UI tests show a session with checkpoint markers renders the native scrollbar and one clickable dot per checkpoint at its message position (all checkpoint-kind markers), that clicking a dot navigates to that checkpoint including one whose message is not yet loaded in the visible history, and that dots too close to separate are grouped with a count and a chooser that navigates to each grouped checkpoint.",
+    "Ordinary scrollbar navigation is kept, as Greg specified: behavioural tests show that dragging the thumb, clicking the track, the scroll wheel and keyboard scrolling move through the conversation as today, with today's accessibility, and that scrolling toward a part of a long history that is not yet loaded still reaches it (the existing history loading still triggers), so no navigation reach is lost by removing the rail.",
+    "The colored content-segment visualisation (the overview minimap rail, its controller and its overview fetch) is removed, and no session pane makes an overview request; a behavioural test shows a session with many messages and no checkpoints renders no segment rail and issues no overview fetch.",
+    "The server's overview endpoint and overview-only persisted metadata are removed only after a search shows no remaining consumer; removing persisted columns or tables follows the existing persistence floor and migration rules with tests, or, if removal would need a floor change, the item records that and leaves the storage in place unread rather than changing the floor without coordinator allocation.",
+    "cd ui && npx tsc --noEmit is clean, the affected vitest suites pass, cargo check is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "greg-requested",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Checkpoint dots and native history scrolling landed at 42851443. Independent evaluator session-17677 attempt2 recorded dbebb74783124084ac4e405e3b53a604 with all5 criteria PASS on exact4285/eab. Native focused60 tests passed (58+2 unloaded-marker), own typecheck passed, adopted cleanR3 pair and same-treeDL560FULL6/6 passed; evidence archived. Original runner-CWD failure retained/diagnosed, temporary approved bridge disclosed and permanent P2w-7b4f76e3f7b1 filed. Storage writes/schema/floors retained unread per agreedscope; no installation/restart claimed.",
+    "completed_at": "2026-11-12T22:30:50.097110600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

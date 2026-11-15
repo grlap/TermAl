@@ -1,0 +1,29 @@
+{
+  "id": "01a1860a-4f82-7ea0-9b02-2aeef0a1cb09",
+  "external_ref": null,
+  "title": "Pre-create accepted explicit local Cargo output directories before fingerprint capture",
+  "outcome": "The launcher pre-creates only its default ignored target directory. An accepted explicit root-local target or intermediate directory that is missing can still be created by Cargo through a random-suffix temporary sibling after fingerprinting, risking a self-inflicted source-change refusal. Extend the existing ignored-output preparation guard within the selected-path policy without adopting or cleaning external caches.",
+  "acceptance": [
+    "Accepted ignored root-local target and intermediate selections that do not yet exist are prepared before fingerprint capture without changing external-directory refusal or cleaning/adopting cache contents.",
+    "A deterministic regression distinguishes first-use explicit target/intermediate creation from default-only preparation and preserves the original source-change detection boundary."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated",
+    "review-follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3c0-7561-acd6-8376b03f2259",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

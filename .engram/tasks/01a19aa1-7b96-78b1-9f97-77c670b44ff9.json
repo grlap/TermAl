@@ -1,0 +1,31 @@
+{
+  "id": "01a19aa1-7b96-78b1-9f97-77c670b44ff9",
+  "external_ref": null,
+  "title": "Remote runner input bundles exceed the 262144-byte mailbox body cap; expose the bound and provide a supported large-payload route",
+  "outcome": "Remote runner input bundles exceed the 262144-byte mailbox body cap; expose the bound and provide a supported large-payload route",
+  "acceptance": [
+    "The mailbox body size limit is stated in the native tool contract (termal_send_to_session and the CLI help), and an over-limit send is refused with a message naming the limit and the supported large-payload route",
+    "A supported route delivers an input bundle larger than the mailbox cap to a remote runner session (for example a content-addressed attachment or a chunked transfer with a manifest and an end-to-end hash check), with no ad hoc base64 splitting by the sender",
+    "A test or one live remote delivery proves that a bundle above the cap arrives intact and verifies by its SHA256",
+    "The change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "mailbox",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

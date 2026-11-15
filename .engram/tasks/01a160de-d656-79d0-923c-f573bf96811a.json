@@ -1,0 +1,28 @@
+{
+  "id": "01a160de-d656-79d0-923c-f573bf96811a",
+  "external_ref": null,
+  "title": "Remove unreachable pending-audit resume branch after named-root release replay lookup",
+  "outcome": "Named-root release has a single reachable selection-matching replay path; remove the strict-subset pending-audit lookup that cannot be reached after the earlier all-audits lookup returns, and put its explanatory comment on the actual replay path without changing release semantics.",
+  "acceptance": [
+    "Remove unreachable pending-audit resume branch after named-root release replay lookup is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "named-roots",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

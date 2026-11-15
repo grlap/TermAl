@@ -1,0 +1,27 @@
+{
+  "id": "01a11d18-6b8c-7d31-9a22-f5a9a8a2d364",
+  "external_ref": null,
+  "title": "Make causal-card UI negative assertions discriminating and cover the withheld dispatch label",
+  "outcome": "UI assertions exercise actual secret-bearing negative controls or explicitly assign redaction proof to backend coverage, and the new withheld dispatch label has an actual consumer test.",
+  "acceptance": [
+    "Make causal-card UI negative assertions discriminating and cover the withheld dispatch label is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "causal-diagnostics",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

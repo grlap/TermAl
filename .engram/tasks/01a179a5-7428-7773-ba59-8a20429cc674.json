@@ -1,0 +1,32 @@
+{
+  "id": "01a179a5-7428-7773-ba59-8a20429cc674",
+  "external_ref": null,
+  "title": "Cover signed federation health refusals through the production monitor loops",
+  "outcome": "Loopback tests exercise the existing monitor branches with real MAC-signed application refusals and distinguish preserved authenticated routing from actual lost authority, without changing product behavior.",
+  "acceptance": [
+    "An authenticated loopback peer returns signed 409 and 503 health refusals through the production monitor path; the current lease remains usable and the existing diagnosticUnavailable observation is recorded.",
+    "A real local enrollment/authority change or retired channel still fences the monitor's lease; the tests use existing fixtures and do not add a routing prerequisite or new lifecycle."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "cross-machine",
+    "federation",
+    "greg-directed",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a17970-e97b-7122-92e2-df99c1bb4e3a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a179a5-2bbe-7460-bd60-ad6c2f2aaeb6",
+  "disposal_reason": "Duplicate created during crossed coordination messages: Fable1905 directed me to file, while Fable1907 created the same monitor-loop Low before my add completed. Canonical coordinator item w-ad6c2f2aaeb6 owns the identical signed409/503 monitor coverage; carry reviewer provenance there. No implementation performed.",
+  "completion": null
+}

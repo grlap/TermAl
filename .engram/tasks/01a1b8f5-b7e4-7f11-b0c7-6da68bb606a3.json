@@ -1,0 +1,30 @@
+{
+  "id": "01a1b8f5-b7e4-7f11-b0c7-6da68bb606a3",
+  "external_ref": null,
+  "title": "Exercise equal and conflicting original bindings retained by both trace and active check",
+  "outcome": "A mediated late-completion fixture verifies equal trace/check copies deduplicate to the artifact verdict and divergent retained originals produce the named UNKNOWN.",
+  "acceptance": [
+    "Exercise equal and conflicting original bindings retained by both trace and active check is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "declared-commands",
+    "greg-reported",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1b889-1cb7-7ce2-bf94-2b4dccf4861d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1ba27-94bd-70c0-a42f-6cfa4bbfdeeb",
+  "disposal_reason": "Continue as independent work after w-2b4dccf4861d completed on landed d3499b97. This optional Low/Note follow-up remains open and is not claimed fixed; preserve its evidence and acceptance.",
+  "completion": null
+}

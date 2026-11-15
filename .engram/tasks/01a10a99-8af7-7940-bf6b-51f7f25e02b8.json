@@ -1,0 +1,30 @@
+{
+  "id": "01a10a99-8af7-7940-bf6b-51f7f25e02b8",
+  "external_ref": null,
+  "title": "Refuse host-send capability conflicts without poisoning the state mutex",
+  "outcome": "An exclusive host-send capability invariant slip refuses the exact send without panicking under StateInner; normal single-capability paths and stale-owner refusal remain unchanged.",
+  "acceptance": [
+    "Refuse host-send capability conflicts without poisoning the state mutex is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

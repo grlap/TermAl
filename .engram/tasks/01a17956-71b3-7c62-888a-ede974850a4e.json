@@ -1,0 +1,29 @@
+{
+  "id": "01a17956-71b3-7c62-888a-ede974850a4e",
+  "external_ref": null,
+  "title": "Central logged an unexplained 500 from the Mac federation peer during post-restart re-attestation (8d838f90)",
+  "outcome": "The single 500 that the central host logged from Mac peer abf8bda6 after the 8d838f90 restart is tied to a route and a host and classified with evidence; a product defect, if any, has its own fix item.",
+  "acceptance": [
+    "The 500 is tied to a specific route and to the host that produced it, with its log line or response body quoted.",
+    "Its cause is classified as transient restart or enrollment behaviour, remote-host state, or a product defect, with evidence; a product defect gets its own fix item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

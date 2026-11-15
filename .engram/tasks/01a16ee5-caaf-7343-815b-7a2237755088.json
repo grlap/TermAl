@@ -1,0 +1,31 @@
+{
+  "id": "01a16ee5-caaf-7343-815b-7a2237755088",
+  "external_ref": null,
+  "title": "w-efeee post-landing live proof: cross-host mailbox/prompt after installed-build update",
+  "outcome": "Collect the original federation post-landing live central–Mac delivery and acknowledgement proof after landing, install and Greg's coordinated restart of both hosts; preserve this obligation independently of the code-landing item.",
+  "acceptance": [
+    "After landing and Greg's restart of both hosts, a live cross-host mailbox message between central and the Mac is delivered and acknowledged with no manual profile refresh, recorded with its message and receipt ids."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "live-proof",
+    "mac",
+    "post-landing",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a165c6-60f1-7223-9003-efeee9548bef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1bd71-6541-7220-8be8-19ff4238acaa",
+  "disposal_reason": "Fable2 #2697 explicitly authorizes completing this independent narrow post-landing live proof from existing October 26 evidence; completed ancestor w-efeee9548bef blocks execution. Preserve criterion and all historical evidence unchanged.",
+  "completion": null
+}

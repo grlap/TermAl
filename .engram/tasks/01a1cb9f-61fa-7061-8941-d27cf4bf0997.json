@@ -1,0 +1,29 @@
+{
+  "id": "01a1cb9f-61fa-7061-8941-d27cf4bf0997",
+  "external_ref": null,
+  "title": "Cover reload after reconciled or compensated Codex child archive",
+  "outcome": "Behavioral reload coverage protects durable automatic archive ownership after archived-inventory reconciliation and compensation re-archive, alongside direct successful archive coverage.",
+  "acceptance": [
+    "A behavioral test drives an ambiguous or rejected automatic archive reply through positive archived-inventory reconciliation, reloads persisted SQLite state and successfully follows up through automatic unarchive.",
+    "A behavioral test verifies that a confirmed compensation re-archive retains the correct thread/home ownership across reload without transferring ownership to a manual or replaced thread."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

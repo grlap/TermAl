@@ -1,0 +1,27 @@
+{
+  "id": "01a1c16d-e88e-7c63-b687-585d959684a1",
+  "external_ref": null,
+  "title": "Clarify that landing pre-push checks do not block the author test-ref exception",
+  "outcome": "The general pre-push instructions explicitly distinguish landing pushes from permitted author test-ref pushes without widening publication authority.",
+  "acceptance": [
+    "Both instruction files express the same distinction between landing pre-push checks and the author test-ref exception, under separately concurred exact wording and the authority-text landing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

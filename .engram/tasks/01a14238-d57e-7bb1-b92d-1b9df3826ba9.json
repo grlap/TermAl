@@ -1,0 +1,28 @@
+{
+  "id": "01a14238-d57e-7bb1-b92d-1b9df3826ba9",
+  "external_ref": null,
+  "title": "Support content revisions in repositories with configured Git filters and LFS",
+  "outcome": "Repositories with configured Git filters, including LFS, can obtain a sound content revision covering the stored worktree content without executing filters or weakening review-freeze verification. Unsupported or unverifiable inputs continue to refuse a source basis with a concrete reason.",
+  "acceptance": [
+    "Support content revisions in repositories with configured Git filters and LFS is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "git-filters",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

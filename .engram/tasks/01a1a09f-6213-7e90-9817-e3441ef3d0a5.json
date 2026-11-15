@@ -1,0 +1,30 @@
+{
+  "id": "01a1a09f-6213-7e90-9817-e3441ef3d0a5",
+  "external_ref": null,
+  "title": "Enforce scheduling guards for future review_identity CLI fixture tests",
+  "outcome": "New or modified review_identity CLI fixture tests cannot silently omit, misorder or prematurely drop the required scheduling guard.",
+  "acceptance": [
+    "A fixture-test wrapper or equivalent automated check rejects fixture work without the required first named scheduling guard, including an immediately dropped `let _ =` guard.",
+    "The current exclusive ownership of every review_identity CLI fixture test through cleanup, real CLI execution and unchanged production timeout remain covered."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gate-flake",
+    "review-followup",
+    "review-identity",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1a095-8fec-7b12-88bb-cc672688ae8e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1a233-b3a1-7363-b3e8-a40fab873b12",
+  "disposal_reason": "Parent scheduling repair w-cc672688ae8e completed after landing cd79424e. Continue the separately tracked Low guard-enforcement follow-up as independent optional P3 work; preserve R1/R2 review provenance and current all-fixtures-exclusive contract.",
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a19b89-339e-7bf3-9360-c0be01506f7d",
+  "external_ref": null,
+  "title": "w-3fe8 source slice: descendants5 port onto ordinary EO (cc6d baseline)",
+  "outcome": "w-3fe8 source slice: descendants5 port onto ordinary EO (cc6d baseline)",
+  "acceptance": [
+    "A source-only patch for exactly the 5 test paths in .evidence/execution-observability-12327/descendants5-cc6d-contract.json, baseline cc6d7c5b, is returned to the integrator Sol-03d4 with an immutable tree id and per-path blobs",
+    "Every original test in those paths has an explicit per-test disposition from a full read, and the real owner, WAL, Stop, FIFO and native controls are preserved",
+    "No shared, product or outside-path edits, no aliases or unmounts, no cargo, and no product behaviour change made to obtain green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 descendants5 source ports; original scoped return and additive classification3b237991 preserved. Ledger/source-handoff reconciliation only; no warning-advice gate added.",
+    "completed_at": "2026-11-08T19:22:16.269466Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

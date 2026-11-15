@@ -1,0 +1,37 @@
+{
+  "id": "01a17528-a3c1-7dc0-98a7-5963146b3f56",
+  "external_ref": null,
+  "title": "Relay boot-scan test assumes eight wake rows are processed inside the worker's 2 s batch budget",
+  "outcome": "mailbox_relay_review_boot_scan_does_not_reset_notifications_created_after_its_snapshot is deterministic under load: it no longer depends on wall-clock time inside run_mailbox_relay_wake_batch.",
+  "acceptance": [
+    "A deterministic regression (partial-batch seam plus boot-scan snapshot) is RED before the fix and GREEN after it, with no wall-clock dependence",
+    "The boot-scan test no longer assumes one batch drains every wake; no timeout, budget or product scheduling change",
+    "The relay test suite stays green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-blocker",
+    "mailbox-relay",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Deterministic relay boot-scan fixture drain landed in combo105 at bca419c7. Read full fresh independent evaluation02f57ff2677b4f9da9791abe0a714437 (original session18077/attempt1): all3criteria judgmentPASS,stale:null,rev3. Completing immediately nextturn before any root commands; no repeated check/evaluation. Historical RED and308GREEN, fresh whole3 confirmation pair, identical-blob carry, Windows243PASS and identical-tree DL560FULL30b26a4d support acceptance; Node9PASS e7ad was admission only. Deferred Lows remain independent. Cleanup of own retained author ref/root/served artifacts follows seal, preserving concrete open follow-up baselines.",
+    "completed_at": "2026-11-14T20:37:19.100646400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

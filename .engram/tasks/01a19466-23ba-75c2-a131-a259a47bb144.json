@@ -1,0 +1,28 @@
+{
+  "id": "01a19466-23ba-75c2-a131-a259a47bb144",
+  "external_ref": null,
+  "title": "Workspace watcher treats any absolute ancestor named `target` as ignored, so a checkout under a `target` directory ignores every source event",
+  "outcome": "Build-directory exclusion in the workspace watcher is judged relative to the workspace root, so a checkout located below a directory named `target` still reports its source file events.",
+  "acceptance": [
+    "Workspace watcher treats any absolute ancestor named `target` as ignored, so a checkout under a `target` directory ignores every source event is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "found-by-gate",
+    "windows",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c511-7bb3-a65f-a63569603b24",
+  "external_ref": "tm-goon",
+  "title": "Add project Engram settings UI and verification",
+  "outcome": "Operators must configure project-scoped Engram integration through TermAl UI instead of hand-crafting a secret-bearing PATCH. Add a project settings Engram tab with enabled toggle, binary/home inputs with defaults, masked write-only grant input, Verify using backend doctor plus authority validation, fail-closed Save through the existing PATCH, and a project status line.",
+  "acceptance": [
+    "Project settings exposes an Engram tab; defaults are engram on PATH and %USERPROFILE%\\\\.engram; the work-authority grant is masked and never rendered back or logged; Verify surfaces project_id, database, required_assurance, healthy, installed/subject/valid-until/revoked; Save is refused until verification succeeds and uses the existing project Engram PATCH; project UI shows enabled and last verification result; focused tests, tsc, full Vitest, and UI production build pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

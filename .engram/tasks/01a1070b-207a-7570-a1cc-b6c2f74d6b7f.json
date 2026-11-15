@@ -1,0 +1,29 @@
+{
+  "id": "01a1070b-207a-7570-a1cc-b6c2f74d6b7f",
+  "external_ref": null,
+  "title": "Operation-bound placement witness for session file edits, so an edit outside a carried gate's worktree can be proven not to reach it",
+  "outcome": "Operation-bound placement witness for session file edits, so an edit outside a carried gate's worktree can be proven not to reach it",
+  "acceptance": [
+    "Operation-bound placement witness for session file edits, so an edit outside a carried gate's worktree can be proven not to reach it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "carried-gate",
+    "check-credit",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

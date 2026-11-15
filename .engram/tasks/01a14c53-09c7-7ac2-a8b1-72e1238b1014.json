@@ -1,0 +1,28 @@
+{
+  "id": "01a14c53-09c7-7ac2-a8b1-72e1238b1014",
+  "external_ref": null,
+  "title": "Test: a declared test command containing a single quote, run by Codex inside its pwsh wrapper — pin whether the declared-route wrapper reader recognises it",
+  "outcome": "Test: a declared test command containing a single quote, run by Codex inside its pwsh wrapper — pin whether the declared-route wrapper reader recognises it",
+  "acceptance": [
+    "A unit test in src/engram_declared_tests.rs (wrapper reader around :396-450) feeds a declared command line that contains a single quote, wrapped the way Codex reports commands (pwsh envelope), and asserts the actual behaviour: recognised as the declared entry, or refused with a named reason.",
+    "If it is refused, docs/features/declared-test-commands.md states the rule (no single quote inside a declared line when Codex runs it) next to its examples; if it is recognised, the onboarding guide's caution is relaxed accordingly."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "declared-tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a1c914-4a26-77b1-b08e-5aa666e1f988",
+  "external_ref": null,
+  "title": "Acceptance evaluation is refused before judgment (committed_input_no_eligible_run) when the newest run on the named root's HEAD failed only outside the item's scope",
+  "outcome": "Either the evaluation preflight admits an independent judgment whose criterion evidence explicitly discloses a known out-of-scope failure in the newest terminal run, or the refusal and the docs state that a passing eligible run on the exact HEAD is always required, so agents stop spending windows on evaluations that cannot be admitted.",
+  "acceptance": [
+    "Acceptance evaluation is refused before judgment (committed_input_no_eligible_run) when the newest run on the named root's HEAD failed only outside the item's scope is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Not a defect. Engram::Fable2's #1497, relayed in TermAl mailbox ba61ac72 #583, confirms that committed_input_no_eligible_run works as designed: an evaluation needs a passing eligible run on the exact HEAD. The reporting session withdrew the incident and took the designed route: fixture-corrected candidate da88414b with fresh checks.",
+  "completion": null
+}

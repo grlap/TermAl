@@ -1,0 +1,38 @@
+{
+  "id": "01a14846-177e-7883-a319-44a905db9d7e",
+  "external_ref": null,
+  "title": "Coding workers, slice 2: parent retrieves the worker's base, worktree, diff or commit locator and child-reported test outcome; no automatic integration",
+  "outcome": "The owning parent retrieves, through the existing result mechanisms, a worker result tied to its delegation and child, with the host-recorded base and worktree, the child's ordinary Git diff or commit locator, and a clearly labelled child-reported native test outcome, and then integrates (or not) with ordinary Git; nothing is staged, committed, imported, merged or pushed automatically.",
+  "acceptance": [
+    "For a worker delegation, the owning parent can retrieve through the existing result routes and termal_get_session_result a result tied to that delegation and child, carrying the host-recorded baseRevision and dedicated worktreePath plus the child's ordinary Git diff or commit locator relative to that base, or an explicit unavailable report. The result and paged output preserve that attribution across completion, failure and an accepted follow-up; no previous attempt's handoff is presented as the current one, unrelated parents remain refused, and older records without the optional metadata remain readable.",
+    "Worker guidance and result output distinguish a child-reported native test outcome (command and actual exit/counts and/or a result artifact locator, or explicit unavailable) from command transcript statuses, watcher observations and host-recorded verification. Neither completed status nor Commands Run success nor prose test claims mint or imply host verification; focused tests cover passing, failing and unavailable outcomes and follow-up isolation through the existing result path.",
+    "Retrieving or completing a worker result does not stage, commit, import, merge, push, delete or synchronize either workspace; the parent decides integration with ordinary Git. A focused local-Git handoff test includes a new file through an explicitly worker-created diff/intent-to-add or an authorized local commit, proves the parent HEAD/index/worktree unchanged by completion and retrieval, preserves reviewer/evaluator behavior, and the exact final input passes the five-stage gate plus an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "design-pending",
+    "harness-agnostic",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1179c-5897-78b0-8991-055d05204ccf",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the worker-result handoff feature on landed Train-4 commit 21241d54. Independent acceptance evaluation d1547e91335b43ef92046a55968da2a2 passed all three criteria; no open obligations remain.",
+    "completed_at": "2026-10-17T17:07:14.485938300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

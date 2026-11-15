@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c6bf-7bb1-b418-8683381624a2",
+  "external_ref": "tm-rkad",
+  "title": "Terminate the full Engram control process tree on timeout",
+  "outcome": "ProcessEngramControlTransport kills its direct wrapper child on timeout/shutdown but does not guarantee descendant termination. Shell/PowerShell wrappers can leave the actual Engram process alive.",
+  "acceptance": [
+    "Unix process groups and Windows Job Objects (or an equivalent cross-platform mechanism) terminate the entire control process tree on timeout, EOF, idle reap, and shutdown, with platform tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

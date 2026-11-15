@@ -1,0 +1,41 @@
+{
+  "id": "01a129c0-612c-7ca3-a719-e79c40a32aa6",
+  "external_ref": null,
+  "title": "A failed launcher test leaves its launcher-fixture-* directory in the user's %TEMP%\\termal\\tests, outside the repository",
+  "outcome": "The launcher tests (scripts/test-launcher.test.mjs, helper testTempDirectory) keep their fixtures inside the repository's ignored .tmp, or remove them even when a test fails, so that no agent ever has to clean the user profile. This matches the earlier fix for Rust fixtures (w-36ed6aab3dc0).",
+  "acceptance": [
+    "The launcher test helper creates fixtures under the repository's ignored .tmp (or another in-repo ignored directory), not under the system temp folder. A test shows that a deliberately failing launcher test leaves nothing in the system temp folder.",
+    "Existing launcher tests stay green, and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "test-hygiene",
+    "work-only-in-repo"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

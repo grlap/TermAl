@@ -1,0 +1,31 @@
+{
+  "id": "01a1cd87-dad9-70d3-a86e-d216d596d7c2",
+  "external_ref": null,
+  "title": "Preserve confirmed not-applied results when an Engram lock retry cannot be funded",
+  "outcome": "Preserve confirmed not-applied results when an Engram lock retry cannot be funded",
+  "acceptance": [
+    "A confirmed locked-store first attempt remains definitively not applied when its shared absolute window cannot admit the retry, without issuing another command.",
+    "Evaluation-submit and policy-write callers retain the safe retry classification in a scripted-clock behavioral test; unconfirmed outcomes remain unknown."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "engram-adapter",
+    "greg-directed",
+    "limits",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,33 @@
+{
+  "id": "01a0ee8c-c31e-7bf1-a598-ec3e3e70eec5",
+  "external_ref": "engram:w-08f9a82bcd91",
+  "title": "Specify the host's acceptance-evaluation procedure: settling attempts, paging evidence, bounding attempts",
+  "outcome": "TermAl's feature documentation states, as the host's own specification, how the host settles an evaluation attempt whose write is uncertain, how it builds and pages the evidence it gives an evaluator, and how it bounds attempts per item and evaluator session; the implementation items cite it.",
+  "acceptance": [
+    "A reviewer of another vendor than the author has read the section against Engram's landed evaluation-unit text and found no contradiction; the review's delegation id is cited.",
+    "Each implementation item named in the notes cites the section it implements, and a statement in the section that is not yet implemented says so.",
+    "TermAl's feature documentation of acceptance evaluation has a section for each of the three parts: settling an uncertain write under the original evaluator identity and stored payload; building and paging evidence, naming which cut each part of the brief was read at and what is host-only; the attempt cap per item and evaluator session, how attempts are counted and what the host falls back to when the cap is reached.",
+    "The section records the coordinators' decisions listed in this item's notes, each with its reason, and links Engram's evaluation-unit section in both directions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance",
+    "design",
+    "docs",
+    "engram-host",
+    "paired-engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,40 @@
+{
+  "id": "01a1bdf4-94b2-7cf1-a204-f2386c1a096e",
+  "external_ref": "engram:w-9b38f77eee5a",
+  "title": "Trace named-root clear EOF on the TermAl side using supported reads",
+  "outcome": "Deliver Fable2728's read-only root-clear process/error trace, post-install clear-success evidence and joint-train impact assessment; no retry, repair or producer-store access.",
+  "acceptance": [
+    "A source-cited TermAl trace identifies the Engram process/session selected for named-root clear, the EOF detection path and the 502 mapping while preserving the exact unconfirmed naming intent.",
+    "Supported read-only evidence identifies any successful root clear since Central Engram 8fc84451 installation at 2026-11-09T00:10:28Z, or explicitly records the evidence gap; no root is cleared merely to test.",
+    "A short finding to Fable distinguishes confirmed joint-train impact from an unknown cause, covers Sol-edfd, Sol-d50d and w-46e8, and records direct coordination with the producer owner when Engram::Fable assigns one."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "diagnosis",
+    "greg-reported",
+    "named-root",
+    "read-only",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the assigned read-only TermAl trace and producer coordination. Exact g3122 clear intent remains pending; historical EOF cause and successful post-install ended receipt remain unproven. Filed separate process-evidence loss bug w-a023081b50ea; no repair or retry.",
+    "completed_at": "2026-11-09T01:46:22.958382700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

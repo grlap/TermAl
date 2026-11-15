@@ -1,0 +1,28 @@
+{
+  "id": "01a1b51a-76a2-7ff3-9067-29ae99b0bab1",
+  "external_ref": null,
+  "title": "Cover remaining watcher ignore fallback and unresolved-summary bounds behavior",
+  "outcome": "Behavioral fixtures verify independent non-Git workspace visibility, conservative classification-failure fallback and bounded unresolved/concurrent late summaries.",
+  "acceptance": [
+    "Cover remaining watcher ignore fallback and unresolved-summary bounds behavior is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "followup-proposal",
+    "review-low",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

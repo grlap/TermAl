@@ -1,0 +1,58 @@
+{
+  "id": "01a0ed9f-562f-7da0-859f-87ed03f01d68",
+  "external_ref": "engram:w-45023fd56257",
+  "title": "Pair Engram's open-obligation advisory (w-45023fd56257): hold the evaluator request while action is required, show the advisory in the response and the evaluator's brief, and re-read before submitting",
+  "outcome": "An evaluation request made while Engram reports open obligations that need action before evaluation spawns no evaluator and tells the requester what to do; otherwise the advisory is shown to the requester and the evaluator, and the evaluator's submission sees obligations resolved since its basis. Engram itself never refuses on the advisory; the hold is the host's.",
+  "acceptance": [
+    "At each evaluation request the host reads evaluation_obligations from Engram anew, never from a cached value; when action_required_total is above 0 it spawns no evaluator and answers with each shown item's label, check_kind and remedy, the exact total, the omitted count and the read cut, and says that the evaluation can be requested once they are met; the hold has no override; a test shows it.",
+    "Before the evaluator's verdicts are submitted the host reads the item's basis again, so that an obligation waived or satisfied since the evaluator's basis is seen and reported to the evaluator instead of submitting an evaluation Engram would void; a test shows it.",
+    "Items with action_required_before_evaluation false never hold: with action_required_total 0 the request proceeds, and the advisory is shown in the request's response and in the evaluator's brief; a test shows both places.",
+    "TermAl's feature documentation of acceptance evaluation describes the hold, what the held response carries, and that a hold believed wrong is reported to Engram, not bypassed.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "With evaluation_obligations absent, as from an Engram older than 0bc04ca, a request behaves as it does today; a test shows it."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "engram-host",
+    "paired-engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

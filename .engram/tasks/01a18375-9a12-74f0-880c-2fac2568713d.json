@@ -1,0 +1,28 @@
+{
+  "id": "01a18375-9a12-74f0-880c-2fac2568713d",
+  "external_ref": null,
+  "title": "Single-row test-run observation writer republishes the in-use revision when revision allocation fails",
+  "outcome": "Single-row test-run observation writer republishes the in-use revision when revision allocation fails",
+  "acceptance": [
+    "persist_test_command_observation_locked publishes its TestRunChanged only at a revision its commit actually allocated (the same before/after guard as the batch path), and publishes nothing when allocation fails; its persistence and failed-tracking behaviour are otherwise unchanged.",
+    "A regression with inner.revision = u64::MAX shows no delta at the reused revision while the observation is still tracked as failed; the review pair finds no Medium or higher and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a18019-74c9-7603-a918-4c5d81531009",
+  "external_ref": null,
+  "title": "Evaluator start fails with 503 when its first-brief durable acknowledgement times out queued for the writer (back-to-back evaluation requests)",
+  "outcome": "Requesting several acceptance evaluations back-to-back does not make an evaluator fail to start because its first-brief durable acknowledgement misses a writer-queue deadline. Either the acknowledgement is reliably durable under ordinary load, or the request waits or queues correctly instead of retiring the delegation.",
+  "acceptance": [
+    "The cause of 'its first-brief durable acknowledgement failed (evaluation submission persistence is unconfirmed (Deadline: queued for the writer))' is diagnosed from host evidence, the writer-tick and phase diagnostics at the failure time, and recorded in a note. It distinguishes writer queue latency, lock contention and memory pressure.",
+    "A fix or bound lands: under a test that issues at least 4 evaluation requests back-to-back while the writer is loaded, every evaluator either starts or the request returns a retry-safe outcome whose retry is idempotent. No evaluation is silently lost or duplicated.",
+    "The full gate passes on the landed tree, with the review pair clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "persistence",
+    "writer-contention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

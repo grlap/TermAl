@@ -1,0 +1,37 @@
+{
+  "id": "01a11e44-a1ce-7772-99f2-3ce8bf23083c",
+  "external_ref": null,
+  "title": "A focused launcher run of a non-test check (doc-link checker) gets \"use a supported test runner form\" guidance",
+  "outcome": "When a session runs `node scripts/test-launcher.mjs focused -- <command>` with an inner command that isn't a test runner (e.g. `node scripts/check-doc-links.mjs`), the host's notice says plainly that the command is not a recognized test runner and earns no Test record. It doesn't tell the caller to use \"a supported test runner form\" or imply that a rerun could earn credit, and it doesn't present the run as a failure.",
+  "acceptance": [
+    "For a focused launcher run whose inner command is not a recognized test runner, the host notice names the inner command, says no Test record will follow because that command isn't a test runner, and gives no advice to rerun or change the form for credit.",
+    "The notice reports the command as the agent ran it (the inner launcher command), or names the shell wrapper separately, rather than presenting the runtime's pwsh -Command wrapper as the command text.",
+    "A regression test covers a non-test focused command and a genuinely unsupported test-runner form, and they get distinct notices."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination-cost",
+    "host-feedback",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed on master by the integration owner, Termal::Opus2.\n\nCommit 0f987597bbede203579e1dc62aa1c04ffda1d163 (tree daa19778) was pushed to origin/master as a fast-forward from 13063e3b, and ls-remote confirmed it at 02:00:30Z.\n\nPre-push checks:\n- 3 files, +140 −12, 0 CR; blobs af2a22cc / 40f96f2d / 571cfbfe = the producer freeze.\n- Re-gate test-0b39ecc7: PASS 5/5 (host record 965a29d3). Its trackedIndexDiff de2934a2 was reproduced exactly IN wt-3ce8-carry-13063e3b-11865.\n- Producer pair: Codex dd852f23 (no findings) and Claude sonnet 640dc915 (no Medium or higher; Low w-36e6 filed). The carry is byte-identical.\n- Evaluation effca213: 3/3, independent, not stale.\n\nInstalled from the same tree after the push; see the install note.",
+    "completed_at": "2026-10-14T02:03:05.062936700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

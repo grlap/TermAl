@@ -1,0 +1,49 @@
+{
+  "id": "01a12872-0dd5-7e13-9aad-2634e468e2a6",
+  "external_ref": null,
+  "title": "Focused launcher recognition refuses `node --test --test-force-exit <file>` (the gate's own helper-test shape) as an unsupported form",
+  "outcome": "A focused launcher run of a Node test file with the same flags the gate's helper-test stage uses (--test --test-force-exit, optionally a reporter or a name pattern) is recognized and recorded as a Test check like other node --test forms.",
+  "acceptance": [
+    "The holder's note identifies, with file:line, which recognition rule rejects `node scripts/test-launcher.mjs focused -- node --test --test-force-exit scripts/test-launcher.test.mjs` as unsupported, and which node --test flags are accepted today.",
+    "The focused Node grammar accepts bare --test-force-exit before test files, including the maintained gate's exact helperTestArgs shape and combinations with already supported options. Matched launcher artifacts still determine native pass/fail/unknown counts and exit; source/grant, ownership, argument-identity and artifact-validation fences remain intact. Regression checks cover recognition and recorded outcomes, reject valued or misplaced --test-force-exit and unsupported watch/reporter forms, and verify refusal feedback includes the offending flag.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Focused Node grammar now recognizes the gate’s bare --test-force-exit helper-test shape and records outcomes with preserved refusal and artifact fences. The fresh independent acceptance evaluation passed all 3 criteria; the full gate and focused run passed at the evaluated source revision.",
+    "completed_at": "2026-10-17T20:57:21.818047700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

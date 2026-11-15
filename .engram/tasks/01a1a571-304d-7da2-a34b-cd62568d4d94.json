@@ -1,0 +1,32 @@
+{
+  "id": "01a1a571-304d-7da2-a34b-cd62568d4d94",
+  "external_ref": null,
+  "title": "Strengthen native relay exact-status immutability, identity and FIFO boundary regressions",
+  "outcome": "Deterministic regressions independently observe stored receipt/cursor/wake immutability and cover wrong-origin/conversation InspectWake, exact participant-pair selection among same-home conversations, and stored-history/durability/unrunnable FIFO stop boundaries.",
+  "acceptance": [
+    "Strengthen native relay exact-status immutability, identity and FIFO boundary regressions is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "mailbox",
+    "remote-runner",
+    "review-low",
+    "testing",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a1e0-eb76-72d2-b95d-c752e99e378b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

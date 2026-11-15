@@ -1,0 +1,60 @@
+{
+  "id": "01a14e57-ba33-7180-8413-d9f08fe63a7a",
+  "external_ref": null,
+  "title": "M5 reference increment 1: prove already-bound roots and expose fresh mailbox-only references",
+  "outcome": "Deliver the already-bound, federation-owned reference increment independently without silently upgrading legacy proxies or claiming the full M5 association milestone.",
+  "acceptance": [
+    "The bounded C-to-S POST /federation/v1/mailbox/native-binding operation uses the actual authenticated current L1/A1 channel and returns one coherent observation of an eligible native root's exact current durably installed binding, S-local native creation token, C placement/principal, full host/central identities and required freshness/correlation basis. The requested binding is only a comparison target; absent, uncertain or ineligible bindings refuse. The operation performs no installation, reservation, opt-in, runtime, mailbox or acknowledgement effect.",
+    "A fresh explicitly federation-owned configuration and typed mailbox-only reference are created from the selected verified peer's actual owned channel and confirmed native-binding proof, with non-reused handle/generation and durable local visibility only after exact response/current-basis and commit rechecks. The ordinary termal_send_to_session facade validates the current reference and sends its canonical participant id to the unchanged ordinary HTTP API. The reference is never a serving agent, native participant or executor route; legacy handles remain unchanged and unassociated, and raw-proxy/native HTTP refusal and standalone behavior remain intact.",
+    "Missing or conflicting proof/reference, wrong host or equal raw ids across hosts, native/reference recreation, stale enrollment/configuration/link/central epoch/placement, uncommitted local persistence and central outage cannot publish or use a wrong or stale reference or fall back to local mail or legacy execution. After restart/reconnect, use requires current authoritative validation; an old handle or idempotent intent is not retargeted to a successor. Two TermAl instances on one SSH machine do not establish continuity. Missing native binding visibly refuses; no M4 installation effect or journal is introduced.",
+    "Deterministic tests exercise the production proof producer, durable reference provision/resolve path, actual MCP facade and ordinary HTTP, including canonical/reference equivalence without duplicate participants or mailboxes, old-handle and executor-fallback refusal, current/stale/recreated/missing binding cases, persistence failure/reload and outage/recovery. Pre-existing native binding and readiness fixture setup are disclosed; no fixture-injected successful association or proof counts as positive evidence. Coverage maps only to the named partial C1/C3/C4 clauses of the parent and proves neither missing native provisioning, live O1/Mac readiness nor full M5 completion.",
+    "Focused tests and the full five-stage gate pass on the exact input, and the independent read-only different-vendor review pair has no outstanding in-scope Medium-or-higher finding. Evidence pins the accepted M2/O1/L1/security dependencies, source and test fingerprints, and actual proof/reference path; no run starts before the coordinator releases both-landed exact carried input. Independent acceptance and completion apply only to this child, not the parent's remaining scope."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14e3f-a539-7dd2-ae91-fc620307cb7a",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a14bba-9864-78b1-809a-1ceeda90644c",
+    "01a14bba-abb8-7110-a31d-c593b94cf600"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed already-bound native-binding proof and fresh federation-owned mailbox-only references as bde704422ee8f3709ca00fe21e1bb23594f32b74 on origin/master, exact gated tree670a72caea236d1a4e925ab380820181db5348b1. Independent acceptance 5/5 fresh; exact full gate5/5; counted different-vendor review/carry chain and host workdir provenance recorded.",
+    "completed_at": "2026-10-19T19:51:05.028269300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a16601-5e88-7dc1-9de0-3d72aae1e429",
+  "external_ref": null,
+  "title": "Clarify carried-running announcement coverage in the watcher-fenced Codex test control",
+  "outcome": "The watcher-fenced carried-test regression records why its close-time assertion targets the refusal line, and pins the required carried-running announcement behavior without depending on unrelated wording.",
+  "acceptance": [
+    "Record the exact close-time holder-line behavior and why the watcher-fenced control targets 'the Codex test launched at' rather than the initial carried-running announcement, citing the production emission/merge path.",
+    "If the initial carried-running announcement is a required observable in the same close, add a discriminating assertion or focused control without weakening the retained refusal, watcher-fence, still-running and late-end ownership assertions; otherwise record an independently concurred rationale for its separate coverage.",
+    "Any test change passes the relevant focused suite on its exact input and follows the current review/integration workflow."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-followup",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a165be-1218-7542-92dd-21de902ddbb4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

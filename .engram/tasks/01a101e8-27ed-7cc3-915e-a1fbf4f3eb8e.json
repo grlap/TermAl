@@ -1,0 +1,28 @@
+{
+  "id": "01a101e8-27ed-7cc3-915e-a1fbf4f3eb8e",
+  "external_ref": null,
+  "title": "A delegation spawned with \"/review-code -- <note>\" is refused as a native slash command when the cwd is the parent's own workdir, though the same command takes the note from any other cwd",
+  "outcome": "One project command file resolves to the same kind for a delegation spawn whatever the cwd. So \"/review-code -- <note>\" either works everywhere or is refused everywhere with a reason that names the file, and a spawn without an explicit cwd says which workdir its children will run in.",
+  "acceptance": [
+    "A delegation spawned with \"/review-code -- <note>\" is refused as a native slash command when the cwd is the parent's own workdir, though the same command takes the note from any other cwd is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "agent-commands",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

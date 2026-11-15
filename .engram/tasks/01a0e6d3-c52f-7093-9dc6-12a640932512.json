@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c52f-7093-9dc6-12a640932512",
+  "external_ref": "tm-i7pv",
+  "title": "Add the silent-substitution question to the reviewer lenses so it outlives a session",
+  "outcome": "Proposal for the operator to accept or reject; nothing edited by hand. A single defect shape appeared four times in one day across two products, and no green suite asked about any of them. Code that cannot obtain the strong notion it needs either substitutes a weak proxy and still reports success, or refuses the weaker thing and reports nothing at all - and both poles survive a suite made only of prohibitions. The four instances, which are what make the pattern recognizable: a scroll restore that cannot find the message it was anchored to matches a raw pixel number instead, never checks message identity, converges within half a pixel and declares the reader position restored at a different reading point; a bounded tail response that cannot prove it is current is discarded whole, so a streaming transcript never fills while nothing anywhere reports a problem; and from the peer project, a compact projection that could not prove two bodies were the same capture matching on a clipped text prefix, and a doctor that could not obtain one consistent snapshot silently mixing two separate reads. The review question that finds all four: when this code cannot get the thing it needs, does it FAIL, or does it quietly accept something that merely LOOKS similar and then claim it worked? Ask it of every fallback, every retry that can report success, and every comparison that could not use the identity it wanted. Suggested placement: the architecture lens, since it is about contracts between components rather than any one language, with the four examples included because the rule alone is much harder to apply than the examples. The peer project has filed the same item on its side and is landing it through its ordinary path with gates and review rather than editing it in; the argument that persuaded me is that a reviewer lens file is how a delegated review pair receives its instructions, so a question kept only in coordinator memory dies with the session while one in the lens is inherited by every future review. Related durable memories on this side: silent-proxy-substitution-review-question and liveness-assertions-not-only-safety.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

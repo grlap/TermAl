@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c424-7c90-a8b1-40595f5b1454",
+  "external_ref": "tm-88r",
+  "title": "Session-to-session messaging: termal_send_to_session MCP tool (peer root sessions, queue-if-busy)",
+  "outcome": "Let an agent in one root-level session deliver a message/prompt to ANOTHER root-level (peer) session.\nDistinct from delegations (which are parent->child): no delegation record, peer-to-peer.\n\nFEASIBILITY: the delivery + queue-if-busy already exist. dispatch_turn (src/turn_dispatch.rs:642) queues\non the target's pending-prompt FIFO when it is Active/Approval, dispatches when idle. POST\n/api/sessions/{id}/messages -> send_message -> dispatch_turn_and_snapshot already does this for any\nsession (Telegram forwarding uses the same path). So no 'fail if busy' needed — queue is free.\n\nINITIAL SCOPE (this task): fire-and-forget MCP tool.\n - termal_send_to_session({ sessionId, message }) in src/delegation_mcp.rs — thin wrapper that POSTs\n   { text: message } to /api/sessions/{sessionId}/messages and returns a compact { sessionId, delivered }.\n   Queue-if-busy handled automatically by the backend. Does NOT wait for/return the target's response.\n - Update delegation_mcp_tools_list_exposes_parent_scoped_tools_only expected vector (learned this the\n   hard way on tm-px5).\n\nDEFERRED / open design:\n - Discovery: the agent needs the target session id. Defer a termal_list_sessions tool; for now the id\n   is supplied by the user/orchestrator.\n - Scope guard: currently can target ANY session id (incl. a delegation child or self). Consider limiting\n   to root (non-child) sessions in the same project.\n - Request/response: fire-and-forget only for now; a wait/result path (like delegations) is a later add.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a0e6d3-c424-7c90-a8b1-40822fb334b9"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-DONE. termal_send_to_session exists and is in daily use (commits 0a1e144, fa13d81); its \"blocked\" state came only from a migrated dependency.",
+  "completion": null
+}

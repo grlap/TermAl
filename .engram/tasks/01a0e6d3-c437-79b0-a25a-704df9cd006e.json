@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c437-79b0-a25a-704df9cd006e",
+  "external_ref": "tm-9mb",
+  "title": "Redesign product website around the real TermAl control room",
+  "outcome": "Replace the current light editorial marketing site with a responsive, accessible product website that visually matches TermAl's pane-based local control room and accurately presents current capabilities: multi-agent sessions, delegations/mailboxes, visual orchestrators, response board, remote hosts, approvals, diffs, durable state, and themes. Preserve the dependency-free static deployment and verifier contracts.",
+  "acceptance": [
+    "The website visually reflects the current TermAl UI rather than a generic editorial landing page; copy covers current product capabilities without overclaiming; desktop and mobile layouts are coherent; interactive demo and progressive enhancement/reduced-motion/accessibility contracts remain valid; node website/verify.mjs passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

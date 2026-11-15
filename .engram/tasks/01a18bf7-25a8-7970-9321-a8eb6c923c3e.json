@@ -1,0 +1,29 @@
+{
+  "id": "01a18bf7-25a8-7970-9321-a8eb6c923c3e",
+  "external_ref": null,
+  "title": "Shrink the 64 MiB fixture in the review-custody index upgrade test to what its assertions need",
+  "outcome": "Shrink the 64 MiB fixture in the review-custody index upgrade test to what its assertions need",
+  "acceptance": [
+    "Shrink the 64 MiB fixture in the review-custody index upgrade test to what its assertions need is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "review-finding",
+    "test-cost"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c643-73a1-b8c5-fb35d7e76d72",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

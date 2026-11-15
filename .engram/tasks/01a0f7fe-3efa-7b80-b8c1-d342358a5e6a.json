@@ -1,0 +1,42 @@
+{
+  "id": "01a0f7fe-3efa-7b80-b8c1-d342358a5e6a",
+  "external_ref": null,
+  "title": "A turn that completes item A and then works toward item B checkpoints B's source change under A's frozen turn binding, after A's seal",
+  "outcome": "A source change made after the turn's bound item completed is never reported against that completed item's run. It is reported under the item the work now belongs to, or held back until a binding for it exists.\n\nReported by Engram::Coder (TermAl mailbox 62e0c56d #114, 2026-10-01 11:16Z). Engram w-35d49919bc24 was sealed at 08:42:07.194Z (seal 8a5a4815…, run 01a0c666-bd33-71d0-8574-35ea0acba1e7, completed). In the same session (8581), a later source_changed=true observation b4138326… was observed at 08:43:46.558Z and recorded at 08:43:46.656Z, at run position 84, source content-v1:bc55e9ed…, workspace size-closures-coder. That turn was preparing the NEXT item (199, root generation 150) after the main closure, but TermAl checkpointed it under the completed item's frozen turn binding. Engram then opened a source_mutation_requires_test obligation (01a0f6a2-4c62-74e0-9a7f-589c3b391778) on the completed run.\n\nEngram's side is Engram w-c4c63440339a: preserve a late observation, its receipt and the grant closure, but open no obligation on a completed or sealed run. TermAl's side is the attribution: a checkpoint after `done` and a focus or root switch should not carry the new item's edits under the old item's binding. Related: w-9991dc0d390f (transition reporting at turn start) and w-370c19557c00 (named-root binding). Do not repair or reopen the completed item.",
+  "acceptance": [
+    "After a turn completes its bound item and then changes source for another item, TermAl does not report that change against the completed item's run. A test reproduces the sequence (bind A, done A, focus B, edit, checkpoint) and fails before the fix.",
+    "The change is either reported under the item the edit belongs to, once that item is bound, or carried to the next turn's report. Which of the two is decided and documented in a note; a test covers the chosen path.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

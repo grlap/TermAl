@@ -1,0 +1,37 @@
+{
+  "id": "01a1d257-7cf4-7240-a545-693034085dc9",
+  "external_ref": null,
+  "title": "Give a legacy-only named root an explicit outcome in evaluation admission and batch-gate binding, independent of Present{revision}",
+  "outcome": "TermAl's decisions for a named root whose only Engram sighting is a legacy revision-only one no longer depend on whether Engram answers Present{revision} or Absent, so Engram can retire that legacy answer shape without silently changing TermAl behaviour.",
+  "acceptance": [
+    "With a named root whose only sighting is legacy revision-only, evaluation admission gives coherent Present{revision} and Absent answers the same typed refusal before starting an evaluator, with a remedy to obtain a current source-identity sighting. Production batch settlement creates no verification_bind request or new credit from either answer; retained batch provenance and previously bound evidence remain readable. Behavioural tests cover both answer shapes and current-sighting and registered-verification positive controls; no test pins message text.",
+    "Code that exists only to treat Present{revision} differently from Absent in those paths is removed; the legacy answer stays parseable until Engram stops sending it. The change has a clean review pair and passes the full gate, and is landed and installed on every running TermAl host before Engram's matching retirement lands."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "cross-project",
+    "legacy",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

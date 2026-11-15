@@ -1,0 +1,30 @@
+{
+  "id": "01a1b1fd-7d1a-7233-bc15-eacf43d40b16",
+  "external_ref": null,
+  "title": "Surface failed or indeterminate received outcomes when suppressing companion reminders",
+  "outcome": "Suppressing an unnecessary companion test reminder still tells the agent about that item's current received failed or indeterminate registered run.",
+  "acceptance": [
+    "A companion receipt with failed or indeterminate outcome names the registered outcome and record when its duplicate-test reminder is suppressed.",
+    "Passing and unavailable/dirty companion cases retain the correct reminder and no-credit behavior; no credit moves between roots."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "diagnostics",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

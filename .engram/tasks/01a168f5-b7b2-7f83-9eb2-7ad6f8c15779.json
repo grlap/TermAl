@@ -1,0 +1,28 @@
+{
+  "id": "01a168f5-b7b2-7f83-9eb2-7ad6f8c15779",
+  "external_ref": null,
+  "title": "A stopped carried check contaminates a later unchanged run's source-change attribution",
+  "outcome": "A stopped check settles under its own launch identity and cannot cause a later unchanged run to lose credit for edits made before that later run started. Host diagnostics distinguish runtime check keys, launch instances and settlement history.",
+  "acceptance": [
+    "A stopped carried check contaminates a later unchanged run's source-change attribution is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

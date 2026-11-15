@@ -1,0 +1,29 @@
+{
+  "id": "01a1a61e-5d18-72d0-947f-e1b580a7397b",
+  "external_ref": null,
+  "title": "Say truthfully what an unanswered owner's read does in the recurring pass",
+  "outcome": "The adapter doc and the test's comment describe both reads correctly, and the test pins the recorded outcome.",
+  "acceptance": [
+    "The adapter doc's sentence on an unanswered read is limited to the deciding read, and a sentence covers the owner's read: the run is retained, evidence is withheld until the next attempt, and it's reported through the work's recovery reason, not the attempt.",
+    "a_root_whose_owners_read_goes_unanswered_heals_on_its_next_attempt says the same in its comment and asserts the recorded attempt outcome."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

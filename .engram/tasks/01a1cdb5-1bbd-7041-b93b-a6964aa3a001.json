@@ -1,0 +1,37 @@
+{
+  "id": "01a1cdb5-1bbd-7041-b93b-a6964aa3a001",
+  "external_ref": null,
+  "title": "Stop populating overview-only persisted metadata (messages.overview_kind/is_user, session_overviews) once nothing reads it",
+  "outcome": "After the minimap and its /overview endpoint are removed, TermAl no longer computes or writes overview-only metadata on message writes or initialization backfill, and any physical schema removal happens only under a coordinator-allocated floor.",
+  "acceptance": [
+    "Behavioural tests show normal message writes and store initialization no longer classify messages or populate/backfill overview-only metadata; existing stores still open and validate, previously stored overview values are preserved, and no product code consumes those values. Existing schema/defaults and compatibility code that preserves historical rows may remain. The overview codec, classifier, kind enum and decoder that become unreferenced are removed, with no change to columns, tables, schema floors or retained data.",
+    "Any physical removal of overview columns or tables happens only under a coordinator-allocated floor with ordered migration and old-binary refusal tests; otherwise the storage stays in place unwritten."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a1cdb2-ed61-7350-9ad6-8275b1ceedfd"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Retired overview metadata writers, startup backfills and unused codec/classifier/kind/decoder while preserving historical storage, schema defaults and floors. Landed53e57b9c passed exact-tree FULL; own registered closure test passed4/4. Independent evaluation7e27a0a6071349679aa16dd8cb51d9ef passed both criteria, no outstanding Medium+, Low filed separately. Original evaluator packet/full output/record archived before completion.",
+    "completed_at": "2026-11-13T01:40:41.678273500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

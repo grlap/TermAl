@@ -1,0 +1,29 @@
+{
+  "id": "01a14aec-a834-7262-a0c3-7b72972fb6db",
+  "external_ref": null,
+  "title": "Make the Worker prompt-eviction receipt-preservation assertion non-vacuous",
+  "outcome": "The Worker handoff eviction regression either checks a non-empty dispatched-prompt receipt through resident-message trimming or explicitly stops claiming receipt preservation; it retains the UNKNOWN attribution and summary-fallback controls.",
+  "acceptance": [
+    "Make the Worker prompt-eviction receipt-preservation assertion non-vacuous is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coding-workers",
+    "delegation",
+    "review-followup",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

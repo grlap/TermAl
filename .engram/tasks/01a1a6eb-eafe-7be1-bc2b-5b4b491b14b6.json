@@ -1,0 +1,31 @@
+{
+  "id": "01a1a6eb-eafe-7be1-bc2b-5b4b491b14b6",
+  "external_ref": null,
+  "title": "Check, edit, check again in one turn stays refused: the ordinary fail, fix, rerun cycle needs a further turn",
+  "outcome": "A worker whose check fails, who fixes the code, commits and reruns in the same turn earns evidence for the last clean check, without a further turn, and a real edit after that check is still refused. Not a prerequisite for the first evaluation window; required before any permanent enforcement.",
+  "acceptance": [
+    "A deterministic test against a pinned real Engram, on the product without w-776305458d13: one turn with a registered check A at X, an edit and commit to Y, and a clean registered check B at Y, then close and evaluate, is shown refused",
+    "After the fix that same sequence earns evidence for check B with no further turn, on Linux and on Windows, and Engram is unchanged",
+    "A real edit after check B is still refused, and an edit reverted to earlier content is not accepted as unchanged unless the measured content really matches",
+    "No wait is added to a turn or a send, and no new assertion depends on real time"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "after-execution-observability",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the simple rule Greg approved („tak”, 2026-11-04 about 20:19Z, memory rules-greg-eo-one-check-2026-11-04): Engram's w-633b5cacc42a decides from Git and carries the real-host rows, so these settled-baseline rows aren't needed. Branches and evidence kept; see note 05115e96.",
+  "completion": null
+}

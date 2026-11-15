@@ -1,0 +1,31 @@
+{
+  "id": "01a198ac-3a80-7dc1-bf07-7e09a73e9704",
+  "external_ref": null,
+  "title": "Avoid rebuilding every delegation child position if production row removal is added",
+  "outcome": "Before introducing production delegation-row deletion, the existing child-position index removes and shifts rows without rebuilding all child-position sets under StateInner, with catalog and lookup equivalence tests.",
+  "acceptance": [
+    "Avoid rebuilding every delegation child position if production row removal is added is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "catalog",
+    "delegation",
+    "greg-reported",
+    "performance",
+    "review-followup",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a192eb-9e83-77c0-9b55-c17ed893adeb",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

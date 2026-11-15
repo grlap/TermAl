@@ -1,0 +1,53 @@
+{
+  "id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "external_ref": null,
+  "title": "Startup blocks for minutes reading every delegation row (SELECT id, value_json FROM delegations ORDER BY rowid) from a ~700 MB store before the host is usable",
+  "outcome": "The HTTP listener binds before delegation payload loading. A single owned background operation restores the full inventory off StateInner and the async reactor, then atomically publishes complete records and indexes. Inventory-dependent operations fail closed while loading or failed; unrelated routes remain usable, history and recovery semantics are preserved, and no schema floor is added.",
+  "acceptance": [
+    "The HTTP listener binds before any delegation value_json payload is read or decoded. Existing session/metadata loading may remain synchronous. The host immediately serves routes that do not require the delegation inventory; inventory-dependent requests receive a typed starting-up or unavailable response until the inventory is complete. Increasing completed delegation history does not increase pre-bind delegation payload rows or bytes.",
+    "After the listener binds, one owned background operation reads and decodes the full delegation inventory without holding StateInner or blocking an async reactor. A complete inventory is installed at one publication boundary with an explicit completeness witness; failures retain an unavailable witness and never publish a partial inventory as complete. Shutdown and stale-source or conflicting-writer outcomes do not silently install or discard durable history.",
+    "Completeness-dependent delegation admissions, child/root classification, catalog joins, recovery, waits and destructive cleanup fail closed or wait with a bound until the complete inventory is installed. Existing delegation records, result/output history, ownership, durability fences, acknowledgement ordering and malformed/mismatched-record quarantine remain preserved. Unloaded or unavailable data is never treated as absent or as completed recovery, and unrelated writes cannot delete or replace unloaded delegation rows with defaults.",
+    "Deterministic regressions compare small/large completed histories and a large payload, verify zero pre-bind delegation payload work, prove SQL/decode run off StateInner, and cover pending-to-complete and failure behavior, required recovery, child exclusion, historical reads and write/restart preservation. Logs report listener-bind and inventory-complete elapsed times.",
+    "Fresh focused compilation and tests covering the final change and affected guards, plus independent Codex/Claude read-only reviews with complete exported packets/prose, pass on the exact frozen candidate. All Medium-or-higher findings are fixed and reviewed again; any unfixed Low is tracked separately. Merger owns the exact-input maintained full gate and landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered delegation payload loading after listener bind, with one off-lock owned inventory load, atomic completeness publication and conservative dependent guards preserving durable history. Current independent evaluation e3ec38239a114bfc8af9dd1f8cbd2a50 (Claude17753/delegation55a85fa4, revision12/cut806) recorded all5 PASS. Fresh current-root Test1d9df118 passed33/0 on046951e88541ff27efd13705d8444d9ed5b649c4/TREE64dd33deaf5893ee7cad58f6ef8f4f9ba461fcc5, generation3587, after the missingTEMP preflight setup failure was preserved/classified/corrected. Historical R3 review/FULL/landing d998353c are consolidated in holder evidence; optional8Low follow-ups stay open. Completion uses the recorded evaluation, with no manual criterion links. No further product change or restart in this closure.",
+    "completed_at": "2026-11-13T04:25:52.189365400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

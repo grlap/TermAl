@@ -1,0 +1,33 @@
+{
+  "id": "01a14a8c-3952-7d63-80a4-d3aafa2646d5",
+  "external_ref": null,
+  "title": "Coding workers slice 3: complete the Worker reporting and lifecycle contract (follow-up guidance, Failed notes, attribution regressions, docs)",
+  "outcome": "Worker follow-ups and failures report truthfully and consistently through the production paths, with attribution regressions and documentation matching the implementation. No new route, field, UI or tool, and no authority expansion.",
+  "acceptance": [
+    "Every accepted Worker follow-up receives the bounded Git-handoff and child-reported native-test reporting guidance without granting staging, commit, push or integration authority. Worker failure results retain Notes from the same current-attempt packet that selected the ordinary failure outcome, including an Idle completion with a trailing assistant chunk; Error-state strict-latest selection, rejected-follow-up behavior, and non-Worker result contracts remain unchanged.",
+    "Production-path regressions demonstrate owning-parent result/output attribution for promoted queued follow-ups, queued follow-ups that never start, started follow-up failure/cancellation, a missing resident prompt boundary, and legacy results without workerOutputUnavailable. Assertions distinguish each explicit unavailable note from transcript command status, child claims and watcher observations; verify true/false/absent output-flag behavior, wrong-parent rejection on both result routes, and persistence without inheriting earlier-attempt evidence. Result retrieval and settlement add no Git mutation, integration action or host-verification creation.",
+    "The documented Worker contract matches the implementation: optional baseRevision/worktreePath, mutable workspace locators, workerOutputUnavailable true/false/absent and summaryFallback, changedFiles/commandsRun and observation semantics, current adapter profiles, advisory ownedPaths, workspace separation rather than containment, and the still-refused trusted frontmatter ingress. Existing read-only reviewer/evaluator and non-Worker behavior remains covered. The exact final input passes the maintained five-stage gate and an independent different-vendor review pair with no outstanding in-scope Medium-or-higher finding; independent acceptance is requested only after the host-recorded evidence is available."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "coding-workers",
+    "delegation",
+    "design-pending",
+    "greg-directed",
+    "harness-agnostic",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1179c-5897-78b0-8991-055d05204ccf",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

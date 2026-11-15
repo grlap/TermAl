@@ -1,0 +1,49 @@
+{
+  "id": "01a12147-d9e2-7c91-9cd5-1d9259ed138e",
+  "external_ref": null,
+  "title": "Check recognition treats operator characters inside quotes as compound: a quoted `|` (e.g. in --test-name-pattern) makes any Test or Build line non-simple",
+  "outcome": "A recognized Test or Build command whose operator characters appear only inside quotes that the running shell treats as literal is judged simple, so it can be credited. Genuinely compound commands (unquoted | & ; < > or newlines, and command substitution wherever the shell expands it) stay non-simple and are refused. The rule follows each shell's quoting semantics, and the refusal names \"compound command\".",
+  "acceptance": [
+    "A regression test shows `node scripts/test-launcher.mjs focused -- node --test --test-name-pattern=\"a|b\" file.test.mjs` with valid provenance is judged simple and recorded PASS for exit 0, where today it is Unknown.",
+    "Tests show these stay non-simple and refused, per shell: an unquoted `|`, `&&`, `;`, `<`, `>` or a newline; `$(` or a backtick inside double quotes under bash or pwsh; and any operator under cmd, where single quotes do not quote.",
+    "The rule is written down with each shell's quoting semantics (bash, pwsh, cmd) next to the declared-command grammar docs, and docs/features/declared-test-commands.md is consistent with it, cross-checked against w-0c891724ef6f (the `!=` filter).",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-recognition",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

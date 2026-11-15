@@ -1,0 +1,37 @@
+{
+  "id": "01a1d726-809f-7371-9773-54e15402ea0e",
+  "external_ref": null,
+  "title": "File changes in a named worktree outside the workdir are dropped during the completion grace window: turn close clears the observed source root before file tracking finishes",
+  "outcome": "A turn's source-root and naming scope stays frozen for its file-change tracking through completion and the grace window. A debounced file event in the turn's named root that arrives just after completion is still attributed to that turn and produces the late FileChanges summary, and a batch captured before completion is not turned into Unresolved merely because the observation trace was closed.",
+  "acceptance": [
+    "A behavioural test: a root session working in a named linked worktree outside its own workdir completes a turn through the ACTUAL observation close; a file event in the named root arriving inside the completion grace window yields the late FileChanges summary for that turn (not dropped)",
+    "A behavioural test: a file-change batch captured before completion and applied after the observation close keeps its resolution (not Unresolved) when turn ownership is unchanged",
+    "The completion fixtures exercise the real observation close, not only finish_active_turn_file_change_tracking with the trace left alive"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "execution-observability",
+    "file-changes",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Retain the exact closed turn's file-tracking scope through completion grace. Reviewed fd7294e2 contribution carried byte-identically as 3b519737 in landed bca419c7. Actual-close late-event and pre-close-capture/post-close-apply fixtures preserve attribution; changed authority stays Unresolved. Independent acceptance 5a14efd5235f496296e3fc08c283c478 (session18089/delegation6ecc4c7c, revision2/cut192) fresh PASS3/3, full verdicts read. Completion boundary clean HEAD bca419c7/tree19b41836, separately checked. Optional Low child w-116c0c6ea48f remains follow-up.",
+    "completed_at": "2026-11-14T21:31:55.080148700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

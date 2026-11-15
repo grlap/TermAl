@@ -1,0 +1,40 @@
+{
+  "id": "01a1b16b-84c0-7e51-8842-4b61659d258f",
+  "external_ref": null,
+  "title": "Shared bounded path trie for workspace file events: implementation, tests and landing",
+  "outcome": "Deliver the shared bounded workspace notification implementation with complete consumer handling, validation and landing evidence, while the parent retains the post-restart baseline and live-host investigation.",
+  "acceptance": [
+    "The measured inefficiencies (unbounded pre-filter channel, per-scope fan-out of each path, pending map that flushes only after 250 ms of quiet) are fixed, and the fix's effect is measured with the same synthetic workload before and after; reports keep established facts separate from the remaining hypothesis about the incident's full 26 GB growth.",
+    "Pending workspace file events are held in one bounded structure shared across sessions and scopes, a trie keyed by path components: repeated changes to one path merge, and a subtree whose pending entries exceed a fixed bound collapses to a single directory-level marker. No change notification is lost: every consumer, at least the UI panels (diff, source, git, file tree) and the Engram check-credit fences (watcher order, change-after-launch), still receives the exact path or a covering directory marker, with the fences' ordering guarantees preserved. A written inventory names each consumer with its code location and how it handles a directory marker.",
+    "Host memory stays bounded when a project tree receives a burst of file activity, for example tens of thousands of files created or deleted under .tmp. An automated test asserts it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "implementation",
+    "memory",
+    "test-runs",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1ae31-11af-73d3-863a-a6f595cb994a",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered and landed the shared bounded path-component trie, bounded wake, oldest/quiet scheduling, truthful covering markers, production provenance and consumer handling. Fresh full23path Codex+Claude R4 has no Medium+; remaining Low issues filed separately. Exact focused Rust100/UI39/tsc and required Windows FULL18dab96d plus DL560 FULL280f4a4a passed on tree68a20c6b889c9be0edf8d6483756dbcbaa8f81b5; all original results independently inspected and archived. Opus2 fast-forwarded/pushed2987dc9a and deleted testref; installation is owner work, not yet asserted here.",
+    "completed_at": "2026-11-07T02:10:46.015284900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

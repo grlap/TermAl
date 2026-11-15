@@ -1,0 +1,28 @@
+{
+  "id": "01a18660-ec0f-7a60-9020-89d8faf6f610",
+  "external_ref": null,
+  "title": "Host-architecture brief: section 2.9 heading and the false-refusal paragraph still read as live after 204b95b",
+  "outcome": "In docs/features/host-architecture.md, the section 2.9 heading reflects that some of its defects were fixed after the brief's base. The paragraph after the table, which says the false refusal's cause is \"inferred from source on its item and not yet proven by a test\", is either dated to the base or says that 204b95b's test now covers the shell placement.",
+  "acceptance": [
+    "Host-architecture brief: section 2.9 heading and the false-refusal paragraph still read as live after 204b95b is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "architecture",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

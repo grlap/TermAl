@@ -1,0 +1,28 @@
+{
+  "id": "01a1333f-6a1e-7481-a2db-910a894f7d66",
+  "external_ref": null,
+  "title": "Render root-session API error literals containing backticks with valid Markdown code spans",
+  "outcome": "Literal response examples in the root-session API error table render their internal backticks and placeholder text as one code span.",
+  "acceptance": [
+    "In docs/features/root-coding-sessions.md, error literals containing backticks use double-backtick code-span delimiters with internal literal backticks, so the full response text and angle-bracket placeholders remain visible and formatted as code.",
+    "The correction preserves the documented API response text and behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

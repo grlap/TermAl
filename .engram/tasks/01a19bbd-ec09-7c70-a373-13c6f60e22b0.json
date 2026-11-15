@@ -1,0 +1,38 @@
+{
+  "id": "01a19bbd-ec09-7c70-a373-13c6f60e22b0",
+  "external_ref": null,
+  "title": "w-3fe8 source slice: live9 test paths still calling deleted ensure_engram_session_bound_off_lock",
+  "outcome": "w-3fe8 source slice: live9 test paths still calling deleted ensure_engram_session_bound_off_lock",
+  "acceptance": [
+    "A source-only patch for exactly the 9 test paths engram_acceptance_sub_agent_live.rs, engram_build_checks_live.rs, engram_carried_gate_live.rs, engram_legacy_root_recovery_live.rs, engram_named_root_completion_live.rs, engram_named_root_sighting_live.rs, engram_source_root_confirmation_live.rs, engram_root_recovery_live.rs and engram_source_observation_live.rs, on current f678a114 with the ac4d4975 shared fixtures, is returned to the integrator Sol-03d4",
+    "Every original test has an explicit per-original disposition, and the pinned real native-producer, registered-verification, root, claim and durability controls are preserved",
+    "No fake ensure-bound alias, no auto-positive work-session stub, no ignored tests, no live execution, no cargo, and no product behaviour change made to obtain green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 live9 test-source ports; exact9 import e8c161c1. These are preserved producer/receipt controls, not nine live provider witnesses.",
+    "completed_at": "2026-11-08T19:22:19.580275Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

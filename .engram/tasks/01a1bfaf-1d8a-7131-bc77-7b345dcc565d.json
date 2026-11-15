@@ -1,0 +1,28 @@
+{
+  "id": "01a1bfaf-1d8a-7131-bc77-7b345dcc565d",
+  "external_ref": null,
+  "title": "An evaluator's one submission can be lost by citing a non-holder note it was able to read",
+  "outcome": "An evaluator knows from its brief which records it may cite, so one invalid citation doesn't cost a whole judgment.",
+  "acceptance": [
+    "The evaluator's brief states or marks which records are citable as run evidence, so a non-holder or pre-claim observation isn't offered as one, with a behaviour test on what the brief carries; Engram's refusal of a bad citation stays as it is.",
+    "A review pair has no Medium or higher, and the normal gate passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "No host defect shown. Engram::Fable (mailbox ebe242f7 #7231): attempt 2's brief already marks such records '[context only: the tracker refuses this as a citation]', including 8a21ffb1. The running build db52491e carries that mark at src/acceptance_evaluation.rs:1322, so attempt 1's brief very likely had it too, though nobody has read that brief. An evaluator citing a marked record is model behaviour, and Engram's refusal plus the reuse route worked. Reopen with a new item if a brief is found that offers such a record unmarked.",
+  "completion": null
+}

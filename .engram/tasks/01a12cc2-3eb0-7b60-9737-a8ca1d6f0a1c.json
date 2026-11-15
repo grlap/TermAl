@@ -1,0 +1,26 @@
+{
+  "id": "01a12cc2-3eb0-7b60-9737-a8ca1d6f0a1c",
+  "external_ref": null,
+  "title": "A NotHeld Resume's renewed budget window is only stamped, not committed with the Resume",
+  "outcome": "In release_engram_begin_preparation_hold_for_resume's NotHeld branch (src/engram_begin_preparation_retry.rs ~:979), an ended or spent budget window replaced by an accepted Resume is made durable in the same write as that Resume, as the Releasable paths already are. Alternatively, docs/features/engram-host-adapter.md says that this path stamps the new window and lets the drain's commit carry it. Today it only stamps, so a drain that refuses without committing, or a stop before the next save, leaves the saved state with the old ended window while memory has the new one. At worst that costs an extra Resume after a restart. A test covers whichever behaviour is chosen.",
+  "acceptance": [
+    "A NotHeld Resume's renewed budget window is only stamped, not committed with the Resume is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

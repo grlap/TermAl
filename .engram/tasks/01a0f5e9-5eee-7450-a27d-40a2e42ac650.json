@@ -1,0 +1,27 @@
+{
+  "id": "01a0f5e9-5eee-7450-a27d-40a2e42ac650",
+  "external_ref": null,
+  "title": "Evaluator briefs under byte pressure can drop the only passed verification record a bound criterion could cite",
+  "outcome": "Low and Note from the Claude reviewer of w-51dab1c2faab, round 2 (delegation-1baa0871-deae-4599-89cc-90823ec063e9).\n\n(1) The same-session Compact verification list (src/acceptance_evaluation.rs, acceptance_same_session_verifications) keeps the 4 newest records of a bound kind whatever their result. Failed or indeterminate records can therefore push out the only passed record a bound criterion could cite.\n\n(2) Under budget pressure, the independent brief leaves out entries oldest-first, with no preference for passed verification records of a bound kind. The left-out inventory does not mark which entries were verification records, and the evaluator may call no tracker tool.\n\nEither way the evaluator sees no admissible citation and may downgrade to insufficient-evidence.",
+  "acceptance": [
+    "At Compact detail the same-session list prefers passed records of a bound kind, filling with others only to the limit; a test where the newest bound-kind records failed covers it.",
+    "When the independent brief leaves out evidence, passed verification records of a bound kind are kept listed longest, or are marked as such in the left-out inventory; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

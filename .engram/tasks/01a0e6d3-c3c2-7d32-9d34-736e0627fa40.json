@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3c2-7d32-9d34-736e0627fa40",
+  "external_ref": "tm-2l9v",
+  "title": "Mark the Engram work context as truncated instead of cutting it silently",
+  "outcome": "CONFIRMED FROM SOURCE, raised by Engram::Advisor on 2026-09-09.\n\nThe Engram work context delivered after a compaction is capped at 32 KiB (ENGRAM_CONTEXT_NUDGE_MAX_BYTES, src/engram_mcp_config.rs) and truncate_engram_context_nudge cuts the text with NO MARKER. UTF-8 handling is correct - it walks back to a char boundary - but the agent receives a fenced block that simply stops. From inside the session there is no way to distinguish \"this is everything Engram had\" from \"this was cut\".\n\nThe only existing signal is host-side: an eprintln to TermAl's own stderr (\"engram> session=... truncated work context to ... bytes\"). The agent never sees it, so today truncation is silent exactly where it matters.\n\nSMALLEST FIX: emit an explicit truncation marker. Constraints, all established while reading the path:\n- The marker must fit INSIDE the cap: reserve its length first, then walk back to a char boundary, then append - otherwise the delivered block exceeds 32 KiB and the cap stops meaning what it says.\n- Avoid angle brackets in the marker text. The fence builder escapes '<' to '&lt;' (src/turn_dispatch.rs around line 66), so a marker written as a pseudo-tag would arrive mangled. Plain brackets are safe.\n- The value is trimmed after truncation (engram_mcp_config.rs around line 508), so a marker ending in whitespace loses it; keep the marker's last character non-blank.\n- The wrapper stays as it is: the marker belongs inside the fenced content, not around it.\n\nWHAT THE MARKER DOES AND DOES NOT ESTABLISH, so the fix is not oversold: it says the content was cut. It does NOT prove any particular rule was lost, and its ABSENCE does not prove a compaction was mid-turn or that anything else went wrong. It is one fact about one delivery, useful precisely because the reader can currently infer nothing.\n\nRelated: the compaction-recovery issue holds the wider contract - arming covers Codex and Claude alike, delivery rides the next dispatched turn, and the host adds no instruction text of its own.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

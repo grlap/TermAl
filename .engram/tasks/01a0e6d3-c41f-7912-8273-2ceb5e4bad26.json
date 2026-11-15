@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c41f-7912-8273-2ceb5e4bad26",
+  "external_ref": "tm-7pnt",
+  "title": "Tell eligible sessions when their project declares Engram but the integration is disabled",
+  "outcome": "Observed by Engram::Advisor (session-6219, Codex, project Engram) on 2026-09-05: no Engram MCP tools, ENGRAM_HOME/ACTOR_ID/SESSION_ID unset while TERMAL_SESSION_ID was present; engram work next failed with \"pass --home or set ENGRAM_HOME\". Root cause was operator state, not an injection gap: the Engram project had been disabled in Settings > Engram for the developer-name change and only PhoenixCodeNav was re-enabled (verified read-only on /api/state). The gap is that a session in a declared-but-disabled project gets no signal at all and may try to guess a store or identity. Desired: when a project declares .engram-project but Engram is disabled (or verification never passed), eligible sessions receive one explicit line (in the seeded instructions and/or the first-turn context) saying Engram integration is unavailable for this project and why, and must not initialize a separate store or borrow another session identity. Acceptance: a session started in a declared-but-disabled project sees the notice; an enabled project is unchanged; test covers both.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram",
+    "ux"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

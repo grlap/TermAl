@@ -1,0 +1,31 @@
+{
+  "id": "01a10e5a-902d-7732-b04f-e1b7e76ec90c",
+  "external_ref": null,
+  "title": "Live proof: reconcile a new begin-unknown incident without Resume",
+  "outcome": "After install and coordinated restart, prove automatic recovery of new applied-reply-lost and expired-unbegun cases, preserving the cleared original incident as historical evidence.",
+  "acceptance": [
+    "After implementation landing, installation and coordinated host restart, a live holder note identifies the installed and observed host build and exercises either a new natural begin-unknown incident or a coordinator-authorized controlled reply-loss reproduction on a disposable session against that live build. An applied-but-reply-lost begin and an expired-unbegun begin reconcile without manual Resume, duplicate provider delivery or lost original prompt, with exact authority and host delivery evidence read from their proper sources. The note preserves the original session-8581 incident at 2026-10-05T22:37:42Z as historical expired-unbegun evidence (capture SHA256 dcebf3bd71a5f60095cd171b26c69fb58fad012edb9a0bea2f04ba1895ad0898), explicitly states that manual Resume removed that original hold, distinguishes its preceding checkpoint grant from grant D, and marks uncaptured historical transport/sidecar evidence unavailable. The new proof records actual fault/recovery events, original retained message identity and delivered count, and coordinates Engram control-latency findings with their owner. Controlled boot witnesses and the live observed recovery together cover restart reconstruction; no recovery of the already-cleared historical hold is claimed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "live-proof",
+    "pilot",
+    "reliability",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10c85-3888-7713-8bc7-58cf44d04f2c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a1410b-5d27-7ce2-a5d3-476a089ca8ae",
+  "external_ref": null,
+  "title": "Order learned naming history independently of foreign generation numbers",
+  "outcome": "Order learned naming history independently of foreign generation numbers",
+  "acceptance": [
+    "A naming event learned from another claim with a higher generation number does not hide a later name and clear on a successor claim with a lower claim-local generation: the original workdir preparation stops being current, its evaluation seed cannot spawn and the root change is detected, also after journal compaction and after a restart; src/tests/engram_root_authority.rs source_root_authority_foreign_generation_cannot_hide_a_later_claim_name shows it.",
+    "The test passes in a full five-stage launcher gate on a master tree that contains the change, cited by run directory and launcher fingerprint."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "control-plane",
+    "post-import",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verification-only closure. Since d7050386 (an ancestor of master d8fdd2dc), learned naming history is ordered independently of foreign generation numbers. Suppose a removed reader learns another claim's event at generation 100, and a successor claim later names and clears at a lower claim-local generation. Then the original workdir preparation stops being current, its seed cannot spawn and the root change is detected, also after compaction and restart. This is covered by source_root_authority_foreign_generation_cannot_hide_a_later_claim_name, which passed in full gate test-9a715c89. Criteria concurred by Termal::Fable2 (912a42d0). Independent evaluation 4e8c9efcc1d549bcb503b6fb4f2eb622 passed 2/2. No source change.",
+    "completed_at": "2026-10-15T19:43:36.900139400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

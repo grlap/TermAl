@@ -1,0 +1,30 @@
+{
+  "id": "01a16681-3cbe-7b22-9a76-b37561fe46a5",
+  "external_ref": null,
+  "title": "Review shared admission durability-fault classification for transient non-ordinary retries",
+  "outcome": "Review shared admission durability-fault classification for transient non-ordinary retries",
+  "acceptance": [
+    "Confirm and document how classified admission fence faults map to retryability for queued Bind, retained Evaluate and restart checkpoint callers, using deterministic fault injection.",
+    "Preserve strict ordinary fallback on actual local write failures while testing the intended handling of transient WriteFailed and deadline faults for non-ordinary recovery.",
+    "Focused tests and the full gate pass, and independent reviews have no unresolved in-scope Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "durability",
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

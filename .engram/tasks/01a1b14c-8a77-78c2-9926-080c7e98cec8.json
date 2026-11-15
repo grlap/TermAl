@@ -1,0 +1,31 @@
+{
+  "id": "01a1b14c-8a77-78c2-9926-080c7e98cec8",
+  "external_ref": null,
+  "title": "Decide native credit behavior when captured command output is truncated",
+  "outcome": "Decide native credit behavior when captured command output is truncated",
+  "acceptance": [
+    "Decide native credit behavior when captured command output is truncated is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "greg-directed",
+    "native-declared-credit",
+    "review-finding",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1af47-2661-7340-b4ef-24a72c898d6d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1b4b5-8850-7880-a698-37d945d4b7ca",
+  "disposal_reason": "Fable2 direct2794 FULLREAD assigns the sole native credit correction to Sol-c593/session13170 under Greg Asistant738/740. Original review-Low decision/provenance and owner12325's earlier175 concurrence carry to that item as input; Greg's newer artifact-verdict rule and Fable's exact acceptance63a26c789fb0464194c0bbf40ea811b3 supersede my narrower proposed C1-C3. No source edit, runtime execution or candidate was made for this child; named this turn only, so relinquish its claim/duplicate execution. Sol-03d4 returns to E2 critical path.",
+  "completion": null
+}

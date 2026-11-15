@@ -1,0 +1,29 @@
+{
+  "id": "01a10d1f-4979-7c10-84aa-fb11c564bc7d",
+  "external_ref": null,
+  "title": "Order dedicated ACP root exit after a concurrent successful prompt settles",
+  "outcome": "Order dedicated ACP root exit after a concurrent successful prompt settles",
+  "acceptance": [
+    "Order dedicated ACP root exit after a concurrent successful prompt settles is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "delegation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3d5-7440-b626-af3e91d2f0c9",
+  "external_ref": "tm-4abl",
+  "title": "Codex session cannot recover from an empty or unreadable thread rollout after a TermAl restart: every turn fails on thread/resume",
+  "outcome": "OBSERVED by Greg 2026-09-11 after restarting TermAl at ~21:12Z because Codex had hung. Session session-5280 (Questly::Codex, project questly) shows \"Turn failed: failed to read thread: thread-store internal error: failed to read session metadata <codex-home>/shared-app-server/sessions/2026/09/11/rollout-2026-09-11T14-11-47-01a0924f-f16b-71d0-9b55-629e76503f15.jsonl: rollout at ... is empty\".\n\nCOORDINATOR FINDINGS (read-only, 21:14-21:20Z):\n- The rollout file exists at C:\\Users\\grzeg\\.termal\\codex-home\\shared-app-server\\sessions\\2026\\09\\11\\ and is 0 bytes, mtime 21:12:15Z; it is the only empty rollout of 38 created today. The thread was created at 21:11:47Z and the app-server was killed by the restart (cargo run restarted 21:12:18Z, new server 21:13:37Z) before the rollout was written.\n- The error text is the Codex app-server thread store's (not in TermAl source); TermAl surfaces it as \"Turn failed\" (src/messages.rs:845). On each new turn TermAl chooses thread/resume when the session has a resume_thread_id (src/codex.rs:1209, src/turns.rs:171) and there is no fallback to thread/start when resume fails, and no session action that assigns a fresh thread: the session is stuck on every turn until the persisted external thread id is replaced.\n- Shared CODEX_HOME at ~/.termal/codex-home/shared-app-server is by design (docs/features/shared-codex-app-server.md:56).\n\nASK: when thread/resume fails with a thread-store read error (empty or unreadable rollout, missing metadata), treat the thread as lost: keep the TermAl transcript, clear the external thread id, start a fresh thread with the session's recovery instructions, and record a transcript notice naming the lost thread id. Optionally expose an explicit \"new thread\" session action for operators. Regression: fixture app-server returning the thread-store error on resume, then a turn succeeds on a new thread. Related: tm-vjr (phantom shells after restart).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in c07657c (ancestor of master f7db2c58).",
+  "completion": null
+}

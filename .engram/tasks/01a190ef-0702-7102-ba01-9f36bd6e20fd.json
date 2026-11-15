@@ -1,0 +1,29 @@
+{
+  "id": "01a190ef-0702-7102-ba01-9f36bd6e20fd",
+  "external_ref": null,
+  "title": "Root mailbox guidance and the acknowledge tool description allow noContinuation on native relay mailboxes, which the API refuses",
+  "outcome": "Root mailbox guidance and the acknowledge tool description allow noContinuation on native relay mailboxes, which the API refuses",
+  "acceptance": [
+    "The injected root mailbox guidance and the termal_acknowledge_mailbox tool description state that noContinuation is unavailable for native relay mailboxes (keep the owed continuation), matching the API's refusal",
+    "A test pins the guidance or tool-description text against the API behaviour for native relay mailboxes, so the two cannot drift again"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

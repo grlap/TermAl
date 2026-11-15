@@ -1,0 +1,36 @@
+{
+  "id": "01a15d22-4c66-74d0-821f-ba5d3f3ceb72",
+  "external_ref": null,
+  "title": "Pin replay of a retired placement admission key after re-enrollment",
+  "outcome": "A regression preserves historical admission-key replay without silently re-admitting or authorizing the retired placement.",
+  "acceptance": [
+    "A disposable fixture replays the original admission key after re-enrollment, pins the retained historical response and unchanged record, and proves current authority/binding/execution fences still reject it.",
+    "A current fresh placement remains distinct and capacity constraints remain enforced; the focused regression passes as host-recorded verification."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "federation",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

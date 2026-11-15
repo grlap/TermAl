@@ -1,0 +1,40 @@
+{
+  "id": "01a14c9f-342c-7a23-a4e5-f80817e7b068",
+  "external_ref": null,
+  "title": "Retain important host correlation fields within bounded launcher registration errors",
+  "outcome": "Retained launcher failure reasons keep the host correlation fields needed to investigate registration failures.",
+  "acceptance": [
+    "A long writer-progress deadline fixture retains serverInstance, operation/attempt correlation and remaining-budget information in the saved launcher error.",
+    "The bounded output contract is explicit and tests pin truncation without leaking unsafe text.",
+    "Relevant authorized tests pass with host-recorded evidence."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "host-recording",
+    "registration",
+    "review-follow-up",
+    "test-launcher",
+    "test-run-registration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14278-d7bc-7553-bfce-8591ae50da25",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

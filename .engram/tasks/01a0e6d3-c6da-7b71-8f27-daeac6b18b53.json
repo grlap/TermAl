@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6da-7b71-8f27-daeac6b18b53",
+  "external_ref": "tm-th1l",
+  "title": "Find why a Codex child's explicit Git Bash shell ran in WSL on Windows",
+  "outcome": "Reported by Engram::Opus (2026-09-26). In Engram review delegation b92ccea8 (Codex child session-7811), every exec_command failed before Git ran. That included a call with shell \"C:/Program Files/Git/bin/bash.exe\". The error was: Failed to attach disk ...\\AppData\\Local\\wsl\\{12808385-...}\\ext4.vhdx to WSL2 (ERROR_PATH_NOT_FOUND). The WSL disk was deleted in the 2026-09-26 profile deletion (see tm-t1gh). A shell of \"bash\" resolving to WSL bash is expected on Windows. An explicit Git Bash path ending up in WSL is not. Root Codex sessions using the default shell work (Engram::Advisor, session-6219).\n\nNot known yet: whether TermAl, for example through the PATH or environment it gives Codex children, or Codex itself routes the explicit path to WSL. TermAl's own review-code skill does not say 'Bash'; the reviewer followed Engram's command wording.\n\nWanted: find the routing cause from the child's recorded commands and environment. If TermAl causes it, fix it. If Codex does, record the evidence and close this as external.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

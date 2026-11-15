@@ -1,0 +1,32 @@
+{
+  "id": "01a18720-bf85-7ce1-8cbd-6125b7b8a8de",
+  "external_ref": null,
+  "title": "w-c205 slice E: a closing checkpoint's retained report and key survive a restart and an uncertified error",
+  "outcome": "The closing turn_checkpoint's request, key and report are kept durably, so a restart does not lose them, and an uncertified Remote error no longer drops the cached report.",
+  "acceptance": [
+    "For the closing turn_checkpoint, the original identity and arguments (session, idempotency key, report) are retained durably before send, so they survive a host restart, and a lost reply is classified as proven-unsent or dispatched-without-valid-reply; timeout or cancel alone is never treated as rollback.",
+    "A dispatched-without-valid-reply checkpoint, including an uncertified Remote error, is disclosed as unresolved and keeps its retained report; it is retried only as an identical replay, or after a status readback, never with a rebuilt report.",
+    "Tests lose the checkpoint's reply after dispatch, across a restart and on an uncertified Remote error, and show the classification, the disclosure and the identical replay or readback-before-retry."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "engram-interop",
+    "lost-reply",
+    "w-c205-slice"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18617-8de1-79e3-b1cb-c205c0fecb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a14fec-f5ef-7de1-af84-a382cf10ef5e",
+  "external_ref": "engram:w-b64cb212b0d9",
+  "title": "Pin session_status + control_store_busy handling with a test: binding kept, uncertainty kept, exact keyless replay",
+  "outcome": "Pin session_status + control_store_busy handling with a test: binding kept, uncertainty kept, exact keyless replay",
+  "acceptance": [
+    "A test drives recovery/admission session_status to a remote control_store_busy reply and asserts: the routing token and active/uncertain grant are not cleared, no fresh bind happens, and the degraded admission schedules a retry that re-issues the same keyless session_status",
+    "A storage_error reply on the same path stays Unknown and is not treated as certified not-applied"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1c81b-6158-7460-9bad-b4946d31ca68",
+  "external_ref": null,
+  "title": "Cover the remaining named-root journal census classes and precedence",
+  "outcome": "The census's new exclusive primary labels and protection precedence have behavioral coverage beyond the current four exercised classes.",
+  "acceptance": [
+    "Behavioral fixture cases cover previously untested named-root journal primary reasons and precedence, including reconciliation subtypes, evaluator versus selected-root custody, runtime root/opening/closing/report references, and known captured-generation custody preceding pending captures; assertions exercise census or admission behavior without pinning implementation text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "named-root",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

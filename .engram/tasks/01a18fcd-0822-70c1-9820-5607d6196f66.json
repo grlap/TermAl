@@ -1,0 +1,28 @@
+{
+  "id": "01a18fcd-0822-70c1-9820-5607d6196f66",
+  "external_ref": null,
+  "title": "Allow read-only Engram tools for Kimi reviewer children (show, memories, search, ls, next --peek)",
+  "outcome": "Allow read-only Engram tools for Kimi reviewer children (show, memories, search, ls, next --peek)",
+  "acceptance": [
+    "Allow read-only Engram tools for Kimi reviewer children (show, memories, search, ls, next --peek) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "kimi",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1a01c-6c6d-7d33-b9d2-ae109290885c",
+  "external_ref": null,
+  "title": "Design spike: split the single termal crate into smaller crates, starting with evaluation and test-run registration",
+  "outcome": "A measured, phased plan for splitting the backend into smaller Rust crates, with evaluation and test-run registration as the first candidates. It states dependencies, the prerequisite refactors, expected effect on compile and focused-test times, and risks, so Greg and the coordinators can decide whether and how to proceed.",
+  "acceptance": [
+    "The report maps, for the acceptance_* (evaluation), test_run* and engram_verification* families, which shared state and other fragments each depends on (AppState, StateInner, persistence, Engram host adapter), and names the pure leaf parts that could move first.",
+    "The report records the current Rust test structure and a resource census (env, processes, ports, SQLite, Git, temp roots, live/ignored tests) with source evidence. It defines the target layout: per-crate unit tests, fast host units, and heavier integration targets. It also gives a bounded parallel-execution plan inside one Central Cargo slot with exactly-once test accounting and no coverage loss. Paired before/after measurements (compile, sequential execution, bounded parallel execution, total FULL, and resource peaks) are made an implementation acceptance requirement, and every measurement not yet taken is stated as missing rather than estimated.",
+    "The report proposes ordered phases (for example converting include! fragments into real modules with explicit imports, then extracting leaf crates, then trait boundaries for state), each with risk, size and a pure-move rule, and no source is changed during the spike."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "architecture",
+    "build-time",
+    "file-size",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

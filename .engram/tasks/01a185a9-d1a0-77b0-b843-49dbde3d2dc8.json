@@ -1,0 +1,28 @@
+{
+  "id": "01a185a9-d1a0-77b0-b843-49dbde3d2dc8",
+  "external_ref": null,
+  "title": "Lifecycle revalidation publication spends ~70% of its StateInner hold in per-row changed-run projection",
+  "outcome": "Publishing the changed rows of one batched evidence persistence (persist_test_run_evidence_batch_with_compaction_locked, the TestRunIdentityIndex changed_row pass) no longer costs tens of microseconds per changed row under StateInner, so a lifecycle revalidation that changes many rows holds the lock for time dominated by the rows' own updates, not their run-summary projection.",
+  "acceptance": [
+    "Lifecycle revalidation publication spends ~70% of its StateInner hold in per-row changed-run projection is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "host-persistence",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

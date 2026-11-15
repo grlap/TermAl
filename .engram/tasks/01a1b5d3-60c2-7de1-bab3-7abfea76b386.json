@@ -1,0 +1,27 @@
+{
+  "id": "01a1b5d3-60c2-7de1-bab3-7abfea76b386",
+  "external_ref": null,
+  "title": "Workspace ignore discovery boundary uses any containing known project, not the session's own project",
+  "outcome": "A standalone or other-project non-Git workspace inside a known project's Git-ignored folder keeps its own discovery boundary, so its real changes stay published and attributed.",
+  "acceptance": [
+    "Workspace ignore discovery boundary uses any containing known project, not the session's own project is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

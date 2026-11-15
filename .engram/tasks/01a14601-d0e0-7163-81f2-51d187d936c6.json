@@ -1,0 +1,29 @@
+{
+  "id": "01a14601-d0e0-7163-81f2-51d187d936c6",
+  "external_ref": null,
+  "title": "Make the withheld-feedback stale-binding test non-vacuous",
+  "outcome": "Strengthen a_binding_changed_after_the_read_cannot_publish_stale_rerun_advice to require the expected notice and one completed core-inspect read, and assert explicit unknown need instead of only checking any optional line for absent rerun wording.",
+  "acceptance": [
+    "Make the withheld-feedback stale-binding test non-vacuous is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "engram-host",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2f8-1e31-7b91-9aed-4f5100c27046",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

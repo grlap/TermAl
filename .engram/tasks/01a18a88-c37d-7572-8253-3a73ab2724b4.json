@@ -1,0 +1,26 @@
+{
+  "id": "01a18a88-c37d-7572-8253-3a73ab2724b4",
+  "external_ref": null,
+  "title": "Project-reset checkpoint failure text: no \"refused\" summary for an unresolved Remote error, and no replay promise where none follows",
+  "outcome": "A project-reset checkpoint failure's text never contradicts itself. A Remote error reply that did not refuse reads as an Engram error with an unknown outcome, not \"Engram refused\". The \"next reset replays the identical checkpoint\" clause appears only where a later reset does replay it: not for claim timeouts, where this reset sent nothing, nor for a best-effort disable that keeps no recovery identity. The engram-host-adapter.md bullets match.",
+  "acceptance": [
+    "Project-reset checkpoint failure text: no \"refused\" summary for an unresolved Remote error, and no replay promise where none follows is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

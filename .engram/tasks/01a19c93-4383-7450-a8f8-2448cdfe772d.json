@@ -1,0 +1,31 @@
+{
+  "id": "01a19c93-4383-7450-a8f8-2448cdfe772d",
+  "external_ref": null,
+  "title": "Federation onboarding external probe discards the bounded-read error, so an intermittent Unavailable cannot be diagnosed",
+  "outcome": "When an external onboarding probe's bounded read fails, the adapter keeps the exact error, its stage and its timing in its result and diagnostics instead of collapsing it to a bare Unavailable, so intermittent failures can be attributed.",
+  "acceptance": [
+    "The federation onboarding external adapter retains the bounded-read Err (kind, stage: spawn, wait, read or pipe, and elapsed time) in its diagnostic output when it reports Unavailable.",
+    "The root cause of the intermittent second-call Unavailable, seen on local cmd.exe stubs 5 ms after a successful first call, is identified from that retained detail and fixed or filed, with no timeout inflation or retry.",
+    "The existing federation_onboarding_external tests keep all assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "nondeterminism",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

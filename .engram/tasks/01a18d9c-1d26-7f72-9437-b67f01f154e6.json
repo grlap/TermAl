@@ -1,0 +1,30 @@
+{
+  "id": "01a18d9c-1d26-7f72-9437-b67f01f154e6",
+  "external_ref": null,
+  "title": "termal_get_session_result returns 404 \"delegation not found\" for an old original Engram review delegation read by its native reviewer-reader",
+  "outcome": "termal_get_session_result returns 404 \"delegation not found\" for an old original Engram review delegation read by its native reviewer-reader",
+  "acceptance": [
+    "A cause note identifies why delegation-17cedf4b-c333-44b1-bbc8-1dadee62da34 attempt 1 is not found for the caller Engram::Architect3/session-14548 (retention or migration of pre-floor-7 review custody, project or authorization basis, or a defect), with file:line and evidence from supported surfaces only",
+    "If the record is retained, the read returns it; if it is legitimately gone or out of scope, the refusal is typed and names the reason (retention, project, authorization) rather than a bare 404 'delegation not found'; a deterministic test covers the case",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation-results",
+    "mcp-tool",
+    "review-custody"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

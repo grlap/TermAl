@@ -1,0 +1,35 @@
+{
+  "id": "01a10213-1e41-7e50-9211-339c47397f43",
+  "external_ref": null,
+  "title": "Record a live run of live_root_lost_committed_replies_replay_exact_requests_once on a master at or after train 23, since its live evidence predates the test child-temp environment",
+  "outcome": "A pinned live run of src/tests/engram_root_recovery_live.rs on a master at or after train 23's landing, where the real Engram child gets the cfg(test) TEMP/TMP/TMPDIR inside its home from 646d250, passes and is cited here.",
+  "acceptance": [
+    "A pinned disposable live run of src/tests/engram_root_recovery_live.rs, on a master at or after train 23, passes live_root_lost_committed_replies_replay_exact_requests_once, whose turn_begin case asserts the begin-unknown replay preview, two byte-identical begins and a single evaluate; its run id is cited on this item.",
+    "The exact input passes independent review and the full integration gate before landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "live-test",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

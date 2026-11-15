@@ -1,0 +1,24 @@
+{
+  "id": "01a1c900-12e0-79a2-b5d2-ed44e80ac39b",
+  "external_ref": null,
+  "title": "Own-run registration refused when a claim renewal crosses expiry: \"named run's claim fence changed; name the source root again\"",
+  "outcome": "A session whose claim is renewed across its expiry either keeps a usable named-root binding for its next registered launcher run, or the refusal tells it exactly what to do before it launches, so that no granted test window is spent on a run that cannot register.",
+  "acceptance": [
+    "Own-run registration refused when a claim renewal crosses expiry: \"named run's claim fence changed; name the source root again\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

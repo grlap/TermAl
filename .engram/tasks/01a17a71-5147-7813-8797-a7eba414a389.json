@@ -1,0 +1,31 @@
+{
+  "id": "01a17a71-5147-7813-8797-a7eba414a389",
+  "external_ref": null,
+  "title": "Triage Windows publication replacement coverage when open SQLite excludes rename",
+  "outcome": "Record the existing Windows source-binding coverage and decide whether a supported-operation regression needs an additional witness. Any future test reuses existing controls; do not add auxiliary proof runs or turn unsupported external live-file replacement into a new landing gate.",
+  "acceptance": [
+    "Triage Windows publication replacement coverage when open SQLite excludes rename is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-reported",
+    "persistence",
+    "review-followup",
+    "startup",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16c5a-c405-7981-af95-4fad42a4ffe7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

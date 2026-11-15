@@ -1,0 +1,38 @@
+{
+  "id": "01a141c9-42d4-7063-92af-dd0dd262c5e5",
+  "external_ref": null,
+  "title": "README: bring it up to date with shipped behaviour (REPL, Kimi/OpenCode, Engram/Work, test launcher/Test Runs, structure)",
+  "outcome": "README.md describes TermAl as it ships at landing. The REPL example works, every supported agent is listed, Engram and the Work view, the test launcher and Test Runs are documented, and the architecture overview and project tree reflect the current subsystems. Greg-approved scope (Engram::Advisor, TermAl mailbox b9d13887 #846), from the coordinator's read-only audit (b9d13887 #845).",
+  "acceptance": [
+    "README's REPL example is a command that works at the landed master (for example `cargo run -- repl codex`) and states that REPL mode does not support Claude; the old `cargo run -- --repl` form is gone.",
+    "Every agent TermAl supports (Codex, Claude, Cursor, Gemini, OpenCode, Kimi, per src/wire.rs Agent) appears in README's agent lists and architecture runtimes, and the agent-comparison link description matches its doc.",
+    "README documents, briefly and with links to their feature docs: Engram as the tracker and the read-only, Engram-only Work view; the shared test launcher (`node scripts/test-launcher.mjs full` five-stage gate and the focused form) with a link to docs/test.md; and the Test Runs tab.",
+    "README's control-panel, pane-tab, architecture-diagram and project-structure sections name the current major sections, tabs and subsystems (Workspaces, Work, Test Runs, Engram adapter, delegations and mailboxes, coordination board) without listing removed ones, and every link README contains resolves to an existing file.",
+    "The change is docs-only, and the full five-stage gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "docs",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Updated README.md to match shipped TermAl behavior, including the REPL, supported agents, Engram and Work, testing, Test Runs, and current architecture. Fresh independent acceptance evaluation a437ff4dfdeb472996ec4acb152ee0b8 passed all five criteria on the landed master tree.",
+    "completed_at": "2026-10-16T23:14:30.005051900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

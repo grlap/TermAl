@@ -1,0 +1,29 @@
+{
+  "id": "01a1461e-4143-7833-984f-f7ac90e74e73",
+  "external_ref": null,
+  "title": "Preserve safe command identity for a Codex test that survives into another turn",
+  "outcome": "An ordinary withheld-check notice names a still-running older Codex command by safe program and actual-line digest, even after a new turn clears the ordinary running-command maps. Preserve only bounded safe identity through the live runtime/end lifecycle and add a cross-turn recorder assertion.",
+  "acceptance": [
+    "Preserve safe command identity for a Codex test that survives into another turn is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "codex",
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2f8-1e31-7b91-9aed-4f5100c27046",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

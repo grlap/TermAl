@@ -1,0 +1,30 @@
+{
+  "id": "01a1a521-4864-78c3-ac41-2d6bf3c55c94",
+  "external_ref": null,
+  "title": "A Windows checkout relying on system core.autocrlf reads as modified under isolated capture, and the refusal doesn't say why",
+  "outcome": "A person or agent whose clean Windows checkout is refused because of line-ending config learns the cause and the supported next step from the refusal, without capture being weakened or any global configuration being changed.",
+  "acceptance": [
+    "On a normal Windows clone under system core.autocrlf=true with no local override, the behaviour of isolated capture and of the launcher's clean report is shown by a recorded reproduction.",
+    "The refusal or report for that case names the line-ending cause and the supported next step, rather than only a list of modified files, and never claims a clean start that wasn't proved; capture's isolation from system and global config is unchanged.",
+    "docs/test.md states the requirement for a consumer checkout on Windows, and a deterministic test pins the behaviour. The exact candidate has a clean required review pair and passes the applicable gate, including on Windows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "commit-input",
+    "consumer-readiness",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

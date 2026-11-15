@@ -1,0 +1,27 @@
+{
+  "id": "01a18567-a81d-7790-8868-89debed735c2",
+  "external_ref": null,
+  "title": "Read-only sed checker refuses GNU sed's read-only -b/--binary option, which master allowed",
+  "outcome": "claude_sed_tokens_are_read_only accepts the exact options `-b` (also inside a short cluster) and `--binary`. `sed -b -n '1p' f` and `sed --binary -n '1p' f` are accepted on all four read-only paths, while a cluster holding `i` or `f` stays refused, with positive and negative tests.",
+  "acceptance": [
+    "Read-only sed checker refuses GNU sed's read-only -b/--binary option, which master allowed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "read-only-checker",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

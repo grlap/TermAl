@@ -1,0 +1,49 @@
+{
+  "id": "01a1315c-966b-7c33-be9b-1bf3d434a624",
+  "external_ref": null,
+  "title": "A Codex test still running in a worktree after its turn closed does not overlap another writable session's checks there",
+  "outcome": "A Codex test of one session that is still running in a worktree after its turn closed (EngramSessionState::running_codex_tests) overlaps a check another writable session starts in that worktree, in the same way another session's in-turn running command does (engram_other_writer_cause), until its end is reported or its runtime exits or is replaced.",
+  "acceptance": [
+    "A test shows session S1's still-running carried Codex test in worktree W overlapping a check session S2 starts in W, with the cause naming another session's still-running test, and not overlapping it once S1's test end is reported.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "codex"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Cross-session carried Codex tests now overlap writable checks in the same worktree until their end is reported. Full gate passed 5/5 on the exact committed tree; independent acceptance evaluation 3221391a8be54bf4b7d67858ded3ac54 passed 2/2. Opus2 fast-forwarded and verified origin/master at 5841a7599642e5af58f6b5d0e518966defbfcbee.",
+    "completed_at": "2026-10-13T19:40:03.207548500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

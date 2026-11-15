@@ -1,0 +1,39 @@
+{
+  "id": "01a198de-76e0-7803-8437-2aa5a4a19772",
+  "external_ref": null,
+  "title": "Documentation, UI/help and agent guidance for the removal of per-turn gating: remove every gated-control mention and describe Work Tracking & Execution Observability",
+  "outcome": "Every current TermAl document, UI and help string, skill and agent-facing guide matches the final removal implementation (w-3fe8f4472e5d). The user-facing name is \"Work Tracking & Execution Observability\", with project-level ON/OFF. The docs describe ordinary work sessions, assignments and claims, non-blocking execution, source and test evidence, and acceptance evaluation, with no turn-admission prerequisite. Retired gated-control descriptions, onboarding, config instructions and obsolete links or pages are removed, not renamed. Historical incident and evidence records stay untouched.",
+  "acceptance": [
+    "An audit of the whole repository (literal 'gated control', 'turn-gated', 'turn gating', admission/begin/grant prerequisites, and synonymous old semantics) lists every match, with each one removed, rewritten to the final behaviour, or justified as historical or immutable.",
+    "README.md, docs/architecture.md, docs/features/engram-project-reset.md, docs/features/engram-host-adapter.md, docs/host-architecture.md, docs/project-status.md, docs/features/supervised-pilot-onboarding.md, the shipped/CLI-MCP/reset/onboarding docs, the UI/help strings and the skills describe only the final implementation, using the agreed terminology, and claim no evidence capability that the removal release has not actually delivered.",
+    "Edits to AGENTS.md or CLAUDE.md follow the repository's exact-wording rule for instruction and authority files: both coordinators' concurrence on the exact wording, Greg sent the wording and its consequence, and a final-diff audit recorded before landing. AGENTS.md and CLAUDE.md stay identical in content where they are meant to.",
+    "Current project memories that describe gated control as current behaviour are revised or retired so that future agents do not restore it; historical records are not rewritten.",
+    "The documentation lands together with, or immediately after, the w-3fe8f4472e5d removal release, and its text is checked against that release's final code."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "docs",
+    "greg-directed",
+    "turn-gating-removal"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Current docs describe the final removal: no turn-admission prerequisite, and the retired gated-control text is removed, rewritten or marked historical. On master 7f8d1b63, gated by test-78f5f61f. Limits are stated on the closing note.",
+    "completed_at": "2026-11-04T09:06:42.121006400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

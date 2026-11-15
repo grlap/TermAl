@@ -1,0 +1,35 @@
+{
+  "id": "01a110d5-ee61-7160-904a-02ae5475675f",
+  "external_ref": null,
+  "title": "Make the Claude cut-output checkpoint path non-leak assertion discriminating",
+  "outcome": "Retained Low from independent Claude delegation-d79aaafe-47e1-4bb9-84cc-96cb358714ea/session-11150 incl authoritative coverage addendum on w-4d18277c0a1a frozen8c0cc205/base151c. src/tests/engram_claude_output_cut.rs:73 compares serialized JSON against raw single-backslash SPILL_PATH; JSON escapes backslashes, making the checkpoint assertion vacuous. Plain refusal-line assertion works and current production doesn't leak the path. This is test quality, not an observed leak. Assert recursively on actual string values or a distinctive backslash-free fragment and add a control proving a checkpoint carrying the path is rejected.",
+  "acceptance": [
+    "The checkpoint non-leak control fails when the checkpoint contains the persisted output path even after JSON escaping, passes for the real current refusal, and retains the effective plain refusal-line non-leak assertion without adding file reads or changing check verdicts."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

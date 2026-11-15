@@ -1,0 +1,31 @@
+{
+  "id": "01a179f9-6ad0-7f80-bc69-8c7a4b672b31",
+  "external_ref": null,
+  "title": "Cover remote detached mixed and unmatched-instance watchdog fallback selection",
+  "outcome": "New targeted selector lacks direct remoteId, hasNewerHistory, mixed local/excluded and known-but-unmatched instance witnesses. Extend existing silentWatchdogFixture; each exclusion must retain full recovery without targeted reads.",
+  "acceptance": [
+    "New targeted selector lacks direct remoteId, hasNewerHistory, mixed local/excluded and known-but-unmatched instance witnesses. Extend existing silentWatchdogFixture; each exclusion must retain full recovery without targeted reads. Relevant focused checks pass and standard review covers the final change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directive",
+    "performance",
+    "review-followup",
+    "testing",
+    "ui",
+    "watchdog"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a179cc-7346-77c1-b51f-8700e28a5963",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

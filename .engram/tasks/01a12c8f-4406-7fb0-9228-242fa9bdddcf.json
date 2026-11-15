@@ -1,0 +1,26 @@
+{
+  "id": "01a12c8f-4406-7fb0-9228-242fa9bdddcf",
+  "external_ref": null,
+  "title": "The begin-preparation lineage counts attempts the drain declined, overstating 'exhausted after N attempts'",
+  "outcome": "count_engram_begin_preparation_attempt (src/engram_retry_schedule.rs ~:618) counts an attempt only once it actually started or failed, mirroring the retry schedule's (started, failed) charge logic. An attempt the drain declined (Ok(None), for example because another admission holds the head) is not counted. With that fix, the exhausted preview's N attempts matches the attempts made, and a test covers a declined attempt.",
+  "acceptance": [
+    "The begin-preparation lineage counts attempts the drain declined, overstating 'exhausted after N attempts' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

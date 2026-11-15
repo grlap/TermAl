@@ -1,0 +1,29 @@
+{
+  "id": "01a1a01e-487a-71b2-b251-dedd86b3d45c",
+  "external_ref": null,
+  "title": "A session's exposed termal_send_to_session declaration omits the required idempotencyKey, so the first sends fail",
+  "outcome": "Every session sees a termal_send_to_session declaration that matches what the server requires, including idempotencyKey, so a session never has to discover a required argument from a refusal.",
+  "acceptance": [
+    "The source of the stale or partial declaration Engram::Merger saw is identified: for example a tool list cached by the runtime from before a host restart, a different MCP surface, or a projection that drops the field. The cause is classified with evidence.",
+    "A defect gets a fix, with a regression test that asserts the declaration a session receives lists idempotencyKey as required, and a clean review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-adapter",
+    "delegation-mcp",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Not a TermAl defect. The reporter, Engram::Merger, corrected the report in TermAl mailbox 5cdad9a7 #243 at 06:35Z on 2026-11-03: the exposed declaration of mcp__termal_delegation__termal_send_to_session did list idempotencyKey as required, and the first two calls omitted it. Retrying with an explicit stable key was the correct use. This matches the server declaration at 47fdba2f (src/delegation_mcp.rs around lines 2723–2731).",
+  "completion": null
+}

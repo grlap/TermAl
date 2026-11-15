@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c531-7e61-8d0d-009bff3451d4",
+  "external_ref": "tm-il8n",
+  "title": "Show animated squares at the end of the current assistant response",
+  "outcome": "Greg asks for animated squares at the end of the current agent answer. Implement in main checkout: three slow opacity-only squares anchored inside existing message bottom padding, no flow/height shift on appear/disappear; respect reduced-motion; visible only for current streaming assistant text using existing completion-aware classification. Do not add a LIVE TURN card or change scroll authority. No build/deploy/test execution authorized in this task yet.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Greg chose the trailing indicator instead; AssistantResponseProgress is gone from ui/src (note 01a09335). Its child w-9e3719ea6278 was closed as obsolete first.",
+  "completion": null
+}

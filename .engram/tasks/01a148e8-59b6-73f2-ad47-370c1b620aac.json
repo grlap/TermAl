@@ -1,0 +1,31 @@
+{
+  "id": "01a148e8-59b6-73f2-ad47-370c1b620aac",
+  "external_ref": null,
+  "title": "Match retained checkpoint grant to the grant reported open during recovery",
+  "outcome": "Match retained checkpoint grant to the grant reported open during recovery",
+  "acceptance": [
+    "Recovery substitutes a retained checkpoint only when its grant matches the authoritative status open grant as well as the current binding/authority.",
+    "A mismatch regression with local grant G1 and status-open grant G2 proves recovery does not repeatedly send the G1 request or claim that its receipt settles G2."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "reconciliation",
+    "reliability",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14882-9853-72f2-8565-339b57a1d89d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

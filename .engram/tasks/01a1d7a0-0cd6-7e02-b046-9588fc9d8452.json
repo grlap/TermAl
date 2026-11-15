@@ -1,0 +1,30 @@
+{
+  "id": "01a1d7a0-0cd6-7e02-b046-9588fc9d8452",
+  "external_ref": null,
+  "title": "Rust warning slice B: remove unused Engram diagnostics and fixture scaffolding",
+  "outcome": "Resolve the classified non-overlapping slice B compiler warnings while preserving runtime behavior, historical readers and the separately reviewed slice A.",
+  "acceptance": [
+    "The 25 slice B primary diagnostic locations classified in parent note 028b86dad8a74045a4038fd73ab60919 are resolved by removing truly unused code, narrowing actual test-only/platform-only helpers or unused bindings, without suppression attributes or behavior changes; the root-authority fence and carried-credit import files remain untouched.",
+    "On the exact slice B candidate based on cca3d3b2e9380cf8772efdde96090385c430f08d, the maintained formatter, production check, test build and focused tests selected for the changed modules pass, and no slice B diagnostic or newly introduced warning remains; unrelated slice A and owner-retained warnings are reported explicitly.",
+    "The independent Codex/Claude read-only review pair has no outstanding Medium-or-higher finding, and the maintained full gate passes on the exact landed tree carrying this slice."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "greg-directive",
+    "warning-slice-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a176f5-ebef-77a2-8fe7-3757892b459c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

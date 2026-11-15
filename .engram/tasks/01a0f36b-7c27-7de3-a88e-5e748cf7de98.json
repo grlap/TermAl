@@ -1,0 +1,36 @@
+{
+  "id": "01a0f36b-7c27-7de3-a88e-5e748cf7de98",
+  "external_ref": null,
+  "title": "The Windows launch test runs its 50-round stress loop in every full gate",
+  "outcome": "native_windows_launch_intermediate_exit_does_not_close_root_lease runs one round in the regular suite; the stress variant runs only when asked for (ignored by default, or a focused invocation).",
+  "acceptance": [
+    "A stress variant with the 50 rounds exists and is ignored by default, with a comment saying how to run it.",
+    "The full gate passed on the exact landed input.",
+    "The regular `cargo test --bin termal` run executes one round of the scenario and prints no per-round lines."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

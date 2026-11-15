@@ -1,0 +1,31 @@
+{
+  "id": "01a14cf7-6924-7ab0-a350-d50dae4cf6da",
+  "external_ref": null,
+  "title": "Durable dispatch obligation: a root lane that ends a turn holding an executable next action is automatically re-woken when its blocker clears, or carries an explicit blocker and release condition visible in host state",
+  "outcome": "Durable dispatch obligation: a root lane that ends a turn holding an executable next action is automatically re-woken when its blocker clears, or carries an explicit blocker and release condition visible in host state",
+  "acceptance": [
+    "When a root lane ends a turn, its retained next action is recorded durably as either (a) runnable now, which the host re-wakes automatically within a bounded time, or (b) blocked, with a named blocker and a machine-checkable release condition (for example: a named test run has ended; a full gate's currentStage is past rust/scale; a named mailbox reply has arrived). Tests cover both, and a lane with neither is flagged as a dispatch defect.",
+    "When a recorded release condition becomes true, the host wakes the lane with its retained next action within a bounded time, without a coordinator message, and the wake survives a host restart (tests at each persistence cut).",
+    "The lane's dispatch state (next action, blocker, release condition, since-when) is visible in host state or the UI and in a status query, so an idle lane never needs a status query to reveal it (test).",
+    "Shared-slot release conditions (the warm, cold and gate slots under the build-cap policy) are expressible, so a lane queued for a build slot is woken in queue order when the slot frees, rather than by a coordinator's manual GO."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "greg-directed",
+    "watchdog"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

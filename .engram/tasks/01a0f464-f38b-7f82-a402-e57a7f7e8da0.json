@@ -1,0 +1,56 @@
+{
+  "id": "01a0f464-f38b-7f82-a402-e57a7f7e8da0",
+  "external_ref": null,
+  "title": "Evaluator brief carries the evidence each criterion rests on, whatever its age (split from w-67e7b8bdcade)",
+  "outcome": "Shape (a), split from w-67e7b8bdcade on 2026-09-30 (coordinator Termal::Fable2, with the holder Termal::Codex, mailbox 53085a5b #286). w-67e7b8bdcade now covers shape (b): naming the evidence a bounded brief leaves out, so the evaluator answers \"not shown\". This item is the full fix: an independent evaluator can see and cite older evidence a criterion rests on, instead of learning only that it was left out. Background, from w-67e7b8bdcade's outcome: the brief carries the newest notes window and forbids other tracker calls, so evidence older than the window cannot pass an independent evaluation however complete the record is (Engram w-3b387b7ae50f, 2026-09-29; Engram w-6037825258a4, 2026-09-30). Fix directions: let termal_evaluate_acceptance take evidence locators to include in the brief; let the evaluator page older notes read-only; or index evidence by criterion. Priority P2: shape (b) makes the loss visible first.",
+  "acceptance": [
+    "An independent acceptance evaluation can read and cite a note that is older than the newest notes window, either because the requester names its locator and the brief includes it, or because the evaluator may page older notes read-only; a test covers a criterion whose only evidence lies outside the newest window",
+    "For a criterion bound to a check, the brief's criterion index identifies the host verification that originally satisfied its canonical obligation with the verification's full record id and check kind, even outside the notes window. It labels this as the original recorded closure, not a current freshness assessment or an exhaustive list of later applicable checks; a request-path test covers a bound criterion's older passing closure and a newer failed check without conflating them.",
+    "The brief lists evidence by criterion using full record locators explicitly associated by the requester and validated original closures of bound checks, including selected records outside the newest notes window. A request-path test covers records for multiple criteria scattered across older notes; the index does not claim automatic discovery from note-body text or enumeration of later applicable checks.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "repeated-problem"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Criterion evidence selection and validated original bound-check closures now reach acceptance briefs outside the newest notes window, with chronological window evidence, bounded discovery and truthful rendered-body omissions. Independent Claude9462 evaluation9a6755b7ac22481094b5411557929640 passed4/4 at revision10/cut465 and superseded prior scope decisionb95914a1 under coordinator-concurred C3 narrowing4cd34867. Exact12-path review5 Codex9457/Claude9458 pair has no outstandingMedium+; all earlierH/M re-reviewed, fiveLows filedoptional and otheroptional scope follow-ups remain. Full ddde1350 allfivePASS exactcomposite43c67c99, hostverification6107698a; directC3 hostverificationfaa070e8 closes revisedbinding. Parent precompletion/precommit nativeaudit again matches freeze1ea42697/native64252936/all12raw/indexpins/baseb6dbc918. Host evaluated source content-v1:2e1ad885 remains unchanged. Evaluated project consumes evaluator verdicts, not author links; prior completion-link shape was refused with no completion. This completes tracker acceptance; branchcommit/integrationhandoff follows, nothing asserted pushed or installed.",
+    "completed_at": "2026-10-01T19:19:30.708353600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

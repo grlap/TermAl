@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3fe-7191-bbaa-2ade78532c17",
+  "external_ref": "tm-5yye",
+  "title": "Extract and harden transcript transition bookkeeping",
+  "outcome": "SessionPaneView.scroll.ts is over the active TypeScript module threshold and the new content-transition classifier adds self-contained pure logic plus four unpruned per-scroll-key maps. Extract transition construction/classification into a focused module with direct unit tests, prune per-key state on teardown, and bound the drainAnimationFrames test helper so a self-rescheduling callback fails diagnostically instead of hanging Vitest.",
+  "acceptance": [
+    "Pure content-transition construction/classification lives outside SessionPaneView.scroll.ts with direct unit tests; all per-scroll-key transition/signature/prompt maps are pruned with pane teardown; drainAnimationFrames has a finite diagnostic bound; existing scroll behavior and full frontend gates remain green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

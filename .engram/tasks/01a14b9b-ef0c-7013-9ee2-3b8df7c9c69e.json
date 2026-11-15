@@ -1,0 +1,30 @@
+{
+  "id": "01a14b9b-ef0c-7013-9ee2-3b8df7c9c69e",
+  "external_ref": null,
+  "title": "MCP termal_read_mailbox is listed but a call fails with TypeError \"... is not a function\" while the CLI read works for the same identity",
+  "outcome": "MCP termal_read_mailbox is listed but a call fails with TypeError \"... is not a function\" while the CLI read works for the same identity",
+  "acceptance": [
+    "The failing path is identified with file:line (the bridge's tool registration or dispatch versus the runtime's tool table), and the condition that leaves a tool listed but not callable is named.",
+    "A regression shows that a mailbox tool the bridge lists is callable, or that it is not listed at all; it never fails with a TypeError at call time.",
+    "When a mailbox tool is unavailable, the session receives a typed, actionable error naming the CLI fallback (TERMAL_CLI mailbox read), not a JavaScript TypeError."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "mcp-bridge",
+    "tool-availability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

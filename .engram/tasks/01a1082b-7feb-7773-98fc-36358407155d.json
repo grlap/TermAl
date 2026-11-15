@@ -1,0 +1,30 @@
+{
+  "id": "01a1082b-7feb-7773-98fc-36358407155d",
+  "external_ref": null,
+  "title": "Abandon a pending admission when a host-wake head proof is lost before promotion",
+  "outcome": "Loss of a host-wake queue-head proof after off-lock admission leaves the existing admission owner with a named disposition, never silently drops begun authority.",
+  "acceptance": [
+    "Abandon a pending admission when a host-wake head proof is lost before promotion is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-followup",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1a8b1-b97a-76b0-b281-1a8df0be8561",
+  "external_ref": null,
+  "title": "Release the settlement test hook on its normal thread stack before TLS teardown",
+  "outcome": "A settlement hook capturing test AppState cannot make its last drop occur in thread-local destructor context.",
+  "acceptance": [
+    "The request-scoped test hook is cleared or otherwise releases captured AppState on a normal stack, including relevant unwind paths, without changing non-test durability behavior.",
+    "Affected receipt and durability tests pass, preserving actual ACK/release synchronization, WAL/history and exact stale-selection409 assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "durability",
+    "review-follow-up",
+    "testing",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

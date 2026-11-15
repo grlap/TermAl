@@ -1,0 +1,27 @@
+{
+  "id": "01a10a1c-1c36-7dc2-904f-58c2c0401a62",
+  "external_ref": null,
+  "title": "Engram-contract changes should run the pinned live suite before their own commit, not only in the landing train",
+  "outcome": "A change to Engram admission or another Engram contract path changed behaviour that the ignored live tests assert, but its own full gate does not run `live`. So the break surfaced only in the landing train's live run, after its pair. Add a pinned live run (`node scripts/test-launcher.mjs live --engram-binary ... --engram-sha256 ...`) to the author's pre-commit checklist for Engram-contract changes, for example in docs/test.md or the landing method, so stale live assertions are caught on the author's branch.",
+  "acceptance": [
+    "Engram-contract changes should run the pinned live suite before their own commit, not only in the landing train is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "process"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

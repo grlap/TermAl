@@ -1,0 +1,27 @@
+{
+  "id": "01a10578-845c-79f3-b4bc-2f2062b83a71",
+  "external_ref": null,
+  "title": "Evaluate an explicit clear flag for named source roots instead of omission-based clearing",
+  "outcome": "An independently concurred decision on whether to replace documented omission-based source-root clearing with an explicit clear flag, including compatibility and shared-tool consequences; no implementation authorized by this inventory item.",
+  "acceptance": [
+    "Evaluate an explicit clear flag for named source roots instead of omission-based clearing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "agent-workflow",
+    "contract-proposal"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

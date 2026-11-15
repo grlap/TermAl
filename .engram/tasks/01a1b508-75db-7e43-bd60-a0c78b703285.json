@@ -1,0 +1,27 @@
+{
+  "id": "01a1b508-75db-7e43-bd60-a0c78b703285",
+  "external_ref": null,
+  "title": "Source-owner pin verification error hides the real cause (deadline exceeded reported as 'no longer matches the pin')",
+  "outcome": "When source-owner pin verification fails because its deadline expired (or for any reason other than a changed executable), the refusal message names the actual cause instead of always saying the executable no longer matches the pin.",
+  "acceptance": [
+    "Source-owner pin verification error hides the real cause (deadline exceeded reported as 'no longer matches the pin') is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

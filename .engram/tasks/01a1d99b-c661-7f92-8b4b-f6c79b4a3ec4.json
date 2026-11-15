@@ -1,0 +1,28 @@
+{
+  "id": "01a1d99b-c661-7f92-8b4b-f6c79b4a3ec4",
+  "external_ref": null,
+  "title": "Make relay wake test caps and scan-completion evidence safe across async task migration",
+  "outcome": "The relay test helper either returns completion evidence directly or clearly enforces its test-thread-only contract; row caps and completion cannot silently read a different thread's state if a caller is spawned.",
+  "acceptance": [
+    "Make relay wake test caps and scan-completion evidence safe across async task migration is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox-relay",
+    "review-low",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a15ba5-9f77-7121-8cf4-02bffdd5c58a",
+  "external_ref": null,
+  "title": "Reconcile genuine external Codex unarchive events without discarding duplicate-event fences",
+  "outcome": "Design and implement a positively attributable reconciliation path for a genuine external unarchive after a settled restore tombstone. Retained duplicate callbacks must not resurrect a compensated thread or cross a successor attempt.",
+  "acceptance": [
+    "Reconcile genuine external Codex unarchive events without discarding duplicate-event fences is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "design-pending",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

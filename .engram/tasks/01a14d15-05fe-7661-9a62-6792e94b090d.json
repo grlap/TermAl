@@ -1,0 +1,29 @@
+{
+  "id": "01a14d15-05fe-7661-9a62-6792e94b090d",
+  "external_ref": null,
+  "title": "Measure enabling turn-gated Engram control from TermAl (Verify/Save) with real timings on a disposable store, as evidence for Engram w-67775bc92f06",
+  "outcome": "Measure enabling turn-gated Engram control from TermAl (Verify/Save) with real timings on a disposable store, as evidence for Engram w-67775bc92f06",
+  "acceptance": [
+    "On a disposable Engram store and disposable TermAl sessions (never live operator data), a real timed Verify and Save of turn-gated control is recorded at 1, 8 and 32 sessions, with per-phase timings (Verify ~src/session_crud.rs:1789; Save ~:1958 via the adapter ~:234-245, including the serial fresh_targets loop ~:3166-3183 before the fence release), followed by a persisted reload and a new session showing the setting held.",
+    "The measurements and their limits are recorded on this item and handed to Engram w-67775bc92f06; no product change is required by this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-interop",
+    "evidence",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

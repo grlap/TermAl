@@ -1,0 +1,28 @@
+{
+  "id": "01a1863c-db0c-72f1-967f-c3665b9eccfb",
+  "external_ref": null,
+  "title": "Work panel: test Urgent strip toggle-close (no reveal) and no reveal replay after a view switch",
+  "outcome": "Tests pin the Urgent strip reveal rules: a second strip click on the selected item closes its details and sends no reveal (a branch collapsed afterwards stays collapsed), and a reveal request made before a view switch is not replayed when Dependencies/Hierarchy/Labels remount.",
+  "acceptance": [
+    "Work panel: test Urgent strip toggle-close (no reveal) and no reveal replay after a view switch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "test-coverage",
+    "work-panel"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0fe99-cf25-7ca2-87bb-a4819b480e9b",
+  "external_ref": null,
+  "title": "Make dropped bind-retry journal preview describe its retained non-retry hold",
+  "outcome": "Make dropped bind-retry journal preview describe its retained non-retry hold",
+  "acceptance": [
+    "Make dropped bind-retry journal preview describe its retained non-retry hold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "review-low",
+    "session-blocking"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0fd60-b810-7a23-93df-ab4130110f9e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1410b-639a-7232-8ae8-4ba973d86174",
+  "disposal_reason": "The parent is completed. Continue as independent work in Sol-a7bb's candidate list; Termal::Opus3 handles it under the TermAl coordinator (Termal::Fable2).",
+  "completion": null
+}

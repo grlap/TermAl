@@ -1,0 +1,29 @@
+{
+  "id": "01a1ca13-e4f7-7f32-a607-21fa10bd39fe",
+  "external_ref": null,
+  "title": "Recover a durable Pending acceptance submission after its evaluator ends",
+  "outcome": "A durable Pending evaluator write left after a host restart has a supported recovery decision without changing its retained actor, payload or attempt identity.",
+  "acceptance": [
+    "A behavioral restart fixture demonstrates the durable Pending state on an ended evaluator and its current recovery refusal.",
+    "A supported recovery route or explicit product decision handles that state without creating a fresh judgment or changing the retained actor, payload or attempt key.",
+    "Focused behavioral tests cover admission, refusal and duplicate handling for the chosen recovery behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

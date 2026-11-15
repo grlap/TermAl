@@ -1,0 +1,33 @@
+{
+  "id": "01a1cb43-befe-7682-9ca1-e23c7f39aa99",
+  "external_ref": null,
+  "title": "Integrate combo59 on be3b6fd8: 03d4 e6b8d2f7 (w-ab5d turn-end evaluation closing baseline carry), direct child of combo58",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit e6b8d2f70609a85e815c4039d971ed2b963b6f4e (tree d4957ff17c117102fc0e41508aca7be1a140ca73) is on origin/master, where master was moved to it by a fast-forward from be3b6fd8ad460761fcdd5dec8cfba0436afbc49f.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is d4957ff1 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the WHOLE-8 pair on 16b5dd9e (Codex session 17472, Claude session 17473) for the contribution, together with the scoped confirmation pair on e6b8d2f7 itself (Codex session 17480, Claude session 17481), which covers src/persisted_state.rs, the one path whose pre-image changed in the carry, and the identity of the other seven paths.",
+    "The release binary built from tree d4957ff1 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo59 e6b8d2f7 (tree d4957ff1), the 03d4 w-ab5d turn-end evaluation closing-baseline carry, landed on master by fast-forward from be3b6fd8 and pushed at 16:20:26Z. It is gated by DL560 FULL test-c20beeaf, PASS 7646/0/114 with vitest 5095, on test ref d270010a, which has been deleted. Installed on Central (9f9684e6; the previous binary is kept as termal-before-e6b8d2f7-3ccf7f77.exe) and on DL560 (bbed9f6d; the previous binary is kept as termal.610325a9.bak). Neither host was restarted. The independent evaluation (session 17506) passed all 3 criteria.",
+    "completed_at": "2026-11-11T16:29:52.998306Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

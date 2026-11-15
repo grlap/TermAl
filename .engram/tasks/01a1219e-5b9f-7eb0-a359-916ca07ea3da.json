@@ -1,0 +1,64 @@
+{
+  "id": "01a1219e-5b9f-7eb0-a359-916ca07ea3da",
+  "external_ref": null,
+  "title": "Launcher self-tests decide pass/fail by a fixed 10 s wall-clock within() race, failing credited gates under host load",
+  "outcome": "scripts/test-launcher.test.mjs waits for spawned launcher processes and their promises by deterministic synchronization rather than by a fixed wall-clock deadline that decides the verdict. A correct but slow worker passes. A genuinely hung or failing worker is reported with its fixture logs preserved, so slow and hung can be told apart. No bound is merely raised.",
+  "acceptance": [
+    "K1 (unbound fail-first): On base 1cb6bf9117092e41123f9557dc0dad0e0915bc6c, a discriminating witness delays a launcher worker's correct completion past the within() bound deterministically, with no CPU load. It shows the current scripts/test-launcher.test.mjs reporting \"did not complete within 10000ms\" although the worker's outcome is correct. A holder note preserves the failing host check, input, log path and SHA-256, and distinguishes the failure from setup or runner errors.",
+    "K2: No fixed wall-clock deadline decides a pass or fail in scripts/test-launcher.test.mjs or its fixtures: within() at :961, :1043/:1045, :1164/:1165, :1296/:1299/:1303, :1341/:1362/:1368, :1552, :1598 and :1629, and the notification fixture's 5 s barrier deadline. Each wait ends on a deterministic event: the child's exit or close, a readiness message, or a barrier file. No bound is merely raised. A worker that never completes is still surfaced, through one documented runner-level liveness guard that names the test and keeps its logs, never through a per-step deadline.",
+    "K3: The K1 witness passes after the fix: the deterministically delayed but correct worker is judged by its outcome, and the readiness-failure test at :1563 asserts the same outcome as before (code 1, the saved terminal result, one completion notice and no runner-error notice).",
+    "K4: When a fixture test fails, its fixture root's worker logs (for example readiness-worker.log) survive the test's cleanup, and the failure output names their path. A passing test still removes its fixture root. A test witnesses both cases.",
+    "K5: The maintained five-stage full gate passes on the exact final input, with this item's own passed host Test record. The independent read-only Codex/Claude review pair has no outstanding in-scope Medium or higher, with every remaining Low filed. An evaluator that never held the item evaluates these exact criteria independently."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "reliability",
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Launcher self-tests no longer decide pass/fail by a fixed wall-clock race. Every process wait in scripts/test-launcher.test.mjs ends on an event (exit or close, readiness, barrier file). Barrier fixtures stop when their owning test process is gone. One documented liveness guard remains: --test-timeout=600000 with --test-force-exit, set in the fingerprint-tests stage and in CI, and CI now runs on the Node version in .nvmrc. A failed or hung launcher test keeps its fixture directory and names its absolute path (scripts/test-fixture-cleanup.mjs). Witnesses: a mocked-time slow worker is judged by its outcome, and a child node --test run covers pass, fail and hang. The independent evaluation d3230cf3 passed K1-K5; gate test-25abff44 passed (host record 5528f007); five review rounds, clean at round 5; Lows filed as w-037e4c19f2cb, w-ef9f30e9f8ef, w-160fb622fc5e and w-7992b2fcb9e0. Landed by Termal::Opus2 as a fast-forward of master to 9fa283c0.",
+    "completed_at": "2026-10-09T23:24:08.459496600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

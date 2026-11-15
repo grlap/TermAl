@@ -1,0 +1,27 @@
+{
+  "id": "01a1dbd8-1ab0-78a1-a731-47d45aef365a",
+  "external_ref": null,
+  "title": "Cover the persisted view of the remote proxy change test with a persisted-only positive control",
+  "outcome": "A test shows that a remote summary change visible only in the persisted record (not in the broadcast summary, live activity or transcript identity) stamps the mirrored proxy, so removing the persisted comparison fails a test.",
+  "acceptance": [
+    "Cover the persisted view of the remote proxy change test with a persisted-only positive control is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

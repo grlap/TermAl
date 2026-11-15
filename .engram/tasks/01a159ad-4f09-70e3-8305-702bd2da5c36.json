@@ -1,0 +1,29 @@
+{
+  "id": "01a159ad-4f09-70e3-8305-702bd2da5c36",
+  "external_ref": null,
+  "title": "Reject empty or relative roots before resolving a test-run registration's Git directory",
+  "outcome": "Registration target identity is independent of the host process working directory.",
+  "acceptance": [
+    "Empty and relative request roots are refused before Git-common-directory resolution; valid absolute main and linked-worktree roots continue to register.",
+    "Regression controls prove the outcome does not depend on host cwd and the existing registration contract remains intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-api",
+    "registration",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

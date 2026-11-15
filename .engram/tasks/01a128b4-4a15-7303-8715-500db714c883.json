@@ -1,0 +1,40 @@
+{
+  "id": "01a128b4-4a15-7303-8715-500db714c883",
+  "external_ref": null,
+  "title": "Keep empty-queue Resume behind retired source-observation reconciliation",
+  "outcome": "Public Resume of an empty paused queue drives pending retired source-observation recovery and only reports the queue unpaused after that reconciliation succeeds.",
+  "acceptance": [
+    "Empty-queue Resume preserves retired source-observation reconciliation before unpause: a refusal keeps the queue paused with an accurate reason, and success finalizes the retained observation before reporting unpaused.",
+    "Regression coverage exercises empty paused queues with both successful and failed retired source-observation reconciliation."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "reliability",
+    "resume",
+    "retained-prompt",
+    "review-follow-up",
+    "source-observation",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12188-9cc9-7b60-9301-b21c5132848c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

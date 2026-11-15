@@ -1,0 +1,29 @@
+{
+  "id": "01a165da-1be6-78f3-8c8a-856f2086b559",
+  "external_ref": null,
+  "title": "named_root_reclamation_startup_discard_blocks_completed_selection fails nondeterministically in full gates (passes in isolation)",
+  "outcome": "The test passes deterministically in the full gate. Its nondeterminism is diagnosed to its cause (test assumption, runner or resource contract, or product defect) and fixed at that cause, with no retry, quarantine or timeout increase.",
+  "acceptance": [
+    "A note identifies the cause of the intermittent failure from the preserved gate logs and a discriminating focused diagnostic, classified as product, test/runner, or environment/resource.",
+    "The cause is fixed (no retry, quarantine or timeout inflation), with a deterministic test covering the failing interleaving; cargo test --bin termal is green.",
+    "The full five-stage gate passes on the exact committed tree with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "named-root",
+    "test-nondeterminism"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

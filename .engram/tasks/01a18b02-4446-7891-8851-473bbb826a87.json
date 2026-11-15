@@ -1,0 +1,32 @@
+{
+  "id": "01a18b02-4446-7891-8851-473bbb826a87",
+  "external_ref": null,
+  "title": "An unsettled original closing checkpoint whose work authority moved is withheld forever, wedging the turn-gated session",
+  "outcome": "Original-checkpoint result recovery replays the exact retained request after the session's claim moved, so a turn-gated session whose bound claim was released or re-fenced settles its closing checkpoint instead of staying excluded forever.",
+  "acceptance": [
+    "Original-checkpoint result recovery no longer withholds its send because the session's current work binding (claim, fence, focus, revision, run) differs from the original's. Recovery sends the exact retained TurnCheckpoint (same idempotency key, grant and report) under the original-operation custody. Every other existing fence is unchanged: owner capture/match, project/store/authority settings, attempt capacity, policy read, containment acknowledgement, deadline.",
+    "Only an accepted \"checkpointed\" receipt naming the original grant retires the duty. Refused, busy, expired, conflict and transport results keep their existing classification and retry policy. No local authority-moved terminal is added.",
+    "A deterministic regression drives the real retry tick on the scripted clock, with no sleeps or retries. A turn-gated root's closing checkpoint reply is lost, then the session's held claim changes: it is released and a different claim and fence are bound. On master the recovery is withheld with \"work authority changed\" and sends nothing. With the fix the tick sends the exact original request once and settles it on a checkpointed receipt.",
+    "The same deterministic tick regression has a refusal leg: when the exact replay of the original returns Refuse (or busy/expired/a later NotApplied), the original duty stays unsettled and visible, no receipt is recorded, and the queued ordinary head is not admitted.",
+    "The existing canonical recovery guidance states, in one sentence and with no new rule or approval gate, that original result recovery never requires reacquiring or rebinding a current claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "restart",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

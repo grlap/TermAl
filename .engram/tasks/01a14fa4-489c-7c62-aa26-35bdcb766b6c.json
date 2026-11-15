@@ -1,0 +1,29 @@
+{
+  "id": "01a14fa4-489c-7c62-aa26-35bdcb766b6c",
+  "external_ref": null,
+  "title": "An unclean machine reboot lost mailbox appends and acknowledgement cursors that TermAl had already acknowledged as durable (SQLite WAL, synchronous=NORMAL)",
+  "outcome": "An unclean machine reboot lost mailbox appends and acknowledgement cursors that TermAl had already acknowledged as durable (SQLite WAL, synchronous=NORMAL)",
+  "acceptance": [
+    "An unclean machine reboot lost mailbox appends and acknowledgement cursors that TermAl had already acknowledged as durable (SQLite WAL, synchronous=NORMAL) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "design-decision",
+    "durability",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

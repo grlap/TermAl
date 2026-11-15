@@ -1,0 +1,36 @@
+{
+  "id": "01a1c12a-c4c7-7c12-827a-5c7d2da64bc0",
+  "external_ref": null,
+  "title": "Declared native source_id runs make committed-input acceptance refuse ScanIncomplete",
+  "outcome": "Define and implement acceptance admission for declared native runs without misreading their source_id results as malformed committed-input launcher results.",
+  "acceptance": [
+    "A behavior regression using the production native registration and real source_id results shape confirms or corrects the reported ScanIncomplete refusal, including an acknowledged terminal native record.",
+    "The chosen native admission contract is documented and preserves source, authority, receipt and currency fences; no test/build evidence is invented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "declared-commands",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Declared native clean SourceId runs now use authenticated native admission rather than malformed launcher ScanIncomplete. Landed 8ab420b0 with green exact-tree FULL and adopted whole12 pair; four Low follow-ups remain separately filed.",
+    "completed_at": "2026-11-10T06:23:21.800242600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "id": "01a128ea-85e9-76a0-b227-f225b3b016ab",
+  "external_ref": null,
+  "title": "A compact current-state panel per session: working / waiting / recovered / action needed, with phase, auto-recovery state, and one safe action only when needed (Greg 2026-10-11)",
+  "outcome": "Per Greg's direction via Engram::Advisor (TermAl mailbox b9d13887 #601, 2026-10-11 03:03Z): each session shows a compact current-state panel answering (1) the state, one of working / waiting / recovered / action needed; (2) the exact dependency or phase it is waiting on; (3) the automatic recovery state, with the next attempt or the result; (4) one safe action, offered ONLY when human action is truly required. Raw control mechanics, duplicate historical cards and diagnostics sit behind an expandable history. An auto-recovered failure never dominates the screen. No fake timers: times shown come from recorded events or scheduled attempts, never invented countdowns. It builds on w-5b823829eb80 (pairing a recovered card by promptId) and the card phase fields of w-cfcf10b68c9b C11, and leaves room for w-43aea73d0c17's diagnostics in the expandable history.",
+  "acceptance": [
+    "C1 Every session's state carries a typed description of an Engram-retained queue head: hold reason, whether it retries automatically, attempt count, the next attempt's scheduled time taken from the recorded retry schedule (admission, delivery-abort or bind retry), and the actions the host accepts. It uses the shape delegations already expose, so the panel never parses preview text.",
+    "C2 Each session pane shows a compact current-state panel naming exactly one state: working (a turn is running); waiting, which names the exact dependency or phase (Engram admission, bind or delivery retry; restoring Engram after restart; delegations; a test run); recovered (the latest admission succeeded after automatic failures of the same prompt, paired by promptId); action needed, only when no automatic path remains (a hold that does not retry automatically, an error status, or a pending approval or user-input request). An idle session with nothing pending shows no panel.",
+    "C3 The recovery line comes only from recorded or scheduled data. While retrying it reads \"attempt n, next attempt at <clock time of the scheduled attempt>\", or \"next attempt not yet scheduled\" when the host has none. Once recovered it reads \"Recovered automatically after N s (attempt k)\". No countdown or computed estimate is ever shown.",
+    "C4 The panel offers at most one action, and only in action needed. Resume appears only when the host accepts resume for a hold that is not retrying automatically. Approval and user-input states name the request but add no duplicate button, since the request card already has its controls.",
+    "C5 Control mechanics live in the panel's expandable history: decisions, codes, latencies, causal failures and earlier attempts. Its default view is one compact line. An automatically recovered failure appears there and on its own card in recovered form, never as the panel's headline once a later state supersedes it.",
+    "C6 The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "UI",
+    "autonomy",
+    "conversation-view",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

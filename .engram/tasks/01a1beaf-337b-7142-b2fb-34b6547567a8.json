@@ -1,0 +1,42 @@
+{
+  "id": "01a1beaf-337b-7142-b2fb-34b6547567a8",
+  "external_ref": null,
+  "title": "Guard direct-prompt operator mutations against cross-origin simple requests before mounting",
+  "outcome": "Consent, grant, revoke and confirm-revocation adapters enforce the existing operator action trust boundary before parsing or mutation when their routes are mounted.",
+  "acceptance": [
+    "A cross-origin text/plain request to every mutating prompt operator adapter is refused before permission state or durable data changes.",
+    "Authorized same-origin operator requests retain their existing authority, consent, freshness and version checks.",
+    "Real HTTP behavior tests cover the refusal and authorized path without pinning diagnostic prose."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "federation",
+    "greg-reported",
+    "macos",
+    "operator-ui-works",
+    "pre-activation",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "review-low",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1741f-92e2-7ba2-921c-e1b088ba9d33",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

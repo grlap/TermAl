@@ -1,0 +1,32 @@
+{
+  "id": "01a1a3a9-2a5e-7941-b07e-c387ad31b379",
+  "external_ref": null,
+  "title": "Define child Git metadata validity in committed-input source identity",
+  "outcome": "Specify child worktree-root and Git metadata association validation so an unrelated checkout cannot supply a child's cleanliness judgment.",
+  "acceptance": [
+    "The contract defines child toplevel equality and acceptable associated Git metadata, with redirected-gitfile/core.worktree conformance cases and no changes to stored evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "architecture",
+    "cross-project",
+    "docs-only",
+    "greg-directed",
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a23f-d694-7041-b135-ccbea5f6c63c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

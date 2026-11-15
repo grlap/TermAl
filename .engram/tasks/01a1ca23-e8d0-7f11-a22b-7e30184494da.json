@@ -1,0 +1,30 @@
+{
+  "id": "01a1ca23-e8d0-7f11-a22b-7e30184494da",
+  "external_ref": null,
+  "title": "Refresh the evaluator child preview after a retained submission is recorded",
+  "outcome": "After successful retained-write recovery, the child session preview agrees with the recorded receipt and repaired delegation result without restarting the evaluator.",
+  "acceptance": [
+    "A behavioral fixture terminalizes an evaluator with an Unconfirmed submission, replays it to durably Recorded and reads the child session through its public view.",
+    "The child preview then uses the compact receipt summary rather than the prior host unconfirmed message, while the child runtime status remains terminal and diagnostic prose is retained.",
+    "Unknown, refused and failed-ACK replays preserve their original uncertainty and do not publish a falsely confirmed child preview; focused tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-follow-up",
+    "session-preview"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

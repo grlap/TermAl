@@ -1,0 +1,30 @@
+{
+  "id": "01a14a85-25d0-7ca0-8b13-7bbd5846d619",
+  "external_ref": null,
+  "title": "Sequential foreground checks in one turn: the first loses credit as \"another command of this session started\" though it had finished",
+  "outcome": "Two focused checks run one after the other in the same turn and root both earn credit when the first reached its terminal result before the second started. An own-session command counts as overlapping only when the two really ran at the same time.",
+  "acceptance": [
+    "The cause of the 15:38Z refusal is identified and recorded: which command key a589f968870e was, and why the host treated it as overlapping run 1.",
+    "A deterministic regression shows two strictly sequential own-session focused checks in one turn both earning credit, including when the first command's terminal event is processed late; a genuinely concurrent own command still refuses credit.",
+    "The full gate and a clean review pair on the exact input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

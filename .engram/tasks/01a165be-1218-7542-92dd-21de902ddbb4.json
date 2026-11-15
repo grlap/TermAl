@@ -1,0 +1,34 @@
+{
+  "id": "01a165be-1218-7542-92dd-21de902ddbb4",
+  "external_ref": null,
+  "title": "Integrate the Mac test-fixture isolation fix (fix/mac-test-fixtures) onto master and validate it on the Mac",
+  "outcome": "origin/fix/mac-test-fixtures (a88dc1e0, Greg's Mac test-fixture isolation and process cleanup) is on master, reviewed, gated on Windows and on the Mac, and installed.",
+  "acceptance": [
+    "Commit a88dc1e0 from origin/fix/mac-test-fixtures is carried onto current master in a dedicated worktree, with any concrete conflict identified and resolved and the carry proof recorded on this item.",
+    "The carried tree has a Codex plus Claude review pair with no outstanding in-scope finding of Medium or higher, and a passing full gate on the exact tree on Windows.",
+    "The maintained five-stage full gate passes on a clean committed input whose parent is then-current master (or on then-current master itself), on the Mac runner under the integration owner's assigned slot; record the run id, commit, tree, running Mac host/build and equal before/after input fingerprints. This validates the inherited Mac fixture changes on the maintained source; it does not retroactively gate historical tree 5fb1ae59278db19f6ffa751c5a53eb5361e6439b or explain historical OS error 35, whose cause remains UNKNOWN.",
+    "The exact reviewed and gated tree is landed on master, pushed fast-forward to origin/master by the integration owner, and installed under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [],
+  "assigned_to": "Termal::Merger",
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed after independent evaluation 62f05cf81bbe46adbd97fd0c9eb20811 passed all four criteria at revision 3, evaluated cut 253 (2026-11-12T00:11:22.535941100Z). Historical carry, Codex+Claude review, Windows full gate, landing and installation plus maintained Mac FULL test-63551c86 were independently assessed. The maintained Mac run passed all six current stages on clean 11bb1a64/tree40586971 with equal source IDs and fingerprints. Historical OS error 35 remains UNKNOWN; this does not retroactively gate old tree 5fb1ae59 on the Mac.",
+    "completed_at": "2026-11-12T00:12:34.554994400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "01a182f9-1aa2-7503-8139-e8e575cecabc",
+  "external_ref": null,
+  "title": "Auto-retry a session paused by the provider error \"Selected model is at capacity\" every 5 minutes, within safe bounds",
+  "outcome": "When a root session or delegation stops with the provider error \"Selected model is at capacity\", TermAl retries the session's retained queued prompt automatically every 5 minutes, without a human Resume. It stops retrying as soon as a turn is accepted, the session is stopped, cancelled or deleted, a different error appears, or the bound is reached. It never duplicates delivery or authority, and the session view shows that it is waiting for capacity, when the next retry is, and a way to cancel.",
+  "acceptance": [
+    "Classification: only the provider's model-capacity error (exact or structured classification of \"Selected model is at capacity\") arms the auto-retry. Usage or credit exhaustion, rate-limit or quota errors with their own reset, authentication errors, safety or policy refusals, and every other error keep today's behaviour (paused, human Resume). Tests cover the capacity error plus at least three non-capacity errors.",
+    "C2 (Safety): the eligible queued head is captured at ARM time; if there is none, nothing auto-retries, and a later arrival, a successor, or the accepted failed prompt is never adopted or resurrected. A retry re-delivers only that captured head through the normal admission path, with a fresh Engram evaluate and begin when control is on, never a previously granted authority or grant id. No retry happens while the session has any matching unresolved obligation under B16's ledger. No duplicate provider prompt is sent for one queued head. On \"Selected model is at capacity\", never switch the model or the owner. After 5 minutes, attempt Resume on the SAME model. Tests prove each of these.",
+    "C3 (Timing and bounds): retries happen every 5 minutes (a configurable constant, default 300 s, per Greg 2026-10-28). The retry state is durable: after a host restart the session either stays paused or re-arms from that durable state, deterministically, never both and never a double retry. While an attempt is in flight (acknowledged or turn started) no further send happens, but that does NOT reset first_capacity_at or the attempt count: a capacity failure after a started turn continues within the original bound. Retrying closes on a successful turn outcome, as classified by the existing terminal owner, a user Stop or cancel, session deletion, a different error, or a bound of 24 hours (288 attempts) since the first capacity error, after which the session stays paused for a human Resume. Tests cover each stop condition, the started-then-capacity case and the restart case, using a scripted clock.",
+    "Visibility: the session status shows the capacity wait, the attempt count, the next retry time, and a cancel action that disarms the timer. Each attempt is recorded in the session's diagnostics. A UI test covers the status and the cancel.",
+    "Landing: the review pair has no outstanding finding of Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "greg-requested",
+    "provider-capacity",
+    "retry",
+    "session-queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

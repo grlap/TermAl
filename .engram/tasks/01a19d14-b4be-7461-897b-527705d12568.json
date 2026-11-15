@@ -1,0 +1,29 @@
+{
+  "id": "01a19d14-b4be-7461-897b-527705d12568",
+  "external_ref": null,
+  "title": "Unadmitted observation worker polls SQLite every 100 ms without bound while a report's image is not durable",
+  "outcome": "While a report's exact session-row image cannot be stored, the observation worker waits with bounded, backed-off polling or parks until a persist or shutdown wakes it. It no longer re-reads SQLite every 100 ms for as long as the process lives. Nothing is sent before the image is durable, as before.",
+  "acceptance": [
+    "While a pending report's image is not durable, the worker neither sends a request nor re-reads the session row at a fixed 100 ms interval indefinitely: the wait backs off or parks, and a later successful persist or shutdown ends it",
+    "A focused test pins that no request leaves before the image is stored and that the worker resumes delivery after the image becomes durable",
+    "The worker still reports idle only when no deliverable or capture work remains"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0f53c-dcd5-79b2-8b5e-e351b731cc84",
+  "external_ref": null,
+  "title": "Independent acceptance brief tries every evidence window at Full omission detail before Compact, so the opaque continuation token can push out evidence",
+  "outcome": "Low from the Claude reviewer of landing train 7 (delegation-2ba46e30-4e3d-43ad-a49d-902d9934fc9e), at src/acceptance_evaluation.rs:846.\n\nbuild_acceptance_evaluator_brief tries every evidence window at AcceptanceOmissionDetail::Full before it tries Compact. Full detail embeds the whole unread continuation token (up to 8,192 bytes) and the full left-out locator list.\n\nThe independent evaluator has no tracker MCP server, so the token is only ever cited. An opaque several-kilobyte token is also a poor fit for the one-to-two-sentence rationale the rule asks for. So metadata nobody can use can push evidence bodies out of the 64 KiB brief, and that leads to more insufficient-evidence verdicts.\n\nFix direction: in the independent brief, refer to the continuation by its byte count or a short digest and keep the whole token only in evidenceOmissions, or evaluate Compact detail before dropping evidence windows.",
+  "acceptance": [
+    "In the independent evaluator brief, evidence windows are not dropped while a smaller omission detail (Compact or a digest of the continuation) would let them fit; the whole continuation stays available in the response's evidenceOmissions; a test sized near the limit covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1d394-aaf3-74d0-adea-a043b142aa60",
+  "external_ref": null,
+  "title": "Make the two silence-restart liveness tests assert that a silence restart is pending",
+  "outcome": "The tests 'keeps a stream that delivers again before its silence restart fires' and 'still restarts a stream that closed while a silence restart was pending' (ui/src/App.live-state.reconnect-backoff.test.tsx) check that a silence restart is scheduled at the computed watchdog tick, so neither can pass vacuously if the tick drifts. The second test also gets the watchdogStarts length guard.",
+  "acceptance": [
+    "Make the two silence-restart liveness tests assert that a silence restart is pending is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "live-stream",
+    "test-quality",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

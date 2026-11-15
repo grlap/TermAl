@@ -1,0 +1,33 @@
+{
+  "id": "01a18091-1c2d-7d52-8413-ca7830e722b6",
+  "external_ref": null,
+  "title": "Distinguish SSE connection totals from finite-response size observations",
+  "outcome": "Output-size diagnostics identify SSE stream-lifetime totals separately from finite HTTP body sizes while retaining per-frame observations and observation-only delivery semantics.",
+  "acceptance": [
+    "SSE stream-lifetime totals have a distinct fixed diagnostic stage or family from finite HTTP response bodies, with per-frame SSE size observations retained.",
+    "Tests distinguish many small SSE frames from one large finite body without changing bytes, stream behavior, or introducing collection, copies, caps or waits."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic",
+    "review-low",
+    "telemetry"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18073-9d60-7c33-88ba-469a2bcba42d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

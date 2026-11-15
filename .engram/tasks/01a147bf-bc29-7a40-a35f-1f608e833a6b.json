@@ -1,0 +1,36 @@
+{
+  "id": "01a147bf-bc29-7a40-a35f-1f608e833a6b",
+  "external_ref": null,
+  "title": "Test-run observation updates publish narrow events, not a full ~14.8 MB state broadcast",
+  "outcome": "Recording a test-command observation (persist_test_command_observation_locked) no longer triggers a full global StateResponse build and broadcast. It emits only the narrow TestRunChanged (or equivalent delta), with persistence, ACK and fence semantics unchanged.",
+  "acceptance": [
+    "A regression test through the real state broadcaster records N test-command observation updates and asserts 0 additional full `state` events, with the expected TestRunChanged (or delta) events and unchanged TestRunChanged/fence outcomes; it fails on the current code (RED recorded) and passes after the fix.",
+    "Persistence and acknowledgement semantics of the observation path are unchanged (the observation is durably recorded before any acknowledgement it previously gated), proven by the existing observation/persistence tests still passing plus one test asserting the persisted record after the narrowed publication.",
+    "A one-time read-only measurement note records, on a host with the current session count, the full-state snapshot's size by component and the StateInner hold time while it's built, before and after the change; the full five-stage gate passes on the exact final input with an independent review pair having no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1470c-5aec-7633-a38a-919a18aecf19",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the one-time post-restart live state measurement and recorded the component breakdown, session count, response time, and limits of the lock-time observation. Fresh independent acceptance evaluation a90bc945272c4dd797026cda0cf07cce passed all 3 criteria on the landed Train-4 revision; the no-action test obligation is handled by completion.",
+    "completed_at": "2026-10-18T00:40:24.385257Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

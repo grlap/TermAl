@@ -1,0 +1,51 @@
+{
+  "id": "01a15ce3-d362-7061-a353-2f0a2cbee70f",
+  "external_ref": null,
+  "title": "Retired placements permanently reserve satellite capacity after re-enrollment",
+  "outcome": "Retired placements retain their forensic records without permanently blocking fresh session admission after re-enrollment; current live reservations still enforce the declared capacity and stale placements acquire no new authority.",
+  "acceptance": [
+    "A holder note identifies the placement capacity count, stale reservation filtering and completion authority paths, with source locators and the observed one-slot retired-placement counterexample.",
+    "A deterministic disposable-store regression shows a fresh root can be admitted at declared capacity one after the old reservation becomes retired by re-enrollment, while a current live reservation still blocks an additional admission. Admission accounting uses the executor reservation domain permanent-retirement boundary; transient disconnection, link-incarnation change, verification loss or settings changes alone do not free an unresolved current-enrollment reservation. Deterministic controls preserve current capacity limits and old records.",
+    "Old retired placement records and evidence remain preserved, and stale placement completion, binding or execution cannot gain authority through the accounting change.",
+    "The full gate passes on the exact final input that lands, with an independent review pair and no outstanding in-scope Medium-or-higher finding on that input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "federation",
+    "placement"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Retired placements stop reserving capacity using the shared permanent-retirement predicate, while history and stale-authority fences remain intact. Landed and remote-verified origin/master23f7a2be219dd4f41c0923276c033c9685e916b2, exact gated treefd47f0dcf23fb4788a0c4d8cfb05cd8258ca4929 on0180f466. Full five-stage gatePASS8087ded5; carried Codex/Claude pair noMedium+; fresh post-land independent evaluationbb51f9cdeb1547de8107d83f041b3706 all4PASS, read in full after held-open submission. Merger reports one installed releaseSHA25621ef8305d3462de72203241edf402c1077a5cbb2667e923eef24c28fc2f931ce; no restart. Deferred Lows separately filed.",
+    "completed_at": "2026-10-22T17:42:28.165270600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

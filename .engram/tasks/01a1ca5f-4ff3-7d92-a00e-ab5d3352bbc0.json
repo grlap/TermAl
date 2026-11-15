@@ -1,0 +1,33 @@
+{
+  "id": "01a1ca5f-4ff3-7d92-a00e-ab5d3352bbc0",
+  "external_ref": null,
+  "title": "Turn-end capture with an unchanged source voids a fresh acceptance evaluation (assumed_missing_baseline barrier)",
+  "outcome": "A turn-end capture whose measured source id equals the source the evaluation judged does not become an unadmitted-change barrier, and a stale-evaluation remedy never tells the agent to end the turn when ending the turn is what creates the barrier.",
+  "acceptance": [
+    "A fixture-reproduced turn-end capture whose measured source identity equals the source judged by a fresh evaluation does not report an assumed source change or invalidate that evaluation solely because the turn ended.",
+    "Real source changes and unavailable or mismatched source evidence retain conservative reporting and stale-evaluation protection; behavioral controls distinguish them from the unchanged case.",
+    "TermAl-owned stale-evaluation guidance, if any is changed, identifies a supported recovery action; the Engram-owned EndTurnReadAndRetry remedy and equal-revision barrier work is linked to Engram w-15932dbe53e2. Source-cause evidence, author RED/GREEN runs, cargo fmt --check and the whole independent review pair are recorded before integration handoff."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered the turn-local evaluation-request comparison checkpoint, durable stamped delta persistence, and conservative same-turn/source-scope retirement. Landed as e6b8d2f70609a85e815c4039d971ed2b963b6f4e (tree d4957ff17c117102fc0e41508aca7be1a140ca73); source-cause and valid author RED/GREEN, independent WHOLE8 plus scoped carry reviews, formatting, integration FULL and own registered PASS9 Test proof recorded. Independent acceptance d208ce8eaa7645e689b6c731b1eef2e9 passed all3 at cut216, acceptance revision6, exact clean landed source.",
+    "completed_at": "2026-11-11T16:34:51.592594900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

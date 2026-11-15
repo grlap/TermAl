@@ -1,0 +1,27 @@
+{
+  "id": "01a18a88-d7c0-74d2-8fb0-a01841c7de67",
+  "external_ref": null,
+  "title": "Test the project-reset checkpoint's production cause attach points",
+  "outcome": "Tests drive each production attach point:\n- project_reset_checkpoint_receipt_off_lock on a target without a routing token or grant gives a local NotStarted cause, disclosed as not sent;\n- the containment budget exhausted before the send gives a NotStarted card cause;\n- a Refuse result gives a card cause with remote_application Refused and the '(refused)' disclosure.",
+  "acceptance": [
+    "Test the project-reset checkpoint's production cause attach points is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

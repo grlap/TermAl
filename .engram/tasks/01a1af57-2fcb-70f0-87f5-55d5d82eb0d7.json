@@ -1,0 +1,28 @@
+{
+  "id": "01a1af57-2fcb-70f0-87f5-55d5d82eb0d7",
+  "external_ref": null,
+  "title": "A second registered launcher run on the same named root, after the root is re-named for a new claimed item, gets no registration or verification record (registrationBacked=false), while the first run worked",
+  "outcome": "An agent that finishes one item and claims the next can re-name the same worktree as its source root and earn a registered committed-input verification for its next run. If registration is refused, the launcher and host state the exact reason at admission.",
+  "acceptance": [
+    "A second registered launcher run on the same named root, after the root is re-named for a new claimed item, gets no registration or verification record (registrationBacked=false), while the first run worked is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1af57-b2fc-71e2-b801-9200b26b7cb1",
+  "disposal_reason": "Duplicate. Opus2 filed w-9200b26b7cb1 for the same defect (12329's second registered run test-dceeb957 got no record and no host reason) at the same time, with the fuller facts and the shared-root hypothesis. Kept that one, raised to P0.",
+  "completion": null
+}

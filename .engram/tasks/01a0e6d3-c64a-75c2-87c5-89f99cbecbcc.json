@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c64a-75c2-87c5-89f99cbecbcc",
+  "external_ref": "tm-myjh",
+  "title": "Document the Engram PATCH contract asymmetry and the producer-less observations checkpoint surface",
+  "outcome": "PATCH /api/projects/{id}/engram is now mixed-mode: workAuthorityGrant is tri-state (omitted preserves, null clears, string replaces) while enabled, binaryPath, home and deadlineMs remain serde(default) full-replace, so a client omitting binaryPath silently clears it while an omitted grant is preserved. The Rust doc comment (src/wire.rs:1463) describes the grant convention but not the asymmetry and docs/features/engram-host-adapter.md (Project.engram / enable-time section about lines 379-395) was not updated; ui/src/api.ts updateProjectEngramSettings has no callers yet, so document it (or make the payload consistently patch-shaped) before a UI calls it. Separately, the observations checkpoint surface (EngramExecutionObservationInput and engram_checkpoint_idempotency_key, src/engram_host_adapter.rs about 4081) has no production producer and no contract comment explaining why observations fold into the idempotency key; add a short comment naming the intended producer and the ordering constraint. Found by the Claude delegated reviewer (Notes).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

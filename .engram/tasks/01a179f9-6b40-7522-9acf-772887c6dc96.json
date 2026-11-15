@@ -1,0 +1,31 @@
+{
+  "id": "01a179f9-6b40-7522-9acf-772887c6dc96",
+  "external_ref": null,
+  "title": "Require the existing full-state instance reference in the transport parameter contract",
+  "outcome": "lastFullStateServerInstanceIdRef currently optional and accessed through params. Make required/destructure, updating direct test callers, so an omitted wire-up cannot silently disable targeted recovery.",
+  "acceptance": [
+    "lastFullStateServerInstanceIdRef currently optional and accessed through params. Make required/destructure, updating direct test callers, so an omitted wire-up cannot silently disable targeted recovery. Relevant focused checks pass and standard review covers the final change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "greg-directive",
+    "maintainability",
+    "performance",
+    "review-followup",
+    "ui",
+    "watchdog"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a179cc-7346-77c1-b51f-8700e28a5963",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

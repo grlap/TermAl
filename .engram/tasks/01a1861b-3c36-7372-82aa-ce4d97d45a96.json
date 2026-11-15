@@ -1,0 +1,29 @@
+{
+  "id": "01a1861b-3c36-7372-82aa-ce4d97d45a96",
+  "external_ref": null,
+  "title": "Cover default ignored-target creation for direct focused Cargo admission",
+  "outcome": "Add a direct focused Cargo fixture that ignores /target and distinguishes accepted-policy tagged directory creation from refusal-before-creation. Existing refusal fixtures leave target unignored, so absence alone cannot detect ordering regression.",
+  "acceptance": [
+    "A direct focused Cargo check with /target ignored verifies accepted selection creates the tagged default directory before its stage.",
+    "The same ignored-target setup verifies refused external/unsupported selection runs no stage and creates no default target."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated",
+    "review-follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3c0-7561-acd6-8376b03f2259",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

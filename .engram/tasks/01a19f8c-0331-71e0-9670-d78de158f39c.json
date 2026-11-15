@@ -1,0 +1,28 @@
+{
+  "id": "01a19f8c-0331-71e0-9670-d78de158f39c",
+  "external_ref": null,
+  "title": "Replace the tautological \"reason never changes what is confirmed\" guard with an independent oracle",
+  "outcome": "The unconfirmed-root reason test compares the confirmed/unconfirmed judgment against an independent copy of the previous boolean logic, so a refactor that changes which roots are confirmed fails it.",
+  "acceptance": [
+    "the guard in src/tests/engram_unconfirmed_root_reasons.rs compares against an oracle that does not call engram_turn_root_capture_locked's own projection",
+    "the test fails when a reason projection is changed to alter a confirmation decision"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

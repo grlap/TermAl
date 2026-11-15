@@ -1,0 +1,29 @@
+{
+  "id": "01a0f322-654b-7922-8711-abfa4d92e9c5",
+  "external_ref": null,
+  "title": "Cover Engram Work drawer failure and Reload details recovery through the panel",
+  "outcome": "Pre-existing coverage gap: ui/src/panels/WorkItemDetails.tsx reload increments revision and re-runs the read effect, but panel-level tests have not covered a failed Engram detail read, visible alert, Reload details, and successful recovery under the same reader identity. The formerly tested Beads drawer is removed. Add a meaningful Engram panel regression preserving cancellation/stale reply fencing; no new UI behavior required.",
+  "acceptance": [
+    "Cover Engram Work drawer failure and Reload details recovery through the panel is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-removal",
+    "testing",
+    "work-view"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2d2-0c6c-7590-93e9-78f1b409aeca",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8acf5b66b3dd",
+  "external_ref": "tm-7cu.41",
+  "title": "Do not turn a delayed shrink-regrow clamp into upward reader input",
+  "outcome": "Review at HEAD 7acacc1. A temporary real-scroll-hook probe first explicitly navigates to bottom(top800, scrollHeight1000, clientHeight200, FOLLOW=true), then models browser-only geometry1000->600->1000 with clamp top400 and delivers the delayed native scroll event after regrowth, without any wheel/key/pointer/focus input. SessionPaneView.scroll.ts:2619-2667 sees final height >= recorded height and top400 not at final bottom; because no active virtualizedBottomBoundaryReveal flag exists, movedUpFromRecordedPosition becomes true. Lines2753-2778 synthesize user navigation, detach FOLLOW and cancel settling. Probe expects FOLLOW to remain true and fails false. This is distinct from the viewport-height-only clamp already tracked in .26: final geometry equals the old geometry, hiding an intermediate content collapse. Existing boundary test explicitly covers protection only while boundary-reveal flag is active; its finished variant accepts detachment without reader input. This is a proven handler-level vulnerability consistent with transient layout around Stop/hydration, NOT an end-to-end reproduction of Greg pressing Stop or a measurement of his live browser. Temporary diagnostic probe removed; no production changes.",
+  "acceptance": [
+    "A shrink/regrow plus delayed native scroll with no reader gesture preserves explicit FOLLOW both during and after boundary reveal; subsequent real output follows. Real upward wheel/key/touch/scrollbar/focus navigation still wins immediately. Cover delayed native events and lifecycle-driven layout; do not infer user intent solely from two geometry snapshots."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 final batch 58fdd104, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 6423b3c (ancestor of master f7db2c58) with a real-hook regression; source markers are in note 58fdd104. Closed by evidence; no formal acceptance evaluation was run.",
+  "completion": null
+}

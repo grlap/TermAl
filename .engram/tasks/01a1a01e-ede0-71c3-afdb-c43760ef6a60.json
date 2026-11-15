@@ -1,0 +1,37 @@
+{
+  "id": "01a1a01e-ede0-71c3-afdb-c43760ef6a60",
+  "external_ref": null,
+  "title": "Test-run registration binds the claim-time work_revision, so any revise after claiming makes Engram refuse the run's verification record",
+  "outcome": "A registered committed-input run binds the item's revision as it stands at registration (or refreshes the binding after a revise by the holder), so a run started after a revise earns its verification credit. A revise that happens after registration but before the record is written is still refused, as Engram's rule intends.",
+  "acceptance": [
+    "The code path that fills binding.work_revision for a test-run registration is identified, and the claim-time source of the revision is confirmed.",
+    "Registration uses the item's current revision at registration time, or refreshes it after a revise by the holder. A regression test claims at revision N, revises to N+1, registers a run, and asserts that the binding carries N+1 and the verification record would be accepted, while a revise after registration still leads to refusal.",
+    "The review pair is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "engram-host-adapter",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed current-held revision capture for immutable committed-input registration. Exact current-master FULL passed on14b53e3b with matched fingerprint and clean input; independent fullR4 plus R5delta/carry pair has no outstanding in-scope findings. Registration snapshots current exact held claim revision, preserves first association/replay and later-revision refusal. Real pinned live witness deferred by coordinator to w-406d2f7fbdd9 after two preserved sharedfixture setup failures; no live PASS claimed. Asserted nonblocking acceptance policy applies; no evaluation fabricated. Push independently confirmed; install/restart not claimed.",
+    "completed_at": "2026-11-03T19:43:12.754589400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

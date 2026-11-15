@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c524-7473-b3f2-00aed6b4bba4",
+  "external_ref": "tm-ha7e",
+  "title": "Content revision: a missing tracked .gitattributes refuses the whole tree even when its directory is gone",
+  "outcome": "Follow-up from the tm-5gi4 phase 1 review pair on input c6140c01 (Claude Low, 2026-09-27; landed as acd7740).\n\nsrc/content_revision.rs:144-154 fails the capture when a tracked .gitattributes is absent from the worktree, because Git would then take its attributes from the index. But content_revision_path (line 257) also returns None when a directory above the path is gone, and the refusal fires then too. So deleting a directory that holds a tracked nested .gitattributes (rm -rf subproject/) leaves the whole tree without a basis until the deletion is staged. A sparse checkout that excludes such a directory has no basis at all. That is a regression: schema-1 used git diff, which skips skip-worktree entries. With the directory gone, no file is left for those attributes to govern.\n\nFix: refuse only when the .gitattributes' parent directory exists (the path resolved but the file is absent). Test: a deleted directory holding a tracked .gitattributes keeps a revision; a sparse checkout excluding one keeps a revision.\n\nRelated edge found while checking this (Opus): a tracked .gitattributes replaced by a directory takes the is_dir branch (line 157) and is skipped rather than refused. Git reading attributes on Windows would then fall back to the index, just as for a missing file. Decide together whether that case refuses too.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

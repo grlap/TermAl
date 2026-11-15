@@ -1,0 +1,55 @@
+{
+  "id": "01a15bc9-b220-7451-bf78-d2f3c6199d27",
+  "external_ref": null,
+  "title": "K2: integration-owner key and REGISTER TEST REF (host-local registry, owner-only)",
+  "outcome": "An operator-written integration-owner key {sessionId, sessionCreationId} is loaded, reloaded on change and exposed read-only with source path and SHA-256, and an owner-only REGISTER TEST REF operation records a durable registration row (item, ref, commit, tree, clean-checkout schema-1 fingerprint, named-root content-v1, expected platform(s), optional required toolchain, registering identity, instance, time) after verifying the named root clean at the commit.",
+  "acceptance": [
+    "Tests show the key loads at start and reloads on change with its hash and time logged, is exposed read-only with source path and SHA-256, and that registration by any caller other than the configured owner is refused with integration_owner_unset or integration_owner_identity_mismatch.",
+    "Tests show a registration verifies the item's named root is clean at the given commit, persists the full row in the persisted state (serde-default, no schema bump), refuses re-registering the same ref to a different commit, and retires the row on deletion; each refusal is named and records nothing.",
+    "The full gate passes on the exact final input that lands, with an independent review pair and no outstanding in-scope Medium-or-higher finding on that input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a15218-5b21-7971-ba0a-c3f102d77999",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the automatic remote-result design (Greg, Advisor #2639; Fable2 #4079): no operator owner key, REGISTER TEST REF or registration registry.",
+  "completion": null
+}

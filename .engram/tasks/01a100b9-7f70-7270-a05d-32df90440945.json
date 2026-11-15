@@ -1,0 +1,54 @@
+{
+  "id": "01a100b9-7f70-7270-a05d-32df90440945",
+  "external_ref": null,
+  "title": "The Claude read-only Bash gate refuses `cmp`, a pure file comparator, so read-only reviewers and evaluators fall back to hashing",
+  "outcome": "The Claude read-only Bash gate refuses `cmp`, a pure file comparator, so read-only reviewers and evaluators fall back to hashing",
+  "acceptance": [
+    "`cmp` is on CLAUDE_READ_ONLY_BASH_COMMANDS (src/claude.rs), and a test through the full read-only permission classifier shows a read-only Claude delegation may run `cmp a b`, `cmp -s a b` and `cmp a b | cat`; the read-only refusal builder no longer names `cmp` as a disallowed command.",
+    "The same test shows `cmp a b > f`, `cmp a b >> f` and `cmp a b; touch f` are still refused, and `git hash-object` (with or without -w or --stdin) stays refused.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "read-only-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only Claude delegations may now run `cmp`. It is on CLAUDE_READ_ONLY_BASH_COMMANDS, and the refusal messages no longer name it. Redirection, chaining and `git hash-object` stay refused, and a test through the full read-only classifier covers both sides. Committed as d95eae8 and landed in train 22 as merge d2d4680 onto b1d876f. Gate test-e0745d01 passed and was credited (a8cf944d); train gate test-08e23ef6 passed. Review pair clean; evaluation 2831a788 passed 3/3.",
+    "completed_at": "2026-10-03T10:29:44.970290300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

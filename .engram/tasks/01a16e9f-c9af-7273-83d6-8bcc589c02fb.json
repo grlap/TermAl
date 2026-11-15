@@ -1,0 +1,28 @@
+{
+  "id": "01a16e9f-c9af-7273-83d6-8bcc589c02fb",
+  "external_ref": null,
+  "title": "Extract the Engram project settings reset/delete fence transactions out of src/session_crud.rs",
+  "outcome": "Extract the Engram project settings reset/delete fence transactions out of src/session_crud.rs",
+  "acceptance": [
+    "Extract the Engram project settings reset/delete fence transactions out of src/session_crud.rs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "refactor",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

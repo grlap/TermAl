@@ -1,0 +1,35 @@
+{
+  "id": "01a14ada-6f15-7913-902e-e8f0fbf4d74d",
+  "external_ref": null,
+  "title": "Canonical named-root release writes its audit in a second lock hold and can claim a retirement the automatic pass made",
+  "outcome": "Canonical named-root release writes its audit in a second lock hold and can claim a retirement the automatic pass made",
+  "acceptance": [
+    "A canonical operator release never runs alongside the automatic reclamation pass for the same store, and its audit attributes only a retirement the release itself performed; a test covers the concurrent case.",
+    "A canonical release's retirement and its audit are committed together, or the audit is documented as best-effort for that route."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "named-roots",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

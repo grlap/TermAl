@@ -1,0 +1,28 @@
+{
+  "id": "01a13920-ccf4-7ad3-a09f-e7af8c61857d",
+  "external_ref": null,
+  "title": "Preserve conflicting carried artifact identities and persist their observation disposition",
+  "outcome": "src/engram_carried_checks.rs:2081 must retain contradictions between an existing output-derived artifact and the carried run instead of overwriting the identity. Route updates through the existing observation persist/fence path so durable status is truthful; preserve exact ownership and byte matching.",
+  "acceptance": [
+    "Preserve conflicting carried artifact identities and persist their observation disposition is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "review-follow-up",
+    "stage-1-registry",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

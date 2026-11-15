@@ -1,0 +1,28 @@
+{
+  "id": "01a1d8e3-9355-70e1-a5f3-3b77a8d61b9c",
+  "external_ref": null,
+  "title": "Validate source-root naming replay against the requested recovery run",
+  "outcome": "Live naming and missing-pending replay compare journal authority with the requested held recovery run before learning or retiring authority, or document and independently approve immutable historical-intent replay semantics.",
+  "acceptance": [
+    "A same-claim stale recovery-run journal is handled deliberately on both live and missing-pending replay paths, with behavioral coverage distinguishing current requested association from historical journal run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

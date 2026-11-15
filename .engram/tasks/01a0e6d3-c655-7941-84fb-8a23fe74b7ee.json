@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-8a23fe74b7ee",
+  "external_ref": "tm-ncc6.14",
+  "title": "Test Runs: honor a launcher heartbeat in results.json for liveness (Engram 3ed72d1)",
+  "outcome": "Engram::Opus mailbox #258 (2026-09-26): Engram's test launcher (scripts only, Engram master 3ed72d1) writes results.json heartbeat {at: ISO timestamp, everyMs: cadence} at run creation, after input capture, at admission, then every everyMs (default 10000; ENGRAM_LAUNCHER_HEARTBEAT_MS 1000..600000; a recorded value outside the range falls back to the worker's cadence). Their rule: a non-terminal run is RUNNING while now - heartbeat.at <= 3 x everyMs and INTERRUPTED after; no heartbeat reads UNKNOWN; liveness never reads the recorded pid (Windows reuses pids). 'A reader outside the launcher should apply the same rule to results.json.' TermAl indexes Engram's run directories (Engram is a TermAl project) and judges non-terminal runs by pid + process creation time (test_runs_disk.rs TestRunDisk::state; docs/features/test-runs.md State). Proposal: when results.json carries a valid heartbeat, judge liveness from it instead of the pid (stale heartbeat -> unknown with a reason that settles a wait, e.g. a new unknownReason 'heartbeatStale', or map to processGone); keep the pid rule for launchers without a heartbeat (TermAl's own scripts/test-launcher.mjs today). Contract change to docs/features/test-runs.md (unknownReason enum, settle rule, wall-clock caveat) needs Greg's approval; consider adopting the same heartbeat in TermAl's launcher (tm-fa5e is the related pid-identity follow-up).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a13812-ca55-7d01-92c8-5eebb4c061ba",
+  "external_ref": null,
+  "title": "test-runs.md and the features README still call declared test commands \"planned\" although they are implemented",
+  "outcome": "docs/features/test-runs.md and docs/features/README.md describe declared test commands (termal-tests.toml) as implemented, matching the running host, and link docs/features/declared-test-commands.md.",
+  "acceptance": [
+    "test-runs.md and the features README still call declared test commands \"planned\" although they are implemented is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

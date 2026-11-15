@@ -1,0 +1,30 @@
+{
+  "id": "01a19c53-664a-73d1-9874-cca329262df1",
+  "external_ref": null,
+  "title": "Delegation status read silently clears a terminal child's queue without committing, so a later failed write cannot restore it",
+  "outcome": "A status read (get_delegation) that detaches a terminal child and clears its queue either commits that change or leaves the queue intact, and a terminal follow-up whose later write fails restores the child's original queue in memory and on disk.",
+  "acceptance": [
+    "get_delegation's terminal detach path accounts for a queue-only clear as a mutation (Detached.did_mutate or its equivalent), so memory and disk cannot diverge silently.",
+    "A terminal follow-up whose Phase 1 or Human-intake commit fails leaves the child's original queued prompts in memory and on disk, matching the pre-follow-up state.",
+    "A regression test drives a real child-row write failure after a terminal follow-up and asserts that the original queue is preserved, without weakening any existing assertion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "persistence",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

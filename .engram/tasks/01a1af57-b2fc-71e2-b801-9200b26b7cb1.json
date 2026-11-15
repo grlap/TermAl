@@ -1,0 +1,36 @@
+{
+  "id": "01a1af57-b2fc-71e2-b801-9200b26b7cb1",
+  "external_ref": null,
+  "title": "A registered committed-input run from an Engram-project session ends with no verification record and no stated reason (EO trial w-ec0406b4930b)",
+  "outcome": "A registered, eligible, passing committed-input launcher run in a claim's named source root either delivers its verification record to that claim's store, or the agent is told plainly why no record was produced. A run never ends silently with no record and no reason.",
+  "acceptance": [
+    "A second registered launcher run in a worktree that the same session re-named for a new claim, while an earlier claim's named-root entry for that exact root is still retained, binds to the current claim and delivers its verification record; or the ambiguity is refused or reported at registration with a reason naming both generations and works, and the launcher prints it. A run never ends silently unbound.",
+    "A regression test covers re-naming one root for a second claim in the same session and store, for both the binding and the reported reason. Existing single-entry registration behavior is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Ambiguous named-root registrations, where one root has two retained entries, are now refused with a bounded reason naming both generations and works. The launcher prints that reason, so a run never ends silently unbound. Regression tests cover the re-name case for binding and reason; single-entry behavior is unchanged. Landed as 4e7ab9fa (fast-forward, pushed 07:58:37Z), gated by DL560 FULL test-6440eb36 (green, eligible, fingerprints equal), with a clean review pair (Codex 16534, Claude 16535: 0 C/H/M/L, 3 Notes) and Windows focused Rust 23/0 plus Node 5/0 on the identical change. Evaluations are temporarily off (Greg). The install of 4e7ab9fa follows on Central and will be noted.",
+    "completed_at": "2026-11-06T08:00:15.231889100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

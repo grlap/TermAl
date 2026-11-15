@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3da-71a0-ba25-31dda03e4988",
+  "external_ref": "tm-4k8",
+  "title": "Add multicast shared-thread mailboxes with one sequence domain",
+  "outcome": "Coordinators currently relay identical findings across several pairwise mailboxes and manually keep numbering/narratives aligned. This caused concrete finding-ID collisions across reviewers. Design multicast or shared-thread coordination where an authorized participant set receives one immutable message stream and one sequence domain, while retaining per-participant forward-only processed cursors, exact audit history, idempotent sends, and participant-scoped authorization.",
+  "acceptance": [
+    "One send can target an explicit immutable participant set without N divergent copies; all participants observe the same message id and sequence ordering; acknowledgements remain independent and forward-only; membership/lifecycle, authorization, notification coalescing, idempotency, restart, deleted participants, and UI presentation are specified and deterministically tested."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

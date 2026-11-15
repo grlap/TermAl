@@ -1,0 +1,38 @@
+{
+  "id": "01a0fa83-1983-7110-8395-d36a5152f0ae",
+  "external_ref": null,
+  "title": "The live UI bundle (ui/dist) is never refreshed after landings, so landed UI fixes stay invisible",
+  "outcome": "Every landing that changes ui/ reaches the running host's served UI by a recorded, authorized procedure, so a landed UI fix is visible after a browser reload",
+  "acceptance": [
+    "The live UI bundle (ui/dist) is never refreshed after landings, so landed UI fixes stay invisible is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "conversation-view",
+    "deploy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a0fa85-4975-7150-81a3-b329cd82a6ea",
+      "kind": "manual",
+      "detail": "Deploying ui/dist needs Greg's explicit word. No recorded word covers it (Engram::Fable #389, Engram::Advisor #140).",
+      "created_by": {
+        "actor_id": "greg/claude",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-10-02T02:50:34.224350Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1a3ad-01c3-7bf2-b4cc-a5d66f0d3fda",
+  "external_ref": null,
+  "title": "A source-observation removal racing a closing or delivery install in the manual writer's window fails with order-dependent error text",
+  "outcome": "A source-observation removal racing a live observation worker in a test state with no writer thread reaches its caller with one failure, whichever order the two commits take.",
+  "acceptance": [
+    "A source-observation removal racing a closing or delivery install in the manual writer's window fails with order-dependent error text is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test-infrastructure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

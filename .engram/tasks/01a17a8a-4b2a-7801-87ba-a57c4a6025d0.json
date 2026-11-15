@@ -1,0 +1,31 @@
+{
+  "id": "01a17a8a-4b2a-7801-87ba-a57c4a6025d0",
+  "external_ref": null,
+  "title": "A benign SQLite predecessor change fails queued-prompt fences and can strand a handoff offer",
+  "outcome": "A same-store write interleaving during transcript preparation cannot permanently strand an otherwise eligible held handoff prompt; exact durable-content acknowledgement and transcript predecessor safety remain intact.",
+  "acceptance": [
+    "Classify the observed predecessor-change/held-offer failure from the preserved Mac gate and identify the competing write path without attributing unrelated historical OS35 failures.",
+    "Resolve the preparation-conflict liveness failure through the existing persistence/fence/queue owners while preserving exact-content acknowledgement, supersession, Stop/Cancel and predecessor safety; no uncommitted prompt is delivered.",
+    "Validate the minimal correction using the repository's standard review pair and relevant maintained checks, with deterministic discrimination of the conflicting-writer interleaving rather than deadline inflation or blind retry."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "handoff",
+    "persistence",
+    "race"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,44 @@
+{
+  "id": "01a14bba-891c-7991-8001-8b21e7066000",
+  "external_ref": null,
+  "title": "Remote foundations M3: atomic central append, dedup and wake obligation, plus the sender intent registry (retry-only outbox)",
+  "outcome": "Remote foundations M3: atomic central append, dedup and wake obligation, plus the sender intent registry (retry-only outbox)",
+  "acceptance": [
+    "Sender host: one durable intent registry UNIQUE(sender_session_id, idempotency_key) across ALL targets, written before the first RPC, with distinct states localIntentDurable/appendOutcomeUnknown/homeCommitted/refused/abandoned; a queued or unknown intent is never reported as a successful send receipt, and the registry is never a source for mailbox list/read/ACK/cursor (P-5). After confirmation or terminal refusal, retry payloads may be removed while minimal key/digest/target/outcome metadata remains for idempotency.",
+    "Central host: append, dedup row UNIQUE(sender_host_id, sender_session_id, key) with canonical digest, and wake obligation commit in ONE transaction; same key + same digest returns the original identity (duplicate=true); same key + different digest or target is a 409 conflict.",
+    "Fail-first tests: crash cuts before/after local durability and before/after the central commit; lost replies; parallel same-key sends; changed content/target conflicts for local and remote targets; disk-full and bounded queues (1,000 intents / 64 MiB per peer, visible refusal); cancellation then GC then delayed first send; exactly one canonical append; authoritative outcomes survive restart.",
+    "Behind the M1 disabled-by-default setting; local behaviour unchanged.",
+    "Exact-input focused tests, the full five-stage gate and an independent review pair with no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14b98-032e-7f70-922a-93105e5592c0",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a14bba-3740-7bc3-8f26-14c782d0d16f"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered M3 durable sender retry-intent registry and exact replay/cancellation, atomic central append/dedup/wake obligation, current capability/identity fences and crash/reopen/schema/quota coverage. Landed commit89211511c605800f62ce54070380be60ab1033f1 on origin/master; exact reviewed/gated tree3a2f51b52cb8d9f0ca10a1bcf39bf26d895b6a47, parent8ebf2f8e. Opus2 #198/message-da7d18d6-33c1-4679-950d-56e1c2e396d0 confirmed fast-forward push at notification2026-10-19T00:24:38.531868Z; parent independently verified remote89211511/localHEAD/tree and cleanstatus. Fresh independent evaluation f1a5e584432648dcbd8af9cff3b99833 all5PASS revision6/cut742/source d5404c, stale=null beforecompletion. Fullgate d3bfc444 host0594996c PASS all5 including tempguard0remaining; focused51/0 host4ee9c144; actual complete full-output different-vendor review chain and repairs recorded. Four optional Lows remain open; no required obligations. Installation pending Opus2/Fable coldslot, no installed build/restart/liveenable/M4drainer claim. Main raw integration-audit evidence retained under openparent note0476c7c0080b4bcfac7cf193c00017a8 until installedhash confirmation.",
+    "completed_at": "2026-10-19T00:25:48.774330900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

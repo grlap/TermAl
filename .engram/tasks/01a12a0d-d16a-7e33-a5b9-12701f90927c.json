@@ -1,0 +1,28 @@
+{
+  "id": "01a12a0d-d16a-7e33-a5b9-12701f90927c",
+  "external_ref": null,
+  "title": "The fresh-admission abort retry of a failed prepared-Begin write previews only its next time, not its attempt and admission-budget deadline",
+  "outcome": "A head settled for a fresh admission after a failed prepared-Begin write (EngramAbortReason::BeginPreparation) shows a preview naming its attempt and the saved 240 s admission-budget deadline, as the admission-retry preview does. The previews of other abort reasons are unchanged.",
+  "acceptance": [
+    "The fresh-admission abort retry of a failed prepared-Begin write previews only its next time, not its attempt and admission-budget deadline is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

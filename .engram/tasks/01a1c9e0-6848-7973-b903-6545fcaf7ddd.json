@@ -1,0 +1,31 @@
+{
+  "id": "01a1c9e0-6848-7973-b903-6545fcaf7ddd",
+  "external_ref": null,
+  "title": "Saved native-relay send intents are not reconciled automatically after the home host returns",
+  "outcome": "When a remote runner's sends to native Central sessions fail during a home-host outage, the saved exact intents are redelivered automatically once the link is healthy again, without duplicates, so owners are not left blind.",
+  "acceptance": [
+    "After a home-host outage ends and the relay link is healthy, a remote sender's saved native-relay send intents are delivered automatically with the same route, key and body, with no manual retry by the sender.",
+    "Automatic reconciliation creates no duplicate delivery of an intent already delivered.",
+    "A behavioural test with a simulated home outage shows saved intents delivered once after recovery and none lost."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "mailbox",
+    "relay",
+    "restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

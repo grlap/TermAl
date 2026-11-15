@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7bb-79f0-9237-7fa904f1c83f",
+  "external_ref": "tm-wgyv",
+  "title": "Use a short injected deadline in the Codex Engram bootstrap timeout test",
+  "outcome": "Parent consolidation of authoritative /review-code results session-6542 (Codex) and session-6543 (Claude), HEAD 272965d, frozen tracked diff 0674b61e4bd755293d721f24bb4985c90ef3d556f3a8dd92dbcc4568477b6465. Fingerprint unchanged at fan-in; Rust 2189 PASS/4 ignored, UI 3783 PASS/214 files, cargo check/tsc/freeze-helper tests PASS. No source edits or new runtime reproduction in this review. Claude Low finding src/tests/shared_codex.rs:6046. engram_bootstrap_config_read_has_a_fixed_deadline_despite_sibling_activity waits for the actual 30-second production timeout and polls full_snapshot every 50ms. Make the deadline injectable while retaining the production default; test sibling activity cannot extend a short deadline and assert the production constant separately. Preserve setup-slot release and shared-runtime survival assertions. This consumes a test worker for roughly 30 seconds; incremental full-suite wall-clock cost depends on parallel overlap and is not claimed as a measured 30-second increase. Distinct from fixed product timeout tm-daks and other recovery deadline tests. Searched open/closed bootstrap/deadline tasks and descriptions; no exact match.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

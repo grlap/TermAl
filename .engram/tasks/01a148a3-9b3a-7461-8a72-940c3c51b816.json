@@ -1,0 +1,30 @@
+{
+  "id": "01a148a3-9b3a-7461-8a72-940c3c51b816",
+  "external_ref": null,
+  "title": "Constrain certified control-error classification by operation and admission-card provenance",
+  "outcome": "Constrain certified control-error classification by operation and admission-card provenance",
+  "acceptance": [
+    "Audit the producer contract's supported control operations and scope non-application diagnostics accordingly, with negative tests for unrelated operations and Refuse-derived errors.",
+    "Automatic admission retry for the certified code strings requires the matching causal provenance; forged or producer-refusal cards cannot acquire retry authority, while earlier uncertain Begin replay remains supported."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-control",
+    "reliability",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14882-9853-72f2-8565-339b57a1d89d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

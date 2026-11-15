@@ -1,0 +1,28 @@
+{
+  "id": "01a1981c-3bb2-7de0-b28d-04efcb74dc94",
+  "external_ref": null,
+  "title": "After a restart, a recovered mailbox-wake prompt in an idle, unpaused, control-OFF session is never auto-dispatched",
+  "outcome": "After a restart, a recovered mailbox-wake prompt in an idle, unpaused, control-OFF session is never auto-dispatched",
+  "acceptance": [
+    "The guard that keeps message-1895317 (a recovered mailbox wake) queued in idle, unpaused session-6219 under control OFF is identified from source with a citation, and classified as an intended safety hold or a defect",
+    "If it is a defect, it is fixed so that an eligible queued mailbox wake in an idle, unpaused OFF session dispatches once, with a regression test; if it is intended, the UI shows it as held with its reason instead of 'Agent is working'"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c54e-7b40-b4c8-6eb4f6ee3305",
+  "external_ref": "tm-ksns",
+  "title": "Guard every Engram test fixture that writes under --home, from one shared snippet",
+  "outcome": "tm-47g6 added an outside-test-root refusal (exit 3) to engram-control-fixture.{ps1,sh}: the home must sit below a termal/tests segment after GetFullPath (ps1) and any '..' segment is refused (both). engram-work-binding-fixture.{ps1,sh} still appends work-read-phases / work-next-read / work-lock-retried under --home and engram-doctor-pipe-fixture.{ps1,sh} creates a pipe and launches engram-descendant.* from --home, all unguarded. If a test ever resolves one of them against an unscoped default home the same write into a real ~/.engram recurs. Do: (1) move the guard into a dot-sourced/sourced snippet (src/tests/fixtures/engram-fixture-home-guard.{ps1,sh}) so the rule cannot drift between scripts; (2) apply it to work-binding and doctor-pipe fixtures; (3) extend the refusal test in src/tests/engram_fixture_contracts.rs to drive each fixture with a direct outside home and a '..' traversal alias; (4) first verify every caller passes a TestTempRoot-derived home. Known remaining gap, deliberately not closed: a symlink placed under termal/tests that points at a real home is not resolved (the guard is lexical, matching test_temp_paths.rs which also does not canonicalise OS-temp aliases). Raised by both /review-code reviewers on tm-47g6.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a12e00-7c40-76d2-9bc6-2198d08a136d",
+  "external_ref": null,
+  "title": "Resume of a paused queue returns success while starting nothing for non-durability reasons",
+  "outcome": "Resume of a paused queue returns success while starting nothing for non-durability reasons",
+  "acceptance": [
+    "Each case in which resume_local_session_queue (src/session_lifecycle.rs) returns Ok while starting nothing on a non-empty paused queue is listed with its cause: Engram admission parked or held, boot recovery pending, a project-reset fence, and a busy session",
+    "For each case it is decided, with the coordinator's concurrence, whether the Resume should return an actionable reason instead of success, and any change is made with tests"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "delivery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

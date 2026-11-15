@@ -1,0 +1,27 @@
+{
+  "id": "01a0e9bf-b3bf-7f13-8785-25de127b9efd",
+  "external_ref": null,
+  "title": "Followed-shell anchoring accepts `cd ABS && . script` or `cd ABS && ./x.ps1`, whose script may move the shell again",
+  "outcome": "engram_shell_move reads a line that starts with `cd ABS` and changes directory nowhere else as a move TermAl follows (To). It anchors the shell at ABS once the command succeeds, even when a later command on the line sources a script (`. env.sh`, `source x`) or runs one in the shell itself (`./setup.ps1`, `call x.bat`, `Invoke-Expression`), which may change directory again. The feature doc states that a change made by a script the line runs or sources is not seen. Since PI-26a, the lost-shell reader treats such lines as hidden (anywhere), so the two paths now disagree. This predates PI-26a.",
+  "acceptance": [
+    "A followed-shell move is not anchored when the rest of its line may hide a change (the lost-shell rules of engram_line_hides_changes: a sourced or in-shell script, a trap, an eval-like word, a substitution); such a line loses the shell instead, with its absolute target kept among the places; a test covers `cd /abs && . env.sh`"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

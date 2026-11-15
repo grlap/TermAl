@@ -1,0 +1,28 @@
+{
+  "id": "01a0f72a-2a2f-7853-9bb5-1eb9486ce489",
+  "external_ref": null,
+  "title": "A carried gate earns no credit when its run directory is renamed or archived between the host's first terminal read and the recording checkpoint (\"its terminal record could not be read\")",
+  "outcome": "A carried gate earns no credit when its run directory is renamed or archived between the host's first terminal read and the recording checkpoint (\"its terminal record could not be read\")",
+  "acceptance": [
+    "A carried gate earns no credit when its run directory is renamed or archived between the host's first terminal read and the recording checkpoint (\"its terminal record could not be read\") is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "carried-run",
+    "verification-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

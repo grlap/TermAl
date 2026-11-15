@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c400-7270-a28a-c6cb887f4df1",
+  "external_ref": "tm-69sk",
+  "title": "Queue hydration regression conflates visible transcript repair with queue refresh",
+  "outcome": "Full combined Test Runs gate test-44434d1c-d631-4a56-aafb-a105a5d9ff50 failed in ui/src/app-live-state.test.ts:1372: fetchSessionTail expected 2 calls, observed 3. Original log: C:/github/Personal/TermAl/.git/review-runs/test-44434d1c-d631-4a56-aafb-a105a5d9ff50/vitest.log. Other four stages passed. Static diagnosis: unchanged queue hash suppresses queue-specific hydration, but advancing sessionMutationStamp invalidates messagesLoaded and tailLoaded; the visible-session effect independently fetches on rerender. Existing harness mocks setSessions as noop, previously hiding that effect; new Test Runs state induces the rerender. Classification: test-scope defect, pending focused discrimination. Add hidden/visible variants retaining exact counts, same-revision rejection, queue replacements/removals, and verify transcript authority is restored only for visible session. No production hydration semantic change. Related broad hydration-burst issue tm-kei8 is not this test defect. Next: launcher-owned focused validation, then original full gate on changed input.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in d3a7603 (ancestor of master).",
+  "completion": null
+}

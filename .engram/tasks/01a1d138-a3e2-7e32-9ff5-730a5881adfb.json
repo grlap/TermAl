@@ -1,0 +1,28 @@
+{
+  "id": "01a1d138-a3e2-7e32-9ff5-730a5881adfb",
+  "external_ref": null,
+  "title": "Integrate combo73 on 73f0fe27: d50d 42851443 (w-8275 checkpoint dots replace the conversation minimap, byte-identical carry of ed418be7)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 428514430668bb7ec8808b5339a2d66a8059b3de (tree eab62ea788f23d940803a75bc4646fa5442ae8ea) is on origin/master, where master was moved to it by a fast-forward from 73f0fe278402ee1ea5d653ff9549f11292fedf22.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is eab62ea7 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against 73f0fe27 is byte-identical (same 50 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to ed418be7's contribution against e3970152, which the whole-50 R3 pair Codex session 17663 and Claude session 17665 (attempt 2) reviewed with no Medium or higher finding (its Lows filed), and the candidate adopts that pair.",
+    "The release binary built from tree eab62ea7 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

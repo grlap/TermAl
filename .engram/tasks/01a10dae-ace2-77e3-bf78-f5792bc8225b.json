@@ -1,0 +1,27 @@
+{
+  "id": "01a10dae-ace2-77e3-bf78-f5792bc8225b",
+  "external_ref": null,
+  "title": "Let a holder cite a whole, same-item non-holder record (for example a coordinator audit) as attributed criterion evidence in termal_evaluate_acceptance",
+  "outcome": "Let a holder cite a whole, same-item non-holder record (for example a coordinator audit) as attributed criterion evidence in termal_evaluate_acceptance",
+  "acceptance": [
+    "A decision recorded by both coordinators (TermAl and Engram) on whether non-holder records may be cited. If yes: the evaluator brief shows each cited non-holder record whole, with its author marked as non-holder and its family; holder-only records keep their current citability; and a test shows the evaluator can tell holder and non-holder evidence apart.",
+    "If no: the decision and its reason are recorded, and the remedy (quote the record in a holder note) is named by the refusal through w-e16e68f70aad."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a15479-b742-7a52-bc6b-d89ac2f54660",
+  "external_ref": null,
+  "title": "Keep test-run scans progressing during scoped registration publications",
+  "outcome": "A full test-run scan applies independently unchanged run updates even when other runs receive narrow registration publications, without overwriting newer per-run authority or starving scanned_once and wait settlement.",
+  "acceptance": [
+    "Keep test-run scans progressing during scoped registration publications is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "host-recording",
+    "registration",
+    "test-launcher",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14071-4dfa-78f1-9168-b37b4125dcb8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

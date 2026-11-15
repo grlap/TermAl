@@ -1,0 +1,30 @@
+{
+  "id": "01a1b7a9-b914-7a51-8972-e73400d2b24d",
+  "external_ref": null,
+  "title": "Apply project-root PATH exclusion to ordinary observation owner discovery",
+  "outcome": "Apply project-root PATH exclusion to ordinary observation owner discovery",
+  "acceptance": [
+    "Apply project-root PATH exclusion to ordinary observation owner discovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "review-follow-up",
+    "source-identity",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ae63-8b69-77a1-b888-6f42c416b0c7",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

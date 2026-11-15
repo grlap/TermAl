@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6a2-7623-841f-75f21fd7b8af",
+  "external_ref": "tm-pvgb",
+  "title": "Decide whether delegation-mcp bridge processes outlive their sessions under the Codex app-server",
+  "outcome": "MEASURED, not diagnosed. A process listing on 2026-09-08 23:2x showed 24 live `termal.exe delegation-mcp --parent-session-id <id> --base-url http://127.0.0.1:8787` processes. Twenty of them share one parent: PID 6400, `codex.exe app-server --listen stdio://`, started 2026-09-07 22:55. Their own start times spread across the whole day (22:55, 23:14, 23:28, 00:08, 00:10, 08:20, 08:57, 09:01, 09:46, 10:10, 11:37, 11:47, 12:55, 13:14, 13:20, 13:56, 14:06, 15:04, 16:07), one per --parent-session-id, ids running 6450, 6452, 6454 ... 6480 plus several root sessions.\n\nNone of the ids 6450-6480 appears in termal_list_sessions, which returned 26 sessions at the same moment.\n\nWHAT THIS DOES NOT ESTABLISH, and must be checked before this is called a leak:\n- termal_list_sessions may list ROOT sessions only. Earlier reviewer children (session-6350, session-6351) were also absent from it while they were demonstrably alive, so absence from that list is NOT evidence that a session is gone. This is the single check that decides the issue.\n- The Codex app-server may legitimately keep an MCP server per open conversation; long-lived conversations would then explain long-lived bridges without anything leaking.\n- Reaping may belong to the Codex CLI rather than to TermAl, in which case the finding is real but not ours to fix - only ours to survive.\n\nWHY IT IS WORTH DECIDING: each bridge holds a process, handles, and a connection to the live server on a machine that already has an FD-limit issue (see the FD-limit task) and already accumulates delegation worktrees. If bridges outlive their sessions, the count grows monotonically with every session Greg opens, for as long as the app-server lives - here, over 24 hours.\n\nFIRST STEP: determine whether a bridge whose --parent-session-id no longer resolves to a live session still holds its connection, by querying TermAl for one of those specific ids rather than by its absence from a possibly root-only listing. Only then classify.\n\nFound while identifying the 23-hour `cargo run --release` process, which turned out to be the live TermAl host itself (PID 15284, child PID 59664 target\\release\\termal.exe, both started 2026-09-07 22:55) - that part is now settled and is not a defect.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

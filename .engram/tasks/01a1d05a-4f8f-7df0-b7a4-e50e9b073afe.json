@@ -1,0 +1,29 @@
+{
+  "id": "01a1d05a-4f8f-7df0-b7a4-e50e9b073afe",
+  "external_ref": null,
+  "title": "Validate checkpoint-dot placement with native overlay and classic scrollbar gutters",
+  "outcome": "Checkpoint dots remain inside their pane and leave ordinary native scrollbar input reachable with macOS overlay scrollbars and Windows classic gutters.",
+  "acceptance": [
+    "Record a browser or native-platform reproduction of dot placement and pointer hit testing with macOS overlay and Windows classic scrollbars.",
+    "If needed, derive placement from actual gutter geometry with an inset fallback; verify no dot/chooser protrusion or unexpected interception of native scrollbar input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "review-followup",
+    "scrolling"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1112d-bb3c-79f0-9690-00a4d37a9620",
+  "external_ref": null,
+  "title": "Mailbox store: fair, timed connection admission shared by all connection users instead of try_lock polling on the read path",
+  "outcome": "Every taker of the mailbox store connection acquires it through one fair, timed admission, so a bounded reader is not starved by blocking writers under sustained contention and reaches the typed Retryable only when the connection was genuinely unavailable for the whole bound.",
+  "acceptance": [
+    "The mailbox store's connection is acquired by every user (append, acknowledge, idempotency read, dispatch-outcome wait, the read paths and reactivation) through one shared, fair, timed admission (for example a Condvar-signalled queue or a timed fair mutex), replacing the read path's try_lock polling with 1 ms sleeps and the writers' unbounded Mutex::lock.",
+    "Under sustained contention from blocking writers, a reader admitted within the bound acquires the connection in arrival order rather than losing every wake-up race; a test with concurrent writers and one reader shows the reader is not starved to the Retryable rejection while the connection was repeatedly free.",
+    "The typed Retryable rejection text, its 503 mapping and the bridge's safe-replay classification are unchanged; the full gate is green and the review pair clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "load",
+    "mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

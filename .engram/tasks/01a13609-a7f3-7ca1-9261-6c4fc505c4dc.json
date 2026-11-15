@@ -1,0 +1,37 @@
+{
+  "id": "01a13609-a7f3-7ca1-9261-6c4fc505c4dc",
+  "external_ref": null,
+  "title": "Codex: a failure before turn/start is written settles Ambiguous although the prompt was provably not sent",
+  "outcome": "Codex: a failure before turn/start is written settles Ambiguous although the prompt was provably not sent",
+  "acceptance": [
+    "A receipted Codex prompt whose turn fails before turn/start was written is settled Rejected (retry entry kept, re-queueable), never Ambiguous, at every such exit: the thread-registration persist failure after the thread exists (src/codex.rs, the Err arm near the setup waiter that calls fail_shared_codex_turn_without_runtime_exit), the Engram config/read deadline (src/codex_engram_bootstrap.rs), the reviewer-MCP exits whose detail says model work was not started, and the runtime-config persist failure before turn/start.",
+    "The design is recorded first. Proposed direction: a per-turn 'turn/start written' fact for Codex, set when the turn/start request is actually on the wire, so any failure settlement before it is Rejected by construction rather than by a note at each site; after it, Ambiguous or the turn/start reply decides.",
+    "Tests cover at least two of these exits through their production failure path, asserting Rejected with a re-queueable entry."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "delivery",
+    "design-pending"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed by the w-9b3a30fde03e landing (master 13063e3b, pushed 23:21:09Z). The Codex runtime_write marker (Untracked, Pending, Begun) gates the single turn/start write. apply_prompt_delivery_outcome turns Ambiguous into Rejected while the write is still Pending, so every exit before turn/start is Rejected and re-queueable by construction. Covered by the receipted Codex-write and thread-setup tests (test-d430a2b4, 9 passed) and by the landing's full gate test-eb74d4f6. Evaluation 158507f3 passed all 3 criteria.",
+    "completed_at": "2026-10-13T23:31:50.617697100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

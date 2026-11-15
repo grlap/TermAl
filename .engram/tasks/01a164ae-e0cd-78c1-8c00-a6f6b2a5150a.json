@@ -1,0 +1,28 @@
+{
+  "id": "01a164ae-e0cd-78c1-8c00-a6f6b2a5150a",
+  "external_ref": null,
+  "title": "Keep visible Test Runs rows in place during adjacent keyboard navigation",
+  "outcome": "Arrow and Tab navigation retain surrounding context when the next run is already visible, while offscreen targets still mount and receive focus.",
+  "acceptance": [
+    "Keep visible Test Runs rows in place during adjacent keyboard navigation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

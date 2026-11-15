@@ -1,0 +1,28 @@
+{
+  "id": "01a166ea-3062-7e33-997d-fb0b479bd569",
+  "external_ref": null,
+  "title": "A self-started Claude turn first seen through a task-notice echo or identity-less output does not learn its own command identity from a later started/output",
+  "outcome": "Decide and document whether an open Runtime turn with no recorded identity, which has taken up no prompt, adopts the first lone unknown identity named to it (its own command's `started` or output) instead of becoming unresolved; implement the decision with tests.",
+  "acceptance": [
+    "The rule for a Runtime turn opened by a task-notice echo or identity-less output that is later shown its own command's identity is decided, documented in src/claude_turn_ownership.rs's contract, and covered by tests for both frame orders.",
+    "The maintained full gate passes on the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "claude-runtime",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

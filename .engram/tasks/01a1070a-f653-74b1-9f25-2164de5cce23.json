@@ -1,0 +1,28 @@
+{
+  "id": "01a1070a-f653-74b1-9f25-2164de5cce23",
+  "external_ref": null,
+  "title": "A carried full gate launched in the turn a background Bash task's completion started gets no verification record and no refusal naming it; the restriction notice arrives a turn later",
+  "outcome": "A carried full gate launched in the turn a background Bash task's completion started gets no verification record and no refusal naming it; the restriction notice arrives a turn later",
+  "acceptance": [
+    "A carried full gate launched in the turn a background Bash task's completion started gets no verification record and no refusal naming it; the restriction notice arrives a turn later is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "engram-host",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

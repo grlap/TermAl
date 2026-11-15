@@ -1,0 +1,37 @@
+{
+  "id": "01a1c04e-9da0-7ac3-938a-941e0fdc6e2f",
+  "external_ref": null,
+  "title": "A one-line `/review-code <brief>` spawn silently drops the brief, and a reviewer that saw nothing can publish as completed with no findings",
+  "outcome": "A spawn's brief always reaches the child or the spawn refuses, and a review that had nothing to review can't read as a clean review.",
+  "acceptance": [
+    "A single-line command prompt with trailing text either carries the text to the child or refuses at spawn; it is never dropped silently, shown by a behaviour test for both Codex and Claude children.",
+    "The injected reviewer protocol distinguishes a completed review of a real change set with no findings from no supplied input or no change set, which must be reported as failed with a reason. A behaviour test shows that such a failed result is not published or displayed as a clean completed review. This relies on reviewer compliance: it does not machine-reject a contrary completed submission, and introduces no schema, legacy or persistence change.",
+    "A review pair has no Medium or higher and the normal gate passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Single-line template briefs are appended rather than silently lost, with both vendor spawn boundaries covered. No-input reviewer guidance requests failed-with-reason, and existing typed failure stays failed through contradictory prose, parent fan-in and persistence. Author71 and exact-tree composite full gate passed; no Medium+ remains. Landed in combo28 4c377a63. Cleanup of author root follows; review originals retained for open optional children.",
+    "completed_at": "2026-11-09T17:53:13.983428Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

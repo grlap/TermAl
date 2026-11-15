@@ -1,0 +1,31 @@
+{
+  "id": "01a1a282-8ab3-75d1-a39a-406d2f7fbdd9",
+  "external_ref": null,
+  "title": "Port the live Engram root-recovery / named-root-completion test fixtures to post-gating Engram (no turn_gated init, authority store key established through the ordinary path)",
+  "outcome": "The ignored live tests in src/tests/engram_root_recovery_live.rs and src/tests/engram_named_root_completion_live.rs set up a real pinned post-gating Engram, and the project's Engram authority store key, through the ordinary non-gated path. Their witness bodies then actually execute against a current pinned Engram.",
+  "acceptance": [
+    "The shared live fixtures use only commands the pinned post-gating Engram (0fe6348 or later) accepts, and establish the project's authority_store_key (and anything else the witnesses read) through the ordinary non-gated route, with no turn_gated or action_gated policy; shown by a cited source search.",
+    "Each live test either reaches its witness body and passes once on the approved pinned Engram, or is deleted with a recorded reason and cited ordinary-EO coverage; no gating is reintroduced and no witness assertion is weakened.",
+    "The c437 registration-revision witness (registration_refreshes_after_revision_or_child_attachment_but_never_after_registration) passes once live on the pinned Engram, closing the live evidence deferred from w-c43760ef6a60."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "legacy-cleanup",
+    "live-tests",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

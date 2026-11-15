@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4c6-77d0-a7b4-d2fb98055402",
+  "external_ref": "tm-c0m5",
+  "title": "Exercise Engram MCP composition through production runtime entry points",
+  "outcome": "Four MCP composition helpers were changed from cfg(test) to allow(dead_code), and ACP retains a runtime_token None branch used only by a test wrapper. This compiles production-unreachable duplicate composition paths and lets tests pass while the real token-bound _for_runtime path regresses. Restore test-only visibility or remove legacy helpers, then drive descriptor tests through the same runtime-token-aware entry points used in production.",
+  "acceptance": [
+    "Release builds contain no duplicate dead MCP composition helpers solely for tests; tests exercise runtime-token-aware production composition for Claude, Codex, and ACP; no allow(dead_code) is needed for these seams; required Rust gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

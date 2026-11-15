@@ -1,0 +1,30 @@
+{
+  "id": "01a19104-f42b-7b33-b895-b89be58f4276",
+  "external_ref": null,
+  "title": "Read-only reviewer delegations refuse `git ls-tree`, a read-only Git inspection command",
+  "outcome": "Read-only reviewer delegations refuse `git ls-tree`, a read-only Git inspection command",
+  "acceptance": [
+    "In a delegation with writePolicy readOnly, `git ls-tree <tree-ish> <paths>` (and other read-only plumbing used to compare blobs, such as `git rev-parse <rev>:<path>`) is allowed",
+    "Commands that can write (for example `git update-index`, `git write-tree` into the object store, or anything that changes refs, index or worktree) stay refused",
+    "A test covers the allowed read-only git inspection forms and at least one refused writing form"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "read-only-policy",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a12e21-c4eb-7f83-9ab0-3627c292287c",
+  "external_ref": null,
+  "title": "Scripted-clock retry helpers should await the retry acknowledgement before advancing the clock, and the budget-clock fence test should assert the retry_acknowledgement flag",
+  "outcome": "The scripted-clock retry helpers (retry_when_due in engram_closing_checkpoint_retry.rs and engram_closing_checkpoint_retry_transient.rs, replay_when_due in engram_root_begin_unsent.rs) wait on the retry record's acknowledgement fence BEFORE advancing the scripted clock past a bind backoff. They assert that the wait returned Some(Ok(())), so a backoff of 20 s or more can never expire the fence silently. The budget-clock fence test also asserts that the fence reaching the writer carries retry_acknowledgement and an EngramAdmission target.",
+  "acceptance": [
+    "The three helpers await the acknowledgement fence before any clock advance, and assert matches!(wait, Some(Ok(()))), as engram_root_recovery_live.rs does.",
+    "a_retry_record_acknowledgement_fence_expires_on_the_budget_clock receives the writer's request and asserts it is a Fence with retry_acknowledgement == true and an EngramAdmission target.",
+    "The affected tests pass on a host-recorded focused run."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

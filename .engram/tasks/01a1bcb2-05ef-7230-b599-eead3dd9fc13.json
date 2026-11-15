@@ -1,0 +1,30 @@
+{
+  "id": "01a1bcb2-05ef-7230-b599-eead3dd9fc13",
+  "external_ref": null,
+  "title": "Clean up owned Chrome profiles after the session-list browser guard finishes",
+  "outcome": "The session-list guard releases its owned browser profile directories while preserving useful diagnostic artifacts.",
+  "acceptance": [
+    "After the guard's normal and reduced-mode browser children finish, it attempts bounded cleanup of only its resolved repository-local mkdtemp profile paths, including failure paths.",
+    "Logs and results remain available for diagnosis; cleanup failures identify retained owned profiles and never delete another run's files."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "greg-directed",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b20e-26eb-75d3-9a44-5f30e3127943",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

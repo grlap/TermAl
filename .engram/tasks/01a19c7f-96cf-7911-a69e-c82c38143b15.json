@@ -1,0 +1,39 @@
+{
+  "id": "01a19c7f-96cf-7911-a69e-c82c38143b15",
+  "external_ref": null,
+  "title": "Audit and repair equality of process-local opening-authority attempt marker",
+  "outcome": "Preserve equality of all persistent observation facts when the D1 process-only attempt marker resets on reload.",
+  "acceptance": [
+    "Before edits, inspect production equality uses of EngramRuntimeObservedTurn and containing types on exact0c00 plus4217; report whether process-local marker can affect production comparisons.",
+    "Follow Fable1936 conditional direction: if production equality can differ solely bymarker, propose product equality ignoring onlymarker; otherwise normalize only live marker in existing boot integrity test while preserving all serialized assertions. No edits before named-root next-turn wake and report.",
+    "Return one small source-only frozen change on0c00 for composition with4217, exact blobs and rationale toSol03d4 ccFable. No Cargo/compiler/tests/retry/credit claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-fix"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only conditional equality repair delivered Sol03d4#145/8273ed27-8309-4bd0-b095-0548e0a4dd16, ccFable1940/3d5898d5-6bdb-4e96-a2a1-cb8cfe5efc31. Frozen tree50e014f3477b2dad4f8d0084ba3c2a019e1e6558, onlycapturefile+18/-1. Production containing-typeEq use audited and pre-edit route reported; manualEq compares all8 persistent fields, omits onlyD1processmarker aftercomposition4217. Tests and serialization unchanged. All executionUNRUN, no proven runtimeCAS failure or gate/landing claim. Prior failures preserved; authorroot hands off.",
+    "completed_at": "2026-11-02T13:47:47.101373700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

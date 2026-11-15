@@ -1,0 +1,27 @@
+{
+  "id": "01a0fc35-83b9-7ca1-b3e6-d07bf581d55b",
+  "external_ref": null,
+  "title": "History snapshot pin runs a SQLite read under the global state mutex; document or measure the latency trade-off",
+  "outcome": "History snapshot pin runs a SQLite read under the global state mutex; document or measure the latency trade-off",
+  "acceptance": [
+    "History snapshot pin runs a SQLite read under the global state mutex; document or measure the latency trade-off is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "sqlite"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

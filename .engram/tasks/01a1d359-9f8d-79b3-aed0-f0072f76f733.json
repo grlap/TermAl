@@ -1,0 +1,33 @@
+{
+  "id": "01a1d359-9f8d-79b3-aed0-f0072f76f733",
+  "external_ref": null,
+  "title": "Expose pre-lock rescan request phases to live trace queries",
+  "outcome": "While a rescan is waiting for or holding a state-lock section, a live trace query can identify the requested section without any trace-ring mutex acquisition while StateInner is held.",
+  "acceptance": [
+    "Expose pre-lock rescan request phases to live trace queries is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-concurrence-needed",
+    "acceptance-needed",
+    "greg-reported",
+    "performance",
+    "review-low",
+    "state-lock",
+    "test-run-tracing",
+    "tracing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d30d-722f-7e31-ab8d-4bd81a716e52",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

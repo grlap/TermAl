@@ -1,0 +1,24 @@
+{
+  "id": "01a1b8c3-7729-7362-8752-b427ba86aa5b",
+  "external_ref": null,
+  "title": "Integrate combined TermAl train on fdd8d035: content-v1 C3 producer + af604 scoped Codex MCP approvals",
+  "outcome": "One combined candidate b40ec035 (C3 2f48fbc6 + af604 61e1283f, composed on master fdd8d035) passes a fresh combined review pair including the content-v1 criterion-8 audit, a whole-binary focused run, and the DL560 and Windows B FULLs on one test ref. It lands by fast-forward only after Engram's consumer 0c012df9 is installed on both Central and DL560, and is installed.",
+  "acceptance": [
+    "Integrate combined TermAl train on fdd8d035: content-v1 C3 producer + af604 scoped Codex MCP approvals is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

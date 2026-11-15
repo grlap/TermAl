@@ -1,0 +1,33 @@
+{
+  "id": "01a1a283-a250-7ee0-92db-e1aa02f8656d",
+  "external_ref": null,
+  "title": "Refuse unreported empty-directory junctions inside pinned child checkouts",
+  "outcome": "A junction inside an initialized pinned child is refused even when its target is empty and Git status reports no entry, under the existing capture budget and without changing ordinary-root admission.",
+  "acceptance": [
+    "A Windows fixture establishes a real junction with an empty target and no Git-status entry, then requires source capture refusal at the child boundary; junction creation failures remain fatal.",
+    "The fix stays within the existing shared deadline and path bounds, retains initialized-child positive controls, and leaves no-gitlink ordinary capture admission and bytes unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-follow-up",
+    "source-id",
+    "source-revision",
+    "team-pilot",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

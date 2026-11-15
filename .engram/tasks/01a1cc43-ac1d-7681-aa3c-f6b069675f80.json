@@ -1,0 +1,34 @@
+{
+  "id": "01a1cc43-ac1d-7681-aa3c-f6b069675f80",
+  "external_ref": null,
+  "title": "Exercise the removed-root journal sweep cursor independently of authority recovery",
+  "outcome": "A controlled-clock behavioural test reaches the removed-root journal loop itself and discriminates cursor advancement and resumption from authority recovery queue rotation.",
+  "acceptance": [
+    "A fixture with removed journals and no preliminary authority read consuming admission observes the actual journal-loop NamedRootRead and asserts a populated, advanced engram_root_read_cursor.",
+    "A subsequent unfiltered pass resumes from the recorded cursor, including wrap/progress behaviour, and a filtered pass preserves an already populated unfiltered cursor; the tests fail if cursor advancement is removed.",
+    "The regression uses controlled clocks, retains operation minimum and journal/read limits, and passes under the standard registered launcher on the reviewed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "engram-adapter",
+    "greg-directed",
+    "limits",
+    "named-roots",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1c96f-bc45-74b2-8059-18a1ae323de4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1cd87-dc50-7291-b631-b89ba80b8187",
+  "disposal_reason": "Continue as independent work after parent w-18a1ae323de4 completed with fresh evaluation54361853705e4aa8b1f5c2ed8c9c21d1/seal562a2011587c49b8893bd3ece04b97e4. Optional Low remains open; no fix or verification claimed.",
+  "completion": null
+}

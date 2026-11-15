@@ -1,0 +1,37 @@
+{
+  "id": "01a1a389-fd66-7ad0-a6d6-7e3a71617d1c",
+  "external_ref": null,
+  "title": "Test-only named-root authority writer fails with a stale metadata snapshot when a concurrent synchronous commit lands between its capture and write",
+  "outcome": "In a test state with no writer thread, a concurrent synchronous commit landing between the manual authority writer's capture and write no longer fails a naming with \"stale metadata snapshot: durable predecessor changed\" when the store already holds the wanted content; if it does not, the refusal stands.",
+  "acceptance": [
+    "All cfg(test) manual writer sites (engram_root_authority twice, engram_named_root_release, engram_source_observation_removal) go through one helper that stays off the state lock and, on the typed stale refusal alone, confirms by reading the wanted content back; if the store does not hold it the refusal stands, and any other write failure is never read back",
+    "A regression test puts the real observation worker's closing install between the writer's capture and write and shows the clear succeeds, with no timing as its oracle; another test shows a stale capture whose content is not durable stays refused",
+    "No retry, sleep, raised timeout or weakened assertion is added, nothing is written twice, the existing tests requiring this path to stay off the state lock while waiting on SQLite still pass unchanged, and non-test behaviour is unchanged",
+    "The review pair has no outstanding finding of Medium or higher and the full gate is green on the exact candidate, or on the coordinated combined candidate containing it"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "test-infrastructure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The test-only authority writer no longer fails a naming with a stale snapshot when a synchronous commit landed between its capture and write and the store already holds the content. Landed in C3, master 0bfbb90d72a513e52110ceaee6abab443db4435b. Only one order is forced; residuals filed as w-5bfdb6cf7c52 and w-a5d66f0d3fda.",
+    "completed_at": "2026-11-04T01:13:09.532957500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

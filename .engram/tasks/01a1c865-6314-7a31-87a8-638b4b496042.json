@@ -1,0 +1,35 @@
+{
+  "id": "01a1c865-6314-7a31-87a8-638b4b496042",
+  "external_ref": null,
+  "title": "Integrate combo46 on bcf66e4d: 8e1f 6b1849c4 (w-de05, refresh timestamps longest first)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 6b1849c4e6e7c2721b7a3d3b7207cb5aa06c6f95 (tree 79c7c4e9af894bdffcadb30a3ee9d20eeadd1847) is on origin/master, where master was moved to it by a fast-forward from bcf66e4d34ce886fa00819664f72e9ff1b9c81a2.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 79c7c4e9 passed every stage, with equal source ids before and after and an eligible clean input, and the whole-1 review pair on 6b1849c4 (Codex 17318, Claude 17319) recorded no finding of Medium or higher.",
+    "The release binary built from tree 79c7c4e9 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo46 integrated. 6b1849c4 is on origin/master by fast-forward from bcf66e4d. The DL560 FULL on the exact tree 79c7c4e9 (test-719144f6) passed every stage, and the whole-1 pair had 0 findings. Installed on Central (03:16:33Z) and on DL560 (03:48:12Z), with the previous binaries kept aside and no host restarted by the install. Independent evaluation delegation-9ccd5ce2 recorded 3/3 pass at 09:04:27Z. Its submission at about 09:03:03Z came after the 08:34Z Central OS reboot, so the CCC1 import was no longer running, and no cargo build was running.",
+    "completed_at": "2026-11-11T09:04:43.841828900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

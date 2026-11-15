@@ -1,0 +1,30 @@
+{
+  "id": "01a13607-da33-7823-82bc-440b3fc01bb3",
+  "external_ref": null,
+  "title": "Import reconciliation D: G3 outcome recovery and serialized retirement integration",
+  "outcome": "Under a hold, TermAl recovers every uncertain control intent only through exact typed reads (turn_grant_read, outcome_read) and Engram's writer-serialized retire_original, with zero provider sends on every branch. Anything not positively resolved stays pending.",
+  "acceptance": [
+    "Tests cover every row of the packet's G3 table, exact identity, auth and schema errors, an unknown Evaluate without a grant, and the not_found versus late-Begin race in both writer orders. With retirement first, a late original returns a terminal refusal and creates no grant or begin. With the original first, the actual result is recovered and the provider is still never dispatched. A lost retirement or result reply retries the exact control outcome without a new effect. A completed grant with a pending process or report stays pending. Successful original execution is never inferred from retirement.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a135ff-5979-7203-93d4-358040469407",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

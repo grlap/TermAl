@@ -1,0 +1,27 @@
+{
+  "id": "01a1218d-5d91-7ef3-bd1d-fb14c675997d",
+  "external_ref": null,
+  "title": "A refused one-call or compound focused Node Test calls the shell's exit \"native\" and drops the pushd frame",
+  "outcome": "When a focused Node Test in the one-call form (`pushd \"DIR\" && …`) or a compound line is refused with a recorded exit, the summary words it as the command's exit, not the launcher's native exit, and keeps the `pushd \"DIR\"` frame, as engram_check_summary does.",
+  "acceptance": [
+    "A refused one-call or compound focused Node Test calls the shell's exit \"native\" and drops the pushd frame is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a1a5dd-0d37-7031-a509-7b2dee69b9e0",
+  "external_ref": null,
+  "title": "The recurring reclamation pass takes an idle owner's or unfocused live root out of Published just to re-learn the same binding",
+  "outcome": "A confirmed root stays confirmed through the recurring reclamation pass unless the pass's read learned something, so an idle session's next turn doesn't open into an unconfirmed root with no authority change.",
+  "acceptance": [
+    "A deterministic test on the unchanged product, driving the pass directly on a live root of an idle owner and on an unfocused live root, shows the root left unconfirmed with no authority change: an unanswered read leaves WorkRunsUnresolved, and a refused publication leaves WorkTransitionUnpublished; or the investigation stops and reports what it ruled out. No time-based assertion.",
+    "After the fix, the pass reads such a root first and goes on only if the read learned something, so that sequence leaves the root Published with its authority untouched, without a restart, a retry loop or an empty turn.",
+    "These stay as they are, each covered by a test: the skip for a root under an open evaluation, retirement of ended roots, capacity reclamation, and the explicit release path; a transition that truly remains unsettled still withholds evidence.",
+    "The review pair is clean. The closing note says what the fix doesn't prove: that any field sample took this path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The recurring reclamation pass reads a live root first and goes on only if the read learned something, so an idle owner's or unfocused live root stays Published with its authority untouched. Field samples aren't shown to have taken this path.",
+    "completed_at": "2026-11-04T12:07:09.825276500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

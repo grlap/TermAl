@@ -1,0 +1,29 @@
+{
+  "id": "01a0e6d3-c51d-7570-b457-0fc81fde619f",
+  "external_ref": "tm-h6uc.3",
+  "title": "Wire Workspaces panel and retire the pane-bar popover",
+  "outcome": "Owner Termal::Grok. Depends on compact panel and rail tasks. Wire workspaces body/header actions through AppControlSurface.tsx and App.tsx to existing app-workspace-layout.ts callbacks and SSE summaries. Present refresh currently depends on isWorkspaceSwitcherOpen effect in App.tsx: move to actual Workspaces-section activation/mount plus explicit Refresh, avoid refresh on unrelated render/SSE or unstable callback identity. Preserve request tokens and newer-SSE safeguards; no stale list overwrites. Reuse current navigation flush/URL behavior, new-window unique ID, current-workspace protection, rename merge and browser title. Retire WorkspaceSwitcher rendering and popup-only open/ref/click-away/Escape props/effects/imports/CSS; keep ThemeModeToggle and backend status from same file. Retain access through standard open-control-panel action if dock is closed, moved right or another section active; no hidden workspace operation paths. No backend API, workspace storage schema, autosave or conflict-policy rewrite. Integration tests actual rail click then switch/new/new-tab/rename/delete, same-workspace no-op, errors remain visible, and no old Workspace switcher dialog.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c51b-7df2-8753-e4ea12b01b75",
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a0e6d3-c51d-7570-b457-0fa0db17a942",
+    "01a0e6d3-c51d-7570-b457-0fbe843f0466"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1b, spot-checked by Termal::Fable2): CLOSE-DONE. The panel is wired and the popover retired, in f4ede4b (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

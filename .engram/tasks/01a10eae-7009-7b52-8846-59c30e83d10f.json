@@ -1,0 +1,43 @@
+{
+  "id": "01a10eae-7009-7b52-8846-59c30e83d10f",
+  "external_ref": null,
+  "title": "Observe the reviewer MCP bridge before cleanup when Codex finishes without a submitted result",
+  "outcome": "Separate finish-without-submission diagnostic slice (ask2), per Fable2 mailbox1342/message-923648b5-16d0-40d1-a296-91506cfa23df under Greg's smaller-landings rule. Startup fail-fast/explicit startup budget remain in the parent. No owner yet; Coder/session7422 likely implements after parent's landing and a new claim/source-root naming. Trigger: coordinator assignment after parent lands; this filing itself promises no implementation. Preserve fail-first test-7e855f39 evidence: actual turn/completed yielded thread/archive instead of status query. This is separate from the disabled-mailbox positive fixture defect.",
+  "acceptance": [
+    "A Codex reviewer finishing without an authoritative submission triggers another bounded termal-server status query before terminal cleanup/archive discards its MCP state. The typed observation (including an explicitly unavailable observation and any captured startup reason) is retained in the failed delegation result and child transcript. It remains a failed/unavailable review, not a fabricated clean result. A valid authoritative submitted result retains existing precedence and is not overwritten by later MCP/transport failure.",
+    "Permanent transport/lifecycle controls cover finishing-without-submission and a healthy authoritative submission. The integration neither blocks the JSON-RPC reader nor holds the state lock while awaiting status, does not damage a sibling thread or shared app-server, and does not settle a stopped/replaced reviewer. Transcript/result diagnostics are bounded and omit raw config, environment secrets, routing credentials and unrelated tool inventories. Existing permission/write-policy and immutable-submission safeguards remain unchanged."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "codex",
+    "delegation-mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c3b1-72a2-ac7e-053dd6158479",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "superseded: the ask 2 scope stays in w-053dd6158479 under its original criteria (carried-failure rule)",
+  "completion": null
+}

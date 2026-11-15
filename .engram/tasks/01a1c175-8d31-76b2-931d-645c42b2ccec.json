@@ -1,0 +1,38 @@
+{
+  "id": "01a1c175-8d31-76b2-931d-645c42b2ccec",
+  "external_ref": null,
+  "title": "Add `cargo fmt --check` as the first full-gate stage",
+  "outcome": "Every TermAl full gate fails fast on unformatted Rust, the same rule Engram already has, and coders format before freezing.",
+  "acceptance": [
+    "The standard full launcher runs `cargo fmt --check` as its first stage, before cargo-check, and an unformatted Rust fixture fails at that stage without the launcher rewriting anything.",
+    "docs/test.md describes six stages, and the coder test-execution skill tells coders to run the project's formatter before freezing a candidate, in the same sentence Engram's copy uses.",
+    "UI and TypeScript formatting are unchanged, and no new dependency is added.",
+    "A registered committed-input full run with the six maintained stages produces a verification_record that records the exact cargo fmt --check stage as Lint, preserves its passed, failed and not-run outcomes, and keeps genuine Test and Build kinds unchanged; formatting without --check and other unsupported commands remain refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "formatting",
+    "launcher",
+    "procedure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed six-stage full gate with check-only cargo fmt first, explicit Lint verification transport and real pinned failed-fmt live witness. Final combo38 master/origin 2545479700fd3b2f019385223f38cf6454bd0f0e verified, all three live-test contribution blobs unchanged; exact-tree DL560 FULL green. Four criteria linked; optional Low test precision follow-up remains separate.",
+    "completed_at": "2026-11-10T07:33:52.432745100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

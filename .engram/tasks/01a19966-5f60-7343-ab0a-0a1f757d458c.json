@@ -1,0 +1,29 @@
+{
+  "id": "01a19966-5f60-7343-ab0a-0a1f757d458c",
+  "external_ref": null,
+  "title": "Full gate: report the first failing test while a stage is still running, not only at stage end",
+  "outcome": "Full gate: report the first failing test while a stage is still running, not only at stage end",
+  "acceptance": [
+    "While a stage runs, the launcher surfaces the first test failure (name and bounded panic headline) to the run's status and notify target, without stopping the run or changing its terminal result",
+    "The final results and logs are unchanged in content and completeness; the early report is advisory and never counts as a gate result",
+    "Existing panic-journal and summary owners are reused rather than duplicated"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "diagnostics",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

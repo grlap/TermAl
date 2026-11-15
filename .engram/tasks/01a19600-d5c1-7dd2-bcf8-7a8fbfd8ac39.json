@@ -1,0 +1,30 @@
+{
+  "id": "01a19600-d5c1-7dd2-bcf8-7a8fbfd8ac39",
+  "external_ref": null,
+  "title": "Prove the control-OFF re-bind key depends on the flagged token's value, not just on being a re-bind",
+  "outcome": "A test shows that source-root naming's flagged-token re-bind derives its idempotency key from the flagged token's value. In one fixture, two re-binds under different flagged tokens send different keys. A weaker fix, such as a constant re-bind salt, would therefore fail the tests.",
+  "acceptance": [
+    "in one fixture, a re-bind under one flagged token and a later re-bind under a different flagged token send different idempotency keys, asserted by a test in src/tests/engram_source_root_off_rebind.rs",
+    "the change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "control-off",
+    "engram-control-transport",
+    "found-by-review",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

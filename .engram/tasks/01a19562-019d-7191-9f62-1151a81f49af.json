@@ -1,0 +1,28 @@
+{
+  "id": "01a19562-019d-7191-9f62-1151a81f49af",
+  "external_ref": null,
+  "title": "Engram process tree holds its terminated mutex across bounded kill and absence probes",
+  "outcome": "EngramProcessTree does not hold its terminated mutex while sleeping or probing. confirmed_after_reap copies the TerminalGroupSignal out of the guard before it runs the post-reap absence probe. terminate() records its outcome without keeping the lock held across kill_before_reap's bounded leader-exit look and kill_child_process's waits. Either that, or the bound is documented as accepted. A concurrent request_termination, whether from a successor in process_for_until or from Drop, no longer overruns its own deadline by up to about 250-350 ms.",
+  "acceptance": [
+    "confirmed_after_reap and terminate() in src/engram_host_adapter.rs do not hold the terminated mutex across the bounded leader-exit look, the post-reap absence probe or the kill waits; or the bound is documented at the lock and the coordinator has concurred on that choice in a note",
+    "the change is reviewed and gated under the standing rule"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control-transport",
+    "found-by-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

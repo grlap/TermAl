@@ -1,0 +1,37 @@
+{
+  "id": "01a1a74e-64f3-7530-870f-dd7f6eb456d5",
+  "external_ref": null,
+  "title": "After a second claim's root ends, re-naming the first claim's root stays 'bound root differs' turn after turn: same-generation naming does not update the session's bound root",
+  "outcome": "A session returning to a held claim, whose root it names again, gets a confirmed opening on its next turn, or a notice whose remedy actually works; it does not stay unconfirmed with evidence withheld after following the notice.",
+  "acceptance": [
+    "A deterministic regression starts with two held claims and separately named roots, ends the later claim, returns to the first claim, names its already selected root again, and opens the next turn with that first claim's exact selected root and generation confirmed; the regression fails on the original source and passes with the fix.",
+    "A genuinely different bound root or stale generation remains unconfirmed. Re-naming does not bypass current claim/store/run identity, unresolved authority transitions, durability or next-turn source-root activation, and creates no false evidence for the naming turn.",
+    "The exact candidate passes focused regression and negative-control tests, has the required independent review pair with no outstanding Medium-or-higher finding, and passes the applicable full gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A session returning to a held claim whose root it names again now refreshes the kept name's bound root, so its next turn opens confirmed instead of staying 'bound root differs'. Landed as 922b81dd on parent 24b42615, tree e9f54c43. Review pair delegation-f1622f66 and delegation-15eae3b3 clean. Focused test-6739d392 13/0/0 on DL560. Landing gate FULL test-b87d994c on DL560 via test ref, 7004 Rust and 5018 vitest passed, 0 failed, launcher fingerprints equal before and after; Central type-check passed. Installed binary sha256 252fd856d5ece88c82a40b2550f9723aaadb0c7222feceae4daa2aefe2ddcfb0 at target/release/termal.exe. Lows filed: w-e0e5713118b6, w-3f91802008b8, w-9435a8abe32f; the automatic focus limit is w-d6b6165a6661.",
+    "completed_at": "2026-11-04T18:29:57.995357400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

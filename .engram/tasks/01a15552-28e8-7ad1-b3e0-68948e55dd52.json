@@ -1,0 +1,29 @@
+{
+  "id": "01a15552-28e8-7ad1-b3e0-68948e55dd52",
+  "external_ref": null,
+  "title": "Build identity: support Git's reftable ref backend (currently reported as a fixed \"unknown\" source state)",
+  "outcome": "Follow-up to w-ab6cc520ffb4 (health build identity), filed by Termal::Fable2 at Architect1's request (Sol-c593 mailbox 1a9f6a77 #275, 2026-10-19). w-ab6c's build.rs captures the build commit from the loose-ref and packed-refs files (HEAD, the pointed ref and packed-refs, with a bounded existing-ref-parent trigger). A repository using Git's reftable backend has no such files; w-ab6c detects that and reports a fixed unknown boundary, documented rather than supported. This item adds reftable support: resolve HEAD and the current ref from the reftable stack, using build.rs rerun triggers on the reftable directory, so a reftable repository reports the true commit, with the same no-unconditional-rerun guarantee.",
+  "acceptance": [
+    "For a repository using the reftable backend, /api/health buildIdentity reports the correct full build commit and a clean, dirty or unknown sourceState, with build.rs rerunning only when the reftable stack or index changes; an isolated fixture proves two no-change builds do not rerun the script.",
+    "The full five-stage gate passes on the exact input with an independent Codex plus Claude review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "build-identity",
+    "follow-up",
+    "provenance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

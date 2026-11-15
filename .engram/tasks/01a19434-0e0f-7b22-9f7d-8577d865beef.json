@@ -1,0 +1,32 @@
+{
+  "id": "01a19434-0e0f-7b22-9f7d-8577d865beef",
+  "external_ref": null,
+  "title": "Resolve the remaining watcher limitation for source edits after a carried check's closing capture",
+  "outcome": "Track the deliberately unresolved broad post-exit edit behavior separated from the legacy terminal-routing repair. A provider-reported edit and an independent filesystem watcher notification can describe the same write. The watcher currently conservatively fences an ended reported check because notification receipt/processing does not prove write time. Any future exemption must positively order the actual write after required capture; unknown or in-flight write-and-restore evidence stays fail-closed. This record grants no watcher redesign, new diagnostics, profiling or live prompts. Fable1313/Architect2 ruling2b28f050 requires returning to Greg with a bounded proposal if the symptom recurs after the narrow fix is live.",
+  "acceptance": [
+    "Record the unresolved watcher-only and duplicate provider/watcher behavior with the original incident provenance, distinguishing measured results from unproven incident causes.",
+    "Before any implementation, obtain a scoped design disposition identifying a concrete producer fact that orders the actual write after completed capture; receipt/processing time, mtime, elapsed delay, matching endpoint content and ended() alone are insufficient. If no safe fact exists, explicitly retain conservative behavior.",
+    "Any authorized correction has deterministic positive and negative regression coverage preserving in-flight writes, delayed write-and-restore, unknown timing, exact source and claim identity; no diagnostic/live run is implied by this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "design-pending",
+    "host-recording",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a192f6-946b-79e0-808d-a2532fef97ed",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

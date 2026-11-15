@@ -1,0 +1,30 @@
+{
+  "id": "01a19b3f-bf26-7861-a9ee-38a8c0cca990",
+  "external_ref": null,
+  "title": "Exact non-parent review read: same resultId succeeds for one same-project root and returns 404 'no confirmed publication' for another",
+  "outcome": "Exact non-parent review read: same resultId succeeds for one same-project root and returns 404 'no confirmed publication' for another",
+  "acceptance": [
+    "A source-cited diagnosis explains why Engram::Merger (session-11859) received 404 'review attempt has no confirmed publication' at about 07:47:55Z for the exact C1 review reads that non-parent Engram::Coder-MacosFixSol (session-12325) completed successfully with the same delegationId, submissionAttempt and resultId; it names whether the cause is timing of publication capture, caller project or root mapping, or a defect",
+    "If it is a defect, a deterministic test shows two eligible same-project non-parent roots get the same answer for the same exact identity, and the fix lands through the normal review pair and gate",
+    "If it is timing or caller mapping by design, the refusal text tells the caller what is missing and the contract is documented in docs/features/review-attempt-retention.md"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "delegation-results",
+    "review-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a19301-7813-7eb1-94e4-81435dcf92ef",
+  "disposal_reason": "Root cause identified by Engram::Coder-MacosFixSol #124: Merger's exact reads passed delegationId as the BARE UUID 'd69e5d7d-3c69-413e-968a-15b85ffd50a6', while 12325's successful reads used the canonical 'delegation-d69e5d7d-…'. That is exactly existing bug w-81435dcf92ef, where a bare UUID yields a misleading 404 'review attempt has no confirmed publication' instead of resolving or refusing the id form. Supported route for Merger: re-read with the canonical 'delegation-' prefixed id. Evidence: Engram w-dd205 fda5059b37aa4a4c954c7a35fc93c619 and 527af481e4884be98677c4f954935aef.",
+  "completion": null
+}

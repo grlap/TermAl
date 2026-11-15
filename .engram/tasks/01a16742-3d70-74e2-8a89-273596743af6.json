@@ -1,0 +1,34 @@
+{
+  "id": "01a16742-3d70-74e2-8a89-273596743af6",
+  "external_ref": null,
+  "title": "Provide backward-compatible host credit-admission capability before launcher activation",
+  "outcome": "Implement and advertise a versioned host credit-admission/revalidation capability bound to exact registered run/request/session/root/work/claim/fence/generation, with typed zero-stage refusals and durable current-authority validation. Preserve today's launcher and defaults so this capability's first exact-input gate uses the existing supported credited path. This required bootstrap child lands and is installed before a coordinated Greg-performed restart; parent launcher activation waits for the restarted host to advertise the capability. No diagnostic-to-credit promotion, legacy fallback in the new launcher, test bypass or unapproved host.",
+  "acceptance": [
+    "The host advertises a versioned credit-admission capability and provides admission and stage-revalidation APIs for exactly registered launcher runs. Capability advertisement describes supported protocol behavior; it does not itself grant verification credit or authorize execution.",
+    "Initial admission reuses the applicable existing effective-source-root and carry eligibility predicates for the execution mode, checks the actual canonical root against the effective current-turn basis and matching live work/claim/fence/generation, and durably binds a successful decision to the exact immutable run/request/session/root/work/claim/fence/generation. Missing, stale, mismatched or unresolved authority receives a typed bounded actionable refusal; the host APIs execute no build/test stages and do not substitute roots or mint credit.",
+    "Stage revalidation checks an explicit stage identity against the admitted durable binding and current authority, rejects cross-run/request/session replay and superseded root/claim/generation, and permits idempotent continuation of the same admitted run. Ordinary closure of the launching turn alone does not invalidate an otherwise eligible detached run; foreground and delegated eligibility retains its existing mode-specific rules.",
+    "The existing launcher files, CLI defaults and supported registration/credit path remain unchanged in this capability-only input, so its first exact-input full gate runs and earns evidence through today's supported path. Existing registration durability, source-integrity, overlap, watcher and terminal settlement checks remain authoritative. No diagnostic-to-credit promotion, hidden bypass, silent unsupported-API fallback, replacement live host or restart is introduced.",
+    "Deterministic repository-local Rust/API regressions cover versioned capability reporting, eligible admission and same-run idempotence, wrong effective root, pending naming, missing/stale claim/fence/generation, request/session/run substitution, stage-boundary authority change and valid detached continuation after turn closure; refused operations leave no false admission or verification credit. Existing registration and carried-credit controls stay green.",
+    "Focused changed-scope checks pass on the frozen input; a fresh independent read-only Codex/Claude pair has no outstanding Medium-or-higher finding; Merger's maintained full Windows gate passes on the exact integration tree before landing and independent acceptance evaluation. Post-restart live capability observation and activation of the new launcher default remain on the parent, not a pre-landing criterion of this child."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "host-capability",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16721-dcbb-7a12-8fe9-771f5f280a14",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

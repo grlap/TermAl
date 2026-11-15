@@ -1,0 +1,41 @@
+{
+  "id": "01a12852-50bf-7143-97ef-7b4a302c8bf3",
+  "external_ref": null,
+  "title": "Decide whether the closing-checkpoint retry exception admits a closing checkpoint the producer refused",
+  "outcome": "engram_unsettled_closing_checkpoint_holds (src/engram_admission_retry.rs) admits an active grant whose newest checkpoint card is a Degraded turn_checkpoint naming the head. That includes an explicit producer refusal of the close (request_refusal: failure_class ProducerRefusal, remote_application Refused, engram_host_adapter.rs:4867-4882). The docs describe only an unsettled close (lost reply, missed deadline). Either exclude the refused cause, or document it deliberately, with a witness either way.",
+  "acceptance": [
+    "A witness shows the chosen behaviour for a closing turn_checkpoint the producer explicitly refused, followed by a bind-backoff park: either the explicit hold (exclusion) or the scheduled retry that settles the grant before the head's evaluate (documented inclusion), and docs/features/engram-host-adapter.md states it.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

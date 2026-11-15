@@ -1,0 +1,31 @@
+{
+  "id": "01a175e1-c2a5-7671-8ea2-b5476c291e56",
+  "external_ref": null,
+  "title": "Test-run sync holds StateInner ~0.8 s at test_runs.rs:778 (projection and summaries for every scanned run built under the lock)",
+  "outcome": "The test-run scan commit does no per-run projection or summary work under StateInner beyond applying the exact precomputed delta, so its lock hold no longer scales with the number of scanned runs. Snapshot and delta ordering is preserved.",
+  "acceptance": [
+    "A note records whether the ~801 ms hold Greg observed after the 2026-10-26 01:3x restart recurs in steady state or only on the first post-restart scan, using host-API-only lock diagnostics (no live-store reads), and identifies from source what the hold covers between test_runs.rs:778 and its release.",
+    "If it recurs or scales with run count: the work that does not need the lock (projection and per-run summary construction for unchanged runs) moves outside it, reusing the existing TestRunProjection and the de60 immutable-cut pattern; deterministic tests show the commit cut is exact and that delta ordering under the lock is preserved; no new cache.",
+    "A review pair has no outstanding Medium or higher and one complete READY goes to Merger2, or, if criterion 1 shows a one-off startup cost only, the item records that verdict with its evidence and is closed without a code change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

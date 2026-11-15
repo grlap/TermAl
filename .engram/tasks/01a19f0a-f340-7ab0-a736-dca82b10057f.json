@@ -1,0 +1,27 @@
+{
+  "id": "01a19f0a-f340-7ab0-a736-dca82b10057f",
+  "external_ref": null,
+  "title": "Repeated 'telegram> failed to forward assistant message: session not found'",
+  "outcome": "Telegram forwarding of assistant messages either reaches its target session or stops retrying with one clear, rate-limited diagnostic naming the missing session and binding. It no longer repeats the same failure continuously, and a real delivery failure is never silenced.",
+  "acceptance": [
+    "Repeated 'telegram> failed to forward assistant message: session not found' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "telegram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

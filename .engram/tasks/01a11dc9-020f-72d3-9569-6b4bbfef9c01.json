@@ -1,0 +1,28 @@
+{
+  "id": "01a11dc9-020f-72d3-9569-6b4bbfef9c01",
+  "external_ref": null,
+  "title": "A cold-restore checkpoint failure on an interrupted head is never rendered; only the prior cause is shown",
+  "outcome": "A cold-restore checkpoint failure on an interrupted head is never rendered; only the prior cause is shown",
+  "acceptance": [
+    "After a host restart, when the retained admission's closing branch interrupts the head and its restart TurnCheckpoint then fails (transport, protocol or remote), the committed session record and the wire show that checkpoint failure's causal record (operation turn_checkpoint, the exact restart idempotency key, the failure boundary), and no received value appears in it.",
+    "No dispatch, hold, retry, recovery or scheduler decision changes: the interrupted head stays retained and held, nothing is handed to the provider, and no request is sent again."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "causal-diagnostics",
+    "engram-admission"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

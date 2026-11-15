@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c43c-7062-a4eb-0718745cebdb",
+  "external_ref": "tm-a55",
+  "title": "Make Live Turn sticky CSS regression assertion order-independent",
+  "outcome": "The AgentSessionPanel regression test parses the .conversation-live-tail.is-pinned CSS rule with an order-dependent regular expression. Replace it with a small declaration-block assertion that validates position: sticky and bottom: 0 regardless of formatting or declaration order, while retaining the unpinned base-rule guard.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete. The owner's clarification (note 9eaf9dce) superseded the sticky requirement: the LIVE TURN must NOT be sticky. The current AgentSessionPanel.test.tsx:814-826 forbids sticky, fixed or absolute positioning on the queued tail, so an order-independent sticky-CSS assertion no longer has a requirement to test. Do not reintroduce sticky. Evidence: Sol-a7bb's triage (f59d4581 #344, item 18), under Greg's net-reduction directive.",
+  "completion": null
+}

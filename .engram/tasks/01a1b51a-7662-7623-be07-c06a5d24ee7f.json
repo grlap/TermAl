@@ -1,0 +1,28 @@
+{
+  "id": "01a1b51a-7662-7623-be07-c06a5d24ee7f",
+  "external_ref": null,
+  "title": "Decide external-change refresh for already-open Git-ignored files",
+  "outcome": "Define whether and how open ignored-file editors and expanded ignored trees detect external changes without restoring ignored-tree event floods.",
+  "acceptance": [
+    "Decide external-change refresh for already-open Git-ignored files is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "followup-proposal",
+    "review-low",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

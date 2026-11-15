@@ -1,0 +1,27 @@
+{
+  "id": "01a10928-5752-7183-867b-188806821768",
+  "external_ref": null,
+  "title": "The drain's no-dispatch-card branch promotes a retry owner's head without that owner's release check, so a settings change racing a due attempt can deliver a parked head without Engram",
+  "outcome": "The drain's no-dispatch-card branch promotes a retry owner's head without that owner's release check, so a settings change racing a due attempt can deliver a parked head without Engram",
+  "acceptance": [
+    "A retry-kind drain owner (abort, bind, admission) never promotes its head through the no-dispatch-card branch unless that owner's release check holds under the promotion lock; a test drives a settings change between a Due step and the drain and shows the head stays held."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

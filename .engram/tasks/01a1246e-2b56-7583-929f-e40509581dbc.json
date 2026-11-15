@@ -1,0 +1,28 @@
+{
+  "id": "01a1246e-2b56-7583-929f-e40509581dbc",
+  "external_ref": null,
+  "title": "Naming-authority settlement at evaluation submission can race a source-root reconcile for the same work",
+  "outcome": "settle_acceptance_evaluation_authority (src/engram_source_roots.rs) does not publish or replace a naming-authority owner while a source-root reconcile for the same work holds its in-flight guard. Otherwise the race is documented and pinned by a regression test. A reconcile running alongside a submission then neither re-guards because settlement published its Prepared owner mid-read, nor fails learn_engram_authority_locked with 'superseded work owner' because settlement prepared a fresh owner, which would leave the requester's turn admitted with source evidence withheld.",
+  "acceptance": [
+    "A deterministic regression test runs a reconcile and a submission's settlement for the same work in an interleaving that today supersedes or re-guards the reconcile, and shows that after the fix the reconcile completes with its evidence and the submission is answered retryably or admitted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "naming-authority",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — settle_acceptance_evaluation_authority was removed; it can no longer publish an owner during reconcile. Current Candidate recovery has its own scoped task/tests. Source: src/acceptance_evaluation_api.rs:902; src/engram_source_roots.rs. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

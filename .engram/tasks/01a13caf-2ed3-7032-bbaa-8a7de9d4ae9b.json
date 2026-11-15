@@ -1,0 +1,28 @@
+{
+  "id": "01a13caf-2ed3-7032-bbaa-8a7de9d4ae9b",
+  "external_ref": null,
+  "title": "Refresh reported-end module provenance for typed focused association reading",
+  "outcome": "Refresh reported-end module provenance for typed focused association reading",
+  "acceptance": [
+    "Module header accurately names typed generic focused association reading and completion ownership without changing behavior or authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "documentation",
+    "host-recording",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1399b-302a-7b82-9dbf-79dc48b36f27",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

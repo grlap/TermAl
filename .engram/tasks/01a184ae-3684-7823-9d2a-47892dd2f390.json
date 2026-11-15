@@ -1,0 +1,27 @@
+{
+  "id": "01a184ae-3684-7823-9d2a-47892dd2f390",
+  "external_ref": null,
+  "title": "Claude bash-shell proof covers only the spawn environment, but its comments claim Claude Code always uses its own bash",
+  "outcome": "The ClaudeCodeDefault bash-shell proof either is documented as covering the spawned environment only, or is extended to the other shell inputs Claude Code reads: settings.json env (user, project and local, and managed), SHELL, and CLAUDE_CODE_SHELL / CLAUDE_CODE_SHELL_PREFIX. It could also pin --setting-sources.",
+  "acceptance": [
+    "Claude bash-shell proof covers only the spawn environment, but its comments claim Claude Code always uses its own bash is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "read-only-checker",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

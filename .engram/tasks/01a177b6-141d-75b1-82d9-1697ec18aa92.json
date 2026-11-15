@@ -1,0 +1,27 @@
+{
+  "id": "01a177b6-141d-75b1-82d9-1697ec18aa92",
+  "external_ref": null,
+  "title": "Relay wake drain helper repeats no-progress passes without a bound; a standing zero-row seam or a persistent stall would hang instead of failing",
+  "outcome": "drain_mailbox_relay_wakes fails with a useful diagnostic, instead of spinning, when passes keep making no progress, and a standing HomeBatchRowLimit of zero is refused, while the one-shot zero-row retry still works and no wall-clock limit is added.",
+  "acceptance": [
+    "Relay wake drain helper repeats no-progress passes without a bound; a standing zero-row seam or a persistent stall would hang instead of failing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox-relay",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

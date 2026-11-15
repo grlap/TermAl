@@ -1,0 +1,37 @@
+{
+  "id": "01a11e91-bd1b-73e0-8643-fb12e491217a",
+  "external_ref": null,
+  "title": "Remove the dormant begin-recovery envelope modules after the begin-unknown replay lands",
+  "outcome": "Once the begin-unknown replay (Option B, inside the retained evaluate) has landed, its last landing included, nothing in the tree carries the parked foundation's dormant recovery-envelope contracts. engram_recovery_format.rs and engram_recovery_validation.rs (474 lines), their tests and their wiring are removed in a pure-deletion commit with its own review pair and gate.",
+  "acceptance": [
+    "src/engram_recovery_format.rs and src/engram_recovery_validation.rs, their module wiring in main.rs and tests/mod.rs, and the tests that exercise only them are deleted. The commit changes no other behaviour: it only removes lines, apart from import or registration adjustments the removal requires.",
+    "No persisted field, loader, admission caller or test outside the removed files referenced the deleted types (shown by the diff and a clean cargo check). The begin-unknown replay's tests still pass unchanged.",
+    "The commit lands after every landing of the begin-unknown reconciliation item, as its own commit with its own independent read-only Codex/Claude review pair (no outstanding Medium or higher), and the maintained five-stage full gate passes on its exact input with this item's own passed host Test record."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "no-legacy",
+    "pure-deletion"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

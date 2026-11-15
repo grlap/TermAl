@@ -1,0 +1,27 @@
+{
+  "id": "01a0e9a9-e1bc-7bd3-9d15-fe6adffdc3a3",
+  "external_ref": null,
+  "title": "One presumed shell directory per runtime mixes a runtime's separate Bash and PowerShell shells when both keep their own cwd",
+  "outcome": "TermAl keeps one EngramShellDirectory per runtime (session engram state). Claude's runtime can run commands through a Bash tool and a PowerShell tool, and each keeps its own working directory between calls. A `cd` made in one is applied to TermAl's presumed directory for both. That misplaces the other shell's later commands, both for crediting (followed mode) and for overlap marking (followed or lost). This predates PI-26a and is outside it.",
+  "acceptance": [
+    "TermAl keeps a presumed directory per shell the runtime reports separately (Bash tool, PowerShell tool), or, where it cannot tell which shell ran a command, treats a change of directory as leaving every such shell's place unknown; a test covers a cd in one shell followed by a command in the other"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

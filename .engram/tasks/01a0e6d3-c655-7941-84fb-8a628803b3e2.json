@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c655-7941-84fb-8a628803b3e2",
+  "external_ref": "tm-ncc6.6",
+  "title": "HTTP: list/get/cancel/rerun test runs and stream a stage log (bounded tail + follow)",
+  "outcome": "HOW\n- Routes in src/main.rs next to the Work routes (~356-361): GET /api/projects/{id}/test-runs, GET /api/test-runs/{runId}, POST /api/test-runs/{runId}/cancel, POST /api/test-runs/{runId}/rerun, GET /api/test-runs/{runId}/stages/{name}/log?tail=N&follow=1. Handlers in src/test_runs.rs via run_blocking_api (src/api.rs:1048) like get_project_work.\n- Rerun: same request.json stages (re-read from the run dir), a NEW run id and a fresh input fingerprint; refused (409) while a run is active for the root.\n- Log stream: SSE modeled on run_terminal_command_stream (src/terminal.rs:149): a worker reads the stage log file from a bounded tail, streams chunks, and keeps following (poll the file with a short bounded interval, no busy loop) until the stage is terminal in results.json or the client drops (cancel guard as TerminalStreamCancelGuard); 16 MiB cap; never routed through the transcript.\n- Read-only for runs TermAl did not start (cancel/rerun -> 409 'not owned by this host').\n- Document the routes in docs/architecture.md route table and in docs/features/test-runs.md.\n\nDEPENDS ON: tm-ncc6.2, .3. BLOCKS: tm-ncc6.7.\n\nREVIEW FIXES (F2, F13, F14, F15)\n- Anchors: run_blocking_api is src/api.rs:1247; Work routes are src/main.rs:380-391; /api/terminal/run/stream at main.rs:295-297.\n- Stream end conditions: the stage is terminal in results.json, OR the host record is terminal (canceled/unknown), OR results.json.pid is no longer alive (CLI-started runs without a reaper); poll interval 250 ms, per-chunk cap 64 KiB, total 16 MiB.\n- Rerun rebuilds the CLI invocation from request.json (full; stages[0].args for focused; liveEngram fields), never a stage list; refuses request.json carrying notifyTo (launcher:809-856).\n- Log route: validate {name} against ^[a-zA-Z0-9_-]+$ (launcher:369, 489) and open only the `log` path recorded in results.json after confirming it resolves inside the run dir.\n- Test harness: src/tests/terminal.rs stream tests (cancel guard, chunk bounds).\n\nOUTPUT TO FILE (Greg, 2026-09-23): add GET /api/test-runs/{runId}/host-log?tail=N (bounded tail + follow) for HOST_LOG (receipt, launcher notices, final summary), same worker and bounds as the stage log route; stage logs are the launcher's per-stage files and keep streaming across a TermAl restart.",
+  "acceptance": [
+    "- Route table rows exist in docs/architecture.md and match the implemented paths (including host-log).\n- GET list/get return summaries without log/diagnostics bodies; 404 for unknown runId.\n- Log stream: tail=N returns at most N lines then follows; ends within one poll interval after the stage becomes terminal, after the record becomes canceled/unknown, or after the pid dies; a dropped client stops the worker (no leaked task), tested in src/tests/terminal.rs style.\n- Host-log stream follows HOST_LOG with the same bounds and ends when the record is terminal.\n- {name} outside the regex -> 400; a log path outside the run dir -> 404.\n- cancel on a terminal run -> 409; rerun while active -> 409 naming it; rerun creates a new runId with a new fingerprint; rerun of a notifyTo request -> 409.\n- Runs not started by TermAl: GET works, cancel/rerun -> 409 (they have no HOST_LOG; host-log -> 404)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c653-7243-bd50-c3af8f060c29",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

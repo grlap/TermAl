@@ -1,0 +1,44 @@
+{
+  "id": "01a0fcc3-768e-7632-ae59-805e92312e06",
+  "external_ref": null,
+  "title": "Named-root read validator rejects live claimed/active runs, so named roots of claimed items are never confirmed (regression in d705038)",
+  "outcome": "named_root_read validation accepts every run state the Engram producer emits (open, claimed, active, completed, cancelled), keeps all identity and history guards, and treats a live no-event read as a cut-scoped absence rather than proof that settles a pending write. Named roots of claimed items are therefore confirmed and checks there earn credit on the real store.",
+  "acceptance": [
+    "A pinned real Engram disposable-store test confirms claimed and active canonical reads and a real named root; a recognized passing check at a recovered claim's newer named root, with no source edit, carries the bound generation/state through its producer and stored verification and permits evaluation and completion without stale_source_revision.",
+    "Canonical named-root reads accept exactly open, claimed, active, completed and cancelled run states, reject unknown states and contradictory associations/feed cuts/generations/history, and keep pending-intent and terminal-only None/Bound rules unchanged.",
+    "The maintained full five-stage gate passes on the exact final input, and independent read-only Codex and Claude reviews of that input leave no outstanding in-scope Medium or higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "regression",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Already landed validator correction10ec5e7 now passes post-restart own-root pinned live10/0 (hosta964bd99, generation263) and fresh independent Claude9884 evaluationb042d194b4194c4280bcd0df134d26cf3/3 atcurrentcontent7d7. Allfive canonical run states accepted, unknown/contradictory identity/history/cut/generation rejected; live absence and terminal-only settlement unchanged. Original fullgate6dc9aa44 and pair9813/9814 no Medium+ on exacttreec205 retained; committed ownedrootclean matches. No new source/commit/push/install/restart; old stale-source refusal preserved as separate source-recording investigation.",
+    "completed_at": "2026-10-02T19:24:42.694066100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

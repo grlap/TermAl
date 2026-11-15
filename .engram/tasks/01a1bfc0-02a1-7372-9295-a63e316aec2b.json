@@ -1,0 +1,33 @@
+{
+  "id": "01a1bfc0-02a1-7372-9295-a63e316aec2b",
+  "external_ref": null,
+  "title": "Assert unread wake metadata after relay boot recovery and an older receipt ACK",
+  "outcome": "The production-shape boot recovery test detects an unread second boundary being presented as an acknowledged continuation, including after replaying an older receipt.",
+  "acceptance": [
+    "The existing boot recovery test asserts the queued mailbox source unread_count is one after rearm and after the old first receipt ACK, while retaining the second message identity and sequence.",
+    "The assertions check structured observable wake state without sleeps, timeout inflation or instruction/Markdown phrase pins; applicable focused tests and required review/gate evidence are recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "regression",
+    "remote-mailbox",
+    "review-followup",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a187f2-acc8-7242-8ab8-39b36c866297",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

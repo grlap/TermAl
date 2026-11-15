@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3d6-7ff2-a4b0-ee91d85a8d9b",
+  "external_ref": "tm-4bm9",
+  "title": "Tests that assert an authored value instead of an observable effect report green in both worlds",
+  "outcome": "Filed after the same shape was found in a live defect and then looked for deliberately (Fable, 2026-09-08, mirroring an audit Engram::Fable ran on his own repo the same hour).\n\nTHE SHAPE. A check that reads back the value the code authored returns positive whether or not that value has any effect. It cannot distinguish the world where the rule works from the world where it is discarded, so it carries no information about behaviour while reporting green. The live instance is the sparse-tail bottom alignment gated behind :has(): a browser without support drops the entire selector at parse time, and the jsdom assertion echoes the authored text either way.\n\nWHAT I ACTUALLY LOOKED FOR, stated plainly so nobody reads more into it than it supports. I searched three shapes, not the suite:\n1. Tests that read ui/src/styles.css as TEXT, regex a rule body out of it and assert on the contents. Six files: plain-text-wrapping, workspace-shell-controls, SessionActivityStrip, AgentSessionPanel, AgentSessionPanel.virtualization, SessionPaneView.delegation-waits. Sampled two and both match the shape exactly - the assertion is on the authored declaration, with no engine involved.\n2. getComputedStyle in tests, where jsdom performs no layout and largely echoes what was authored: message-stack-scroll-sync, AgentSessionPanel.virtualization, AgentSessionPanel.virtualization-scroll, AgentSessionPanelFooter, themes.\n3. toHaveStyle: MarkdownContent, AgentSessionPanel, AgentSessionPanel.virtualization, ConversationOverviewRail.\n\nThis is a shape search and NOT a verdict on the suite. Other spellings of the same mistake will not be in these lists - a pinned className, a config value nothing loads, an assertion on a constant the product never reads. Do not cite this list as coverage.\n\nPINNING AUTHORSHIP IS NOT ITSELF WRONG. A test guarding against silent deletion of a declaration is useful. The defect is a test that pins authorship while being read as verifying behaviour - the reader sees green and concludes the feature works.\n\nACCEPTANCE. For each test in scope, one of two things is true and visible in the test itself: either it observes the EFFECT through something that can actually fail when the rule does not apply, or its own text states that it pins authorship only and cannot detect a rule the engine discarded. A green run must not be mistakable for behavioural coverage.\n\nRelated: the :has() item carries the live instance and a note that moving to a plain selector removes that symptom while leaving this mechanism intact. Method recorded as memory probe-must-be-able-to-return-positive.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

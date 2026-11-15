@@ -1,0 +1,30 @@
+{
+  "id": "01a1d5ac-4b42-70e1-b3f5-acb88a82983e",
+  "external_ref": null,
+  "title": "Clarify corrupt transcript error statuses and missing-position quarantine",
+  "outcome": "The history API's row-decode and missing-position classifications, status codes and resulting runtime quarantine are documented consistently; any chosen behavior change is covered by real API regression tests.",
+  "acceptance": [
+    "Record the current status and error-kind behavior for row-decode failure, a missing durable position and subsequent lookup after quarantine.",
+    "Resolve whether the status distinction is intentional; document the decision and cover any changed API behavior with a fixture-backed regression."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "post-restart",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

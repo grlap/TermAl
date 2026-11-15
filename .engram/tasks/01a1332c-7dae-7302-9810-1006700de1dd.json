@@ -1,0 +1,29 @@
+{
+  "id": "01a1332c-7dae-7302-9810-1006700de1dd",
+  "external_ref": null,
+  "title": "Team strategy decision (joint with Engram): when to use root coding sessions versus coding delegations, and how many roots",
+  "outcome": "Team strategy decision (joint with Engram): when to use root coding sessions versus coding delegations, and how many roots",
+  "acceptance": [
+    "A recorded joint decision, concurred by both coordinators (Termal::Fable2 and Engram::Fable), states: roots are for independent claimed packages with their own worktree, evidence and landing; coding delegations are for bounded parallel subwork whose parent integrates; root count matches ready, disjoint packages and host capacity (memory, given the 2026-10-12 exhaustion incident w-66d54f4a4068); and when and how it is reassessed from measured throughput and failures.",
+    "The decision names the measurements it will be reassessed against (for example packages landed per hour, gate failures by class, host commit peak, and idle root-hours) and where they are recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "cross-project",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

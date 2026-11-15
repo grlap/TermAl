@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6af-77e3-8cfb-64b2772ab52e",
+  "external_ref": "tm-r1it",
+  "title": "SSE test reader mistakes keep-alive comments for application events",
+  "outcome": "Observed in full scripts/test-rust.sh under coordinator GO: 2087 passed, 1 failed, 3 ignored. tests::http_routes::state_events_route_recovers_after_ordered_broadcaster_delta_overflow failed at src/tests/http_routes.rs:2195: expected lagged marker, got \":\\n\\n\". Read-only diagnosis: src/tests/mod.rs:1672 next_sse_event returns the first blank-line-terminated frame indiscriminately; src/api_sse.rs:306 enables KeepAlive::default(). A legal comment-only keep-alive therefore becomes a false application event in the fixture. Classification: test helper defect, not evidence of lost production lagged recovery. Existing tracker searches for broadcaster, SSE, keep-alive and next_sse_event found no matching task. Next action: coordinator grants a focused reproduction with a deterministic comment frame followed by a lagged event, fixes frame filtering while preserving event boundaries, then reruns the original full Rust wrapper. No timeout inflation or repeat-until-green. No unowned source/test edit has been made.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in a0e3d29 (ancestor of master f7db2c58).",
+  "completion": null
+}

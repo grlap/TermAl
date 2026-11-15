@@ -1,0 +1,29 @@
+{
+  "id": "01a1c852-c1fc-7ad2-9cf7-a1f0c56965e8",
+  "external_ref": null,
+  "title": "Check Windows .cmd runner behavior inside the test-temp-root wrapper",
+  "outcome": "Confirm how the shell-free temp-root wrapper handles Windows npm/npx/pnpm/yarn shims and describe the supported executable form without inventing successful Test execution.",
+  "acceptance": [
+    "Bounded Windows evidence distinguishes a shim spawn failure from actual test execution and preserves the original failed outcome.",
+    "Documentation or diagnostics state any native-executable requirement that the evidence confirms."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 4,
+  "labels": [
+    "note",
+    "registered-runs",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1500a-d03d-78a1-8bc2-e118e24fd4b2",
+  "external_ref": null,
+  "title": "Named-root status view and full-table 409 don't show slots reserved by unconfirmed operator releases or unpublished retirements",
+  "outcome": "An operator can see every slot the named-root capacity counts. GET /api/engram/named-roots and the capacity refusal also list unacknowledged operator releases and unpublished retirements that still reserve capacity, each with its exact selection and a state such as \"release pending confirmation; repeat the identical request\".",
+  "acceptance": [
+    "The status view and the full-table refusal list each unacknowledged operator release and each unpublished retirement that engram_named_root_capacity counts, with the exact selection to repeat",
+    "A test with an unconfirmed operator release shows its reservation in both the status view and the refusal"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "named-roots",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a0f11b-ea5d-7df0-95ab-81fbf8574529",
+  "external_ref": null,
+  "title": "Reject native Windows batch dotfiles named exactly .cmd or .bat after path normalization",
+  "outcome": "Reject native Windows batch dotfiles named exactly .cmd or .bat after path normalization",
+  "acceptance": [
+    "Explicit-path and PATH regression cases cover .cmd, .bat and their trailing-dot/space spellings without executing an admitted batch shim.",
+    "The raw and resolved native-launch batch checks reject case-insensitive .cmd/.bat suffixes even when the basename is a dotfile."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "security",
+    "terminal",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

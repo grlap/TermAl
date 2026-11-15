@@ -1,0 +1,50 @@
+{
+  "id": "01a1317c-7996-7831-85a5-03d466958d59",
+  "external_ref": null,
+  "title": "Launcher fingerprint's index-diff hash depends on the worktree's checked-out line endings, so a scratch worktree cannot reproduce it",
+  "outcome": "The launcher's trackedIndexDiffSha256 (scripts/review-freeze-fingerprint.mjs: `git diff --cached HEAD --binary`) identifies the staged content independently of how the worktree's files are checked out, so the integration owner can reproduce a gate's recorded input from the commit alone (for example, in a no-checkout scratch worktree).",
+  "acceptance": [
+    "The launcher fingerprint's staged-content field identifies the staged blobs independently of the worktree's checked-out line endings, so the same index gives the same value in a CRLF checkout, an LF checkout and a no-checkout worktree; the change is recorded in docs/test.md, including that older fingerprints are not comparable.",
+    "A fail-first test in scripts/review-freeze-fingerprint.test.mjs builds the same index in two checkouts with different line-ending conversion and shows the field is equal, while a real content change to a staged file changes it.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "fingerprint",
+    "integration",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented checkout-independent staged-index fingerprinting, documented the new format, and added the LF/CRLF/no-checkout regression. Exact-input full gate passed all five stages; independent review pair found no Medium+ issues; fresh acceptance evaluation bd290d2963cc4a8e9dcda9284c1faf91 passed 3/3. Commit 8b70610e564bbce39149b75bda9eefd371e89eda (tree fcd26ff) is on origin/master, fast-forward verified by the integration owner. Installation is deferred by the coordinator.",
+    "completed_at": "2026-10-14T06:18:58.201095400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

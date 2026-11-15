@@ -1,0 +1,36 @@
+{
+  "id": "01a155a2-ced7-7cf2-ad1c-a6a391500491",
+  "external_ref": null,
+  "title": "M6 precheck: discriminate early risks R1/R2/R3 for the first native central↔Mac exchange",
+  "outcome": "Independent preparation for M6 (w-e41b7112372a) and its first native exchange (w-574269147730), from Architect1's critical path (note 3817a957 on w-e41b). It discriminates three risks early, read-only or build-only, with no host changes. R1: other Windows assumptions in O1's checklist beyond the cmd.exe probe (paths, shells, separators, process APIs). R2: can the Mac build landed master (7fa57966 or later) itself; capture the toolchain, result and duration in a disposable worktree, with no install or replacement of the running binary. R3: does the Mac's sshd permit the TCP forwards L1 needs (AllowTcpForwarding, GatewayPorts, PermitOpen, Match blocks), read-only; any change is Greg's act. Findings are recorded here and on w-e41b.",
+  "acceptance": [
+    "R1, R2 and R3 each have a recorded finding with evidence (source locations for R1; the Mac toolchain versions and build result for R2; the effective sshd forwarding settings for R3), each classified as clear, needs-fix (with the owning item) or needs-Greg (with the exact act), and the findings are noted on w-e41b7112372a."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "macos",
+    "precheck",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed R1/R2/R3 discrimination with evidence and classifications copied to M6. R1 source/native POSIX facts recorded; actual O1 EPERM is routed to P1 child w-867b51249f9a with cause unresolved, and Greg owns daemon PATH. R2 single Mac release build of landed7fa passed in218.099802s, no install. R3 forwarding/reload confirmed by Greg's attributed effective-policy report. IndependentClaudeSonnet13672 evaluation1223dc3cebb748efa1fa6523ba5ccbff passed1/1 atbasis49/revision1; authoritative compact and complete1495-byte output read. No code change, install/restart, nativeverificationimport, O1pass or M6exchange claimed.",
+    "completed_at": "2026-10-19T19:55:50.075191Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

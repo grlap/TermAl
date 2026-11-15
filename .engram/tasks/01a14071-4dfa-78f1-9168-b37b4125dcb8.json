@@ -1,0 +1,44 @@
+{
+  "id": "01a14071-4dfa-78f1-9168-b37b4125dcb8",
+  "external_ref": null,
+  "title": "Test-run registration returns HTTP 500 when the background state persist misses its 5 s durability fence (live store 4.4 GB), so runs and full gates start nothing",
+  "outcome": "A focused launcher run's registration with the host (scripts/test-run-registration.mjs: POST /api/sessions/{id}/test-runs, then GET /api/test-runs/{id}, sharing an 8 s registrationBudgetMs) succeeds under normal machine load (concurrent cargo builds and other sessions' runs). Or, when the host genuinely cannot register in time, the launcher reports which phase failed (POST timeout, POST HTTP status, or query abort versus transport error) and the host records why, rather than ending with a catch-all or an HTTP 500 with no diagnostic. A registration the host acknowledged but the launcher abandoned does not stay \"registrationPending\" with \"awaiting settlement\", holding restartWouldVoidEvidence true.",
+  "acceptance": [
+    "The cause of both occurrences is identified from host logs or state with source locators: why the host took about 8 s, or returned HTTP 500, for a registration POST or query (for example lock contention, a slow durable write or a handler error).",
+    "A regression test drives that cause and shows registration either succeeds within budget or fails with a phase-specific, actionable reason on both sides; no generic catch-all message hides an abort versus a transport error.",
+    "When exact durable evidence establishes that a registration attempt ended before any test/preflight or worker execution, the host durably records a terminal no-start disposition, clears only that attempt's registration-related restart hazard, and preserves the result across late replies, duplicate requests and reload. Ambiguous attempts and independent pending execution or verification remain unresolved or hazardous with an actionable reason.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording",
+    "registration",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

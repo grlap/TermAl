@@ -1,0 +1,31 @@
+{
+  "id": "01a18a73-00a2-7412-8548-fef743f7f8a8",
+  "external_ref": null,
+  "title": "Registration-only wait can mistake a results replacement race for deterministic oversized artifacts",
+  "outcome": "Keep a transient results stamp/read replacement race distinct from an oversized artifact within the existing wait/disk owner, preserving bounded grace and typed UNKNOWN semantics.",
+  "acceptance": [
+    "A results.json that disappears between its pre-read stamp and read receives the existing transient-read grace instead of being inferred TooLarge solely because results_stamp is present; an actually oversized result retains deterministic no-grace UNKNOWN behavior.",
+    "Deterministic fixture coverage distinguishes the stamp/read disappearance race from oversized request/results and ordinary published-loss behavior without adding polling, a queue, a lifecycle owner or verification credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "follow-up",
+    "native-wait",
+    "read-race",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18a20-8a69-7ae1-ad1c-b7c81c59f96e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a16c82-e419-7013-bd77-ec02b7969675",
+  "external_ref": null,
+  "title": "UI test stage takes ~8 minutes in the full gate (vitest 488 s wall: 287 s tests + 84 s import + 78 s environment); App.* and panels files dominate",
+  "outcome": "The full gate's vitest stage runs in a substantially shorter, measured wall time with the same tests and assertions and no weakened checks, by cutting per-file import/environment overhead and the cost of the slowest App/panel suites.",
+  "acceptance": [
+    "On the same integration base and host/runtime, three predeclared paired baseline/candidate runs of the complete UI stage, with comparable cache and load conditions and all runs reported, show at least a20% reduction in median candidate wall time. Each candidate run executes the complete baseline file/test inventory (271 files and4743 tests at de3bc0cd, with an explicit reconciliation for any subsequent base change), with no skipped, filtered-out, todo or failed baseline tests. Record launcher artifacts, per-file timings, phase totals, run conditions and the calculated medians; the historical488.26s run is context, not the sole comparison.",
+    "The optimization preserves production behavior, existing assertions and scenario coverage, test isolation guarantees and current timeout limits. No assertion weakening, fixture reduction below a tested boundary, retries to mask failure, or timeout inflation is used. Any scheduling/pool/setup change has explicit cleanup/order validation, including a seeded shuffled-order full UI run in addition to the three candidate runs. All validation passes without new React act warnings, the full gate passes on the final input, and the independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "tests",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

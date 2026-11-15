@@ -1,0 +1,28 @@
+{
+  "id": "01a13920-cd36-7302-bafb-19ae669f40da",
+  "external_ref": null,
+  "title": "Document durable test-run registration and fallback details in the architecture endpoint table",
+  "outcome": "Update docs/architecture.md endpoint table for POST /api/sessions/{id}/test-runs, its durable/versioned201 ACK and errors/idempotent replay, plus observed/registered fallback detail behavior. Keep feature documentation and actual current route semantics aligned.",
+  "acceptance": [
+    "Document durable test-run registration and fallback details in the architecture endpoint table is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "stage-1-registry",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

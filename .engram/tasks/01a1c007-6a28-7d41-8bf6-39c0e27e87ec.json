@@ -1,0 +1,25 @@
+{
+  "id": "01a1c007-6a28-7d41-8bf6-39c0e27e87ec",
+  "external_ref": null,
+  "title": "Preserve rival authority owners across transition-path naming read races",
+  "outcome": "Transition recovery refuses a changed pre-read local context before re-preparing over a rival's authority owner, while preserving exact retained event custody.",
+  "acceptance": [
+    "Capture transition selection/journal context before off-lock proof/learning windows and validate it before recovery can replace a rival authority owner; genuine same-context supersession remains bounded and recoverable.",
+    "A deterministic rival-selection-change plus real owner-supersession control covers both send-path and before-selection windows and asserts refusal preserves rival owner id/version, selection and immutable pending event without another producer write."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be12-2a94-7573-99d2-e40047ef7d1b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

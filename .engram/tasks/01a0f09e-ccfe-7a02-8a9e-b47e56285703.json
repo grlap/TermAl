@@ -1,0 +1,30 @@
+{
+  "id": "01a0f09e-ccfe-7a02-8a9e-b47e56285703",
+  "external_ref": null,
+  "title": "Measure cold and warm end-to-end Engram authorization against an isolated copy of a live store, phase by phase",
+  "outcome": "Scope as worded by Engram::Coder (TermAl mailbox 62e0c56d #52, remainder of Engram w-3a736198442c).\nKeep cold and warm end-to-end authorization measurements against an isolated copy of a named live store:\n- include waking an idle sidecar, and writer contention;\n- split sidecar startup, bind, evaluate, begin and persistence;\n- report the effective per-call and overall budgets and the cancellation and expiry results. The 20-second constant is not measured latency.\nKeep the unresolved causes of the original 624 ms incident and of the later 10 009 ms fence timeout.\nLinked narrower items, which do not fulfil this matrix: w-5e670d9dbaca, w-5a374ce1ef08, w-5acc935a360e, w-27131b023ef7 and w-e0f80b315a6d.",
+  "acceptance": [
+    "A recorded measurement run against an isolated copy of a named live store reports cold and warm timings for sidecar startup, bind, evaluate, begin and persistence separately, including an idle-sidecar wake and a run under writer contention.",
+    "The report names what it does and does not explain about the 624 ms incident and the 10 009 ms fence timeout, leaving unresolved causes marked unresolved.",
+    "The report states the effective per-call and overall budgets and what cancellation and expiry did in the runs, and does not present a configured constant as measured latency."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "control-plane",
+    "engram-interop",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

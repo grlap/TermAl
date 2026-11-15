@@ -1,0 +1,43 @@
+{
+  "id": "01a138d7-5596-7c32-bb6f-efb3eeb260b1",
+  "external_ref": null,
+  "title": "Reconcile a late Codex turn-start response against an adopted explicit start without accepting a retired request's terminal",
+  "outcome": "An explicit start that arrives first keeps established compatibility while a late matching response can detect a mismatched adopted turn identity; a never-retired old start/terminal cannot settle a newer handshake.",
+  "acceptance": [
+    "Record an architectural decision for how exact RPC identity reconciliation preserves valid explicit-start-before-response and fully idless compatibility.",
+    "Cover a delayed old explicit start plus terminal absent from the retired cache, with a later response identifying the newer turn; no wrong receipt settlement or provider dispatch occurs.",
+    "Retain normal response-first and valid explicit-start-first operation."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "agent-runtime",
+    "design-pending",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

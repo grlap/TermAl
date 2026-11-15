@@ -1,0 +1,30 @@
+{
+  "id": "01a13c9f-113b-7420-8584-9f0ee7d46174",
+  "external_ref": null,
+  "title": "Clarify that a focused launcher validation rejection reports the command exit rather than a test result",
+  "outcome": "Clarify that a focused launcher validation rejection reports the command exit rather than a test result",
+  "acceptance": [
+    "Focused validation-rejection wording makes clear that the observed exit belongs to the launcher command and does not establish test execution, while preserving Unknown and all evidence guards.",
+    "Relevant focused diagnostic regression and maintained full gate pass on exact reviewed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "host-recording",
+    "review-follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1399b-302a-7b82-9dbf-79dc48b36f27",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

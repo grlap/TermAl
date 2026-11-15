@@ -1,0 +1,28 @@
+{
+  "id": "01a1d85b-b062-74a2-a1b5-a573dc5267a1",
+  "external_ref": null,
+  "title": "Consume deferred naming selection after a successful Stop-path successor commit",
+  "outcome": "A queued successor opened by Stop consumes an applied runtime-only naming selection only after its successful opening commit, consistently with the other opening paths.",
+  "acceptance": [
+    "A Stop that successfully commits a queued successor clears the applied pending selection; a failed commit retains or restores the prior pending choice under the existing rollback behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

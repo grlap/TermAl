@@ -1,0 +1,27 @@
+{
+  "id": "01a1b387-2579-74d1-a339-9ff5f55b4460",
+  "external_ref": null,
+  "title": "No-tautological-tests rule: also ban tests that check whether agent instruction files exist",
+  "outcome": "The rule's first bullet covers tests that check the presence of the repository's agent instruction files, not only their content, so a test asserting that a command file exists or is gone can't be read as allowed.",
+  "acceptance": [
+    "The first bullet of '## No tautological tests' in AGENTS.md and CLAUDE.md reads 'reads, pins or compares the content or presence of' (or equivalent), identical in both files",
+    "No automated check of the rule's wording is added"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

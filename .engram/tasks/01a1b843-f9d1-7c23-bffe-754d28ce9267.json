@@ -1,0 +1,36 @@
+{
+  "id": "01a1b843-f9d1-7c23-bffe-754d28ce9267",
+  "external_ref": null,
+  "title": "Central POST /api/sessions validates a remote project's workdir as a local directory and returns 400 before remote routing",
+  "outcome": "Creating a session in a remote-backed project through Central's POST /api/sessions with an explicit workdir that exists only on the remote host should route to the remote, or give a clear error that names the cause. It should not fail local directory validation with a 400. Observed 2026-11-07 ~23:06Z by Questly::Codex2: creating a Mac Questly session (remote macbookpro, root /Users/greg/GitHub/Personal/questly) with workdir returned 400 from local validation, while the same call with projectId only (inheriting the project's remote root) succeeded (session-16749).",
+  "acceptance": [
+    "For a remote-backed project, POST /api/sessions with a workdir inside that project's remote root is validated against the remote, not the local filesystem. It either succeeds or returns an error naming the actual remote-side cause. A workdir outside the project's root is still refused.",
+    "A deterministic test covers a remote-backed project with a remote-only workdir (success or a named remote error), and a workdir outside the root (refused), using the existing remote test seams; it uses no live remote.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "api",
+    "cross-machine"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed remote-project workdir routing in bf7ff309: remote-only explicit paths reach the owning host; deterministic focused10 and reviewed source plus exact-tree Linux/Windows FULL evidence recorded.",
+    "completed_at": "2026-11-08T18:16:02.206676700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a10707-217e-7772-bc33-9f8823dd96fe",
+  "external_ref": null,
+  "title": "Rust tests fail with 'Filename too long' and '$GIT_DIR too big' when the test temp root is deep (Windows path limits); about 166 tests on master c083c33",
+  "outcome": "Rust tests fail with 'Filename too long' and '$GIT_DIR too big' when the test temp root is deep (Windows path limits); about 166 tests on master c083c33",
+  "acceptance": [
+    "Rust tests fail with 'Filename too long' and '$GIT_DIR too big' when the test temp root is deep (Windows path limits); about 166 tests on master c083c33 is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

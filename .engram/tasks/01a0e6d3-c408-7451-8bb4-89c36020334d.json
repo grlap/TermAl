@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-89c36020334d",
+  "external_ref": "tm-7cu.20",
+  "title": "Live-turn card flows as a regular message: sticky-bottom overlay removed per Greg's design ruling",
+  "outcome": "GREG DESIGN DECISION 2026-07-31 ~22:45: 'live turn should be treated as regular message — so it scrolls with the messages, not trying to stay visible as long as possible.' Screenshot showed the sticky live-turn card floating OVER a command message (z-index overlay), the visibility-maximizing design colliding with real content.\n\nIMPLEMENTED BY FABLE, CSS-only: removed .conversation-live-tail.is-pinned { position: sticky; bottom: 0; z-index: 2 } and its :has(.expandable-session-message.is-expanded) carve-out (which existed only to fight the stickiness — a design smell already noted in its own comment). The live-turn card + queued-prompt block now participate in normal flow at the transcript end and scroll away with content. The liveTailPinned STATE and is-pinned class application are retained untouched — they feed scroll logic (SessionPaneView.scroll.ts:68 indicator gating) and tests; the class simply carries no positioning.\n\nGates: affected suites 41 files / 934 tests green; production build clean; served.\n\nNOTE for anyone revisiting: if 'where is the live turn?' visibility is ever missed after this change, the answer is the EXISTING new-response/jump-to-latest affordance and the minimap — not a return of the overlay. Greg explicitly rejected the stay-visible behavior.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a re-check, spot-checked by Termal::Fable2): CLOSE-DONE. The sticky live-turn card was removed; ui/src/panels/AgentSessionPanel.test.tsx:818 asserts no sticky, fixed or absolute position.",
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a0fec5-fe6e-7272-9815-68b498022eb0",
+  "external_ref": null,
+  "title": "Keep resident body fields when dirty or late frames only admit metadata",
+  "outcome": "Keep resident body fields when dirty or late frames only admit metadata",
+  "acceptance": [
+    "Keep resident body fields when dirty or late frames only admit metadata is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

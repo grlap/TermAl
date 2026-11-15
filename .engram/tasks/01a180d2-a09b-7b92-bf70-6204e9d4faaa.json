@@ -1,0 +1,28 @@
+{
+  "id": "01a180d2-a09b-7b92-bf70-6204e9d4faaa",
+  "external_ref": null,
+  "title": "Gate write guard over-protects a carried gate whose watcher exemption settlement will certainly refuse (and its doc names the test-only watcher entry)",
+  "outcome": "The Claude gate write guard stops protecting a gate as soon as its credit is provably lost, and its doc comments name the production watcher path.",
+  "acceptance": [
+    "Gate write guard over-protects a carried gate whose watcher exemption settlement will certainly refuse (and its doc names the test-only watcher entry) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "gate-load",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

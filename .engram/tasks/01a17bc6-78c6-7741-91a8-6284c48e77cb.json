@@ -1,0 +1,28 @@
+{
+  "id": "01a17bc6-78c6-7741-91a8-6284c48e77cb",
+  "external_ref": null,
+  "title": "architecture.md State diffs: qualify the full-state request as the base mode where cut mode now differs",
+  "outcome": "architecture.md State diffs: qualify the full-state request as the base mode where cut mode now differs",
+  "acceptance": [
+    "docs/architecture.md's State diffs 'Bases' and 'Client admission' bullets name the base mode ({}) of POST /api/events/full-state where they describe marked bases and alignment, and do not imply that {\"mode\":\"cut\"} opens a request generation"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "review-low",
+    "state-diff"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

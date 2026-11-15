@@ -1,0 +1,30 @@
+{
+  "id": "01a1c1b5-6c3e-7113-a696-04d7b35381ee",
+  "external_ref": null,
+  "title": "Expose safe mismatch details for refused runtime observation scopes",
+  "outcome": "An existing supported host diagnostic or refusal notice identifies why a runtime closing scope no longer matches, without opening the store or exposing private payloads.",
+  "acceptance": [
+    "A supported read-only diagnostic reports a fixed mismatch category and the relevant safe pinned/current revision, fence or root-generation facts for a refused runtime observation scope.",
+    "Behavioral coverage verifies that the reported reason distinguishes a work-revision mismatch from other scope changes and excludes credentials, full source_id payloads and private error prose."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c1ae-9b67-76a3-bf05-1d8a8991b237",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

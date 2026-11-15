@@ -1,0 +1,37 @@
+{
+  "id": "01a13caf-2e89-7352-a3fe-f277a5246d64",
+  "external_ref": null,
+  "title": "Cover generic focused launcher terminal and carried association rejections with precise reason assertions",
+  "outcome": "Cover generic focused launcher terminal and carried association rejections with precise reason assertions",
+  "acceptance": [
+    "Add meaningful generic focused Test recorder/checkpoint controls for terminal incoherence, non-focused requests, malformed or missing result records, ReportedSuccess and carried Codex completion while preserving valid native outcomes.",
+    "Each rejection case asserts its expected named validation guard, with positive controls and no assertion weakening or timeout increase.",
+    "Focused regression and maintained full gate pass on exact reviewed input before completion."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "test-launcher",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1399b-302a-7b82-9dbf-79dc48b36f27",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a108ab-01b9-7713-905d-6fe2ae9d0589",
+  "external_ref": null,
+  "title": "Document bounded host-wake history and removed-session inspection",
+  "outcome": "Operators can find unresolved removed-session wake duties and understand bounded accounted history and honest unavailable lookups.",
+  "acceptance": [
+    "Document bounded host-wake history and removed-session inspection is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

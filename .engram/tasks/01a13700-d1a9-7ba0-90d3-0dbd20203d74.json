@@ -1,0 +1,28 @@
+{
+  "id": "01a13700-d1a9-7ba0-90d3-0dbd20203d74",
+  "external_ref": null,
+  "title": "A prompt-delivery test removes its failing persistence directory silently",
+  "outcome": "A prompt-delivery test removes its failing persistence directory silently",
+  "acceptance": [
+    "a_failed_requeue_commit_leaves_the_rejected_receipt_retryable (src/tests/prompt_delivery.rs) removes its failing directory with remove_test_directory, which names the path and the OS error on failure, instead of `let _ = fs::remove_dir_all(&failing)`",
+    "the prompt_delivery:: tests pass"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

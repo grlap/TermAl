@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c652-7b33-8600-cae1ea9472c1",
+  "external_ref": "tm-nar",
+  "title": "Cover orphan-thread suppression end-to-end",
+  "outcome": "Add a test driving the shared-Codex setup waiter with the AppState record removed (and detach-first ordering) to prove suppress_orphaned_codex_thread fires on the waiter path; the current suppress_orphaned_codex_thread_blocks_discovery_reimport only exercises the helper in isolation, not the src/codex.rs waiter branch.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

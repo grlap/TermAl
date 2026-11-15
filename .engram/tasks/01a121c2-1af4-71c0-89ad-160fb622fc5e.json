@@ -1,0 +1,27 @@
+{
+  "id": "01a121c2-1af4-71c0-89ad-160fb622fc5e",
+  "external_ref": null,
+  "title": "Launcher test owner-alive check can be fooled by PID reuse, leaving an orphaned barrier fixture waiting forever",
+  "outcome": "Fixture processes in scripts/test-launcher.test.mjs detect their owning test process's death even if its PID is reused, for example by comparing the owner's start time or by watching a handle whose closure signals the owner's death. An orphaned barrier waiter cannot outlive its owner indefinitely.",
+  "acceptance": [
+    "Launcher test owner-alive check can be fooled by PID reuse, leaving an orphaned barrier fixture waiting forever is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

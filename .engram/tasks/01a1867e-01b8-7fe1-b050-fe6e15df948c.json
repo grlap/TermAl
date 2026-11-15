@@ -1,0 +1,28 @@
+{
+  "id": "01a1867e-01b8-7fe1-b050-fe6e15df948c",
+  "external_ref": null,
+  "title": "Test that the session pane anchors the session action notice to the active session in session view",
+  "outcome": "A SessionPaneView-level or App-level test reports a session action notice for the active session. It asserts that the alert renders inside that session's pane, between the activity strip and the composer or delegated-child footer, in session view. It also asserts that the alert does not render in a pane showing another session, or in a non-session view mode.",
+  "acceptance": [
+    "Test that the session pane anchors the session action notice to the active session in session view is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,72 @@
+{
+  "id": "01a146c2-ebd4-7923-b1b1-fa936228028f",
+  "external_ref": null,
+  "title": "approvalPolicy auto-approve parks MCP-using Codex sessions: it maps to Codex on-request, which turns every MCP tool call into an unanswered elicitation",
+  "outcome": "Keep native Codex on-request for host AutoApprove while TermAl answers permitted tagged routine MCP approvals itself, retaining read-only/write/external guards, genuine interactive questions and explicit recovery of live pending routine prompts.",
+  "acceptance": [
+    "Under host auto-approve, Codex keeps requesting approval (the on-request mapping is kept, not replaced by never), and TermAl itself approves permitted routine MCP tool-call approval requests (elicitations tagged codex_approval_kind mcp_tool_call), so routine calls such as read mailbox, ack, send, spawn and tracker note complete without operator input.",
+    "Host guards stay enforced: for read-only delegations TermAl declines non-exempt write or external tool calls exactly as for ordinary approvals; genuine form elicitations, URL elicitations and user-input prompts stay interactive; tests cover each boundary.",
+    "Regression coverage through the production paths: session creation and settings mutation with auto-approve and never, and ordinary MCP calls under each, asserting that auto-approve never leaves a routine tool-call prompt for the operator.",
+    "A recovery path for sessions already parked on routine mcp_tool_call prompts, needing no human click on each prompt: an explicit operator selection or reselection of host auto-approve resolves that session's live pending routine tool-call prompts per the host policy; genuine questions stay pending; a test covers it.",
+    "The maintained full five-stage gate passes on the exact final input, and the independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "approvals",
+    "codex",
+    "greg-reported",
+    "p0",
+    "throughput"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented and committed aeacfe69101c63033c4dd0b6bc8a6915ea375335 on coder/autoapprove-7422-ac1bf7dc, exact gated tree dbae39c241e51519825e9ae307a367846b23a79f, base ac1bf7dcd88071b9d9837a418433bb370a6d69c0. Full five-stage gate310b83e297af468d880167080611643d PASS, complete independent Codex+Claude R3 no Medium+, fresh independent acceptance691673599ce641599160170bd07906f6 all5PASS at revision4/cut238/currentcontent71404997. HostAutoApprove remains nativeon-request and host answers permitted routineMCP by currentpolicy with guards/genuinequestion boundaries and livependingrecovery. No push/install/restart by holder; Opus2 integration handoff follows.",
+    "completed_at": "2026-10-17T00:49:01.321167200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

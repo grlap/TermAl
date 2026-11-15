@@ -1,0 +1,28 @@
+{
+  "id": "01a19da1-6efc-7b30-ae9b-a8616540d235",
+  "external_ref": null,
+  "title": "UI: held or unknown hand-off rows without a delivery receipt render no card or Cancel but count as waiting",
+  "outcome": "A queued row the backend will not run (engram_ordinary_handoff from the H5 load rule, or a promoted legacy-retained row kept as history) is shown as an unknown hand-off with a Cancel control and is excluded from the actionable waiting count.",
+  "acceptance": [
+    "UI: held or unknown hand-off rows without a delivery receipt render no card or Cancel but count as waiting is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "review-low",
+    "ui",
+    "w-3fe8-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

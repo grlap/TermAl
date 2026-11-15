@@ -1,0 +1,79 @@
+{
+  "id": "01a137e1-ffbc-7a83-8866-654bf2d34f93",
+  "external_ref": null,
+  "title": "Every test run, including a detached full gate, is registered in TermAl and visible in the UI while queued or running, with its restart-safety impact",
+  "outcome": "Every launcher test run, focused or full, foreground or detached, and every directly executed declared or built-in test command recognized by TermAl, is registered in TermAl from the moment it is queued until it settles, and is visible in the UI. \"Detached\" only means the initiating agent may wait; it never means invisible, untracked, or unable to affect restart safety. Each record shows the item, the initiating and owning session, the runner and process identity when known, the current stage, the start and elapsed time, the terminal result and artifact locator, and whether a restart now would void its evidence. No test execution is hidden.",
+  "acceptance": [
+    "C1 (test): Launching `node scripts/test-launcher.mjs full` or `focused`, in the foreground or with --detach, registers a TermAl run record before the first stage starts and keeps it until the run settles. The record holds: the item it serves (when bound), the initiating and owning session, the runner and process identity when known, the current stage, the start time, the elapsed time, and on settlement the terminal result and its artifact locator (run directory, results.json). A test shows that a detached full gate is listed while its initiating session is idle.",
+    "C2 (test): The UI lists every queued and running test run in a place visible without opening the owning session. A settled run shows its terminal result. The list survives a page reload and reflects host restarts honestly: a run whose monitoring a restart interrupted is shown as such, never as silently gone.",
+    "C3 (test): Every registered run exposes the host-computed restartWouldVoidEvidence value (true, false or null) and a reason through the same API and UI, including terminal runs whose evidence risk remains unresolved. True means identified evidence is still at risk under the current host credit/restart policy; null means that risk cannot be determined from exactly correlated evidence and is displayed as an unknown-risk warning, never as safe. A bound run awaiting host verification settlement, and a recorded passed check for an associated work-item lifecycle that is not completed, remain at risk. False requires validated absence of a work binding, or complete terminal settlement with no passed check remaining at risk for any associated work-item lifecycle. Run identity, ownership, source/claim binding and exact verification/closure records must support the correlation; matching only item or source, a terminal artifact, or an acceptance-submission receipt cannot clear risk. Tests cover true/false/unknown, terminal-but-unsettled and passed-but-open cases, unrelated records, multiple bindings, and reload/restart. False reports evidence impact only and is not permission to restart active work.",
+    "C4 (test): In a TermAl session, a foreground or detached launcher starts no test preflight, bootstrap or stage until the exact run registration has been durably acknowledged and is available in the host API. Refusal, persistence failure, unavailable or malformed host configuration, or an unresolved registration acknowledgement aborts the launch with a nonzero result and an explicit registration error; the launcher and any detached child do not fall back to untracked execution. Retrying a lost acknowledgement uses the same run identity and immutable request. Only standalone invocation with no TermAl host/session environment may execute without registration, and it prints UNTRACKED with a reason. Tests prove no stage runs before acknowledgement or after each registration failure, in foreground and detached modes, and distinguish a permitted standalone invocation.",
+    "C5 (test): The maintained full gate passes on the exact committed tree.",
+    "C6 (test): Direct declared and built-in test commands recognized by TermAl appear in the same global run API and UI from the first reliable command-start observation through terminal result and evidence settlement, including while the owning session is not selected. Their provenance is host-observed, distinct from launcher-acknowledged registration, and their evidence-risk value follows C3. Stable execution identity prevents duplicate observations and unrelated reruns from merging; exactly correlated launcher observations do not double-count a run. Tests cover a declared dotnet/TRX command and a built-in command while running, terminal result/credit separation, duplicate and concurrent observations, persistence failure, and reload/restart. Missing start telemetry or tracking durability is shown explicitly and does not count as demonstrated while-running visibility."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "coordination-cost",
+    "host-recording",
+    "restart-safety",
+    "test-launcher",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Stage 2 landed on origin/master as 9d7725fa10f49d839d304dc3c1b542cbc7e77cc2 (tree 696d1cc5865b8db0c0ec83cf995005aa70ec3c57), fast-forward from c2660b80; Opus2 verified the remote with ls-remote. Exact-tree full gate test-b11a7680-2084-4ce9-a9c7-16f01c8a5409 passed all five stages. Independent evaluation 8bccf98f9cdb4713818e7931626fa56c passed all six criteria at work revision 6.",
+    "completed_at": "2026-10-14T19:16:39.562545500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

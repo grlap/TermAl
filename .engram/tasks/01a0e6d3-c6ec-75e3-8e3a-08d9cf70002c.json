@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6ec-75e3-8e3a-08d9cf70002c",
+  "external_ref": "tm-uex8.8",
+  "title": "Improve launcher drift reporting and supporting documentation",
+  "outcome": "Parent-consolidated dual review 2026-09-22, Codex session-7272 and Claude session-7273; reviewed fingerprint 105d17771f7afa7df75efb3448832b9f7f8303b8fe850f159601b6d5f792e505. Report differing fingerprint components for pre/post-run drift rather than only aggregate mismatch; bounded evidence must distinguish component changes from exact path attribution. Pin exported composite fingerprint behavior without changing the existing CLI wire format. Correct docs/test.md retired docs/bugs.md pointer to Beads and describe effective Cargo resolution platform-neutrally. Reader-atomic rename is not power-loss durability; clarify that guarantee without inventing fsync requirements. No duplicate bugs for informational notes alone.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c6ea-78d0-ba56-5e0ab65d0a7f",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

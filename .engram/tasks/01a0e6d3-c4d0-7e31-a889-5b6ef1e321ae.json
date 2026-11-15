@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4d0-7e31-a889-5b6ef1e321ae",
+  "external_ref": "tm-cnsv.6",
+  "title": "Scope readiness admission to the diagnostic rather than the entire settings save",
+  "outcome": "Final Claude7093 Low, retained after adjudication. src/api.rs PATCH acquires a readiness permit for enabled requests and retains it over all patch_project_engram_settings work, including teardown/revocation/persistence. Slow post-probe work can occupy the two-slot readiness pool and 429 another Verify; pure_authority_clear also acquires despite skipping readiness. Move admission to the actual probe boundary while retaining fail-fast concurrency and holding permits until blocking diagnostics really stop. Preserve unconditional disable escape. Add tests for non-probe save work and authority-clear bypass.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c4cb-75d2-b163-b711849dc8d8",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

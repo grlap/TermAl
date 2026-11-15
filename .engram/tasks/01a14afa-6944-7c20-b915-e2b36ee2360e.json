@@ -1,0 +1,36 @@
+{
+  "id": "01a14afa-6944-7c20-b915-e2b36ee2360e",
+  "external_ref": null,
+  "title": "Multi-machine pilot: an isolated remote worker machine runs independent cold builds and tests while the primary host coordinates and merges (each host local, no shared SQLite or network-drive store)",
+  "outcome": "A reviewed operational plan, with a first live proof, for using one isolated worker machine to take cold builds and tests off the primary host's saturated NVMe. TermAl and Engram stay local on each host, with no shared SQLite and no network-drive store. Work and evidence move only through the agreed channels: Git for source, Engram Git sync for tracker state as Engram defines it, and TermAl's existing project-scoped SSH remote proxy where it fits. The primary host coordinates and merges.",
+  "acceptance": [
+    "Prerequisites are written down for the worker machine: OS, toolchains (Rust, Node, npm), TermAl built from master, the pinned Engram binary and its local home, Git remote access to the TermAl repo, SSH reachability from the primary host if the project-scoped SSH remote is used, disk-space preflight, and which lanes or sessions run there.",
+    "The pilot boundary with Engram Git sync is agreed with Engram::Fable and recorded verbatim. It covers what crosses machines (Git commits and branches; Engram sync records) and what never does (SQLite files, live stores, network-drive homes), plus how a worker's host-recorded verification credit is attributed or re-established on the primary for landing.",
+    "A verification procedure, plus one live proof: a worker-machine lane builds and runs a focused test for a real item, and the result is visible and correctly attributed, without using the primary's NVMe for that build.",
+    "Failure recovery is specified, with no data loss and no duplicate land, push or install: the worker goes offline mid-run, the SSH tunnel drops, Git diverges or is non-fast-forward, an Engram sync conflict occurs, and a stale claim or root is left on the worker.",
+    "The plan, its prerequisites, verification and recovery are reported to Greg through Engram::Advisor, with message locators recorded on this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "greg-direction",
+    "multi-machine",
+    "pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a15218-5b21-7971-ba0a-c3f102d77999"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

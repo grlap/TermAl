@@ -1,0 +1,29 @@
+{
+  "id": "01a0fec5-6f1e-7940-af93-eef0e604ad36",
+  "external_ref": null,
+  "title": "Prune covered body-delta replay payloads without invalidating older in-flight reads",
+  "outcome": "Release kept parsed body frames no longer needed for any active replay, preserving bounded evidence for in-flight reads and epoch fencing.",
+  "acceptance": [
+    "Prune covered body-delta replay payloads without invalidating older in-flight reads is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "deferred-review",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,40 @@
+{
+  "id": "01a175fd-713c-7720-b1da-6c2daf95c56f",
+  "external_ref": null,
+  "title": "Persist writer deep-clones every metadata collection under StateInner each tick (state_inner.rs:1121 held 1954 ms; collect 2106 ms of a 2254 ms tick)",
+  "outcome": "A persist tick's locked collect phase no longer deep-clones metadata collections that did not change since the watermark. It captures only changed metadata units, reusing the existing w-cce8 metadata-unit model and change stamps, so the StateInner hold per tick no longer scales with accumulated history (test-run cards, registrations, observations, compacted runs, waits, Engram naming, journal and audit history, sightings, layouts). Persisted bytes, ordering, watermark and crash semantics are unchanged.",
+  "acceptance": [
+    "A note quantifies, from host-API persistence diagnostics and source (no live-store reads), which metadata collections dominate the collect-phase hold on the current central host, and confirms or refutes that PersistedState::metadata_from_inner (persisted_state.rs:102-144), called from collect_persist_delta_plan (state_inner.rs:698) under persist_collect_locked, is the dominant cost.",
+    "Deterministic tests show that a persist tick with N unchanged metadata collections and one changed one clones only the changed unit under StateInner (verified by the existing persist observer or a test seam, not a timing threshold), and that the persisted SQLite metadata units, watermark, predecessor and recovery behavior are byte-for-byte unchanged against the current owner; it reuses the existing metadata-unit codec and change tracking, with no new cache or parallel persistence path.",
+    "A review pair has no outstanding Medium or higher and one complete READY goes to Merger2; the post-landing live observation of the collect-phase hold is recorded under w-7bc33299e17a, not claimed here."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "gate-load",
+    "greg-reported",
+    "host-persistence",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a15102-d358-7642-acdd-1fcaa9b93d12",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 8d838f90; sparse metadata capture tests/FULLbebb6c43 recordede8459a01; closure only. Live collect improvement belongs to skipped w-7bc33299e17a.",
+    "completed_at": "2026-11-08T19:21:45.762940400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

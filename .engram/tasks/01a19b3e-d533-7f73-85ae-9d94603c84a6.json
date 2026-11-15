@@ -1,0 +1,40 @@
+{
+  "id": "01a19b3e-d533-7f73-85ae-9d94603c84a6",
+  "external_ref": null,
+  "title": "Port generic Engram host-adapter parent tests to ordinary Execution Observability",
+  "outcome": "Source-only sole-file port of src/tests/engram_host_adapter.rs from a704cd50595228ed3126c590e31f292f0b0f6886, preserving ordinary safety/service tests and shared helper ABI, with an explicit disposition for every original test.",
+  "acceptance": [
+    "The scoped patch changes only src/tests/engram_host_adapter.rs and preserves existing mounts, current transport helper, test_control_work_binding, pure settings/doctor/MCP helper ABI and EO imports under Sol-03d4's exact contract.",
+    "Every original test has a recorded disposition: preserved, ported to ordinary safety/service behavior, or retired because its admission/grant/checkpoint executor was physically deleted; no old gate aliases or production changes.",
+    "The source-only patch and disposition/helper ledger are handed to Sol-03d4 for integration with coverage limits and genuine gaps, without compiler, runtime or READY claims."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 87f49ed0 EO source integration; accepted09318241 generic-parent return +189 dispositions ded39e7b. Source-only handoff closure reconciliation; do not invent separate review/runtime PASS.",
+    "completed_at": "2026-11-08T19:22:14.141141100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c787-7eb0-87d9-543a5293bb44",
+  "external_ref": "tm-uwx",
+  "title": "Cross-session messaging reliability and coordination metadata",
+  "outcome": "Field feedback from FableLegal after roughly 40 cross-session exchanges with LegalCodex found recurring stale-reply, resend, truncation, and safety-stop problems. Track the improvements needed to preserve TermAl's asynchronous FIFO email-like model while adding batch delivery, identity and sequencing metadata, queue visibility, reliable full-message retrieval, optional request/reply notification, and narrowly scoped urgent delivery.",
+  "acceptance": [
+    "Each ranked field request is independently tracked and can be prioritized or delivered without losing the shared asynchronous-channel design constraints. End-to-end tests cover queued delivery, active-turn delivery where applicable, metadata persistence, truncation recovery, and cross-repository isolation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

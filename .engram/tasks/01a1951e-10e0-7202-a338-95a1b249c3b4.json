@@ -1,0 +1,25 @@
+{
+  "id": "01a1951e-10e0-7202-a338-95a1b249c3b4",
+  "external_ref": null,
+  "title": "terminal_output_reader_disconnected_reports_reader_panic times out on Windows when the panic's backtrace takes longer than its 1 s reader wait",
+  "outcome": "The test proves that join_terminal_output_reader reports a panicked reader as an internal error, without its result depending on how long the panic hook and unwind take on the host.",
+  "acceptance": [
+    "The test's own synchronization no longer races the panicking reader's hook and unwind against a fixed 1 s wait. For example, it waits for the reader's completion through the documented channel, or it scopes the panic hook. There is no timeout increase, no retry and no weakening of the assertion.",
+    "The test passes on Windows under the standard launcher with backtraces enabled, and on macOS or Linux."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

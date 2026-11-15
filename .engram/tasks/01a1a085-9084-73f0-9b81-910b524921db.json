@@ -1,0 +1,32 @@
+{
+  "id": "01a1a085-9084-73f0-9b81-910b524921db",
+  "external_ref": null,
+  "title": "Align Telegram document file-error classification for Windows symlink loops and access refusals",
+  "outcome": "Return and document consistent typed refusals for Telegram document path errors, including Windows ERROR_CANT_RESOLVE_FILENAME, without treating caller file conditions as unexpected backend failures.",
+  "acceptance": [
+    "A Windows symlink loop is reported with the documented typed refusal and is covered by a real filesystem loop test with symlink privilege available.",
+    "PermissionDenied handling is explicitly decided and the documented error table matches the chosen behavior on supported platforms."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "api",
+    "error-classification",
+    "greg-directed",
+    "review-low",
+    "telegram",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a19f5a-9424-7d40-a821-69bf789cbfc0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

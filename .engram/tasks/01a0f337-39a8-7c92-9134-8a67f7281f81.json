@@ -1,0 +1,44 @@
+{
+  "id": "01a0f337-39a8-7c92-9134-8a67f7281f81",
+  "external_ref": null,
+  "title": "The host's orientation peek for a read-only child should carry no context generation, so Engram shows it no directive it cannot follow",
+  "outcome": "For a read-only delegation child the host's orientation read (`work next --peek`) carries no `--context-generation`, so Engram shows that child no directive telling it to run `memories --context-generation <token>`, a call its read-only gate denies. The child still reads its memories at start as its project's instructions require. Writable sessions keep the generation.",
+  "acceptance": [
+    "Engram's coordinator confirms, by mailbox cited by message number, that a peek without a generation shows no memories directive after Engram w-4e799f05b07a.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "The orientation read the host runs for a read-only delegation child has no --context-generation argument; a test reads the arguments for a read-only child and for a writable session."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "context-nudge",
+    "engram-interop",
+    "read-only-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Verification-only closure of a 2026-09-30 landing: commit 93a40525, a parent of merge cac212ce, an ancestor of master 8dd0f6ce. A read-only delegation child's orientation peek carries no --context-generation, and writable sessions keep it. C1: Engram::Fable confirmation (ebe242f7 #344). C2: full gate test-55fcd0d5 PASS on the reviewed input (diff a6c560b3…). C3: a_read_only_childs_orientation_read_carries_no_context_generation passed on master in the named root (test-e6592fb1, host-recorded). Independent evaluation e8ceec1a passed 3/3.",
+    "completed_at": "2026-10-15T18:34:34.520950300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a111e9-6291-76c1-b036-300e42c8f565",
+  "external_ref": null,
+  "title": "Classified migration of .tmp/review-runs-archive to .evidence/",
+  "outcome": "The existing .tmp/review-runs-archive/ content is classified per worktree and either moved to .evidence/ (open tasks, recorded holds; verified by count and SHA256) or listed on the item and removed after the in-repo path check, per Greg's corrected consequence (relayed by Engram::Advisor, TermAl mailbox b9d13887 #358) and Termal::Fable2's note 13713cca on the parent.",
+  "acceptance": [
+    "The existing .tmp/review-runs-archive/ content is classified per worktree: runs of open tasks or with a recorded concrete retention need move to .evidence/ (verified by count and SHA256); all other runs are listed on this item, then removed after the in-repo path check."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "authority-text",
+    "cleanup",
+    "cross-project",
+    "evidence-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a111bb-f337-7a12-81f8-5bc0bc7922b4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The 50 inventoried directories of .tmp/review-runs-archive/ (26,587 files, 1,085,106,971 B; per-file SHA256 inventory) were classified per worktree from the owners' answers (Opus2, Opus3, Coder, Codex), tracker cross-checks and Termal::Fable2's rulings. Open-task artifacts moved to the main checkout's .evidence/: 7 directories (obligation-summary-9474, c1-failfirst, train-admission, train-hostcwd, train-landing2, train, kimi-acp-exit-9332) plus the two begin-core runs that open w-9a56ce59b758 retains — 511 files, 38,324,545 B, every file verified by count and SHA256. All other runs — 43 directories, 26,076 files, 1,046,782,426 B — were listed on this item before deletion and removed after the in-repo absolute-path and no-reparse-point checks; removals recorded with counts and bytes. Memory machine-safety-and-git-gotchas revised to rev 6/7: the archive target is .evidence/<wt>/, .tmp/review-runs-archive/ is retired. Two directories archived by session 11336 after the inventory are outside scope and left for the coordinator's sweep.",
+    "completed_at": "2026-10-08T14:23:35.744265Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

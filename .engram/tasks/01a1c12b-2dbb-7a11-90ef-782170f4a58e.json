@@ -1,0 +1,29 @@
+{
+  "id": "01a1c12b-2dbb-7a11-90ef-782170f4a58e",
+  "external_ref": null,
+  "title": "Qualify native verification guidance in the unsupported-check refusal",
+  "outcome": "The unsupported-check refusal and docs distinguish acknowledged native verification from the admission route the current committed-input flow actually supports.",
+  "acceptance": [
+    "Guidance names a supported recognized real test/build registered run on the same commit and accurately states the native admission limitation or cites its independently validated repair.",
+    "No classification or admission is widened to repair the guidance."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "documentation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1246e-3638-7a60-8ea9-50c245467f17",
+  "external_ref": null,
+  "title": "Share one naming-authority reader-selection helper between settlement and recover_engram_authority_batch_until",
+  "outcome": "acceptance_evaluation_authority_reader_available (src/engram_source_roots.rs) and recover_engram_authority_batch_until (src/engram_root_authority.rs:855-870) choose an authority reader (a binding target with authority_store_key == store and a routing token) through one shared helper, so the two cannot drift apart.",
+  "acceptance": [
+    "Both call sites use a single helper for reader selection, and the existing settlement and recovery tests still pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "naming-authority",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

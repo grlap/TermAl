@@ -1,0 +1,31 @@
+{
+  "id": "01a17ff7-19c4-7971-9774-fd4fde41ccc7",
+  "external_ref": null,
+  "title": "macOS: four restored_closing unadmitted-reporting repair tests time out waiting for the restarted host's observation (master 87377afe)",
+  "outcome": "The cause of the four macOS-only failures is diagnosed with discriminating evidence and classified as a product, test/runner or environment defect. The defect is then fixed within its authority, or escalated, so that TermAl master's full gate passes on macOS.",
+  "acceptance": [
+    "A diagnosis note states falsifiable hypotheses for why, on macOS only, the restarted AppState never sends the retained closing job's observation in the four tests. It records the focused discriminating evidence that confirms one and rules out the others, and classifies the cause as product, test/runner or environment.",
+    "If the cause is a test or runner defect, the fix lands under the standing rule. If it is a product defect, it is escalated for authority before any product change.",
+    "A standard full gate on macOS, on a master commit containing the fix, passes these four tests with no other failures."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host",
+    "gate-failure",
+    "investigation",
+    "macos"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1a5a2-29c8-7a43-b57b-b2affe143a8d",
+  "external_ref": null,
+  "title": "An already queued valid relay wake can be trapped when its predecessor is fenced later",
+  "outcome": "Define and implement guarded queue progress for unrelated valid relay successors when an already queued predecessor loses authority, without canceling its owed carrier or crossing user, Stop, pause, durability and history protections.",
+  "acceptance": [
+    "An already queued valid relay wake can be trapped when its predecessor is fenced later is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "mailbox",
+    "remote-runner",
+    "review-low",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a1e0-eb76-72d2-b95d-c752e99e378b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a16670-6853-7e23-a093-2588ebd7d46b",
+  "external_ref": null,
+  "title": "Reclamation hold for an open evaluation can pin a work's Current-route roots indefinitely (Held evaluator, work-wide match)",
+  "outcome": "The named-root reclamation planner holds back an owner's Current-route pass only while an evaluation of that exact claim or root is open and bounded: a Held evaluator that has no running budget no longer pins it indefinitely, and a root of another claim of the same work is not held back.",
+  "acceptance": [
+    "engram_work_has_open_evaluation_locked counts an evaluator delegation as open only while its stored status is Running, it has not submitted, and its current attempt has no hold (attempt.hold is None). A held evaluator (public status \"held\") no longer holds back the Current-route reclamation of its work's root, and it holds it back again once its hold clears. The predicate stops listing stored statuses that are never stored (Queued, Held), and its doc comment no longer claims an evaluator budget ends the hold. A deterministic test records a hold on an open evaluator's attempt, as the delegation hold path records it with the stored status kept Running. It shows the Current-route pass is planned, then that clearing the hold restores the hold-back.",
+    "The hold-back applies only to roots of the evaluated claim: source_root.claim_id for a named-root evaluation, source_claim.claim_id for a workdir evaluation, and the work id only when the target names neither (a legacy target). A deterministic test shows that an open evaluation of one claim does not hold back a Current-route root of another claim of the same work, while it still holds back its own claim's root.",
+    "The Unfocused retirement route stays unaffected. The existing reclamation-eligibility tests pass, adjusted only where they rely on the work-wide match, and focused verification and the maintained gate pass on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "named-roots",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

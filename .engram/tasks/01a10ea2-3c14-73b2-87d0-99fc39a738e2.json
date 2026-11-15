@@ -1,0 +1,29 @@
+{
+  "id": "01a10ea2-3c14-73b2-87d0-99fc39a738e2",
+  "external_ref": null,
+  "title": "Delegation result parser adds a false \"Inconsistent result packet\" note to an acceptance evaluator packet whose summary reports no findings",
+  "outcome": "Delegation result parser adds a false \"Inconsistent result packet\" note to an acceptance evaluator packet whose summary reports no findings",
+  "acceptance": [
+    "The verbatim output of evaluator delegation-1cb6b9bf-c637-474d-b745-c3ed348a05da (1136 bytes; its summary says only that criterion 1 passes and explains the 4097-byte marker and the pre-open callback; Findings: None) is added as a fixture, and its compact packet carries no \"Inconsistent result packet\" note.",
+    "Summaries that genuinely report findings while the Findings section says None still get the note. The existing fixtures in src/tests/delegation_result_summary_counts.rs keep their current outcomes.",
+    "A test bound to this item passes in the maintained full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

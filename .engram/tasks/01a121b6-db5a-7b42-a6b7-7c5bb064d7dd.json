@@ -1,0 +1,42 @@
+{
+  "id": "01a121b6-db5a-7b42-a6b7-7c5bb064d7dd",
+  "external_ref": null,
+  "title": "Keep a bounded diagnostic record of control operations (Resume clicks, admission and dispatch outcomes, slow or timed-out API calls) with correlation ids",
+  "outcome": "The next occurrence of a silent or failed control operation can be diagnosed from what the host kept. The host keeps a bounded record of control operations: user actions such as Resume, Stop and Cancel with their session and target prompt; admission and dispatch outcomes and their reasons; and API requests that exceeded a latency threshold or timed out. Each entry carries a correlation id that matches the card or history entry it produced. The record is size-bounded and rotated, readable through a documented route, and contains no prompt bodies or secrets.",
+  "acceptance": [
+    "A design note names what is recorded, where it lives, its size bound and rotation, how it is read, and what is deliberately excluded (prompt bodies, secrets), and confirms it lives in the host's own state area.",
+    "Tests show a Resume click and its admission or dispatch outcome recorded with a shared correlation id, a slow or timed-out API call recorded, and the bound and rotation enforced.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "diagnostics",
+    "host-responsiveness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

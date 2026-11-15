@@ -1,0 +1,29 @@
+{
+  "id": "01a14c11-9a42-7ce2-8768-bbc0d1ef799a",
+  "external_ref": null,
+  "title": "Read-only evaluator refused a pure read pipeline (grep -o … | sort | uniq -c); decide whether pipelines of read-only commands are recognized",
+  "outcome": "Read-only evaluator refused a pure read pipeline (grep -o … | sort | uniq -c); decide whether pipelines of read-only commands are recognized",
+  "acceptance": [
+    "The governing rule is identified with file:line: which component refused `grep -o '\"bin\": \"[^\"]*\"' FILE | sort | uniq -c` in a readOnly evaluator, and whether refusing pipelines of read-only commands is intended.",
+    "Either (a) a pipeline whose every stage is a recognized read-only command with no redirection or write is admitted, with a regression covering it and a regression proving a pipeline with a writing stage or redirection is still refused; or (b) the restriction is documented as intended where evaluator briefs/read-only policy are described, and the refusal text names the rule and the allowed alternative (the Grep tool).",
+    "The refusal text is retained in the evaluator result so a reporter can quote it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "read-only-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

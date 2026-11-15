@@ -1,0 +1,39 @@
+{
+  "id": "01a0eb9f-f98f-7ed3-bc25-80d8fb5ddf35",
+  "external_ref": null,
+  "title": "Mirror the Kimi stand-in for an unavailable Codex reviewer into TermAl's instruction files (CLAUDE.md, AGENTS.md, review-changes.md, fix-bug.md), citing Engram fc3c3aa",
+  "outcome": "TermAl's commit rule and /review-changes let Kimi stand in for an unavailable Codex reviewer, and only for that, with the round bounded to two reviews that count, one stand-in and three spawns; the text cites Greg's words and Engram commit fc3c3aa.",
+  "acceptance": [
+    "Before landing, this item or w-4116fb43f508 cites, for the exact wording landed: Engram::Fable's and Termal::Fable2's concurrence, the time and route by which the wording and its consequence were sent to Greg with no objection from him recorded, and Greg's word on the Kimi stand-in quoted verbatim with its source.",
+    "CLAUDE.md and AGENTS.md condition 1 and CLAUDE.md's Review cadence bullet, .claude/commands/review-changes.md, .claude/commands/fix-bug.md line 74, docs/dev-team-pattern.md and docs/features/agent-delegation-sessions.md carry exactly the wording recorded with both coordinators' concurrence on w-4116fb43f508 and this item, narrowed to an unavailable Codex, citing Engram commit fc3c3aa; no other line of those files changes; src/tests/agent_commands.rs pins the amended command text in review_changes_pins_two_review_resume_wait_flow, including the definition of an unavailable Codex and the stand-in's spawn shape.",
+    "The command-pin tests pass in a credited foreground one-call check in the named root — `pushd \"C:\\github\\Personal\\TermAl\\.tmp\\wt-standin\" && cargo test --bin termal review_changes_pins` — on the committed input, and the full launcher gate passes on that same input, its run directory and fingerprint cited in a note.",
+    "The review pair on the exact committed input is clean: two read-only /review-code children of different vendors, one Codex and one Claude, or a Kimi stand-in for a Codex unavailable in that round with its refusal text recorded on this item; no outstanding in-scope findings, Low and Note included."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "PI-10",
+    "authority-text",
+    "docs",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6da-90ac-7272-92b1-4116fb43f508",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch a640e340, spot-checked by Termal::Fable2): CLOSE-DONE. The exact authority text landed in 60a56a9 (ancestor of master; AGENTS.md:105-122), and Greg explicitly accepted its post-landing concurrence disposition (00c8bcc7). Closed by evidence.",
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a176f9-18aa-7140-a909-ec196290aeb9",
+  "external_ref": null,
+  "title": "Validate contained no-grant decision ledger before mutating its session record",
+  "outcome": "Validate contained no-grant decision ledger before mutating its session record",
+  "acceptance": [
+    "Validate contained no-grant decision ledger before mutating its session record is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "checkpoint-capacity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

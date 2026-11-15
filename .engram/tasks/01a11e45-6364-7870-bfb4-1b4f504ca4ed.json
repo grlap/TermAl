@@ -1,0 +1,63 @@
+{
+  "id": "01a11e45-6364-7870-bfb4-1b4f504ca4ed",
+  "external_ref": null,
+  "title": "A recognized focused cargo run that ends after its session's turn closed gets no verification record and no refusal",
+  "outcome": "Every focused launcher run the host recognizes for a bound item ends in exactly one outcome on that item: a verification record (passed or failed), or a refusal naming the run and its reason. This holds when the run's process outlives the turn that started it.",
+  "acceptance": [
+    "C1 (diagnosis). The item records, with source locators, why test-281279cb got neither a record nor a refusal: on the 10-09 build a check still running at its turn's close was closed Unknown and its late end dropped, since no Codex carry existed before 23e77889. It also records what master still does for a test that is not carried, gaps (a) and (b) above [(a): engram_close_unended_checks (engram_turn_checks.rs:757-786) publishes only the generic Unknown line and discards the engram_carry_refusal cause computed at reported_ends.rs:295; (b): the late end of a closed, uncarried check is dropped silently (note_engram_reported_end :696-698; codex_events.rs:1078-1097)].",
+    "C2 (named cause at close). When a recognized test is still running as its turn closes, or at the next turn's start after a Cached or Nothing close, and is not carried, the holder's line names why: the carry-refusal cause, keyed by its line, a runtime other than Codex, or no runtime token. The wording is for a test, never \"background full gate\". The check still closes Unknown and earns no credit.",
+    "C3 (late end told). When such a closed check's process later reports its end, whichever turn the end names, the holder gets exactly one line naming the check, its reported outcome, and that its evidence closed at its turn's close; no advice to rerun only for credit. The observed run row still updates. A carried test's late end is recorded exactly as before.",
+    "C4 (existing rules). A carriable Codex test is still carried and settled to one record or named refusal. Fences, source changes and a lapsed claim keep their refusals.",
+    "C5 (tests). Through the real shared app-server path (report_late_end with a closed turn id), in tests/engram_reported_ends.rs: an uncarried test (unnamed root; overlapped; keyed by its line) gets its named closure cause and exactly one late-end line, and a carried test still records from its late end.",
+    "C6 (validation and landing). The full gate passes on the exact tree submitted for landing; the review pair has no outstanding finding of Medium or higher; the item carries the evidence the standing landing rule requires."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

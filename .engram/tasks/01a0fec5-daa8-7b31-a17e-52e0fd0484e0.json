@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-daa8-7b31-a17e-52e0fd0484e0",
+  "external_ref": null,
+  "title": "Remove or document unused exact-start history selector and wire sequence fields",
+  "outcome": "Remove or document unused exact-start history selector and wire sequence fields",
+  "acceptance": [
+    "Remove or document unused exact-start history selector and wire sequence fields is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1104c-244b-7651-bb67-bdcb46570d1e",
+  "external_ref": null,
+  "title": "Use phase-synchronised progress waits in reviewer MCP lifecycle controls",
+  "outcome": "Earlier Pair6 Claude Low src/tests/codex_reviewer_mcp_controls.rs:30, retained Pair7 fixture Note. Fixed 2-3s worker-progress waits validated serially, not under default parallel gate; no measured load cause. Use established phase guard for nondiscriminating progress waits, keep genuinely short safety discriminators, preserve failures and do not inflate deadlines as a fix. Inventory only: no assigned implementation owner or scheduled trigger. Holder must establish concurred acceptance before evaluation.",
+  "acceptance": [
+    "Use phase-synchronised progress waits in reviewer MCP lifecycle controls is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

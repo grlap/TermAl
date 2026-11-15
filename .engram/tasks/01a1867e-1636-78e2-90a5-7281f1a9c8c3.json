@@ -1,0 +1,27 @@
+{
+  "id": "01a1867e-1636-78e2-90a5-7281f1a9c8c3",
+  "external_ref": null,
+  "title": "Clear stale session action notices when the session or its refused request goes away",
+  "outcome": "A session's action refusal notice is cleared when the session leaves the adopted state, or when the pending approval or request it refers to no longer exists. Notices for removed sessions do not accumulate in the module store for the life of the page.",
+  "acceptance": [
+    "Clear stale session action notices when the session or its refused request goes away is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

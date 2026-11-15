@@ -1,0 +1,27 @@
+{
+  "id": "01a1beef-f8fa-7210-bf4a-99c9722d0201",
+  "external_ref": null,
+  "title": "Before evaluation is switched on: prove on the real host that done on unchanged source consumes the evaluation and seals",
+  "outcome": "Before anyone relies on evaluation again, a real restarted host and real provider evaluator show the success path end to end, not only the refusal path.",
+  "acceptance": [
+    "On a real host with a real read-only provider evaluator, on a disposable project, done on source unchanged since the registered check consumes the recorded evaluation and produces the seal; real projects' readiness is unchanged before and after."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Done by the run ordered on Engram's w-46e8594c7e7e. On db52491e and Engram 8fc84451: done on unchanged complete SourceId completed disposable item w-e95d096f417f at 06:50:17Z with seal 1fe3234645e14516936cee5f8880eafb, consuming independent_session evaluation 5670afb25bd14506b09e0f79e57a3d37 from a real Claude child (session-16972, delegation73736ff3, observed 1/1), criterion linked to verification fa82bd6ed0574156bcd62f442d2f4162 from test 6c32178e. Six real roots unchanged, BEFORE 06:32Z and AFTER 06:52Z, all modes []. Evidence: .evidence/evaluation-source-id-13be-12328/46e8-positive-terminal/ (Sol-edfd, TermAl mailbox 56afc642 #2882). The stored seal records no comparable later closing sighting; that limit stands. Launcher registration limit filed as w-a29561736a4b.",
+  "completion": null
+}

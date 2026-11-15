@@ -1,0 +1,33 @@
+{
+  "id": "01a1c41e-e9ed-7bf3-8a84-3511b2dc62e8",
+  "external_ref": null,
+  "title": "Integrate combo38 on 8ab420b0: 03d4 861717c8, 8e1f 04cddb64, d50d a0b48c59, a7bb dae668b2",
+  "outcome": "The composed candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Integrate combo38 on 8ab420b0: 03d4 861717c8, 8e1f 04cddb64, d50d a0b48c59, a7bb dae668b2 is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No acceptance evaluation exists; self-asserted under the evaluation-OFF policy. combo38, commit 25454797 (tree fb980dfa), combines 03d4 861717c8, 8e1f 04cddb64, d50d a0b48c59 and a7bb dae668b2. It was fast-forwarded onto master from 8ab420b0 and pushed to origin at 07:24:19Z, with origin/master verified. Review: the composite pair was clean (Codex 17210 no findings; Claude 17211 one Low, filed as w-a4d1351bf3fd). The DL560 focused union passed 3245/0/103, every ignored test being live-pinned. Landing gate: DL560 FULL test-0c42c143 on test ref commit 991e5ea1, which has the same tree. It was eligible and all six stages passed; Rust 7537 passed, 0 failed; vitest 5091 passed. The test ref and the author-test ref were deleted at 07:24:35Z. Installs: Central termal.exe c8a5c45a at 07:30:35Z, old binary backed up as termal-before-25454797-7bb5c605.exe; DL560 termal 173541f1 at 07:29:53Z, backup termal.f62fe012.bak. Neither host was restarted.",
+    "completed_at": "2026-11-10T07:32:15.964002200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

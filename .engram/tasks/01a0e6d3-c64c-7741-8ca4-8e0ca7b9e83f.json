@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c64c-7741-8ca4-8e0ca7b9e83f",
+  "external_ref": "tm-n1r",
+  "title": "Correlate hydration diagnostics by adoption identity, not message count",
+  "outcome": "session-hydration-performance.ts matches adoption-to-DOM-commit diagnostics using only visible message count. A same-length transcript replacement can miss the real commit, leave a pending measurement behind, and later emit a false slow-commit warning. Carry an adoption generation/token or stable message-window identity through render commit, clear unmatched pending entries deterministically, and add same-length replacement plus skip-path regression coverage.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

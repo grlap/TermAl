@@ -1,0 +1,30 @@
+{
+  "id": "01a1533f-455c-7cc0-b6c8-22484cd3b3ae",
+  "external_ref": null,
+  "title": "Continue mailbox coverage settlement past an unappliable candidate",
+  "outcome": "One mailbox's failed coverage application does not prevent independent eligible continuations from settling, within explicit bounded work and unchanged safety fences.",
+  "acceptance": [
+    "A deterministic multiple-mailbox regression shows an unread, hidden or delivered boundary candidate cannot prevent another independently covered continuation from being considered.",
+    "Choose and document bounded behavior for append-epoch interference; retain final turn, runtime, head, proof, unread/boundary and append safety revalidation, with no unbounded retry loop.",
+    "Add an epoch-specific race control where a direct append commits before wake coalescence, so the append-epoch guard itself prevents removal; run focused coverage tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination-cost",
+    "mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

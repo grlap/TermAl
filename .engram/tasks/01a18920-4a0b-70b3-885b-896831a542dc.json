@@ -1,0 +1,30 @@
+{
+  "id": "01a18920-4a0b-70b3-885b-896831a542dc",
+  "external_ref": null,
+  "title": "Collapse routine informational Engram control cards (Turn admitted, Turn checkpointed) by default in the transcript; keep errors, warnings and action-required cards expanded",
+  "outcome": "In the session transcript, routine informational Engram control cards render collapsed by default, so they don't crowd the conversation. Examples are DISPATCH \"Turn admitted\" and CHECKPOINT \"Turn checkpointed\" on a successful grant. Errors, warnings, refusals and any card that requires user action stay expanded and visible by default. A collapsed card can still be expanded on demand. No card is hidden or lost.",
+  "acceptance": [
+    "Routine successful Engram control cards (for example DISPATCH 'Turn admitted' and CHECKPOINT 'Turn checkpointed' for a grant) render collapsed by default and expand on user action; covered by Vitest component tests.",
+    "Engram control cards that report an error, warning, refusal, waiting/unknown/paused/held state or a required user action render expanded by default; covered by Vitest tests, including at least one per category.",
+    "Existing transcript behaviour (loss and authority rendering, ordering, accessibility of the expand control) is unchanged; `npx tsc --noEmit` is clean, the affected Vitest suites pass, and an independent review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete. The routine-card collapse it covered landed in ce2487a8 and was then removed together with turn-gated control in 87f49ed0, so nothing remains to close. Per Opus3's read-only sweep at master 57a762c8 (TermAl mailbox 03723eab #5238); cancelled by coordinator Termal::Fable2, 2026-11-13.",
+  "completion": null
+}

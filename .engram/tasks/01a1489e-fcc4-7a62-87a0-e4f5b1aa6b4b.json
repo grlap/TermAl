@@ -1,0 +1,30 @@
+{
+  "id": "01a1489e-fcc4-7a62-87a0-e4f5b1aa6b4b",
+  "external_ref": null,
+  "title": "Cover Worker result boundary, promoted queued-id and legacy output paths through production routes",
+  "outcome": "Deterministic Worker regressions exercise missing resident boundaries, successful queued-prompt promotion, started follow-up failure/cancel, legacy absent-flag output, parent refusal and current-attempt persistence rather than only detached helper snapshots.",
+  "acceptance": [
+    "Production result/output paths cover a started attempt whose prompt boundary is absent, a promoted queued-id completion, and a legacy absent workerOutputUnavailable field, checking exact flags, fallback and evidence scope.",
+    "Started follow-up failure/cancel, wrong-parent paged-output rejection and same-attempt contradictory child-prose persistence are covered without leaking prior commands, Notes or observations."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation",
+    "review-followup",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

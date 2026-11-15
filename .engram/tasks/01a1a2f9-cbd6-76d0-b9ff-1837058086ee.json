@@ -1,0 +1,33 @@
+{
+  "id": "01a1a2f9-cbd6-76d0-b9ff-1837058086ee",
+  "external_ref": null,
+  "title": "Refuse excluded untracked child attributes that can normalize tracked edits",
+  "outcome": "Committed runtime exclusions cannot authorize an untracked or ignored child .gitattributes that hides tracked-byte changes.",
+  "acceptance": [
+    "A real child checkout counterexample establishes conversion-hidden tracked edits through an excluded untracked or ignored .gitattributes, with unchanged pin and a clean-status precondition.",
+    "Production admission refuses the unsafe attribute source inside the initialized-child boundary while ordinary-root behavior, committed attribute policy, declaration grammar for unrelated runtime files and existing bounds remain unchanged.",
+    "Tests include a restored admitted neighbor and the correction receives the required review and validation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "conformance",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

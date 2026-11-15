@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c78d-72c0-b95a-8fd60fcd4a04",
+  "external_ref": "tm-uwx.10.11",
+  "title": "Preserve mailbox provenance across sender deletion during dispatch",
+  "outcome": "If the sender session disappears between durable append and dispatch source resolution, the live-session lookup drops structured mailbox provenance. The wake can dispatch as ordinary text and later be recreated. Preserve backend-owned mailbox metadata independently of live sender lookup while retaining a safe sender snapshot.",
+  "acceptance": [
+    "Deleting or losing the sender before wake dispatch cannot strip mailbox metadata, duplicate the wake, or expose the body; a deterministic regression test covers the race."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

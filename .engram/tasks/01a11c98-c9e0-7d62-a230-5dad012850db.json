@@ -1,0 +1,29 @@
+{
+  "id": "01a11c98-c9e0-7d62-a230-5dad012850db",
+  "external_ref": null,
+  "title": "Extract one shared bash-line lexer from src/claude.rs for the read-only check's quote/escape scanners",
+  "outcome": "Extract one shared bash-line lexer from src/claude.rs for the read-only check's quote/escape scanners",
+  "acceptance": [
+    "Extract one shared bash-line lexer from src/claude.rs for the read-only check's quote/escape scanners is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "read-only-delegation",
+    "refactor",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

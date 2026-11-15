@@ -1,0 +1,28 @@
+{
+  "id": "01a1c465-9a76-7ef1-b634-69465bf701ad",
+  "external_ref": null,
+  "title": "Cover location extraction after numbered bold delegation finding headlines",
+  "outcome": "A behavior regression proves a numbered bold finding with an explicit source location after the bold headline retains its file, line and message through the real parser.",
+  "acceptance": [
+    "A behavioral parser test for 1. **Medium — Title.** `src/a.rs:3` Details. asserts source file, line and resulting message and keeps a no-location positive control."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "delegation-results",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

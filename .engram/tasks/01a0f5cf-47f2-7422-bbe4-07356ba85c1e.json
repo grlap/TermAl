@@ -1,0 +1,31 @@
+{
+  "id": "01a0f5cf-47f2-7422-bbe4-07356ba85c1e",
+  "external_ref": null,
+  "title": "Capture the named-root begin fence before turn_begin transport",
+  "outcome": "Capture the named-root begin fence before turn_begin transport",
+  "acceptance": [
+    "Capture the named-root begin fence before turn_begin transport is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "PI-28",
+    "acceptance-needed",
+    "control-plane",
+    "named-root",
+    "post-import",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a14148-ada4-7041-909d-74dc6f93f55a",
+  "disposal_reason": "The parent is completed. Continue as independent work: per Architect2's ruling (note e2827767), a small deterministic Begin in-flight-clear regression test, written by Termal::Opus3 under the TermAl coordinator.",
+  "completion": null
+}

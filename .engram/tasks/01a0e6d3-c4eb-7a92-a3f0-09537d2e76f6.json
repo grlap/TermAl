@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c4eb-7a92-a3f0-09537d2e76f6",
+  "external_ref": "tm-dl65",
+  "title": "Let a parent start the review workflow with its own tools when slash commands are unavailable (Codex parents, non-TermAl projects)",
+  "outcome": "Reported by the Engram/Phoenix pilot (via Engram::Advisor, 2026-09-05): for three review rounds Greg had to trigger /review-changes from the UI because the parent session (Codex, and Claude sessions in the Website project) could not invoke its own slash command; the review skill lives in the TermAl repository .claude skills, so other projects and Codex parents have no callable entry point. Assessment (Fable): the review workflow is already executable with the tools every parent has - parent gates, then exactly two read-only reviewer leaves via termal_spawn_session (mode reviewer, write policy readOnly) and termal_wait_delegations / termal_resume_after_delegations fan-in; what is missing is a callable description of that sequence for parents without the skill. Desired: (1) a project-independent statement of the review workflow as tool calls (which prompts, which write policy, gate ownership stays with the parent) delivered where such parents read instructions - the managed Codex AGENTS.md section and docs/features/coordination-cli.md or a new docs/features/review-workflow.md; (2) optionally a single MCP tool or CLI verb that runs the two-leaf review with the canonical prompts so the parent does not retype them; (3) no change to the rule that the parent owns gates and freeze. Acceptance: a Codex parent in a non-TermAl project can run the documented workflow end to end without a user click; docs cross-linked.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "coordination",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

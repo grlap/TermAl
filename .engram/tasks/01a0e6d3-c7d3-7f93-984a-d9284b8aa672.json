@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7d3-7f93-984a-d9284b8aa672",
+  "external_ref": "tm-wzkd",
+  "title": "Fold engram_note_turn_started into one StateInner-level turn-start helper",
+  "outcome": "Round-18 review (Claude, tm-winf steps 2+3). start_turn_on_record carries an unenforced contract: every caller must call engram_note_turn_started afterwards (clears running_command_worktrees, marks other sessions' open Engram checks), or overlap marks are silently skipped. Only a doc comment enforces it; the three production callers in turn_dispatch.rs (start_next_queued_turn_locked, dispatch_turn_with_followup's two paths) follow it, test callers do not. Wrap both in one StateInner-level helper so a future caller cannot start a turn without the Engram note.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

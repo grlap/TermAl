@@ -1,0 +1,29 @@
+{
+  "id": "01a156a8-d778-7011-8652-0e303d8a80e9",
+  "external_ref": null,
+  "title": "Successful fixed-stage probe runs write a routine stderr line on every onboarding check",
+  "outcome": "federation_probe_run writes its diagnostic only for failures, or for successful runs only above a stated latency threshold, so a long-running host does not write routine stderr lines for every onboarding identity or wake probe; the failure diagnostic (stage, typed cause, phase, elapsed, redacted detail) is unchanged.",
+  "acceptance": [
+    "A successful fixed-stage probe under the threshold writes no stderr line, and a failure still writes its typed diagnostic; a focused test covers both.",
+    "The full gate is green and an independent review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

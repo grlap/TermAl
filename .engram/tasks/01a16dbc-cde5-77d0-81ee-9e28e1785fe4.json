@@ -1,0 +1,29 @@
+{
+  "id": "01a16dbc-cde5-77d0-81ee-9e28e1785fe4",
+  "external_ref": null,
+  "title": "Publish the measured SQLite COMMIT duration before transaction cleanup can block",
+  "outcome": "While rollback or transaction cleanup is in progress, diagnostics expose the COMMIT duration already measured without changing SQL, cleanup or error behavior.",
+  "acceptance": [
+    "The live commit_cleanup sample publishes the already-measured sqliteCallUs before dropping the transaction; cleanup duration stays unavailable until measured.",
+    "Deterministic coverage proves live visibility during cleanup and preserves COMMIT result and rollback behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "persistence",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16cfa-2e63-7b61-a19d-f1391dace99b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

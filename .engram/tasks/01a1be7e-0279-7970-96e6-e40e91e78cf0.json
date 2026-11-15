@@ -1,0 +1,37 @@
+{
+  "id": "01a1be7e-0279-7970-96e6-e40e91e78cf0",
+  "external_ref": null,
+  "title": "Project memories: 610 is too many; retire stale working-state snapshots, keep decisions and lessons",
+  "outcome": "Project memories hold decisions, durable lessons and current facts rather than old queue and window state, nothing of value is lost, and working state stops accumulating there.",
+  "acceptance": [
+    "Each entry proposed for retirement has been read for unique value; any still-valid decision or lesson is kept or moved to a kept entry first, and retirement uses forget, which tombstones and keeps history.",
+    "A before-and-after count by family is recorded, along with what was kept and why.",
+    "Agents have a clear rule that queue and working state goes on items, not in memories; no test reads instruction files for it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "greg-reported",
+    "memory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Project-memory cleanup:610→387 retained heads,214 own tombstones plus10 baseline owner migrations and1 concurrent retained addition. Unique decisions/lessons and citations preserved; full before/after family counts and214-key inventory recorded; working state belongs on items. No source/artifact operations.",
+    "completed_at": "2026-11-09T05:28:59.832354100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

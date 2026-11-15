@@ -1,0 +1,32 @@
+{
+  "id": "01a15431-7c90-7d63-96ca-33f4cde5413c",
+  "external_ref": null,
+  "title": "Naming a source root right after a restart can fail once with 409 \"named-root acknowledgement belongs to a superseded authority image\"",
+  "outcome": "A valid termal_name_source_root request, or an acceptance-evaluation request under an unchanged live claim and binding, is not refused with a final named-root 409 merely because canonical history advanced or another authority image superseded the image the request captured. Real invalidations stay fenced.",
+  "acceptance": [
+    "A deterministic regression pauses an acceptance-evaluation request on a named source root after it captures its named-root authority, then lets canonical history learn the Bound event of that same binding (the same current claim, canonical workspace, root generation and named_at), whatever naming event history had learned before, or puts an authority transition of the same binding in flight, which the request waits out or reports as retryable. The request passes the named-root validation and can record its result without re-naming: neither learning the binding it was requested on nor a transition of it in flight causes a final named-root 409. A history advance that cannot be proven to describe that same binding, including any advance under a workdir evaluation that has no named binding, still refuses, and its refusal names that the work's naming moved. Existing source, evidence-basis and acceptance-basis validity checks remain enforced.",
+    "A deterministic regression supersedes a valid naming request's captured authority image without changing the caller's claim or requested binding. The original call completes within the existing bounded operation budget and acknowledges the current binding, without a caller retry, duplicate effective naming or a spurious generation change. It never acknowledges an authority image it no longer owns.",
+    "Negative controls change or release the claim, change the workspace/root generation/naming identity, introduce a conflicting naming intent, or change the authority epoch while a request is paused. Each stale naming/evaluation request is refused before a stale acknowledgement or evaluation result is committed. A change away from a binding and back again cannot revive the old request. Other roots/claims remain isolated.",
+    "A request that cannot establish a valid current binding within its existing budget terminates with the established bounded failure path. Any remaining refusal identifies the actual authority/binding conflict or unresolved state and indicates whether retrying can help. No blind/unbounded retry, increased timeout, or weakened retirement/claim/source fence is introduced.",
+    "The regression cases use explicit synchronization and controlled state transitions rather than a timing lottery; a test-only fail-first witness demonstrates the original naming/evaluation failure, and the corrected input passes the focused checks. The full five-stage gate passes on the exact landing input, with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "named-roots",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

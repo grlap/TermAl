@@ -1,0 +1,30 @@
+{
+  "id": "01a133ad-3627-7ed2-a636-688c8d746e07",
+  "external_ref": null,
+  "title": "Pin carried held-read ordering, deadline skip and unnecessary-read avoidance",
+  "outcome": "Round-2 Claude review found no regression test proving the held read follows this turn's captures, zero remaining capture budget skips it, or same-claim/fenced/expired candidates issue no read. Current checkpoint uncertainty tests exercise error/omitted/absent outcomes but do not record held-read timing/counts. Add deterministic meaningful boundary coverage without real sleeps or increasing production budgets.",
+  "acceptance": [
+    "Deterministic checkpoint coverage proves own end-basis/check/carried capture precedes held-claim reading, and zero remaining budget skips the read while retaining uncertainty.",
+    "Coverage proves no held read occurs for same-claim/same-fence or already-refused fenced/expired candidates.",
+    "Focused relevant tests pass on the changed input without weakening timeouts or settlement safeguards."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-check",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

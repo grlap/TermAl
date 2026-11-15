@@ -1,0 +1,29 @@
+{
+  "id": "01a177f2-e662-7931-9fbd-0e0a25910aa0",
+  "external_ref": null,
+  "title": "Tests that build state with Codex discovery resolve the real user's ~/.termal/codex-home and would open its live state_5.sqlite",
+  "outcome": "No test, focused or full, resolves, probes or opens anything under the real user's home (~/.termal, including codex-home/state_5.sqlite). Codex discovery in tests is pointed at a test-owned root or disabled.",
+  "acceptance": [
+    "A note on current master identifies every test path that reaches resolve_termal_codex_discovery_root (src/codex_discovery.rs:163-170) or codex_home.rs:84 with the real HOME/USERPROFILE, and states whether the full gate launcher already isolates HOME while focused runs do not.",
+    "Those tests use a test-owned discovery root, by reusing the existing test temp-root helpers; no new mechanism is added if an existing one fits. A deterministic test proves that a test-constructed state never touches the real home, for example by asserting the resolved root is under the test temp root. Production resolution is unchanged.",
+    "The independent review pair finds no Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "live-store-safety",
+    "test-isolation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

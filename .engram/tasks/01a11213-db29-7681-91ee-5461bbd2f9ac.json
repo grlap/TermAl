@@ -1,0 +1,77 @@
+{
+  "id": "01a11213-db29-7681-91ee-5461bbd2f9ac",
+  "external_ref": "engram:w-e0872d08dd03",
+  "title": "Avoid redundant mailbox continuation turns only with explicit proof that the obligation is covered",
+  "outcome": "A continuation demonstrably covered by an identified runtime handoff or an independently agreed fulfillment proof starts no extra model turn; uncertain or still-owed continuations remain deliverable. ACK alone never suppresses a wake. Preserve Stop, paused queues, restart recovery and later messages. Investigation/design request only; no implementation or restart authorized by this report.",
+  "acceptance": [
+    "Later-turn coverage: when a session reads a page that includes every message up to a queued mailbox continuation's boundary and acknowledges that exact receipt, both inside one turn whose generation is later than the turn in which the wake was queued or last advanced, and no message of that mailbox is unread, the continuation is removed without starting a turn.",
+    "Explicit no-continuation acknowledgement: a receipt acknowledgement made inside an active turn with the explicit no-continuation flag covers the queued continuation for messages through that receipt's boundary, which is then removed without a turn when nothing is unread; an acknowledgement without the flag never removes or suppresses a wake, including in the same turn the messages arrived, and the existing owed-continuation tests pass unchanged.",
+    "Uncertainty keeps the wake: a later message (coalescing clears coverage), a read and an ack in different turns, a read or ack outside a turn, the legacy numeric acknowledgement, a retained or durability-held head, a Stopped or paused queue, a host restart and an invisible or other-target boundary each leave the continuation exactly as today.",
+    "Coverage is applied before the turn-end Engram checkpoint chooses its next intent, so a fully covered queue checkpoints Wait, not Continue; each removal emits one bounded diagnostic line naming the session, mailbox, boundary and proof kind, and increments a counter.",
+    "The MCP tool description, CLI and docs describe both proofs and state that an acknowledgement alone never suppresses a wake; existing mailbox, acknowledged-wake and queued-prompt-durability tests pass unchanged.",
+    "The maintained full five-stage gate passes on the exact final input, and the independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "mailbox",
+    "token-efficiency"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed explicit mailbox-continuation coverage and coordination schema5 on origin/master at a5cca6e7acef33cc4ac30c6b0bcc2f95fa8efbeb, exact reviewed/gated tree2a23a2bcd20e249321f14930fe4dd859f3696d63. ACK alone keeps owed wakes; later-turn full read+exactreceiptACK or explicit scoped noContinuation proof can settle eligible boundaries before checkpoint selection, preserving uncertainty/latermail/Stop/pause/held/restart/central-domain fences. Full5-stage host PASS60a0e80a723644b7afd919ac0261e88f; focused schema28/0/0 PASSaf3d8548f115412d841735ded8cd16de. Initial and currentv5 review pairs noMedium+. Independent acceptance abbd07ab688141f1bd173537a8931595 passed6/6 and dedicated fresh read immediately beforedone. Merger byte-identical commit/Opus2 fast-forward push from476c45c7 verified by ls-remote, independently repeated by holder. No source/naming writes after evaluation.",
+    "completed_at": "2026-10-20T00:36:49.502164400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

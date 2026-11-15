@@ -1,0 +1,30 @@
+{
+  "id": "01a1b356-9efe-7153-a938-fd8684a64088",
+  "external_ref": null,
+  "title": "Keep directory metadata filtering when coalesced raw notification kinds differ",
+  "outcome": "A pending generation made only of directory metadata hints retains that classification when the raw notify kinds differ, while real namespace or file changes remain visible.",
+  "acceptance": [
+    "A regression merges two different metadata-hint kinds for the same ordinary directory through production ingest/drain and verifies that the directory hint remains suppressed.",
+    "A mixed metadata plus real namespace/file-change control retains covering notification and conservative ordering; alias and reparse-point protections remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "metadata",
+    "review-followup",
+    "review-low",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

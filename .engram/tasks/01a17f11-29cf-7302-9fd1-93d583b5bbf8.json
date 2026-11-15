@@ -1,0 +1,31 @@
+{
+  "id": "01a17f11-29cf-7302-9fd1-93d583b5bbf8",
+  "external_ref": null,
+  "title": "Lifecycle fixture tests nondeterministically exhaust real readiness budgets; six expiry failures and one release-gate timeout",
+  "outcome": "Lifecycle tests whose subject is grant/runtime bookkeeping use deterministic readiness setup, preserving actual authority CLI behavior and product budgets; the separate release-gate timeout is attributed from worker evidence rather than assumed to have the same cause.",
+  "acceptance": [
+    "Preserve and individually attribute the six readiness-expiry failures and the distinct release-gate timeout from test-b36a7b33; add a deterministic discriminating witness without artificial host load, and expose any worker error before the release gate.",
+    "Reuse the existing test readiness owner where appropriate so unrelated lifecycle setup does not race the real 20-second launch budget, preserving fixture-authority-revoke-fail semantics, real authority CLI assertions, production timing, readiness deadline coverage and all lifecycle assertions; add no retry, skip or inflated timeout.",
+    "Record an independent Codex/Claude review pair and passing focused and maintained full-gate evidence on the exact repaired input; retain the original failed run and distinguish validation from historical cause attribution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-failure",
+    "load-sensitive",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

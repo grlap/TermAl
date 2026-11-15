@@ -1,0 +1,33 @@
+{
+  "id": "01a0e6d3-c441-7090-87c9-49c20a0630f7",
+  "external_ref": "tm-akg",
+  "title": "Raise TermAl process FD limit before spawning agent runtimes",
+  "outcome": "The shared Codex app-server reached 253 descriptors under the inherited macOS soft RLIMIT_NOFILE of 256, so delegated review could not spawn git and aborted with EMFILE. TermAl should raise its own Unix soft descriptor limit early so the app-server and all subsequently spawned agents inherit adequate capacity. This is distinct from the Rust test-gate wrapper and must not require users to launch TermAl through ulimit.",
+  "acceptance": [
+    "On Unix, TermAl raises RLIMIT_NOFILE before spawning app-server or agent children without lowering an existing limit. If the requested value cannot be reached, startup reports the requested, effective, and applicable ceiling values; macOS kernel-ceiling rejection degrades to the best achievable lift instead of leaving the original low limit. TERMAL_NOFILE_LIMIT has a documented safe maximum. Tests deterministically cover default, valid override, invalid override, capping, no-lowering, and syscall-failure behavior without requiring a host-specific setrlimit success. Windows remains unchanged. Architecture, test, and shared-Codex documentation cross-link the runtime and harness policies. All focused and repository quality gates pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Raised Unix process soft descriptor capacity early before runtime spawning, with capped override, no lowering/hard-limit changes, macOS ceiling-aware best-achievable fallback, honest final readback diagnostics, Windows noop,27 deterministic tests and cross-linked policy docs. Landed exact reviewed/gated tree c967943c as81270966 on origin/master.",
+    "completed_at": "2026-10-20T12:41:26.802232800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

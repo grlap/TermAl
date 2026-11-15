@@ -1,0 +1,42 @@
+{
+  "id": "01a128cd-8735-7bd3-a727-5ef7f24291cd",
+  "external_ref": null,
+  "title": "Hoist the closing-checkpoint retry test helpers onto CausalRoot",
+  "outcome": "prompts(), read() and retry_when_due() exist near-verbatim in both src/tests/engram_closing_checkpoint_retry.rs and src/tests/engram_closing_checkpoint_retry_transient.rs. They live once on CausalRoot (src/tests/engram_root_causal_failure.rs), so the tick and acknowledgement choreography cannot drift between the two modules.",
+  "acceptance": [
+    "The helpers exist once (on CausalRoot or one shared helper) and both closing-checkpoint retry modules use them; the focused tests pass unchanged in what they assert.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a16787-9070-7c82-b87e-3f4fa601c0f7",
+  "external_ref": null,
+  "title": "A kept re-name clears its claim's journal flags on an off-lock Engram read without rechecking",
+  "outcome": "A kept (same-path, same-generation) re-name clears the holder's own journal flags (obsolete, retirement, an unsettled reconciliation) only when the authoritative Bound read still describes the journal's current state. A displacement or an unsettled reconciliation that arrived after the read, taken off the lock, is never erased.",
+  "acceptance": [
+    "A regression changes the claim's journal (a Displaced retirement, or an unsettled reconciliation recorded) between the kept re-name's authoritative Engram read and its re-acquiring the state lock; the re-name does not clear that later flag, and evaluations under the binding stay refused until it is resolved.",
+    "A kept re-name whose read still matches the journal's state continues to clear the holder's own stale flags (the existing a_kept_re_name_clears_the_holders_own_stale_journal_flags behaviour is preserved).",
+    "Focused verification and the maintained gate pass on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "named-roots",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

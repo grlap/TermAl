@@ -1,0 +1,31 @@
+{
+  "id": "01a10e0a-44ec-7d93-9766-70128a4cd75d",
+  "external_ref": null,
+  "title": "Restore genuine failed host-wake boot reconciliation coverage for healthy timer release",
+  "outcome": "A connected-writer or genuine unresolved boot-reconciliation failure control proves that healthy timers still become eligible, or the existing test is accurately named for successful malformed-original cancellation without claiming the missing failure property.",
+  "acceptance": [
+    "Restore genuine failed host-wake boot reconciliation coverage for healthy timer release is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-follow-up",
+    "test-credit",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

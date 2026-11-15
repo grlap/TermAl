@@ -1,0 +1,27 @@
+{
+  "id": "01a132ba-3165-7383-848e-01e5d84a1303",
+  "external_ref": null,
+  "title": "termal_submit_acceptance_evaluation returns 500 'not acknowledged as persisted … (Deadline: queued for the writer)' when the persistence writer is slow",
+  "outcome": "An evaluator's submission does not fail with a 500 merely because TermAl's persistence writer missed its acknowledgement deadline. Either the host waits for, or reconciles, the queued write, or it returns a typed, retry-safe outcome that tells the evaluator whether the submission was sent, so that an identical retry is known to be safe.",
+  "acceptance": [
+    "termal_submit_acceptance_evaluation returns 500 'not acknowledged as persisted … (Deadline: queued for the writer)' when the persistence writer is slow is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "host-persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

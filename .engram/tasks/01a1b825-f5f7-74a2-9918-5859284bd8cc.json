@@ -1,0 +1,30 @@
+{
+  "id": "01a1b825-f5f7-74a2-9918-5859284bd8cc",
+  "external_ref": null,
+  "title": "Cover identity mismatch and missing central mailbox identity diagnostics",
+  "outcome": "Behavioral coverage exercises central mailbox identity mismatch and missing identity refusals, including which native target spelling still permits local delivery.",
+  "acceptance": [
+    "Disposable tests cover detailed 409 reasons for configured/local central identity mismatch and missing identities, retaining refused domain admission and checking usable local native delivery without a host restart where its identity is available."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "federation",
+    "mailbox",
+    "review-low",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b598-c875-7d02-abab-59e712e2dd9e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

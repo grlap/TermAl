@@ -1,0 +1,40 @@
+{
+  "id": "01a185e0-410f-7b30-810e-3e48e6ac1c57",
+  "external_ref": null,
+  "title": "Ordinary launcher accounting: recognize split named libtest result lines",
+  "outcome": "Pinned named live runs retain exact-name and count checks while accepting a sequential libtest status split from its test-name line by diagnostics.",
+  "acceptance": [
+    "For sequential named live runs, the launcher pairs each libtest test-name prefix with its completed ok or FAILED status even when diagnostics split them across lines; it still requires every requested name exactly once and matching terminal counts.",
+    "Focused Node regression checks cover split successful and failed statuses, missing or truncated statuses, unrelated test names, duplicate results, count mismatches, and executeRun PASS/FAIL accounting without weakening child-exit or exact-selection checks.",
+    "Both original B16 runs (test-da554d1a and test-8f8af9ff) remain preserved with the runner diagnosis; this repair lands under its own required reviews and standard full gate, and after it lands the pinned live 25 is rerun on the landed master and recognized by the launcher as PASS before any B16 acceptance evaluation or gated-control enable."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "control-plane",
+    "engram-control",
+    "gating-removal-audited",
+    "live-suite",
+    "runner-defect",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

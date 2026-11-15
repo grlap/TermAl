@@ -1,0 +1,27 @@
+{
+  "id": "01a1d64e-f66c-7f43-a0e3-976f6b45abdf",
+  "external_ref": null,
+  "title": "Docs link checker: decode HTML entities before deriving heading slugs",
+  "outcome": "scripts/check-doc-links.mjs derives heading anchors as GitHub renders them when headings contain HTML entities.",
+  "acceptance": [
+    "A heading such as '# Fish &amp; chips' is accepted under its GitHub anchor #fish--chips and #fish-amp-chips is reported as unresolved, proven by a synthetic fixture test in scripts/check-doc-links.test.mjs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

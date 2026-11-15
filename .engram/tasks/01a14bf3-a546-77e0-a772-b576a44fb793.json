@@ -1,0 +1,30 @@
+{
+  "id": "01a14bf3-a546-77e0-a772-b576a44fb793",
+  "external_ref": null,
+  "title": "A Claude root session's own Bash-background full-gate launch is registered as outstanding background work and fences that same gate's credit",
+  "outcome": "A Claude root session's own Bash-background full-gate launch is registered as outstanding background work and fences that same gate's credit",
+  "acceptance": [
+    "The failing path is identified with file:line: how the documented Claude gate launch (docs/test.md 'Credit for a background or detached gate': `pushd ROOT && node scripts/test-launcher.mjs full` in the Bash tool's background mode) is registered in src/claude_outstanding_work.rs as background work whose own outstanding interval fences the carried gate's credit (ClaudeHazardCause::OwnSession).",
+    "A regression: a Claude root session that launches a full gate exactly in the documented background form, with no other background or subagent work, gets the carried gate credited on its next checkpoint for the same claim once the run passes; unrelated outstanding background/subagent work still fences as before.",
+    "The refusal text for any remaining fence names the actual outstanding work (its tool use / task), not only the generic own-session cause."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "claude",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

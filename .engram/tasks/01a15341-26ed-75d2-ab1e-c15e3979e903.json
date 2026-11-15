@@ -1,0 +1,28 @@
+{
+  "id": "01a15341-26ed-75d2-ab1e-c15e3979e903",
+  "external_ref": null,
+  "title": "A mailbox send can persist but return no receipt to the caller, and a retry with the same idempotency key is then refused as \"used for a different message\"",
+  "outcome": "A termal_send_to_session (or CLI mailbox send) that durably appends a message always gives the caller a receipt, or a retry with the SAME intent and key returns that original message with duplicate=true. The caller can always tell \"not appended\" from \"appended without a receipt\" and retry safely. A 409 \"key used for a different message\" happens only when the content genuinely differs, and then names what differs.",
+  "acceptance": [
+    "A mailbox send can persist but return no receipt to the caller, and a retry with the same idempotency key is then refused as \"used for a different message\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "idempotency",
+    "mailbox",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

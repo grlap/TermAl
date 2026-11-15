@@ -1,0 +1,26 @@
+{
+  "id": "01a0f50a-9a64-7e61-9e46-c9e8e80bbca3",
+  "external_ref": null,
+  "title": "Avoid cloning already bounded read-only delegation result projections",
+  "outcome": "Return borrowed data for normalized bounded read-only results in delegation_result_for_policy and avoid cloning the whole record in serialize_delegation_record_for_api unless legacy classification or bounding is needed.",
+  "acceptance": [
+    "Already normalized bounded results avoid redundant full clones while legacy and oversized results retain the same API behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

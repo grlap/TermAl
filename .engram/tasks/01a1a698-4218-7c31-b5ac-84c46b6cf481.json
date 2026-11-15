@@ -1,0 +1,29 @@
+{
+  "id": "01a1a698-4218-7c31-b5ac-84c46b6cf481",
+  "external_ref": null,
+  "title": "Resolve commit-input filter drivers named unset or unspecified",
+  "outcome": "Confirm and resolve the ambiguity between check-attr sentinel output and literal driver assignments, keeping Rust and Node eligibility aligned and preserving the versioned contract.",
+  "acceptance": [
+    "Resolve commit-input filter drivers named unset or unspecified is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

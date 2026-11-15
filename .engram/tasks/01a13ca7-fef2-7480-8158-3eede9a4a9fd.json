@@ -1,0 +1,29 @@
+{
+  "id": "01a13ca7-fef2-7480-8158-3eede9a4a9fd",
+  "external_ref": null,
+  "title": "Exercise final handoff fencing and healthy delivery for every ACP vendor",
+  "outcome": "Add deterministic ordinary final-handoff controls for Cursor, Gemini, OpenCode and Kimi, preserving each vendor's existing Stop semantics and proving healthy enqueue as well as stale owner/Stop refusal. Distinguish executable per-vendor evidence from common-arm source audit.",
+  "acceptance": [
+    "Exercise final handoff fencing and healthy delivery for every ACP vendor is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "review-low",
+    "testing",
+    "turn-dispatch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

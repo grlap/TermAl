@@ -1,0 +1,31 @@
+{
+  "id": "01a10a3a-3bb5-72f1-aed3-50db32cfc2de",
+  "external_ref": null,
+  "title": "A carried run that is already terminal loses its record when the holder edits source before the settling checkpoint ('directory changed before it settled'), even a FAILED result on its own verified input",
+  "outcome": "A carried full gate settles only at the holder's next closing checkpoint, and any source change in the worktree before then refuses its record ('no credit because the directory changed before it settled'). That is so even when the run is already terminal and its launcher verified that the input fingerprint was identical before and after (results.json). The holder must fix a failure promptly, so recording the failure becomes impossible and the failed-first evidence is lost.\nA terminal run with a launcher-verified unchanged input should settle against ITS OWN recorded input fingerprint and revision, whatever later edits did to the worktree. A passing result is credited at that revision only; a failed one is always recorded as failed. Source changes made before the run became terminal still fence it as today.\nA deterministic test covers: a terminal FAIL followed by an edit before the checkpoint, which is recorded as failed at the run's input revision; and an edit during the run, which is still fenced.",
+  "acceptance": [
+    "A carried launcher run with a valid, unchanged terminal record (matching request and expected/before/after input fingerprints) retains exactly one verification record for its original captured source revision when the holder edits source after the run became terminal but before the settling checkpoint. Terminal PASS is recorded as succeeded and terminal FAIL as failed; neither result is attributed to the later edited revision.",
+    "A source edit or other disqualifying interference that reaches a carried run while it is still in flight continues to withhold verification, including an edit later reverted before terminal completion. Missing, interrupted, inconsistent or changed terminal records and changed claim/root authority continue to fail closed.",
+    "Deterministic regression tests exercise both terminal PASS and FAIL followed by a real source edit before checkpoint settlement, assert the original revision and actual outcome, and include the still-in-flight edit control. Ordering is established by explicit fixture events/barriers rather than elapsed-time guesses; existing carried-check integrity, authority and duplicate-settlement controls remain green. The existing test a_write_after_the_run_ended_leaves_the_gate_to_the_basis_check is revised to the new expectation rather than deleted, and the item records why its earlier expectation no longer holds.",
+    "The focused carried-check tests and the full five-stage gate pass on the final exact input, and the independent read-only review pair has no outstanding in-scope finding of Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "carried-check",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

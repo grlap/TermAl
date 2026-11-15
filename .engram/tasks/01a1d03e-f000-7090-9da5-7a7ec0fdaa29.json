@@ -1,0 +1,29 @@
+{
+  "id": "01a1d03e-f000-7090-9da5-7a7ec0fdaa29",
+  "external_ref": null,
+  "title": "Check native scrollbar drag seek re-arming after no-scroll movement and intervening writes",
+  "outcome": "Native thumb drag remains able to request unloaded history after pointer movement with no additional scroll and after an intervening programmatic scroll write, or evidence shows the hypothesized interruption cannot occur.",
+  "acceptance": [
+    "Use a behavioral test or browser reproduction to discriminate the two proposed drag interruptions against the current gesture/generation owners.",
+    "If confirmed, repair the owning history-scroll lease/re-arm behavior without losing cancellation, stale-response fences or FOLLOW/STAY intent; relevant regression and existing history-navigation tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "review-followup",
+    "scrolling"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

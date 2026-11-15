@@ -1,0 +1,38 @@
+{
+  "id": "01a1bdfb-88c5-7e00-8b6f-a023081b50ea",
+  "external_ref": "engram:w-9b38f77eee5a",
+  "title": "Retain observed Engram child PID and exit context when named-root binding returns 502",
+  "outcome": "A named-root bind or clear failure keeps the already observed, sanitized child-process identity and exit state in the caller-visible diagnostic/evidence route without changing immutable-intent settlement or retry authority. Missing historical evidence remains explicitly unavailable.",
+  "acceptance": [
+    "A controlled transport failure after request handoff exposes the actual already observed child PID and exit state through the supported named-root error/diagnostic surface, while an observation that was never captured remains explicitly unavailable.",
+    "Behavioral coverage shows named-root pending intent, identity and original error code remain unchanged after the failed exchange; no success or remote nonapplication is inferred, and diagnostic fields retain no request body, credentials or private error payload.",
+    "The exact candidate passes focused checks, an independent review pair with no outstanding Medium-or-higher findings and the required full gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "engram-control-transport",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Named-root 502 diagnostics preserve captured PID/exit or explicit unavailable while retaining immutable intent and retry semantics. Delivered in reviewed and dual-host gated Combo19 89427b15 on master/origin. Self asserted; No acceptance evaluation exists.",
+    "completed_at": "2026-11-09T04:09:59.584921700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

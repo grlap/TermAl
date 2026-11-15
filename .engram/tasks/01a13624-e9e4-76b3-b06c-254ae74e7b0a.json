@@ -1,0 +1,36 @@
+{
+  "id": "01a13624-e9e4-76b3-b06c-254ae74e7b0a",
+  "external_ref": null,
+  "title": "Replace the \"Team strategy\" section of root-coding-sessions.md with a pointer to Engram's team-strategy page (single ledger)",
+  "outcome": "One agreed copy of the team strategy exists. TermAl's docs/features/root-coding-sessions.md replaces its own round-1 'Team strategy' text, which includes the withdrawn 'Engram implementers land in their coordinator's window', with a short pointer to Engram's maintained docs/team-strategy.md (linked on Engram's master branch, since that page will keep changing). It keeps only the TermAl-specific facts this page owns (TermAl producers hand off to the integration owner; the creation record), so no reader finds two disagreeing 'agreed' texts.",
+  "acceptance": [
+    "The TermAl page's Team strategy section body is replaced by exactly the wording both coordinators concurred (note 1133595b on this item), which links Engram's maintained page https://github.com/grlap/Engram/blob/master/docs/team-strategy.md and keeps only TermAl-specific statements that do not restate or contradict it. The '## Team strategy' heading is unchanged, so links into it (such as line 45's #team-strategy) still resolve. No other text changes.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "cross-project",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the TermAl team-strategy doc update. Commit 53d8117f is pushed to origin/master; Opus2 verified fast-forward from 0f987597 and remote master, tree 7cd660d5. Full gate test-4783df8c passed all five stages on the exact input (host verification c79eb7c3). Independent acceptance evaluation 655082fc passed 2/2. Docs-only; no install.",
+    "completed_at": "2026-10-14T03:35:21.133887800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

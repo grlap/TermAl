@@ -1,0 +1,91 @@
+{
+  "id": "01a11ed8-fcf7-7bb3-9c2d-cfcf10b68c9b",
+  "external_ref": null,
+  "title": "A transient failure before any Begin was sent (begin_preparation_unacknowledged, a prepared-Begin fence missing its deadline under load) parks the session for Greg's Resume instead of re-admitting automatically",
+  "outcome": "Per Greg's direction of 2026-10-11 (memory greg-decision-2026-10-11-transient-admission-self-recover, which supersedes the Option B ruling recorded in w-c60e6f4258a2's outcome): when the prepared-Begin persistence fence fails or misses its deadline, so the Begin is withheld and remote application is not_started, the retained prompt is re-admitted automatically. The re-admission is bounded, durable and idempotent, uses a fresh valid binding (a fresh evaluate and grant when the old grant cannot be begun safely), and runs on the common recovery schedule (w-7224e6317e55) under its host-wide cap, with no unbounded polling. Actionable UI (Resume or Cancel) appears only when automatic recovery is exhausted or the outcome is truly semantically unknown. A late-acknowledged fence (success after the budget) is classified by what happened. The holder also audits the other Resume-only holds that a transient admission or control failure can produce, and files each as its own item.",
+  "acceptance": [
+    "C1 (fail-first, unbound): At be2ed177, a test with a gated persist writer on the scripted budget clock and no synthetic load makes the prepared-Begin persistence fence miss its deadline, so no Begin is sent (card code begin_preparation_unacknowledged, remote application not_started). The writer then recovers and the tick runs past the first retry delay. The retained prompt is not delivered without Resume. A holder note cites the host-recorded failed check, its log path and sha256.",
+    "C2: A transient prepared-Begin write failure or missed per-attempt wait, while the request remains eligible and inside C4's overall budget, recovers on the existing shared 2, 5, 10, 20, 30 and then 60 second schedule with its existing jitter, one-attempt-per-head guard, host-wide cap and durable acknowledgement. A still-pending exact preparation is reconciled before choosing replay or fresh admission; a timeout alone does not prove write failure. For fresh admission, retain the prompt and its content, settle the old issued never-begun grant by the completed rebind before sending a fresh evaluate, and discard only the superseded evaluate/preparation after that disposition is safe. Never create two live grants or send Begin without its content-specific durable acknowledgement. Scripted-clock and gated-writer tests prove these orders and that the C1 recovery delivers the original prompt exactly once without Resume. Local invalidation of a stale executable evaluate/bind cache may precede rebind only when the exact unresolved settlement obligation and necessary evidence remain durably recoverable and old callbacks cannot restore authority. Discarding that obligation or unresolved prepared-Begin evidence before safe disposition is prohibited; fresh evaluate always follows completed rebind.",
+    "C3: A content-specific prepared-Begin acknowledgement that arrives after one 20 second attempt wait but before C4's overall deadline remains a successful durability outcome. Retain the exact prepared Begin, grant, key and delivery tokens and, if the exact owner and admission prerequisites remain valid, send it in a bounded attempt or replay that same Begin. A late success at/after the overall deadline or after Stop, Cancel, operator pause or owner supersession records the old operation's actual outcome without automatic Begin/provider delivery or mutation of a successor. Deterministic tests cover ACK just before, at and after both boundaries, success observed after the caller stopped waiting, definitive write failure, an unresolved in-flight write and stale-owner ACK. A timeout never proves a committed write absent or a possibly-applied Begin cancelled.",
+    "C4: A named constant of 240 seconds bounds automatic recovery of one host-accepted logical control-admission request. Its clock starts when the exact queue head is accepted for control admission, before control/persistence/capacity waiting, and excludes ordinary prompt backlog behind an earlier provider turn. Persist the original budget start/deadline with that request; preserve it through retries, backoff, rebind, fence waits, phase transfers and restart. Every individual control/RPC call and dispatch attempt remains at most 20 seconds and is clipped to the remaining overall budget. Shared-capacity waiting consumes the budget but starts no attempt. At/after the deadline no new automatic send starts; existing completion/tick paths show Resume/Cancel with 'automatic re-admission exhausted after N attempts; last cause …'. Separate tests cover initial waiting, repeated failures, cap saturation, backoff crossing expiry, pending ACK at expiry, exact 240 second expiry, stopped writer, disabled control, Stop, Cancel, operator pause and superseded owner. Stop/Cancel/pause/disable/supersession prevent further automatic advancement immediately; they do not reset this clock. Tests use the scripted clock and gated operations, with no synthetic load, new polling, watchdog or timer subsystem. The overall budget ends at a matching applied Begin receipt: after it, admission has succeeded, and the admitted turn's later calls (root reconciliation and source observation on that binding) keep only the 20-second per-call bound and are not clipped to the overall budget. In this item, the start is captured at acceptance for every head, and the budget is enforced for every phase of a logical head once it enters prepared-Begin recovery, including subsequent bind, admission, abort and exact-Begin-replay phases. Enforcement for heads that never enter that recovery is separate work; tests here preserve their existing behavior. For the applied-Begin exemption, receipt time is the host-observed completion time of the exact matching Begin response, on the operation budget clock, not later local application or provider delivery time. A response received strictly before the overall deadline ends the admission budget even if subsequent local processing crosses it; a response first received at or after that deadline is retained as actual outcome but does not revive automatic advancement. Operator holds, ownership validation, durability and at-most-once delivery continue to apply in both cases.",
+    "C5: Revise tests/engram_begin_unknown_recovery.rs::begin_unknown_recovery_unacknowledged_preparation_withholds_the_send to prove that an unacknowledged Begin is withheld, definitive failed preparation leaves no stale executable prepared record, ambiguous or pending persistence follows C2/C3 without racing a fresh admission, transient failures recover automatically inside C4's budget, and a stopped writer stays explicitly held.",
+    "C6: After restart, acknowledged retained request/retry state reconstructs the existing cadence and only the time remaining before the original persisted C4 deadline; elapsed downtime counts and restart never grants another 240 seconds. Missing/unacknowledged/invalid budget or ownership evidence remains held. Recovery runs under the existing host-wide cap and boot persistence acknowledgement. A head whose only blocker was a stopped writer can resume after that boot acknowledgement if still within its original budget and its grant/preparation disposition is safe; if exhausted it stays held for explicit Resume/Cancel. Tests cover each, including restart near and after expiry and pending prepared-Begin reconciliation.",
+    "C7: Audit: a holder note lists every Resume-only hold that a transient admission or control failure can produce, with file:line, and each is filed as its own item with provenance.",
+    "C8: docs/features/engram-host-adapter.md describes the distinct <=20 second per-call/per-attempt bound and 240 second admitted-request budget, its exact start and excluded ordinary prompt backlog, persisted ownership and restart behavior, queue/cap/backoff accounting, rebind settlement before fresh evaluate, late-ACK truth versus advancement permission, exhaustion UI, explicit Resume, and holds that stop automatic advancement.",
+    "C9: The full gate passes on the exact reviewed tree.",
+    "C10: Independent verification: the review pair has no outstanding Medium or higher, and an acceptance evaluation is made by an evaluator that never held the item.",
+    "C11: (a) Resume on a begin-preparation or interrupted Reconcile hold returns an actionable result, never a silent no-op. It validates the current owner and single-flight state and reconciles retained preparation/grant evidence first. A safe never-begun fresh admission completes rebind before fresh evaluate; an acknowledged prepared Begin uses its exact replay. An explicit accepted Resume after an exhausted or stopped window starts one new persisted C4 window; duplicate Resume while that window's flight is in progress neither starts a second flight nor resets its deadline. Stopped writer, disabled control, superseded owner or unresolved safety prerequisites return a deterministic reason without clearing the hold. Provider delivery is at most once. (b) Without a published cause, the withheld-Begin card uses its own code and boundary, not 'Original failure details unavailable'; automatic waiting, next retry, overall deadline and exhausted/operator hold remain distinguishable. (c) The card's latency separates evaluate, admission and prepared-Begin durability fences, begin and total; overall queue/retry elapsed time is not mislabeled as one RPC's latency. Rust tests cover (a), including repeated Resume and late callbacks; UI tests cover (b) and (c)."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 9,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 11,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "field-occurrence",
+    "greg-direction",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed on commit 9836a6bd3b3ef0b96499fd80f0ab151130700f5e (tree 62caef03), after fresh independent acceptance evaluation 60affcf5402a4bbbb5d96fd645a5fd33 passed all 11 criteria. Full gate c2d3724024f241a3a2fac56c529ce2cb passed on the exact committed tree; exact-tree review evidence is 73ae11d18015406ab4fc228e09d6ef4a. Commit remains on merger branch and is not pushed; handoff to integration owner follows.",
+    "completed_at": "2026-10-12T03:09:39.278059400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

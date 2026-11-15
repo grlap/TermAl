@@ -1,0 +1,29 @@
+{
+  "id": "01a1c0e3-17ca-7561-844d-7ef58721e3c4",
+  "external_ref": null,
+  "title": "Document argument append behavior for command templates without a placeholder",
+  "outcome": "The slash-command and delegation feature briefs explain nonempty argument append after a blank line and before the note when a template has no $ARGUMENTS placeholder.",
+  "acceptance": [
+    "Document argument append behavior for command templates without a placeholder is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "delegation",
+    "review",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c04e-9da0-7ac3-938a-941e0fdc6e2f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a18adc-d05c-7960-9caa-4501b9ba9ea2",
+  "external_ref": null,
+  "title": "Keep distinguishable id-less Codex calls separate in transcript presentation",
+  "outcome": "Different id-less command creations in one native turn keep distinct command cards without using command text as qualifying invocation proof or weakening replay rejection.",
+  "acceptance": [
+    "Keep distinguishable id-less Codex calls separate in transcript presentation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "command-invocations",
+    "design",
+    "engram-host-adapter",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18a53-c626-7740-9c09-ec8cbcc3efec",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

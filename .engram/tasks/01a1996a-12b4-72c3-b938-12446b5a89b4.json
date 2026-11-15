@@ -1,0 +1,34 @@
+{
+  "id": "01a1996a-12b4-72c3-b938-12446b5a89b4",
+  "external_ref": null,
+  "title": "Measure the slowest 10% of TermAl tests and make them faster without losing coverage",
+  "outcome": "A measured ranking of the slowest 10% of TermAl's tests exists per suite and host, and reviewed optimizations of representative slow cases show a measured before/after benefit with unchanged behaviour and coverage",
+  "acceptance": [
+    "Existing runner logs, results and artifacts are recovered through supported TermAl routes, and their run id, commit, tree, host, command and environment provenance is recorded on this item; agents work from summaries and bounded diagnostics, not followed stdout",
+    "For each suite (Rust, Vitest, Node helper tests) and each comparable host and input, a ranking lists the slowest 10% by test count (ceil of actually timed executed tests divided by 10), with each test's duration, its suite, host and input, and its share of measured runtime; compile, queue or wait, and execution time are separated; durations are never inferred from completion gaps between concurrently running tests; missing timings are reported as missing; hung or unfinished tests are listed separately and never counted as zero cost",
+    "Where Rust per-test timings are missing, they are obtained by the minimal extension of the existing duration reporter or by one bounded profiling run, without extra full gates run only to inventory logs",
+    "Representative slow cases or groups are optimized (unnecessary sleeps, process spawns or repeated large fixtures removed, unreleased waits repaired, existing shared fixture and runner owners reused) with behaviour, assertions, concurrency coverage, test population and failure semantics unchanged; no test is ignored, no fixture meaning reduced, no timeout inflated, and no success retry added",
+    "Before/after timings are compared on the same host with an exactly comparable selection, configuration and disclosed cache conditions; observed subset time and whole-stage benefit are reported separately; an optimization that measured no benefit is reported with its cause",
+    "Each optimization lands as a reviewed change with the normal applicable validation and concrete timing evidence; gate scheduling stays with the integration owner"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "greg-directed",
+    "launcher",
+    "performance",
+    "test-durations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

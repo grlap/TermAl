@@ -1,0 +1,29 @@
+{
+  "id": "01a17611-3f58-78b1-87e1-cc7aa5c7fbcb",
+  "external_ref": null,
+  "title": "Avoid duplicate runtime-report notices and custody work for sessions without an Engram target",
+  "outcome": "Plain Claude sessions do not accumulate redundant observation custody and duplicate not-reported notices while unbound configured sessions remain truthful.",
+  "acceptance": [
+    "A plain Claude session with no Engram target creates no unnecessary reporting custody or duplicate close notice; configured but unclaimed sessions still visibly state that no report was sent, with regression coverage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "review-low",
+    "unadmitted-observation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6c9-9c20-7ad3-8066-df1ef323efe9",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

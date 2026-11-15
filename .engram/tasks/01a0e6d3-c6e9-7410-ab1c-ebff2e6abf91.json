@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6e9-7410-ab1c-ebff2e6abf91",
+  "external_ref": "tm-uc2l",
+  "title": "Runtime-token guard Engram post-ready send failure cleanup",
+  "outcome": "After Engram preparation reaches Ready, runtime channel send failures still invoke token-less legacy rejection cleanup. A replacement runtime/successor appearing in the small window can be cleared by stale cleanup.",
+  "acceptance": [
+    "Send-failure cleanup is scoped to the prepared runtime/dispatch identity and cannot clear or fail a replacement successor; add a race regression."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

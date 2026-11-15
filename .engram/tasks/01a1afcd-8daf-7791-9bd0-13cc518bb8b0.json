@@ -1,0 +1,30 @@
+{
+  "id": "01a1afcd-8daf-7791-9bd0-13cc518bb8b0",
+  "external_ref": null,
+  "title": "Avoid duplicated Git refusal causes in alternate-format error chains",
+  "outcome": "A Git read refusal names its bounded cause once in both plain and alternate-format error output, while preserving operation timing, the shared budget and the original cause chain.",
+  "acceptance": [
+    "A real Git refusal remains visible through plain Display, appears once through alternate-format chain rendering, and retains its original downcastable cause and operation/budget context."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "review-low",
+    "source-revision",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1af65-1815-71b3-8f6b-43ba19db0403",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

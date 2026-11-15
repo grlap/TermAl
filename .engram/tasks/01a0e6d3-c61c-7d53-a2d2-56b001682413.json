@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-56b001682413",
+  "external_ref": "tm-m6r1.9",
+  "title": "Work reads: pin actual canonical store resolution to admitted binding",
+  "outcome": "Codex session-6884 Medium src/work_visualizer.rs:209. Pre/post checks inspect saved database_path while CLI derives its database via home/project declaration. Retargeted home/store symlink or junction with old database still present can open another store and potentially initialize it. Validate actual canonical resolution without creating a store, not just saved-path existence.",
+  "acceptance": [
+    "Regression retargets home/store alias after admission while original database remains: read rejects before CLI opens foreign store; normal established binding works. No live Engram database mutations."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a18a28-5037-72a2-99e4-c9a931504c69",
+  "external_ref": null,
+  "title": "Tier-OFF reset final acknowledgement reports generic failure after settings already applied",
+  "outcome": "An exhausted final containment acknowledgement reports a typed applied-with-held-state outcome and preserves the exact unresolved exclusions.",
+  "acceptance": [
+    "A regression exhausts the shared reset budget after settings commit and verifies a typed post-commit outcome without releasing unacknowledged containment.",
+    "Existing pre-commit refusal and confirmed-containment release semantics remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

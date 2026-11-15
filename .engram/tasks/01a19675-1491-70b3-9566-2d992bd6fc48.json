@@ -1,0 +1,29 @@
+{
+  "id": "01a19675-1491-70b3-9566-2d992bd6fc48",
+  "external_ref": null,
+  "title": "Naming bind adopts routing_token/work_binding/rebind_required without a session mutation stamp, so the delta persist may not save it",
+  "outcome": "Every naming-bind adoption of routing_token, work_binding or rebind_required is durably persisted on its own, not only when some other change happens to stamp the session.",
+  "acceptance": [
+    "Whether the naming-bind adoption at engram_source_roots.rs (bind_fresh_engram_source_root_until) is included in the next delta persist without a mutation stamp is established from source, with a disposable-store test that reloads after the persist.",
+    "If it is not durable: the adoption goes through the stamping accessor, or an equivalent, and the reload test shows routing_token, work_binding and rebind_required persisted; the review pair is clean and the gates pass. If it is durable: the mechanism is named on the item and the item is closed as expected behaviour."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "named-root",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

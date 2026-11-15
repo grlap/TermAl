@@ -1,0 +1,27 @@
+{
+  "id": "01a18a40-3f0b-7d31-a575-776a211b74a0",
+  "external_ref": null,
+  "title": "Assert that a definitive checkpoint refusal falls back to exactly the turn's own observation",
+  "outcome": "a_definitive_refusal_still_drops_the_report_to_its_fallback captures active_turn_report_fallback before the turn finishes, and asserts that the cached report after a definitive refusal equals it (non-empty, with the turn's own observations), so replacing it with an empty default would fail the test.",
+  "acceptance": [
+    "Assert that a definitive checkpoint refusal falls back to exactly the turn's own observation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

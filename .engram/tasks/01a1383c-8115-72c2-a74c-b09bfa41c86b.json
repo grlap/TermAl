@@ -1,0 +1,27 @@
+{
+  "id": "01a1383c-8115-72c2-a74c-b09bfa41c86b",
+  "external_ref": null,
+  "title": "Pin the capacity schedule and cover remote flag clearing, exhausted controls and waiting UI",
+  "outcome": "Cover literal [120,300,600x6] seconds and due offsets, stale remote true-to-false, exhausted Resume/Stop/ownership fencing, and rendered waiting indicator.",
+  "acceptance": [
+    "Pin the capacity schedule and cover remote flag clearing, exhausted controls and waiting UI is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity-recovery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

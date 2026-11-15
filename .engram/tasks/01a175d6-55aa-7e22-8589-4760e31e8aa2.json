@@ -1,0 +1,31 @@
+{
+  "id": "01a175d6-55aa-7e22-8589-4760e31e8aa2",
+  "external_ref": null,
+  "title": "Refine the Windows cleanup admission-cut check without adding retries",
+  "outcome": "Windows cleanup distinguishes fully captured early process admissions from incomplete cuts while preserving fail-closed release proof and the existing budget.",
+  "acceptance": [
+    "Assess a retry-free admission-count comparison around member capture and document its exact guarantee.",
+    "If refined, prove that admissions already included in the captured cut do not cause false unresolved and that uncaptured new members cannot produce reaped, with deterministic controls and unchanged budget."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gate-blocker",
+    "launcher",
+    "review-low",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173e6-4ea8-7281-911d-d712933fd9c0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

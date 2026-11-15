@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7b9-7183-95a3-9dcc4ff0ec87",
+  "external_ref": "tm-wfi2",
+  "title": "A delegated child whose first prompt Engram withholds stays 'running' with a paused queue that the parent can neither see nor resume",
+  "outcome": "Reported by Engram::Opus (2026-09-27, mailbox #328).\nSpawn: termal_spawn_session (Claude, reviewer, readOnly), parent session-7284, cwd Engram .worktrees/plan-bindings. Created delegation-7411a028 and child session-8086 at 13:21:52; prompt at 13:22:16 local.\nThe child's engramControl dispatch record: decision 'degraded', dispatch 'withheld', failMode 'degraded', refusalCode 'control_unavailable', total latency 239 ms, evaluate 0 (evaluation never ran).\nThe child then sat idle with queuePaused: true and the preview 'Engram: Waiting/Unknown. Original prompt retained; resume to retry or cancel.' The delegation meanwhile kept reporting status 'running', so a fan-in wait on it would never resolve.\nThe Codex reviewer spawned 10 s earlier (delegation-0aa8bc6d, session-8085) was granted in 10 ms. The parent's full gate had just started, so the machine was busy.\nThe parent has no way to resume the child: termal_followup_session requires a completed delegation. Workaround used: cancel and respawn (delegation-402ee67a, session-8087, granted normally).\n\nGaps:\n(1) A withheld dispatch is invisible in delegation status and fan-in. The status should say the child is paused on a withheld prompt, and a resume-after-delegations wait should resolve, or report it, rather than hang.\n(2) A parent cannot resume or cancel-and-retry the retained prompt of a child it owns.\n(3) Whether control_unavailable with evaluate 0 should count as an UNKNOWN outcome that gets tm-8t7e's single identical resend. tm-8t7e covers timeout and transport loss only.\n\nHypothesis, unverified: the same process-startup stall under load as tm-menr, with the control process not starting within the admission budget. The dispatch record's refusal detail would tell.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

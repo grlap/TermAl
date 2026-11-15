@@ -1,0 +1,28 @@
+{
+  "id": "01a1c8f0-6519-7490-b912-a5562f2fca98",
+  "external_ref": null,
+  "title": "Share the standalone notification identity predicate in its existing owner",
+  "outcome": "Note scripts/test-run-registration.mjs:361/453 and test-launcher.mjs:1143 repeat matching owner/recipient/origin checks. Reuse one helper in existing registration/notification owner to avoid future divergence; no parallel registry/lifecycle or weaker admission.",
+  "acceptance": [
+    "Admission, worker validation and notification use consistent sender/recipient/origin validation with existing refusals preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-follow-up",
+    "review-note",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0f52d-4bb1-7282-870c-38baa9b769e3",
+  "external_ref": null,
+  "title": "Reclaim retained named-root slots with the claim-scoped lifecycle read",
+  "outcome": "Consume Engram's claim-scoped old-root lifecycle read after it ships, reclaiming only authoritatively ended or superseded selections while preserving unknown and active roots.",
+  "acceptance": [
+    "Reclaim retained named-root slots with the claim-scoped lifecycle read is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "PI-28",
+    "control-plane",
+    "engram-interop",
+    "named-root",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0e6d9-98a0-7783-a19f-370c19557c00",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a140a3-32cf-7203-bec8-cdbac3631206",
+  "disposal_reason": "Continue as independent work (Termal::Fable2, 2026-10-15). Its parent w-370c19557c00 is completed, which left this child stranded and execution-blocked. The 64-root cap it would relieve is now actively blocking verification closures (w-05db1020fd87, w-8a67f7281f81) in the net-reduction cleanup; see the occurrence notes ea21660f and 8ae4737a.",
+  "completion": null
+}

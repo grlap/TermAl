@@ -1,0 +1,38 @@
+{
+  "id": "01a1a7b9-aa66-7070-a862-99c835b750ea",
+  "external_ref": null,
+  "title": "Clean up after finished work: inventory and remove verified leftovers, and make cleanup part of closing an item",
+  "outcome": "Finished work leaves no worktrees, build targets or artifacts behind unless a recorded need names why and until when; what exists now is inventoried with owners and retention, verified leftovers are removed, and closing an item includes its cleanup.",
+  "acceptance": [
+    "An inventory of Central worktrees, .tmp entries, .logs and .evidence, and of TermAl job roots on DL560 and the Mac, lists for each its size, owner where known, related items and their state, whether it is clean, whether its HEAD is reachable from master or another retained ref, whether any run directory or open item needs it, and a keep or remove class with the reason.",
+    "Only verified leftovers of finished work are removed: nothing an open item, running job, named root, unmerged commit, retained evidence need or another session's active worktree depends on. Every recursive delete has its absolute path checked against the repository first, and what was removed and the space recovered are recorded. Nothing on Windows B is touched until Greg confirms his copy has finished.",
+    "Cleanup becomes part of closing: the rule is written where agents read it, the holder of an item removes its own worktrees and targets at closing or records a concrete need and when it ends, and a recurring check makes leftovers visible rather than relying on memory.",
+    "No live store is opened, no stored evaluation or verification changed, and the cause of the accumulation is stated plainly on this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 0,
+  "labels": [
+    "capacity",
+    "greg-directed",
+    "housekeeping"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "First cleanup completed: consolidated4668 inventory rows;21 registered worktrees,42 verified plain exports and39 targets removed by this lane. Closing rule and read-only visibility report landed a163deb5. Large remaining Central population belongs to w-90520db13cc0; six holds/custody to w-b11000c4a757. Unknowns remain unknown.",
+    "completed_at": "2026-11-05T00:04:07.404479900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

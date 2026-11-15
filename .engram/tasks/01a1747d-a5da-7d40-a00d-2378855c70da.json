@@ -1,0 +1,27 @@
+{
+  "id": "01a1747d-a5da-7d40-a00d-2378855c70da",
+  "external_ref": null,
+  "title": "Remote wake outcome classification lacks unit cases for queued-behind-active-turn, a stopping root, and a hand-off on an active root",
+  "outcome": "Remote wake outcome classification lacks unit cases for queued-behind-active-turn, a stopping root, and a hand-off on an active root",
+  "acceptance": [
+    "Remote wake outcome classification lacks unit cases for queued-behind-active-turn, a stopping root, and a hand-off on an active root is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "federation",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

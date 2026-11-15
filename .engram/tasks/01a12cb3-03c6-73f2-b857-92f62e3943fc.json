@@ -1,0 +1,56 @@
+{
+  "id": "01a12cb3-03c6-73f2-b857-92f62e3943fc",
+  "external_ref": null,
+  "title": "A launcher-focused cargo run is classified as a node test and refused \"no passing test\" although the launcher records runner Cargo with 36/36 passed",
+  "outcome": "A launcher-focused cargo run is classified as a node test and refused \"no passing test\" although the launcher records runner Cargo with 36/36 passed",
+  "acceptance": [
+    "C1: RED, then GREEN, on the exact pwsh-wrapped form with Engram-launcher output and an Engram v1 record. The host's notice names the unrecognised launcher record format instead of \"node test … no passing test\".",
+    "C2: TermAl-launcher output is still credited, in the pwsh-wrapped and Claude pushd forms.",
+    "C3: the full gate passes on the exact tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording",
+    "regression-suspect",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Launcher recognition and focused Cargo credit are fixed; the committed seven-path change passed the exact-tree full gate and all acceptance criteria.",
+    "completed_at": "2026-10-12T18:09:50.814272400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1d394-9f84-7d93-89d2-6f17d4ca985f",
+  "external_ref": null,
+  "title": "Reconnect fallback owed during an in-flight /api/state request is lost when the EventSource is recreated",
+  "outcome": "A fallback state poll that is owed while its /api/state request is in flight survives recreation of the EventSource. The recreated transport re-arms the poll instead of inheriting no deadline. A behavioural test recreates the stream while the fallback fetch is pending, leaves the replacement CONNECTING without an error, and observes the next fallback request.",
+  "acceptance": [
+    "Reconnect fallback owed during an in-flight /api/state request is lost when the EventSource is recreated is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "live-stream",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

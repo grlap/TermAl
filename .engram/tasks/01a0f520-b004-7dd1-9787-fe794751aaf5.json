@@ -1,0 +1,27 @@
+{
+  "id": "01a0f520-b004-7dd1-9787-fe794751aaf5",
+  "external_ref": null,
+  "title": "Witness the archive profile in single-wire read-only release and recovery tests",
+  "outcome": "Use distinct runtime identities for both profiles in read-only child release/recovery fixtures, or assert recorded archive origin equals the child's profile. Single-wire aliasing makes shared_codex_profile_holding return Default for a read-only child and permits an impossible mixed-profile path without detecting it.",
+  "acceptance": [
+    "Read-only release and recovery tests assert the correct archive origin profile and discriminate an incorrect Default profile."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f435-1ebc-7890-82b9-53ab42df726c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

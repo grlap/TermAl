@@ -1,0 +1,35 @@
+{
+  "id": "01a15108-0951-7f23-9d9a-f174f211a1bf",
+  "external_ref": null,
+  "title": "Bound or retire obsolete durable federation mailbox references",
+  "outcome": "Bound or retire obsolete durable federation mailbox references",
+  "acceptance": [
+    "Bound or retire obsolete durable federation mailbox references is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "design-pending",
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup",
+    "source-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14e57-ba33-7180-8413-d9f08fe63a7a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

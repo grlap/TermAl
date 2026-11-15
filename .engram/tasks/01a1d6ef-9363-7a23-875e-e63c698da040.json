@@ -1,0 +1,40 @@
+{
+  "id": "01a1d6ef-9363-7a23-875e-e63c698da040",
+  "external_ref": null,
+  "title": "Carried live-test fixture bypasses readiness and cannot name its disposable source root",
+  "outcome": "The carried-gate live fixture learns its real disposable Engram store identity through readiness before naming the worktree, allowing both live tests to reach their lifecycle and no-native-credit assertions.",
+  "acceptance": [
+    "The carried-gate fixture clears only its inherited disposable project settings before the existing real enable/readiness path, then asserts a learned authority_store_key whose database is under its fixture home before source-root naming; no fake key, product or store-guard change is introduced.",
+    "Both existing carried_gate_live tests pass on the corrected candidate with the reviewed pinned Engram binary and disposable stores, reaching source-root naming and their lifecycle/no-native-credit assertions; the original failed live run and artifacts remain preserved.",
+    "The fixture correction is reviewed and lands in the same validated candidate as the carried-launcher retirement repair, with production byte-identical to the original b5461271 repair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "engram-readiness",
+    "full-gate",
+    "live-fixture",
+    "review-medium",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1d6ac-88ad-76f3-8d6c-d92277ffea31",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Corrected the disposable carried-gate fixture to learn its actual store identity through existing readiness before naming. Both pinned live tests passed, original failures retained; same reviewed contribution landed in combo99c. Independent evaluation75e5d4756cd549dbb3f2ccedc3bf211b at2026-11-14T03:15:22.125690900Z passes all3 criteria at clean landed eb78d349/treee5553362; no duplicate test or native-credit claim.",
+    "completed_at": "2026-11-14T03:16:46.572342Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

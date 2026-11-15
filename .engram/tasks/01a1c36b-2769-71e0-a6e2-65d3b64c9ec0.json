@@ -1,0 +1,37 @@
+{
+  "id": "01a1c36b-2769-71e0-a6e2-65d3b64c9ec0",
+  "external_ref": null,
+  "title": "Test-run query response outgrows the registration adapter's 64 KiB bound for a large uncommitted input, so registration is refused as invalid-response before any stage runs",
+  "outcome": "A launcher's registration confirmation succeeds for an input of any supported size, because the confirmation reads a bounded projection rather than the full run detail, or the full detail no longer duplicates unbounded source identity.",
+  "acceptance": [
+    "Registering a run whose uncommitted input has enough changed paths that its full source identity exceeds 64 KiB, then reading GET /api/test-runs/{id}?view=registration from the real host route, returns HTTP 200 with a body under 64 KiB that carries every identity field Engram's registration adapter (scripts/test-run-registration.mjs query()) checks, shown by a behavioural test; the end-to-end confirmation with Engram's shipped adapter is verified under Engram's w-b7d5132b2535.",
+    "The confirmation response stays within a documented bound independent of the input's changed-path count, and still carries every identity field the adapter checks (runId, owner and initiating session, registration state, durability, provenance, creatorPid, startedAt, detached, runDir, worktree, source).",
+    "The full run detail remains available to readers that ask for it; no source identity is truncated or dropped from the durable record."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "registration",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "No acceptance evaluation exists; self-asserted. Delivered bounded registration GET view and TermAl adapter query, full detail/source preserved. Landed master/origin0b32ab57 at18:21:10Z in integration w-bd31e57a1047; exacttree144596bb FULL test-ce0a612f allsixstagesPASS, Rust7553/0 andVitest5091/0, ownWindows3/0/0 andsourcepair noMedium+. All3criteria linked to5b8eb53738784091ab42dd946a11b2b4; C1 alsoWindows abf3b5e979d24a3880dc4c64ebe600b3. Engramshippedadapter end-to-end remains separatelyownedw-b7d5132b2535; nolive/restartedhostclaim. UnfixedLows w-d64afd83ecf4,w-514362de9c31 filed; rawarchive retaineduntilbothclose. Ownauthorrefdeleted. Safeownedfrozenrootcleanup follows.",
+    "completed_at": "2026-11-10T18:32:29.625440800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

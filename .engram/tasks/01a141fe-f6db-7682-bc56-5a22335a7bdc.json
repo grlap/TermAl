@@ -1,0 +1,30 @@
+{
+  "id": "01a141fe-f6db-7682-bc56-5a22335a7bdc",
+  "external_ref": null,
+  "title": "Update two live evaluation witnesses for the producer's evaluation record field",
+  "outcome": "The independent-refresh and sub-agent live witnesses read the current producer evaluation record id and verify the intended canonical evaluation, without depending on the removed hash alias.",
+  "acceptance": [
+    "The two affected witnesses use the producer's documented evaluation record identity and still inspect the canonical recorded evaluation and distinct whole attempts/sub-agent identity as originally intended.",
+    "A pinned disposable Engram check passes both witnesses against a build containing alias-removal commit 6b4a3a6b10e5e120eb9f41be3ce4cc5ac912af03, retaining original failure evidence; no compatibility fallback to an obsolete hash alias is added.",
+    "Independent review and the required exact-input gate pass before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-interop",
+    "live-suite",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4ca-7cb2-b03f-98301c9eb246",
+  "external_ref": "tm-c8q",
+  "title": "Define safe multi-image request body limits and errors",
+  "outcome": "The 16 MiB Axum request body cap accommodates one maximum-size pasted image but multiple valid attachments can exceed it before application validation, producing a bare 413 rather than the normal structured error. Define an explicit attachment count/aggregate-byte contract instead of relying on the transport cap.",
+  "acceptance": [
+    "UI and backend agree on attachment count and aggregate encoded/request limits; valid supported multi-image sends fit under the route cap, oversized requests receive a clear structured error where possible, and tests cover single-max, multi-image, and over-limit cases without weakening DoS protection."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

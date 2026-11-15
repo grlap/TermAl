@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c6c9-7eb1-aa9e-78092f192319",
+  "external_ref": "tm-s0l",
+  "title": "Extract OpenCode config subsystem from acp.rs",
+  "outcome": "Move the cohesive OpenCode config reconcile/apply/wait/notification subsystem out of src/acp.rs into a focused module with the repository provenance header. Keep this a pure structural move separate from the model-specific effort behavior changes; preserve the existing ACP tests and protocol behavior. Review context: acp.rs is near the 3,000-line scrutiny threshold.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3b, spot-checked by Termal::Fable2): CLOSE-DONE. The OpenCode config subsystem is extracted: src/acp_opencode_config.rs exists on master.",
+  "completion": null
+}

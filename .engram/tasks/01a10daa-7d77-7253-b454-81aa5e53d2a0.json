@@ -1,0 +1,37 @@
+{
+  "id": "01a10daa-7d77-7253-b454-81aa5e53d2a0",
+  "external_ref": null,
+  "title": "Windows read-only Codex reviewers get Unicode-safe native source-read guidance (review-code command and generated Codex brief)",
+  "outcome": "Windows read-only Codex reviewers get Unicode-safe native source-read guidance (review-code command and generated Codex brief)",
+  "acceptance": [
+    "The guidance text in w-44a70e9adc93's note f8517e53 (or a reviewed refinement of it) is in .claude/commands/review-code.md, and build_delegation_prompt (src/delegations.rs) appends it only for a Windows, Codex, readOnly delegation. The vendor-neutral write-policy text and the Claude and Kimi prompts are unchanged.",
+    "Tests show the guidance is present in a Windows Codex readOnly prompt and absent from Claude, Kimi, writable and non-Windows prompts.",
+    "The guidance does not claim to enforce fidelity: it tells the reviewer to report inspection unavailable when exact text or full coverage cannot be obtained."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "codex-runtime",
+    "read-only-review",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A Windows, Codex, read-only delegation's prompt now ends with the Unicode-safe native source-read guidance. build_delegation_prompt delegates to build_delegation_prompt_on(record, cfg!(windows)), and the same paragraph is in .claude/commands/review-code.md. The guidance does not claim enforcement and asks for \"inspection unavailable\" when the exact text or full coverage cannot be obtained.\n\nLanded as train 48: master = origin/master = a3af3519f6d6dac67ae7ed42be8ca7ba0ff414fa, tree 5bbe6edc, parents d0f33aca and ecf11563 (my commit). Verified with git fetch: origin/master = a3af3519.\n\nEvidence:\n- Item gate test-eb40c30c, holder record 7a6050d3.\n- Review pair 1 clean: Codex delegation-9b10cd9d, Claude delegation-61de29ce.\n- Authority-file conditions: (a) both coordinators; (b) Greg's 'OK, ma sens.'; (c) audits 8dbdc923, ce5d994b and Fable2's 07773b5d, plus her supplementary train-48 audit.\n- Evaluation delegation-b6e38c52 passed 3/3 (receipt b73cccd1).\n- The Explorer/Evaluator scope Note is filed as w-0d901084a352.",
+    "completed_at": "2026-10-06T01:43:58.369371300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

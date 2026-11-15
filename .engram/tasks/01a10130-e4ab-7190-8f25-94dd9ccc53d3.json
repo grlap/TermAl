@@ -1,0 +1,28 @@
+{
+  "id": "01a10130-e4ab-7190-8f25-94dd9ccc53d3",
+  "external_ref": null,
+  "title": "The review-freeze fingerprint's trackedHeadDiffSha256 changed between freeze and commit with no content change (suspect: stat-dirty files after reviewers' read-only git calls)",
+  "outcome": "The review-freeze fingerprint's trackedHeadDiffSha256 changed between freeze and commit with no content change (suspect: stat-dirty files after reviewers' read-only git calls)",
+  "acceptance": [
+    "The review-freeze fingerprint's trackedHeadDiffSha256 changed between freeze and commit with no content change (suspect: stat-dirty files after reviewers' read-only git calls) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "fingerprint",
+    "review-freeze"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a10afc-58fa-79f2-8148-f6c12d3c9de2",
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 body comparison b80d766c; applied by Termal::Fable2): duplicate in the same review-freeze staging-state family, covered by w-f6c12d3c9de2.",
+  "completion": null
+}

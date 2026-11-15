@@ -1,0 +1,27 @@
+{
+  "id": "01a13b65-4dfd-7e42-8872-276bd5c1f5ce",
+  "external_ref": null,
+  "title": "Preserve recovery-notice route readback during in-flight registration",
+  "outcome": "A notice issued against the previous published route during registration is confirmed against the same route authority, or safely deferred, without falsely marking issuance Undelivered.",
+  "acceptance": [
+    "Preserve recovery-notice route readback during in-flight registration is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "wake-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

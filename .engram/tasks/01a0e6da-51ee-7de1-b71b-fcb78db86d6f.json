@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6da-51ee-7de1-b71b-fcb78db86d6f",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance requested in the turn of a claim switch measures the previous item's still-bound claim (silent proxy substitution)",
+  "outcome": "termal_evaluate_acceptance requested in the turn of a claim switch measures the previous item's still-bound claim (silent proxy substitution)",
+  "acceptance": [
+    "termal_evaluate_acceptance requested in the turn of a claim switch measures the previous item's still-bound claim (silent proxy substitution) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "PI-5",
+    "acceptance-evaluation",
+    "post-import"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0f315-4d7e-75e3-9a0e-4a3324d6da5c",
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: duplicate — Same previous-claim substitution case is covered by the more complete requested-claim/root item. Source: src/acceptance_evaluation_api.rs:1273. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

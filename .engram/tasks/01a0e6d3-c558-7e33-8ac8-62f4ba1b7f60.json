@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c558-7e33-8ac8-62f4ba1b7f60",
+  "external_ref": "tm-l73k",
+  "title": "Preserve selected delegation mode for slash commands",
+  "outcome": "Composer slash-command delegation currently builds options only from resolved command metadata. When a Claude or Codex user selects Explorer and the command has no explicit mode, the request silently falls back to Reviewer while the button still advertises Explorer. Command-provided mode should win; otherwise preserve the user-selected mode. Add regression coverage for a non-default selected mode with a slash command.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

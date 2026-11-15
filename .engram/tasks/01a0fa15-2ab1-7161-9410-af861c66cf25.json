@@ -1,0 +1,69 @@
+{
+  "id": "01a0fa15-2ab1-7161-9410-af861c66cf25",
+  "external_ref": null,
+  "title": "Claude runtime-started turns: host ownership, result attribution, detected/unmediated record and continuity drift",
+  "outcome": "A turn Claude Code starts by itself is owned, attributed and recorded truthfully by the host, and its result can never finish, checkpoint or credit another turn",
+  "acceptance": [
+    "A Claude turn that the runtime starts by itself is identified from the stream by the probed contract — on a runtime that advertises msg_lifecycle_v1, turn output that no command_lifecycle `started` and no result identity ties to an outstanding host prompt, normally after a task_notification; on a runtime without it, init, then turn output with no exact echo of an outstanding host prompt before it — adopted under its own host owner and generation shared by the prompt writer and the stdout reader, shown Active while it runs, and host prompts sent meanwhile queue behind it; a test replays the probed frame sequences through the production frame router.",
+    "A result finishes only the turn it is correlated to — on a lifecycle runtime, the one host prompt its user_message_uuid(s) name; on a runtime without lifecycles, the turn whose init and echo opened it: a runtime-started turn's result never finishes, checkpoints, retries, or clears the replay prompt of a host-dispatched turn, including when a host prompt is written while the runtime-started turn runs; an uncorrelated or unresolved result never finalizes any grant, an error result with no correlated owner never puts an Idle session into Error, and a subagent's frames never reset or finalize the root turn; tests cover these schedules through the production frame router.",
+    "A runtime-started turn is recorded as detected and unmediated: the transcript shows an immediate mediation-gap notice when it is adopted, and its commands, tests and source changes are never attributed to another turn's grant or credited; a test shows it.",
+    "Continuity drift is tracked apart from a turn's own measured begin: when a workspace's actual begin basis differs from the previous checkpoint's end basis for the same workspace and run/root binding, the host records the drift with both revisions and the previous checkpoint reference and surfaces it as a host diagnostic, while the turn's own begin basis stays the measured one; a test shows drift with a no-edit next turn and no drift when unchanged.",
+    "The full gate passes on the landed input.",
+    "The /review-changes pair has no outstanding in-scope Medium or higher finding on the reviewed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a0e6c9-9c20-7ad3-8066-df1ef323efe9",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed as merge 21779da onto master (tree e6417568), installed and running on the host since Greg's restart at about 02:17Z.\n\nClaude turns the runtime starts by itself are identified by the probed contract, adopted under their own host owner and generation, shown Active, and host prompts queue behind them. A result finishes only its correlated turn. Such a turn is recorded as detected and unmediated, with an immediate mediation-gap notice, and nothing of it is attributed or credited to another grant. Continuity drift is tracked apart from a turn's measured begin. Retained Claude work reaches checks and carried gates through one interference rule (src/engram_claude_interference.rs): registration against each check's evidence interval, a carried run fenced outright up to its first terminal read and judged per settlement candidate by its own closure after that, and reconciliation at the publication cut.\n\nThe work took 18 review rounds and freezes up to 23, with every Medium fixed and reviewed again. The witnesses were discrimination-proven: red under fault controls, green on the fix.\n\nEvidence: the full gate on the landed tree, test-c24c1b4e (verification 8391e5cd, content-v1:52949e5b); round 18 clean on 817b5e4 (Codex ed088284, Claude 001e716a); the integration pair clean on e6417568 (Codex 585947ba, Claude fb1e4641); the evidence index ba7e8197; independent evaluation 2cdd5a3d, 6/6.\n\nFollow-up filed: w-42a86e2bff87 (outstanding Claude work forgotten across a restart).",
+    "completed_at": "2026-10-03T02:59:10.471049100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

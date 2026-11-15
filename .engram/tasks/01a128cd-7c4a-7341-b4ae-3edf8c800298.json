@@ -1,0 +1,42 @@
+{
+  "id": "01a128cd-7c4a-7341-b4ae-3edf8c800298",
+  "external_ref": null,
+  "title": "Transient closing-checkpoint witness: assert settlement before the new evaluate and use a distinct uncertain successor grant",
+  "outcome": "src/tests/engram_closing_checkpoint_retry_transient.rs claims the prior grant is settled before the one new evaluate, but only compares counts. It asserts from CausalTransport.order that the recovery turn_checkpoint (NeverStarted) or the session_status read (LostReply) precedes the new turn_evaluate. Its uncertain-grant case also uses the shape production writes: active = prior grant N, uncertain = a distinct possibly-begun successor grant. The current case sets uncertain == active, a state no production writer produces.",
+  "acceptance": [
+    "The transient witness asserts the settlement (recovery checkpoint or status read) is ordered before the new evaluate for both failure modes, and an uncertain-grant case with a distinct successor grant keeps the hold; the focused tests pass.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4e9-7fe1-972b-fc62930d943c",
+  "external_ref": "tm-dk5",
+  "title": "Document cross-agent conversation rewind and fork capabilities",
+  "outcome": "Record the investigated point-in-time conversation capabilities for Codex, Claude, Gemini, Cursor, OpenCode, and generic ACP; distinguish native provider support from current TermAl support and document the safe implementation direction.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

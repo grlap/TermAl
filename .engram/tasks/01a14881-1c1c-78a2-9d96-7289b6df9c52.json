@@ -1,0 +1,49 @@
+{
+  "id": "01a14881-1c1c-78a2-9d96-7289b6df9c52",
+  "external_ref": null,
+  "title": "Distinguish unknown mailbox receipts from receipts issued to another participant or mailbox",
+  "outcome": "Mailbox receipt rejections distinguish an unknown token from a token issued to another participant or mailbox, preserve cursors, and retain exact-receipt acceptance. The reported 06:14Z rejection is documented as a caller transcription error, not an identical retry or storage race.",
+  "acceptance": [
+    "The 06:14Z incident's root cause is recorded with original transcript line references: the failed acknowledge transposed abd2 to ab2d; the successful acknowledge used the original issued receipt.",
+    "An unknown receipt and an existing receipt belonging to another participant or mailbox produce distinct typed errors without moving any cursor; the exact original receipt is subsequently accepted, including across separate connections to the same store.",
+    "A delegation-MCP bridge regression verifies that mailbox reads and acknowledgements forward the same serving session identity and preserve the exact supplied receipt.",
+    "The focused receipt regressions and full gate pass on the final input, and an independent read-only review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

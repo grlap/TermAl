@@ -1,0 +1,30 @@
+{
+  "id": "01a13c7b-9c16-7603-aa38-d69952b0a485",
+  "external_ref": null,
+  "title": "Strengthen nested-summary association controls with a valid same-root nested record",
+  "outcome": "Strengthen nested-summary association controls with a valid same-root nested record",
+  "acceptance": [
+    "Missing or mismatched outer-summary association controls include a valid same-owner, same-root nested artifact and still reject fallback; assertions distinguish association handling from foreign-path rejection without weakening final verdict guards.",
+    "Focused regression and maintained full gate pass on the exact reviewed input before completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-follow-up",
+    "test-launcher",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1399b-302a-7b82-9dbf-79dc48b36f27",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a123b7-642a-71b3-89d8-32c7324bb514",
+  "external_ref": null,
+  "title": "Strengthen the refused and deferred boot-reconstruction witnesses, and cover a Begin-refused head restarted with its Prepared begin",
+  "outcome": "Strengthen the refused and deferred boot-reconstruction witnesses, and cover a Begin-refused head restarted with its Prepared begin",
+  "acceptance": [
+    "Strengthen the refused and deferred boot-reconstruction witnesses, and cover a Begin-refused head restarted with its Prepared begin is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

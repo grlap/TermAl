@@ -1,0 +1,31 @@
+{
+  "id": "01a1bc55-4df4-7ef0-a108-f35625426fed",
+  "external_ref": null,
+  "title": "Isolate an unavailable local relay association from independent mailbox listing results",
+  "outcome": "A missing local-home association is reported truthfully for its mailbox while independently verified available history remains listable, without inventing membership or reconstructing associations.",
+  "acceptance": [
+    "A deterministic injected missing-association case preserves independently available verified mailbox summaries and reports the unavailable mailbox without granting membership, changing its original home or fabricating an empty history.",
+    "Behavioral controls cover the refusal/isolation contract and leave participant cursors, receipts and owed notifications unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "needs-triage",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ba29-1065-7332-a772-96168781dfa8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

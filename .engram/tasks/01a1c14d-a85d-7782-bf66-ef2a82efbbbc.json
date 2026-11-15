@@ -1,0 +1,35 @@
+{
+  "id": "01a1c14d-a85d-7782-bf66-ef2a82efbbbc",
+  "external_ref": null,
+  "title": "Require the supported initial notes-window carrier during canonical discovery",
+  "outcome": "Require the supported initial notes-window carrier during canonical discovery",
+  "acceptance": [
+    "Once canonical identity is acquired, a supported initial notes-and-gates receipt lacking mandatory notes_window is refused before evaluator creation; request-path tests distinguish the malformed carrier from capability-unavailable legacy behavior."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "repeated-problem"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

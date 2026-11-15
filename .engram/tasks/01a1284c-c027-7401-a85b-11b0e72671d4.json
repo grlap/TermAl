@@ -1,0 +1,41 @@
+{
+  "id": "01a1284c-c027-7401-a85b-11b0e72671d4",
+  "external_ref": null,
+  "title": "Populate the card-level grantId on recovery-checkpoint failure cards",
+  "outcome": "When a rebind's recovery checkpoint is refused (restart_checkpoint_refused carrying the producer's code) or answered with a receipt for another grant (restart_checkpoint_receipt_mismatch), the hold card names the grant that status reported open, in a structured card-level field, without echoing the received receipt's grant or any capability. Today the card's grantId is null; the grant appears only inside causalFailure.attemptId, the refused request's idempotency key, which an operator must parse.",
+  "acceptance": [
+    "A test shows that for both a refused recovery checkpoint and a receipt naming another grant, the hold card carries the grant status reported open in a structured field (for example grantId), while the receipt's own grant id and every routing or delivery token stay absent from persisted and wire projections (engram_root_causal_value_free.rs's absence checks still pass).",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

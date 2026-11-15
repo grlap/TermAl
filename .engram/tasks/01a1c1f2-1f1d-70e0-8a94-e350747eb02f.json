@@ -1,0 +1,24 @@
+{
+  "id": "01a1c1f2-1f1d-70e0-8a94-e350747eb02f",
+  "external_ref": null,
+  "title": "Selected-proof fence: tracker-cut marker must not sit on the closing fence line",
+  "outcome": "A selected evidence body rendered as a fenced block always closes its fence, even when the entry is marked cut by the tracker, so later host anchors stay visible; the fence renderer and the anchor parser share one fence rule, and the partial-window-copy test asserts anchor placement.",
+  "acceptance": [
+    "Selected-proof fence: tracker-cut marker must not sit on the closing fence line is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

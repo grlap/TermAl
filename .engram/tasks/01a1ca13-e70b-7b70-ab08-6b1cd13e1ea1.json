@@ -1,0 +1,30 @@
+{
+  "id": "01a1ca13-e70b-7b70-ab08-6b1cd13e1ea1",
+  "external_ref": null,
+  "title": "Cover remaining acceptance replay admission and source failure boundaries",
+  "outcome": "Behavioral replay tests cover remaining refusal and source-custody branches without external effects, real-time waits or changed timeout policy.",
+  "acceptance": [
+    "Tests drive the production replay path for changed store, prepared brief and retained child/attempt identity mismatches and assert no tracker invocation.",
+    "Tests cover Locked, NeverStarted and immutable source verification failures, preserving the original Unconfirmed write and attempt identity.",
+    "Tests verify source custody and stored outcome at the relevant refusal/ack boundaries; focused tests pass on the judged candidate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

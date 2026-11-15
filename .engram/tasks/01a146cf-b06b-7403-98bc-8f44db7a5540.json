@@ -1,0 +1,29 @@
+{
+  "id": "01a146cf-b06b-7403-98bc-8f44db7a5540",
+  "external_ref": null,
+  "title": "After stop and queue resume, a session's source-root binding becomes \"unconfirmed: canonical naming history could not be established\", and evidence is withheld",
+  "outcome": "After stop and queue resume, a session's source-root binding becomes \"unconfirmed: canonical naming history could not be established\", and evidence is withheld",
+  "acceptance": [
+    "After stop and queue resume, a session's source-root binding becomes \"unconfirmed: canonical naming history could not be established\", and evidence is withheld is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "named-root",
+    "session-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a18add-33d2-7ba1-9840-078b993cb527",
+  "external_ref": null,
+  "title": "Reconcile invocation slot retirement with native abandonment and unproven placeholder saturation",
+  "outcome": "Explicit producer-native abandonment releases only the original invocation slots it proves ended; unproven placeholder capacity has an accurately scoped loss policy. Unfinished processes, NotFinished, host turns and artifact Unknown do not become completion proof.",
+  "acceptance": [
+    "Reconcile invocation slot retirement with native abandonment and unproven placeholder saturation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "command-invocations",
+    "design",
+    "engram-host-adapter",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18a53-c626-7740-9c09-ec8cbcc3efec",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

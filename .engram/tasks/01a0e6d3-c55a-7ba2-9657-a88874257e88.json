@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c55a-7ba2-9657-a88874257e88",
+  "external_ref": "tm-lgw8",
+  "title": "Share live SSE across browser tabs without starving workspace requests",
+  "outcome": "Greg reports repeated UI hangs on Vite 4173. HTTP root and proxied health respond in 3-122 ms; Vite has six persistent upstream connections to 8787. Current transport creates one EventSource per tab. Implement shared worker transport covering rejected tm-h5cn requirements: async native fallback, error parity, coalesced recovery, joining snapshot hydration, bounded dead port cleanup and bfcache restore. Restore preserved tests from target/proposals/6276-plus-evidence-vs-5eec13e.patch. Do not touch the existing staged changes or live release assets.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 511cd20 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

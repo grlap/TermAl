@@ -1,0 +1,31 @@
+{
+  "id": "01a1a41e-05b1-7073-9c86-6e0dc893bf14",
+  "external_ref": null,
+  "title": "Cover Claude background launcher correlation through the real parser with exact and unrelated locators",
+  "outcome": "Cover Claude background launcher correlation through the real parser with exact and unrelated locators",
+  "acceptance": [
+    "A real handle_claude_event background-result fixture with Success/NotFinished and Claude provenance correlates the original explicit registered RUN locator without conferring native verification credit.",
+    "An unrelated-locator control preserves honest uncertainty and conditional registered-run advice."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "review-low",
+    "test-runs",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a01f-522e-7d00-9d49-96480bbbe221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

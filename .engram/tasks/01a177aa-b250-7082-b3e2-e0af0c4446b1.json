@@ -1,0 +1,30 @@
+{
+  "id": "01a177aa-b250-7082-b3e2-e0af0c4446b1",
+  "external_ref": null,
+  "title": "Fence global mailbox aliases when a new MCP bridge receives a legacy participants array",
+  "outcome": "A new bridge talking to a host that returns the legacy participants array does not infer complete global name inventory or route mail to a visible namesake while another host is unavailable; exact identities remain usable.",
+  "acceptance": [
+    "A legacy participants-array response causes the bridge to recover unavailable-host information from the existing directory endpoint or to mark global alias inventory incomplete before selecting a Name or name: target.",
+    "A bridge regression covers a visible namesake plus unavailable-host uncertainty and proves that global aliases fail closed while exact ids and supported host-qualified references remain usable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "compatibility",
+    "federation",
+    "mcp",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

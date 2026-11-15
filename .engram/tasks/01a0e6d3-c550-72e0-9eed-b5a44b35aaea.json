@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c550-72e0-9eed-b5a44b35aaea",
+  "external_ref": "tm-kwu8",
+  "title": "Bound concurrent Engram doctor invocations and account for lingering readers",
+  "outcome": "Consolidated final20-file Claude Low findings: Verify and Save can concurrently run doctor for300s against the same project/store with blocking workers, two readers and up to8MiB per stream. Add per-project single-flight or explicit busy response, with concurrency tests. Separately account for detached readers after timeout: single-flight until request return alone does not bound accumulation across sequential retries when Unix descendants retain pipes. Define resource lifetime/admission policy and test it rather than claiming single-flight fixes lingering readers. Existing tm-ng02 covers bounded request return and safe cleanup; no matching concurrency task found by tracker title/description search. Source inspection only; no resource-exhaustion reproduction.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

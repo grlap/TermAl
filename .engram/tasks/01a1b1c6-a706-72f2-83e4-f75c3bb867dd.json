@@ -1,0 +1,28 @@
+{
+  "id": "01a1b1c6-a706-72f2-83e4-f75c3bb867dd",
+  "external_ref": null,
+  "title": "Follow-up to a completed Codex delegation child is refused with \"archived manually\" when TermAl itself may have archived the thread",
+  "outcome": "Follow-up to a completed Codex delegation child is refused with \"archived manually\" when TermAl itself may have archived the thread",
+  "acceptance": [
+    "For delegation-43792edc-fc4b-42d5-ae6c-d444854aaa39, it is established from the host's records who archived the Codex thread (a user, or TermAl's release path), with the evidence.",
+    "If TermAl archived it, a follow-up to a completed Codex child restores the thread, or the refusal names the real cause and the supported recovery; a test covers that path. If a user archived it, the existing refusal is confirmed as intended and the item closes with that evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a10d1f-49aa-7e40-9790-8bf5519ab991",
+  "external_ref": null,
+  "title": "Avoid queued dispatch onto a dedicated runtime whose tree is confirmed gone",
+  "outcome": "Avoid queued dispatch onto a dedicated runtime whose tree is confirmed gone",
+  "acceptance": [
+    "Avoid queued dispatch onto a dedicated runtime whose tree is confirmed gone is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-workflow",
+    "delegation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

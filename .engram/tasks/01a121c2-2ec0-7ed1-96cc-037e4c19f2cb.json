@@ -1,0 +1,27 @@
+{
+  "id": "01a121c2-2ec0-7ed1-96cc-037e4c19f2cb",
+  "external_ref": null,
+  "title": "The mocked-timer slow-worker witness cannot detect a wall-clock deadline reintroduced on another wait or in a fixture process",
+  "outcome": "A regression that puts a wall-clock deadline back into scripts/test-launcher.test.mjs is caught by a test. The deadline could come back on any process wait (a setTimeout race) or in a fixture process (Date.now()). One option is routing waits through one helper whose time is injectable; another is a source guard over the test file and its fixture sources.",
+  "acceptance": [
+    "The mocked-timer slow-worker witness cannot detect a wall-clock deadline reintroduced on another wait or in a fixture process is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

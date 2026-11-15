@@ -1,0 +1,30 @@
+{
+  "id": "01a1beb5-e8bf-7fd2-a01a-b78b4a42cbce",
+  "external_ref": null,
+  "title": "Preserve keyboard focus when clearing the Test Runs session scope",
+  "outcome": "Activating Show all runs clears the scope and moves focus to a stable surviving control so keyboard and screen-reader users can continue inspecting Test Runs.",
+  "acceptance": [
+    "Activating Show all runs from keyboard clears the session scope, preserves View/Project/State, and leaves focus on an appropriate surviving control with the updated scope understandable.",
+    "A panel behavior test covers the focused clear action and its resulting rows and focus."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "accessibility",
+    "greg-reported",
+    "review-follow-up",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be7f-e822-7df3-8636-e23b6817b4e1",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a15b35-1f8c-7f12-94a4-b57a17e243b6",
+  "external_ref": null,
+  "title": "Discard bridge read keys only on certified refusals that never froze a page",
+  "outcome": "A bridge read refused before page creation does not retain a nonexistent key and misreport the next identical attempt as a central restart; unknown outcomes still preserve exact-key recovery.",
+  "acceptance": [
+    "Discard bridge read keys only on certified refusals that never froze a page is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "gate-load",
+    "greg-directed",
+    "mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15a23-842a-7c72-b323-c931b0f63084",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

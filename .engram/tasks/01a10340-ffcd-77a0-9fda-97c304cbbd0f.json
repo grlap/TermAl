@@ -1,0 +1,24 @@
+{
+  "id": "01a10340-ffcd-77a0-9fda-97c304cbbd0f",
+  "external_ref": null,
+  "title": "Use accurate guidance during ordinary deletion and admission-only source tracking holds",
+  "outcome": "Ordinary delete reservations and admission-only deferrals describe their actual status without claiming unfinished source accounting.",
+  "acceptance": [
+    "Use accurate guidance during ordinary deletion and admission-only source tracking holds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

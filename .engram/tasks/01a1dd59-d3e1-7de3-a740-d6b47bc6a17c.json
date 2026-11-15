@@ -1,0 +1,30 @@
+{
+  "id": "01a1dd59-d3e1-7de3-a740-d6b47bc6a17c",
+  "external_ref": null,
+  "title": "Publish the predecessor no-report diagnostic added during ordinary or human turn opening",
+  "outcome": "A client receives every predecessor no-report message when a new turn starts, with a mutation stamp consistent with the published message projection.",
+  "acceptance": [
+    "A behavior test exercises an opening that settles a predecessor lacking a retained report/job and verifies the System diagnostic appears in the published message delta or a committed full snapshot, alongside the new prompt and a truthful mutation stamp."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-low",
+    "review-medium",
+    "sse"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c70b-7f41-98e7-8a4de9959cdd",
+  "external_ref": "tm-ncc6.7.3",
+  "title": "Log viewer with SSE follow",
+  "outcome": "TestRunLog.tsx with an SSE client modeled on ui/src/api-terminal.ts:80; bounded ring buffer; follow toggle (auto-scroll only when following), wrap, jump to end; stops when the server closes the stream (stage terminal); aborts on unmount.",
+  "acceptance": [
+    "- Follow stops when the stream ends; no reconnect loop.\n- Buffer never exceeds its bound.\n- Unmount aborts the request (no leaked EventSource/fetch)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a7ef4115f1f",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

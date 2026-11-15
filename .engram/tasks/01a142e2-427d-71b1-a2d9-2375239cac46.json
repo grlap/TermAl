@@ -1,0 +1,37 @@
+{
+  "id": "01a142e2-427d-71b1-a2d9-2375239cac46",
+  "external_ref": null,
+  "title": "Cover test-run cursor validation and missing-timestamp pagination boundaries",
+  "outcome": "Pin the remaining safe-by-inspection cursor validation and keyset ordering edge cases through bounded route tests.",
+  "acceptance": [
+    "Route tests reject base64-valid cursors with wrong JSON shape, unknown fields or empty runId, and cursors over the 4096-character limit; project-scoped cursors are rejected when reused without their project filter.",
+    "Pagination tests cover differing startedAt values across a page boundary and missing/null timestamps sorting last, with exact expected order and no assertion weakening, timing sleeps or timeout increases.",
+    "Focused regression and maintained full gate pass on the exact reviewed input before completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "api",
+    "coordination-cost",
+    "host-recording",
+    "performance",
+    "restart-safety",
+    "review-follow-up",
+    "test-launcher",
+    "test-run-visibility",
+    "tests",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

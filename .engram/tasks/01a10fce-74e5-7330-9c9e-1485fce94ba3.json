@@ -1,0 +1,29 @@
+{
+  "id": "01a10fce-74e5-7330-9c9e-1485fce94ba3",
+  "external_ref": null,
+  "title": "Make dormant recovery ACK readback establish persisted session and transcript loadability",
+  "outcome": "Before live recovery ACK use, validate loader-compatible metadata, message decoding, contiguous positions and message identity columns, with adversarial controls.",
+  "acceptance": [
+    "Make dormant recovery ACK readback establish persisted session and transcript loadability is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "begin-recovery",
+    "dormant",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

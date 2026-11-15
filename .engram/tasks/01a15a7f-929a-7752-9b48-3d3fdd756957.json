@@ -1,0 +1,29 @@
+{
+  "id": "01a15a7f-929a-7752-9b48-3d3fdd756957",
+  "external_ref": null,
+  "title": "Test Runs panel is extremely sluggish without a filter: keystrokes lag until state=running is set",
+  "outcome": "The Test Runs panel stays responsive (typing and filtering without perceptible lag) with the full unfiltered run history of a busy host.",
+  "acceptance": [
+    "A measurement on a realistic run history (at least the size of the central host's history on 2026-10-20) shows where the time goes: rendering, filtering, polling or state size.",
+    "A fix keeps keystroke-to-render latency in the panel's filter input under a stated bound with the full history and no filter, and a test or benchmark guards it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

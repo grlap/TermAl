@@ -1,0 +1,38 @@
+{
+  "id": "01a1d1d9-f517-7c33-afed-908c041b593b",
+  "external_ref": null,
+  "title": "Cover stale wake metadata refusal during removed-recipient notification retirement",
+  "outcome": "A stale observed wake cannot retire a newer retained notification, and current metadata can still be retired safely.",
+  "acceptance": [
+    "A disposable behavioral test changes the retained wake metadata after an observation, proves retirement refuses and preserves the row, then proves retirement with the current metadata succeeds without changing canonical mail or cursors."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "native-relay",
+    "post-restart",
+    "relay",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d135-c3d4-7072-9d47-d8f2e3a93e49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

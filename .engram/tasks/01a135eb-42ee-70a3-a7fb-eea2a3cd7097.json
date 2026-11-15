@@ -1,0 +1,29 @@
+{
+  "id": "01a135eb-42ee-70a3-a7fb-eea2a3cd7097",
+  "external_ref": null,
+  "title": "After a restart, a receipted write-ahead that never reached promotion is settled Ambiguous although its durable row proves it unsent",
+  "outcome": "After a restart, a receipted write-ahead that never reached promotion is settled Ambiguous although its durable row proves it unsent",
+  "acceptance": [
+    "Decide, with a recorded design ruling, whether restart settlement (src/prompt_delivery.rs, the boot settlement of HandingOff receipts) returns a HandingOff receipt whose durable turn_generation is None to Pending instead of Ambiguous, since promotion commits the turn generation before any send.",
+    "If changed, restart_after_the_write_ahead_commit_is_ambiguous_and_never_replayed is revised and a test covers both the never-promoted case (pending, sent once) and the promoted case (ambiguous, never replayed)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "restart",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

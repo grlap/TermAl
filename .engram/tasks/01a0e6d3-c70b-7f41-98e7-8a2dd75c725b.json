@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c70b-7f41-98e7-8a2dd75c725b",
+  "external_ref": "tm-ncc6.7.1",
+  "title": "Tab wiring: kind testRuns, factory, validation, label, dock action, singleton per pane",
+  "outcome": "Mirror the Work tab in ui/src/workspace-types.ts, workspace-tabs.ts (createWorkTab 161), workspace-tab-validation.ts (28/88), panels/pane-tab-labels.ts (87), panels/ControlPanelSurface.tsx (93), app-workspace-actions.ts (41/801), workspace.ts (openWorkInWorkspaceState ~940-988); tests mirror workspace-work.test.ts.",
+  "acceptance": [
+    "- Dock action opens one Test Runs tab per pane; reopening focuses it.\n- Persisted tab validates and labels correctly.\n- tsc clean, workspace tests green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c655-7941-84fb-8a7ef4115f1f",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

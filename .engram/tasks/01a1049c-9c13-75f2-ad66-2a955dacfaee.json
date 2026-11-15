@@ -1,0 +1,35 @@
+{
+  "id": "01a1049c-9c13-75f2-ad66-2a955dacfaee",
+  "external_ref": null,
+  "title": "Bound journal-capacity lifecycle witnesses without changing production limits",
+  "outcome": "Capacity and reclamation witnesses remain behaviorally meaningful with bounded real lifecycle transitions, while production retains the 1024 journal limit and full-size boundary coverage.",
+  "acceptance": [
+    "The three journal-capacity witnesses exercise real naming and reclamation beyond an isolated fixture capacity with a bounded number of transitions, preserving monotonic generations, retained custody, retirement publication and acknowledgement, restart behavior and final journal assertions.",
+    "The production journal limit remains 1024 and production retention and protection behavior is unchanged; full-size admission, refusal and census coverage remains, and the fixture capacity cannot affect another state or survive an unintended restart.",
+    "Focused behavioral tests pass on the candidate without raised timeouts or removed assertions, and original runtime evidence plus the source analysis of live naming and compaction costs remains recorded."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

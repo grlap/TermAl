@@ -1,0 +1,28 @@
+{
+  "id": "01a1985d-0337-7bf2-9e7b-0abaa7ca8db6",
+  "external_ref": null,
+  "title": "Spawn-time slash-command resolution drops the arguments after the command, so a /review-code delegation reviews an empty tree",
+  "outcome": "Spawn-time slash-command resolution drops the arguments after the command, so a /review-code delegation reviews an empty tree",
+  "acceptance": [
+    "When termal_spawn_session receives a prompt that starts with a resolvable slash command followed by arguments (for example a commit range or a brief path), the arguments are preserved and passed to the command the same way /review-changes ARGUMENTS are; or the spawn is refused with a typed error, never silently truncated",
+    "A test spawns a reviewer with '/review-code <range> <brief path>' and asserts that the child prompt contains the arguments, or that a typed refusal is returned"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "review-integrity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1c04e-9da0-7ac3-938a-941e0fdc6e2f",
+  "disposal_reason": "Same argument-loss behaviour, found again in a live review on 2026-11-09 and being fixed under w-941e0fdc6e2f with the broader no-input protocol line. Its holder is to check this item's criteria at closing, per Sol-a7bb mailbox f59d4581 #2862; this item's original observations stay here for reference.",
+  "completion": null
+}

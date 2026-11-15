@@ -1,0 +1,32 @@
+{
+  "id": "01a18720-9010-7d11-a4b9-2f002c244c5f",
+  "external_ref": null,
+  "title": "w-c205 slice B: Remote errors and idempotency conflicts are final only when Engram documents a no-write refusal",
+  "outcome": "Unadmitted execution_observe delivery and verification_bind treat only Engram's documented record-nothing refusals as final, and a validated idempotency conflict as a terminal identity collision. The collision is disclosed with its key and is never resent or rekeyed while the process knows it. Once durably recorded, it is never rescheduled. Other Remote errors stay unresolved and are replayed identically or held.",
+  "acceptance": [
+    "For unadmitted execution_observe and verification_bind, retain the original session, idempotency key and request intent before send. Classify only operation-specific documented no-write refusals as terminal; classify a validated idempotency conflict distinctly as rejected identity collision, never bound. Undocumented or unvalidated outcomes remain unresolved.",
+    "After a validated identity collision, the running process never automatically resends or rekeys the request, and a durably recorded terminal collision is never rescheduled after reload. If a crash loses the reply before terminal settlement is durable, recovery may replay only the still-pending original session, key and intent under the producer's supported contract; this does not resolve the collision or provide exactly-once transport. Durably disclose the rejected request's original identity and the known conflicting-key relation through the existing bounded diagnostic owner before retiring its delivery custody; do not claim the occupying request or its result is known without matching evidence. Other unresolved outcomes keep their original identity and custody and use only supported bounded identical replay. The updated-build guarantee does not extend to a rollback to a pre-fix build, whose old AlreadyBound classification is documented.",
+    "Per-endpoint tests cover terminal collision disclosure and retirement across a crash/reload, no resend or rekey of a known or durably recorded collision, with supported identical recovery of a reply lost before durable settlement and no false bound notice; undocumented Remote errors remain unresolved with identical replay and custody; documented no-write refusals remain final. Tests cover the existing diagnostic bound and the declared predecessor/rollback behavior without claiming unavailable readback."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "engram-interop",
+    "lost-reply",
+    "w-c205-slice"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18617-8de1-79e3-b1cb-c205c0fecb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

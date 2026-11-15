@@ -1,0 +1,41 @@
+{
+  "id": "01a0e4da-22f2-7262-bcd8-be02a8f58f83",
+  "external_ref": null,
+  "title": "Live proof: named root and bound test",
+  "outcome": "Live proof: named root and bound test",
+  "acceptance": [
+    "The proof is written up",
+    "cargo test --bin termal live_proof passes in the named root"
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "live-proof"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Live proof step 4 complete (Termal::Fable2, session-8112, 2026-09-28): named root .tmp\\wt-proof measured by the host; the bound test credited as host-minted verification (44d96f57… passed at content-v1:0c0033bc…); independent evaluation 9f948dca… passed 2/2 at that revision; earlier cases A, B, C', E observed on this item (missing_acceptance_evaluation, acceptance_insufficient_evidence, acceptance_failed, acceptance_evaluation_stale) and D/D'/D'' on w-a69942b120f3 and w-61291d093755. Write-up: LIVE-PROOF.md in the root; full report .tmp\\beads-to-engram\\step4-report-20260927T2148Z.md.",
+    "completed_at": "2026-09-28T06:52:36.768819100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

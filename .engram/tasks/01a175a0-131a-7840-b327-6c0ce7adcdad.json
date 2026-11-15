@@ -1,0 +1,37 @@
+{
+  "id": "01a175a0-131a-7840-b327-6c0ce7adcdad",
+  "external_ref": null,
+  "title": "Native binding proof fixture races the real 10 s attestation window, so a loaded gate fails with attestExpired",
+  "outcome": "Fixture attestation in the native binding proof, relay and reference suites does not depend on elapsed wall time. The product's attestation expiry semantics are unchanged and still tested.",
+  "acceptance": [
+    "A deterministic regression is RED before and GREEN after: the fixture attestation succeeds although a real delay longer than its attestation window elapses during the handshake",
+    "The fixture channels use the scripted control clock; no product timeout, budget or expiry semantics change, and the attestation-expiry tests stay green",
+    "The native binding proof, relay and reference suites stay green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "gate-blocker",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; 16635a20; scripted clock/injected-delay RED-GREEN, pair/FULLb9331c43; closure only; production timeout unchanged.",
+    "completed_at": "2026-11-08T19:21:45.309313800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

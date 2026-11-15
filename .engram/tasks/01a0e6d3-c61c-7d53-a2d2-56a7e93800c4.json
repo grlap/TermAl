@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-56a7e93800c4",
+  "external_ref": "tm-m6r1.8",
+  "title": "Work query validation: bound combined Windows CLI arguments",
+  "outcome": "Round-1 Claude Low, work_visualizer_types.rs:26: four independently accepted 16-KiB fields can exceed the Windows CreateProcess 32767-character command-line limit including configured paths and quoting; spawn then returns misleading upstream 502. Set realistic field/aggregate budgets (including UTF-16 and escaping where relevant) and reject oversized client input before spawning. Cursor stays opaque; base its cap on the supported CLI contract, not token internals.",
+  "acceptance": [
+    "Boundary tests cover combined fields and Windows quoting/UTF-16 expansion; oversized queries return 400 without spawning, while valid supported cursors still work."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

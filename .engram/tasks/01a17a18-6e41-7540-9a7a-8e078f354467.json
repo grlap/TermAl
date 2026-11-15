@@ -1,0 +1,33 @@
+{
+  "id": "01a17a18-6e41-7540-9a7a-8e078f354467",
+  "external_ref": null,
+  "title": "Carry session-list display metadata over the landed ordinary-routing changes",
+  "outcome": "The accepted session-list display-metadata change is mergeable on 0a63d3a5 while preserving the landed ordinary native-routing behavior and the immutable original package.",
+  "acceptance": [
+    "Map the accepted 30144b65 metadata hunks onto base 0a63d3a5 at delegation_mcp.rs and federation_mailbox_bridge.rs without losing the landed ordinary-routing changes; preserve the original root, claim and evidence package.",
+    "Run one focused validation in the separate owned carry root after a granted build slot, and obtain the required delta confirmation review for actually merged hunks while retaining authenticated exact-blob prior full-review coverage.",
+    "Deliver one complete carry READY package to the integration owner with original-to-new hunk mapping, native base/tree/raw/index evidence, focused result and complete review artifacts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "carry",
+    "coordination",
+    "engram-reported",
+    "federation",
+    "post-p0",
+    "regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a178bc-efd3-7c40-9eb7-25199ca6ef59",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

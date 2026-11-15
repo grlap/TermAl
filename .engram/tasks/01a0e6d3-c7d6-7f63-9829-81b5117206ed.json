@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7d6-7f63-9829-81b5117206ed",
+  "external_ref": "tm-x80k",
+  "title": "An 80-character workspace label can distort the pane bar: switcher trigger has no width bound",
+  "outcome": "Found independently by BOTH delegated reviewers, which is the strongest agreement signal this review arrangement produces. The workspace switcher trigger value at ui/src/styles.css around line 1438 has no max-width, white-space, overflow or text-overflow. Before workspace labels existed, that element always rendered a hard-truncated eight-character workspace id, so its width was bounded by construction; it now renders an arbitrary user label of up to eighty characters inside the pane-bar flex row, whose container uses grid-auto-columns max-content with flex 0 0 auto, so a long label stretches the switcher button and can widen the actions past the normal 36rem control-panel pane, squeezing the tab area toward zero and overflowing the header. The neighbouring theme toggle and connection chip are pushed or clipped. The dropdown row title at around line 1572 has the same gap inside its 26rem menu and can overflow horizontally on a single long unbroken token. Fix direction, agreed by both reviewers: clamp the trigger value with max-width plus white-space nowrap plus overflow hidden plus text-overflow ellipsis, and keep the full text available through a title attribute so nothing is lost; give the dropdown list title overflow-wrap anywhere. Worth checking the saved-workspace rows in the same pass. Note this is only reachable with a long label, so it does not affect anyone using short names, and the server already bounds the value at eighty characters. Related tracked item: the workspace-label work itself.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. The switcher popover was retired in f4ede4b; no workspace-switcher rule remains in ui/src/styles.css.",
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c69d-7c10-8f4e-5a374ce1ef08",
+  "external_ref": "tm-pl7k",
+  "title": "Bound the Engram work-binding CLI reads on the dispatch path against the documented latency invariant",
+  "outcome": "Every session bind now performs a synchronous two-command Engram CLI read (work next --sections focus, then work focus <id>) via read_work_binding (src/engram_host_adapter.rs:3634); each command is bounded at ENGRAM_WORK_BINDING_COMMAND_TIMEOUT (6 s) with one 250 ms lock retry, so roughly 12.25 s worst case per command and about 24.5 s for the pair, and the stale-fence recovery paths in prepare_engram_dispatch and deliver_engram_turn re-run a full bind once more. A single user prompt can therefore spawn up to about 8 Engram processes and block the send path for tens of seconds, contradicting docs/features/engram-host-adapter.md:375-377 (250 ms per call; a hung dispatch is never acceptable). Cap the total work-binding read budget per dispatch, cache the binding per routing token, or move the read off the hot path (see also tm-qc2h for the sidecar prewarm), reconcile the brief, and add a test asserting the end-to-end dispatch wall clock stays inside a stated bound when the CLI read is slow. Found by the Claude delegated reviewer (Medium); the consultant review had accepted the bound as a fault-only cost, the documented invariant is the stricter contract.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

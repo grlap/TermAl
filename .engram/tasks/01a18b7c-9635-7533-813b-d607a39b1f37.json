@@ -1,0 +1,30 @@
+{
+  "id": "01a18b7c-9635-7533-813b-d607a39b1f37",
+  "external_ref": null,
+  "title": "review_identity_questly_capacity_covers_ten_thousand_files_without_relaxing_limits exceeds its 40 s capture deadline when run in parallel with its review_identity_cli siblings on Windows (solo ~30 s)",
+  "outcome": "review_identity_questly_capacity_covers_ten_thousand_files_without_relaxing_limits exceeds its 40 s capture deadline when run in parallel with its review_identity_cli siblings on Windows (solo ~30 s)",
+  "acceptance": [
+    "The original test-f0ee2474 failure remains recorded as failed with its cause unresolved; the controlled solo, four-thread, one-thread, temporary-directory and valid-input full-gate evidence is retained with run identities and limitations. No test, fixture size, assertion or worker limit is weakened.",
+    "A confirming maintained full gate on the clean Bprime integration input after c7e0 includes and passes the required 10,000-file capacity case, with its exact commit, tree and matching before/after input fingerprints recorded; until then this item remains open for monitoring.",
+    "The recorded monitoring disposition treats any recurrence on eligible clean input as a new investigation trigger, preserves its failed run, and compares the effective Git executable/PATH, wrapper environment and gate resource context before selecting a fix. Diagnostic passes are not reported as a fix of the original failure; shell-output loss remains tracked separately as w-b822f1fb3d1a."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-load",
+    "test-contract",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

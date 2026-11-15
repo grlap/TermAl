@@ -1,0 +1,30 @@
+{
+  "id": "01a1b83d-85bc-7d33-969a-6f845d667984",
+  "external_ref": null,
+  "title": "Speed up the four review_identity Rust tests that each run over 60 s, without losing coverage",
+  "outcome": "Greg asked („Moze Kimi z zespołem popracowac aby usprawnic testy?”) for the slowest tests to be sped up. Four of the ten Rust tests that exceeded 60 s in Central FULL test-1397710a (Kimi #144) are review_identity tests:\n- review_identity_questly_capacity_covers_ten_thousand_files_without_relaxing_limits\n- review_identity_questly_fixture_keeps_all_input_layers_and_nested_bytes\n- review_identity_reads_assume_unchanged_files_instead_of_stat_clean_candidates\n- review_identity_reads_skip_worktree_files_and_intent_to_add_content\nThe review_identity_cli binary took 190.15 s. These tests should run materially faster while asserting the same behavior. This is a sibling of the fingerprint-tests work in w-a8f887b04a4e.",
+  "acceptance": [
+    "Before and after durations of the four named tests and of the review_identity_cli test binary are measured on the same host and recorded. The log reports only a >60 s threshold, so the before durations are measured fresh, at a quiet moment coordinated with the integration owner. The after durations are materially shorter.",
+    "Every existing assertion and behavior is still checked, including the 10,000-file capacity limit and its unrelaxed limits. Speed comes only from sharing immutable fixtures (built once and never mutated by a test), from cheaper fixture construction that yields the same inputs, or from lighter process boundaries that exercise the same behavior. There are no deletions of behavioral coverage, no relaxed limits, skips, retries or timeout changes, and no parallelization that weakens isolation.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-time",
+    "greg-directed",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

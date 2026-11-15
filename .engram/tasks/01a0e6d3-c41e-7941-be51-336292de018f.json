@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c41e-7941-be51-336292de018f",
+  "external_ref": "tm-7p9z",
+  "title": "Remove unsupported legacy compatibility from unreleased TermAl",
+  "outcome": "TermAl is still in development and has no production history that requires compatibility with previous local builds. Remove migrations, alternate schemas, loose wire shapes, old localStorage layouts, old TermAl-to-TermAl protocol branches, and hypothetical compatibility code. Local developer state may be reset or rejected instead of migrated. Preserve only current runtime recovery, temporal stale-response protection, current filesystem/input handling, and external compatibility explicitly required by one pinned supported upstream version.",
+  "acceptance": [
+    "Every child area uses one documented current schema and protocol; no production path exists solely for data or API shapes from previous TermAl development builds; tests construct only current fixtures except explicit rejection tests; docs stop promising migration of unreleased state; a final audit classifies every remaining legacy/compatibility occurrence as current external/platform behavior or removes it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "epic",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "beads-migrated",
+    "legacy-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

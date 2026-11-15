@@ -1,0 +1,65 @@
+{
+  "id": "01a0f629-2ff8-7570-9872-25b4f98cec5f",
+  "external_ref": null,
+  "title": "A root session's mailbox wakes stayed \"queuedBehindActiveTurn\" for about 2.8 hours and never woke it (Termal::Fable2, 2026-10-01 03:40–06:28Z)",
+  "outcome": "A message sent to an idle root session wakes it, and a session whose turn has really ended is never treated as still active. Observed by Termal::Fable2 (session-8112) on 2026-10-01. Its last turn ended at about 03:39Z. From 03:41Z to 06:29Z, about twenty mailbox messages from Coder, Codex, Opus2, Architect2, Engram::Fable, Engram::Coder and Engram::Advisor arrived with notificationState \"queuedBehindActiveTurn\", and none woke the session. Greg noticed and resumed it by hand (Engram::Advisor, mailbox b9d13887 #119, 06:29Z: \"Greg is resuming Termal::Fable2 separately\"). Meanwhile Termal::Coder sat idle from about 03:52Z waiting on the coordinator, and two restart signals and a P1 escalation went unanswered. Unknown: whether the host believed the turn was still running (a stale active turn, for example a background Bash task or a resume-wait registration left open), or whether the wake was lost. The session's last tool activity before the gap included a termal_resume_after_delegations wait and background Bash gates earlier in the session, worth checking first. Related: w-072e84b182c7 (other silent host states).",
+  "acceptance": [
+    "1. When a dispatch's admission-durability fence or dispatch-card save fails before provider handoff, and a matching Checkpointed receipt from the grant's original authority closes the begun grant, TermAl durably records the aborted-before-handoff settlement under a content-specific persistence acknowledgement. It then admits the same retained prompt again: a fresh evaluation operation, the same prompt and transcript identity, on the decided backoff (2, 5, 10, 20, 30, then 60 s, with up to 20% jitter). This happens without Resume, a new message or a restart, and the provider receives the prompt exactly once. A test covers a slow writer that recovers.",
+    "2. Until that settlement is acknowledged, the head stays held and is shown as waiting for local durability with delivery not attempted. A failed local settlement is retried automatically. None of the following triggers the automatic retry, and each keeps the existing conservative hold: a missing, mismatched or transport-unknown checkpoint receipt; a grant_not_begun (issued) answer; a crash before the abort record is durable; a concurrent Stop or Cancel; changed settings or principal. Tests cover each.",
+    "3. A dispatch-card save failure on a known Defer durably settles that Defer and its evaluation, then schedules a new evaluation that honours retry_after. A test covers it.",
+    "4. A restart after the abort settlement was acknowledged reconstructs retry eligibility and re-admits without a new incoming wake. A restart before it keeps the conservative hold. A test covers both.",
+    "5. A mailbox send to a session whose head is held reports a held disposition, distinct from queuedBehindActiveTurn, and keeps the original send receipt unchanged. A test covers it.",
+    "6. The cause of each recorded occurrence is identified from the host's state, Engram's store and logs, and recorded in a note. If an occurrence's cause is not one that criterion 1 recovers (for example the 03:39:56Z occurrence, an Engram evaluate deadline before any grant began), the note names the item that covers it, and that item is linked from this one.",
+    "7. The full five-stage gate passes on the exact reviewed input; a note cites its run directory and fingerprint.",
+    "8. Independent verification: the review pair has no outstanding Medium or higher; an acceptance evaluation is made by an evaluator that never held the item; and a live check after the install and restart, recorded in a note with the installed build's hash, shows no session in the interrupted/unknown hold and an idle session started by a mailbox wake."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "mailbox",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

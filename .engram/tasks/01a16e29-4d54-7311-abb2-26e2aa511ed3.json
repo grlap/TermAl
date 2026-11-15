@@ -1,0 +1,29 @@
+{
+  "id": "01a16e29-4d54-7311-abb2-26e2aa511ed3",
+  "external_ref": null,
+  "title": "Tidy watcher diagnostic formatting and source ownership documentation",
+  "outcome": "Tidy watcher diagnostic formatting and source ownership documentation",
+  "acceptance": [
+    "The new diagnostic call uses rustfmt layout without unrelated legacy churn; routing documentation sits on the production handler; prose narrows first-notification claims to source-file fences and the extracted fragment documents its ownership boundary."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cleanup",
+    "diagnostics",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16d74-2d08-7260-836f-757f2f324d75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

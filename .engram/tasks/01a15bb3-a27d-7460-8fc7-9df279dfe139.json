@@ -1,0 +1,29 @@
+{
+  "id": "01a15bb3-a27d-7460-8fc7-9df279dfe139",
+  "external_ref": null,
+  "title": "Commit rule condition 3: clarify \"independent evaluation\" and the push/install-confirmation boundary (two Lows from the w-45bf/w-f2c3 review)",
+  "outcome": "Condition 3's landing-only clause names the latest independent evaluation of that same frozen tree, and says explicitly that the lander's own push and install confirmation is neither \"the build running\" nor \"a live or remote observation\"; landed as a clarifying edit under the commit section's (a), (b) and (c).",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md condition 3 read \"the latest independent acceptance evaluation of that same frozen tree\" in place of \"an independent acceptance evaluation of the frozen tree\", and state that the lander's own push and install confirmation is not \"the build running\" or \"a live or remote observation\"; both files are identical in that text and nothing else changes.",
+    "Both coordinators' concurrence on the exact wording, the wording sent to Greg, and a passed final-diff audit are recorded on this item before landing (a clarification, so no new widening approval is needed)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "authority-policy",
+    "docs",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1b466-6fb4-77e2-8164-7b37fe202d18",
+  "external_ref": null,
+  "title": "Bound run metadata so large accounting strings and stage plans retain readable terminal evidence",
+  "outcome": "The launcher has a defined bounded metadata projection or admission policy that preserves actual stage facts and readable terminal evidence within the existing per-artifact cap, including accounting strings and stage plans.",
+  "acceptance": [
+    "Bound run metadata so large accounting strings and stage plans retain readable terminal evidence is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "follow-up",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

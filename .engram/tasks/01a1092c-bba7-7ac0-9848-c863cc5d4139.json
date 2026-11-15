@@ -1,0 +1,27 @@
+{
+  "id": "01a1092c-bba7-7ac0-9848-c863cc5d4139",
+  "external_ref": null,
+  "title": "Delegation summary-count fixture tests should also assert that no inconsistency note is emitted",
+  "outcome": "In src/tests/delegation_result_summary_counts.rs (added by w-a7c465026c6c), the two verbatim evaluator-fixture tests assert only findings.is_empty(). Add assert!(inconsistency_notes(&parsed).is_empty()) to both, as the zero/label/tally test already does, so a future heuristic change cannot reintroduce the false signal as a note on clean evaluator output without failing a test.",
+  "acceptance": [
+    "Delegation summary-count fixture tests should also assert that no inconsistency note is emitted is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "delegations",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

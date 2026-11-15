@@ -1,0 +1,30 @@
+{
+  "id": "01a0f40f-035f-7593-a463-4c2768f74294",
+  "external_ref": null,
+  "title": "Update the host architecture context token example for the host UUID format",
+  "outcome": "The What TermAl calls table in docs/features/host-architecture.md documents termal-<host-uuid>-<generation> or points to the owning Engram host feature brief; obsolete termal-<n> wording is removed.",
+  "acceptance": [
+    "The change preserves the read-only child policy that omits context-generation and introduces no executable or authority change.",
+    "The orientation command row agrees with the host UUID/counter formatter and docs/features/engram-host-adapter.md."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "context-nudge",
+    "documentation",
+    "engram-interop",
+    "restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f2f9-9443-7552-9879-6b865d826480",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

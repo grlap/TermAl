@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4d0-7e31-a889-5b14081b11ae",
+  "external_ref": "tm-cnsv.14",
+  "title": "Unify native and PowerShell Engram inspection argv construction",
+  "outcome": "Final consolidated review: Codex7143 clean; Claude7144 retained Low at src/engram_host_adapter.rs:353 and src/engram_session_reconciliation.rs:72-86. Native Command and secure PowerShell dispatch independently assemble the same inspection arguments, creating future flag-drift risk. Assemble once and feed both dispatch paths; preserve literal selector transport and the Windows batch-wrapper refusal. No current incorrect invocation was demonstrated.",
+  "acceptance": [
+    "Both dispatch paths consume one canonical argument vector; literal selector and unsupported-wrapper regressions pass; native paths and read-only receipt admission are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c4cb-75d2-b163-b711849dc8d8",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

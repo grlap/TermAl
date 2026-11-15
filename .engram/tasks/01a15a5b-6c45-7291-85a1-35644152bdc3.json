@@ -1,0 +1,30 @@
+{
+  "id": "01a15a5b-6c45-7291-85a1-35644152bdc3",
+  "external_ref": null,
+  "title": "A native cross-host mailbox send through the TermAl CLI in a Codex command cell never returned, delivery unknown (S3 step 2)",
+  "outcome": "A cross-host mailbox send with an ~11 KiB body, issued by an agent through the supported transports, either returns a receipt or fails with a typed error within a bounded time; the layer that stalled on 2026-10-20 is named.",
+  "acceptance": [
+    "A reproduction or a recorded diagnosis localizes the stall to a named layer: the Codex exec cell or tool bridge, the PowerShell inline argument passing, the TermAl CLI, or the host's cross-host send path.",
+    "If the stall is in TermAl (the CLI or the host send path), a fix makes a send with an 11 KiB inline body either return a receipt or fail with a typed error within a bounded time, and a test covers it; if the stall is outside TermAl, the item records the external cause and the supported send form (for example --message-file or the MCP tool) in docs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "greg-directed",
+    "mailbox",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

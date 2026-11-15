@@ -1,0 +1,29 @@
+{
+  "id": "01a10f49-eb33-75d2-a72d-e76449de9c78",
+  "external_ref": null,
+  "title": "Declared test commands doc: order an artifact-rule failure before failing counters at exit 0, and complete the observed-reason list",
+  "outcome": "Declared test commands doc: order an artifact-rule failure before failing counters at exit 0, and complete the observed-reason list",
+  "acceptance": [
+    "docs/features/declared-test-commands.md states the order at exit 0: an artifact that fails an artifact rule is UNKNOWN before the run outcome and counters are considered, and the precedence covers both TRX and JUnit",
+    "The observed-reason list includes 'modified before the start' and 'canonical path changed', or is marked as examples"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "team-pilot",
+    "test-runners"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

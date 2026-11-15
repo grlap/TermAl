@@ -1,0 +1,35 @@
+{
+  "id": "01a12373-bc04-76e0-911e-b8d28ccb6195",
+  "external_ref": null,
+  "title": "Remove the two dead-code warnings w-0e3b leaves in non-test builds (persist_delta_via_cache, persist_delta_with_fences)",
+  "outcome": "`cargo check` on the bin target is warning-free again after w-0e3b338ac4a4's F1 and F2. Production callers moved to the *_timed variants, which left persist.rs:1383 persist_delta_via_cache and persist_fence.rs:612 persist_delta_with_fences used only by tests; these are now test-only (for example #[cfg(test)]) or removed in favour of the timed variants.",
+  "acceptance": [
+    "cargo check (bin target, non-test) on the committed tree reports no 'never used' warning for persist_delta_via_cache or persist_delta_with_fences, and no new warning.",
+    "The full gate passes on the exact committed tree, and its cargo-check stage prints no warnings."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cargo-check-clean",
+    "host-persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1239d-27c6-76c2-8e07-ad17bdd45daa",
+  "disposal_reason": "folded into w-ad17bdd45daa as criterion 3; same change and gate",
+  "completion": null
+}

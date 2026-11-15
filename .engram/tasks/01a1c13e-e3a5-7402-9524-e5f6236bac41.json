@@ -1,0 +1,28 @@
+{
+  "id": "01a1c13e-e3a5-7402-9524-e5f6236bac41",
+  "external_ref": null,
+  "title": "On Windows, a live control child's closed stdout surfaces as a deadline, not end-of-file",
+  "outcome": "We know why, on Windows, the parent never sees end-of-file when an owned child closes its stdout and stays alive, and the control transport reports that case accurately or the limit is documented.",
+  "acceptance": [
+    "The cause is found from evidence, naming which handle keeps the pipe open and in which process, or the item records what was checked and why it can't be found.",
+    "If the cause is in TermAl, a reviewed and gated fix makes a Windows live-child stdout close report end-of-file through the real transport, shown by an actual-child test. Otherwise the limitation is stated in the relevant feature doc."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

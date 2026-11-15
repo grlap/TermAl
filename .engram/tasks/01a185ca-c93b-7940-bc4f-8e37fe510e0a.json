@@ -1,0 +1,28 @@
+{
+  "id": "01a185ca-c93b-7940-bc4f-8e37fe510e0a",
+  "external_ref": null,
+  "title": "Launcher registration returned HTTP 503 \"registration durability is pending\" under writer queueing; focused run never started",
+  "outcome": "A focused launcher run is not refused with 503 merely because the host's persistence writer is briefly queued, or the refusal is retried within the launcher's registration contract, so ordinary runs do not silently end UNRUN.",
+  "acceptance": [
+    "Launcher registration returned HTTP 503 \"registration durability is pending\" under writer queueing; focused run never started is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-persistence",
+    "registration",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a0f4ec-4f0f-76b1-a6b1-2187ce662f0c",
+  "external_ref": null,
+  "title": "First-extraction fixture test: remove the wall-clock ordering assertion between the check's and the turn's timestamps",
+  "outcome": "First-extraction fixture test: remove the wall-clock ordering assertion between the check's and the turn's timestamps",
+  "acceptance": [
+    "src/tests/engram_first_extraction.rs no longer asserts check_completed_at <= turn_observed_at (or any order between two wall-clock stamps); the relabelling of each time by the record that carries it and the equality of the environment's time with its check's stay; a review pair without a Medium or higher on the change"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "engram-host-adapter",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fixed elsewhere: the first extraction's commit d63659f (w-8597a0e17af3) fixes this Low. It landed on master in train 7, acea4c7, pushed 2026-10-01 about 02:16Z. Recorded in Termal::Architect1's hand-off note 0d8eb764 on w-8597a0e17af3. Closed by Termal::Fable2.",
+  "completion": null
+}

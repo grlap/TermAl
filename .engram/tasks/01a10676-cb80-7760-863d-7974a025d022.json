@@ -1,0 +1,52 @@
+{
+  "id": "01a10676-cb80-7760-863d-7974a025d022",
+  "external_ref": null,
+  "title": "Budget-clock migration B8: never-enabled tests that reach source-observation finalize or reconcile choose their budget clock",
+  "outcome": "The suite-wide inventory for w-b3f0058feb49 ran on da0a3d9 (.tmp/admission-evidence/unselected-reads.md, sha256 a711b210; this item's list is .tmp/admission-evidence/b8-tests.txt, sha256 062abd33). It found 29 tests in 13 modules that never enable Engram, yet read the budget clock before any clock is chosen, through finalize_delivered_source_observations and/or reconcile_retired_source_observations. These are typically session or delegation removal, kill, and stop/resume paths.\nArchitect2's design check 5a228a3c ruled that these two production readers keep their deadline origins: the budget deliberately covers lock waits, and for reconcile also retirement and commit. So the tests' fixtures choose their clock explicitly instead. Coordinator Termal::Fable2 split this out of w-b3f0058feb49 (#967) so that item stays production-only.\nThe 29 tests, by module:\n- delegation_review_results (4): completed_structured_review_survives_child_session_removal; delegation_terminal_paths_preserve_pending_watcher_observations; removed_review_child_does_not_hide_the_persisted_failed_result; structured_review_bounds_observation_paths_and_accounts_for_omissions.\n- delegation_wait (3): delegation_wait_reconciles_when_child_session_is_removed; removing_delegation_parent_consumes_already_satisfied_wait_with_parent_removed_reason; removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason.\n- delegations (4): followup_delegation_rejects_removed_child; removing_delegation_child_or_parent_terminalizes_records; removing_delegation_parent_cascades_to_nested_delegation_children; removing_delegation_parent_deletes_child_runtime_and_session.\n- engram_host_adapter::root_dispatch::delegation_held (1): a_bound_resume_never_admits_a_successor_exposed_after_its_check.\n- engram_host_adapter (2): s0_explicitly_disabled_project_never_calls_or_persists_engram_state; s0_without_project_engram_is_byte_stable_and_never_calls_transport.\n- mailbox_acknowledged_wake (2): an_acknowledged_wake_held_behind_a_paused_queue_stays_held; stop_holds_the_acknowledged_wake_until_an_explicit_resume.\n- mailboxes (1): deliberate_session_deletion_remains_the_mailbox_eviction_authority.\n- orchestrator (1): killing_a_session_prunes_its_orchestrator_links.\n- session_lifecycle (4): kill_session_route_returns_ok_when_shared_codex_interrupt_fails; killing_local_codex_session_prevents_rediscovery_after_restart; killing_session_persists_removal_even_when_shared_codex_interrupt_fails; killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interrupt_fails.\n- session_settings (1): setting_non_codex_external_session_id_does_not_clear_ignored_codex_thread.\n- session_stop (3): resume_persist_failure_rolls_back_the_promotion_and_keeps_the_queue_paused; resume_promotes_the_paused_queue_head_and_delivers_it; stop_projects_the_paused_queue_and_resume_clears_it.\n- telegram_settings (2): kill_session_prunes_telegram_state_and_config_references; telegram_unknown_file_config_never_overrides_default_app_preferences.\n- test_run_waits::run_wait_evidence (1): settled_result_respects_stop_latch_until_explicit_resume.\nSome of them also read through admission or boot recovery. w-b3f0058feb49 removes those reads in production; this item covers the finalize and reconcile reads. No production change. Criteria are in B7's test-only template and are agreed before anyone claims it. This item is a prerequisite of FINAL (w-c06f573bef27).",
+  "acceptance": [
+    "Scope at the master commit current when claimed: the 29 tests named in the outcome. Each test, or its fixture, chooses the budget clock through the slice-1 boundary before its first read: select_test_scripted_engram_budget_clock, or declare_test_real_engram_budget_clock with its reason in a comment when wall time is the subject. Neither production reader changes; their deadline origins stay as Architect2's 5a228a3c ruled.",
+    "A note gives the transitive caller inventory of every changed fixture per file, showing that no caller installs, selects or declares a second clock or advances a clock other than the fixture's own. It also classifies each real-time and wall-clock source in those files, including a clock read made through a helper function, as a liveness guard, the subject of its test, or a display stamp: a value that reaches no timing decision and that no assertion compares with a separate read of the clock. Each display-stamp entry cites the sites that show this.",
+    "Every test in scope that is compiled on the gate's platform passes on its chosen clock; a test compiled out is listed in a note with its cfg. A budget-expiry assertion either advances the same scripted clock across its causal boundary, with an unadvanced positive control, or declares Real with its reason. Each changed fixture asserts the clock is unread before its first read. No expectation is weakened, no timeout grows, and no retry is added.",
+    "No production change. A shared fixture used outside this scope stays unchanged unless the inventory covers every caller.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "gate-blocker",
+    "load-sensitive",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "B8 landed: the 29 never-enabled tests in 13 modules select the scripted budget clock right after their fixture, before the first read. Commit 8cf80039, fast-forwarded on master by Termal::Opus2; ls-remote confirmed. Test-only, no install needed. Gate test-9d5183f1 (fp 230c4284, credit 889069fb), pair dceff9af/cd562587 clean, acceptance dc666566 5/5.",
+    "completed_at": "2026-10-04T20:11:56.340727100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

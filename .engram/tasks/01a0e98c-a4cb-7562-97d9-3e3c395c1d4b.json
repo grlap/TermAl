@@ -1,0 +1,28 @@
+{
+  "id": "01a0e98c-a4cb-7562-97d9-3e3c395c1d4b",
+  "external_ref": null,
+  "title": "Test-run fan-in: the \"Settle it\" hint names `recover`, which another repository's launcher may lack, and \"Interrupted: no\" contradicts an UNKNOWN (process gone) verdict",
+  "outcome": "The termal_resume_after_test_runs fan-in prompt (test_run_card_lines, src/test_run_waits.rs:205-287) has two problems with an UNKNOWN verdict:\n- It always adds \"Settle it: `node scripts/test-launcher.mjs recover \\\"RUN_DIR\\\"`\" (line 283). TermAl's own launcher has `recover`, but runs are watched in other repositories too. Engram's launcher at cee0612 has no such subcommand and answers \"usage: test-launcher.mjs full|focused … | summary|notify RUN_DIR\".\n- \"Interrupted: yes|no\" (line 217) prints the summary's interrupted flag, which comes only from terminal results. For a run whose process is gone and whose heartbeat is stale, with no terminal result, it prints \"no\" beside \"Verdict: UNKNOWN (process gone)\", which reads as a contradiction.",
+  "acceptance": [
+    "For a run with no terminal result (UNKNOWN verdict), the Interrupted line says unknown rather than no; a test covers the process-gone case",
+    "The fan-in names a settle command only when the run's repository launcher offers it (or names it conditionally, e.g. `summary` everywhere and `recover` where available), so the hint never names a subcommand the launcher rejects; a test covers a run whose launcher has no `recover`"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "fan-in",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

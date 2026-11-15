@@ -1,0 +1,28 @@
+{
+  "id": "01a1c128-32ad-7fc1-8eb4-8cabdf7b5954",
+  "external_ref": null,
+  "title": "A Codex root session's Engram tools vanished across a host restart and returned only after the next one",
+  "outcome": "We know why a running Codex root session can lose its Engram tools around a TermAl host restart, and either it no longer happens or the session is told plainly.",
+  "acceptance": [
+    "The cause is identified from evidence, or the item records that a later restart did not reproduce it and says what was checked.",
+    "If a defect is confirmed, a fix or a plain notice to the session is reviewed and gated; if none is found, the item closes stating that."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "post-restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

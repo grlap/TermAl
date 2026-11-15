@@ -1,0 +1,36 @@
+{
+  "id": "01a1ae62-1665-7402-b8c4-fffde8cf0145",
+  "external_ref": null,
+  "title": "Preserve reset guidance for malformed older-floor native completion metadata units",
+  "outcome": "Older units-backed state formats fail closed with the existing unsupported-schema/reset guidance when native custody guard encounters malformed rows or missing metadata-unit storage.",
+  "acceptance": [
+    "On each supported older units-backed floor, malformed native-custody candidate rows or missing state_metadata_units retain unsupported-schema reset guidance without writing or adopting the database.",
+    "Focused regressions assert the reset guidance and unchanged header, generation and raw custody after refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "reader-floor",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed reset guidance for malformed older units-backed native completion metadata, preserving fail-closed refusal and zero-write behavior. Focused Windows registered verification received; fresh independent pair has no blocking findings; exact-tree five-stage FULL passed and integration owner pushed master.",
+    "completed_at": "2026-11-06T07:18:46.037200200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1c2e4-68e0-7b71-908e-cedc2699f9b9",
+  "external_ref": null,
+  "title": "Restore source-specific discrimination in the earlier-check live freshness test",
+  "outcome": "The between-turn source-observation live regression distinguishes a true source-freshness refusal from another work_completion_refused cause.",
+  "acceptance": [
+    "Use a successful original-source evaluation control or assert the exact source-specific refusal reason in between_turn_observation_makes_the_earlier_check_stale; retain unchanged original evidence, actual edit and later passing-check controls without changing production acceptance semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "severity-low",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

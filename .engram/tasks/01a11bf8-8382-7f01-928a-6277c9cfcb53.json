@@ -1,0 +1,30 @@
+{
+  "id": "01a11bf8-8382-7f01-928a-6277c9cfcb53",
+  "external_ref": null,
+  "title": "Split the mailbox read-timing code out of src/mailboxes.rs (3,349 lines) into its own module",
+  "outcome": "The read-timing measurement (MailboxStoreTimings, MailboxReadStageTimings and slow_report, RequestReceivedAt with stamp_request_received_at, MeasuredMailboxRead, read_mailbox_measured and read_mailbox_routed) lives in its own module with the provenance header the repository asks for, as a pure code move; src/mailboxes.rs keeps only the timed acquisition helpers and returns below the ~3,000-line threshold.",
+  "acceptance": [
+    "A new module (for example src/mailbox_read_timing.rs) holds the read-timing code with a header stating what it owns, what it does not own, and the file it was split out of; the move is pure (no renames, no signature changes, no new imports beyond what the move requires); src/mailboxes.rs is below 3,000 lines.",
+    "cargo check is clean and the mailbox and delegation_mcp test modules pass unchanged in the named root."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "mailboxes",
+    "review-followup",
+    "tech-debt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1a013-0dd9-79d2-b465-4226eb67e0f9",
+  "external_ref": null,
+  "title": "After a quarantine lift, a remote runner acts on requests queued before the quarantine without the requester confirming them",
+  "outcome": "When a satellite's link returns after a quarantine or outage, the messages queued during it reach the recipient marked with their age and the outage they waited through. Runner guidance or tooling requires a requester's confirmation before starting expensive work from such a backlog, so superseded runs are not started.",
+  "acceptance": [
+    "Delivery after a link recovery exposes, per message, its creation time and that it was queued across an outage, through the supported mailbox read surface.",
+    "The runner protocol (documentation and any runner helper) requires confirming a request older than the outage with its requester before launching it, and a test or documented drill shows a pre-outage request is held rather than started."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox",
+    "post-restart",
+    "remote-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

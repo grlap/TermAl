@@ -1,0 +1,33 @@
+{
+  "id": "01a199b4-6713-7141-9e65-0d953776d655",
+  "external_ref": null,
+  "title": "w-3fe8 slice D: delete checkpoint, closing-checkpoint, boot and root recovery gating code and its tests",
+  "outcome": "w-3fe8 slice D: delete checkpoint, closing-checkpoint, boot and root recovery gating code and its tests",
+  "acceptance": [
+    "The checkpoint, closing-checkpoint, boot-recovery, root-recovery, recovery-format and reported-end gating code in this slice is deleted, not disabled; historical records stay readable as data only",
+    "Tests that only exercised the deleted gating are deleted; tests that cover ordinary restart, Stop, exact delivery or historical-record reading are kept or migrated",
+    "The slice compiles and its focused tests pass on the integrator's base, as a host-recorded focused run",
+    "The slice is handed to the w-3fe8 integrator (Sol-03d4) as one reviewed-ready diff against the agreed base"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "zero-legacy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the w-3fe8 integrator's split: test oracles and fixtures are now required child w-c962a451f7f6 (Sol-a7bb), and recovery is w-14df8701db1f (Sol-8e1f). The partial deletion and data-test diff (8 paths, +78/-1770) is kept as evidence 09202d55d3514f819c9273e6f2c055e6.",
+  "completion": null
+}

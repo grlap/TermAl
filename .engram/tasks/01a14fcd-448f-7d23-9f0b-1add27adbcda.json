@@ -1,0 +1,30 @@
+{
+  "id": "01a14fcd-448f-7d23-9f0b-1add27adbcda",
+  "external_ref": null,
+  "title": "Named-root status and release: add route-level tests and a SQLite read-back test for the release fence",
+  "outcome": "The status and release API is covered end to end. Request-level tests through the app router cover GET /api/engram/named-roots and POST /api/engram/named-roots/release: wiring, the camelCase JSON shape, 422 on unknown fields, and the ApiError status mapping. A test persists the metadata and then confirms the EngramNamedRootRelease fence through its is_already_durable read-back branch.",
+  "acceptance": [
+    "One request-level router test per route asserts the response shape, the 422 for an unknown field, and at least one refusal status (409 for a live claim)",
+    "A test confirms an EngramNamedRootRelease fence by read-back from the persisted metadata row, not from the in-memory delta, for both a committed release (passes) and a still-retained selection (does not)"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "named-roots",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0fc35-6e0e-7c21-aaf7-ae081b84fd11",
+  "external_ref": null,
+  "title": "The history `start` selector has no production caller and is undocumented in the history-mode docs",
+  "outcome": "The history `start` selector has no production caller and is undocumented in the history-mode docs",
+  "acceptance": [
+    "The history `start` selector has no production caller and is undocumented in the history-mode docs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

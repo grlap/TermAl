@@ -1,0 +1,29 @@
+{
+  "id": "01a14871-7e5e-7612-8db7-b86e2c674a32",
+  "external_ref": null,
+  "title": "Report real doctor fixture worker failures without waiting for the readiness guard",
+  "outcome": "An early real worker failure in the doctor deadline test helper surfaces its actual error promptly through the readiness path, without waiting for the existing 60-second deadlock guard or changing production doctor timing.",
+  "acceptance": [
+    "A deterministic test demonstrates that a real worker error before descendant readiness releases the readiness wait and reports that worker error.",
+    "Cleanup remains bounded and preserves process/tree/pipe ownership; production deadlines and timeout values remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "doctor",
+    "test-defect",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14814-ba9e-7883-974b-0a2a14283c21",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1b218-4ca4-7ae0-adf7-b37b701d568b",
+  "external_ref": null,
+  "title": "Preserve received notice upgrades when settlement races terminal publication",
+  "outcome": "A record settled between terminal snapshot preparation and publication is still presented for its original correlated command.",
+  "acceptance": [
+    "Terminal scheduling rechecks current registration receipt status or permits the observer to resolve it after publication.",
+    "A deterministic prepare-to-publication settlement schedule delivers the received record without stale source, root, claim or ordinary credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "diagnostics",
+    "race",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

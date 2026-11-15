@@ -1,0 +1,51 @@
+{
+  "id": "01a11e09-4820-7bb3-8a73-cd57679e0bb6",
+  "external_ref": null,
+  "title": "Focused Node launcher runs are recognized but recorded Unknown: \"ended without an exit status\" despite a native exit",
+  "outcome": "A focused Node launcher run whose records fail TermAl's provenance guards is refused truthfully: the refusal keeps the run's native exit status and names the guard that failed, never \"ended without an exit status\". Runs with valid provenance are recorded PASS or FAIL as before. Crediting Engram's launcher runs is Engram w-695530a4e4b3, which adds the two fields.",
+  "acceptance": [
+    "Diagnose why the running host records \"ended without an exit status\" for focused Node launcher runs that exited 1 and 0 natively (runs 28fcd9d5 and 7ea1c66d), with source locators, and say whether the cause is in a6c655a4 (w-b189aedeee40) or elsewhere.",
+    "A regression test with focused-Node launcher records that lack `detached` or tests `runner` and carry a native exit shows, before the fix, Unknown with \"ended without an exit status\", and after it a refusal that keeps the native exit status and names the rejected guard; a test with records carrying the required provenance fields still shows PASS for exit 0 with passed > 0 and FAIL for a nonzero exit with failing counts.",
+    "The existing refusal behaviour for a genuinely absent exit status, malformed or stale evidence, and zero executed tests is unchanged.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "declared-tests",
+    "host-recording",
+    "regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed on commit cc4867d10ea1891de37d10f9310d70642f96c03d after fresh independent acceptance evaluation ac3b54d1098b4daea3e05af5f6850194 passed all 4 criteria. Criterion 1 diagnosis is corrected in f1f0a2f394f849a28dd70a3841742ec0: missing detached was the first live guard rejection. Exact-tree five-stage gate test-1bfd885c passed (note 5be213da189a4b6682048ba0ca254fa9); commit blobs match the frozen index and the worktree is clean. Ready for integration owner Opus2 to push.",
+    "completed_at": "2026-10-11T10:26:32.873065600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

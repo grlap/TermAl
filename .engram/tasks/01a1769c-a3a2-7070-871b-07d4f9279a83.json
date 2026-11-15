@@ -1,0 +1,27 @@
+{
+  "id": "01a1769c-a3a2-7070-871b-07d4f9279a83",
+  "external_ref": null,
+  "title": "Retry and advertise local accounting for ordinary accepted checkpoint receipts after a missed writer ACK",
+  "outcome": "Retry and advertise local accounting for ordinary accepted checkpoint receipts after a missed writer ACK",
+  "acceptance": [
+    "Retry and advertise local accounting for ordinary accepted checkpoint receipts after a missed writer ACK is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "checkpoint-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

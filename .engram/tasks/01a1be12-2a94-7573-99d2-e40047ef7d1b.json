@@ -1,0 +1,34 @@
+{
+  "id": "01a1be12-2a94-7573-99d2-e40047ef7d1b",
+  "external_ref": null,
+  "title": "Naming a source root can return 409 \"named-root response belongs to a superseded work owner\" for the current claim holder",
+  "outcome": "A root session holding a current claim can name a registered worktree and get a definite result, or a stated supported recovery; a superseded owner's reply never leaves the live owner's naming outcome uncertain.",
+  "acceptance": [
+    "A controlled same-binding regression supersedes the work's local transition after the canonical read and before its result is learned; on the unmodified product it produces the reported 409 for a still-current claim, and the original failing evidence is retained.",
+    "Ordinary naming under unchanged claim, connection, runtime and exact pending intent handles that post-read supersession through the existing bounded retry within the original budget; genuinely stale authority remains withheld, and unrelated errors or changed authority cannot authorize another producer write.",
+    "Tests distinguish the later failure windows after selection/journal installation and during a kept name, verify their reported state and supported identical-request recovery, and preserve the existing genuinely stale-owner regression; no sleeps, timeout inflation or new authority mechanism is added.",
+    "The final exact candidate passes focused behavior checks, the independent Codex/Claude review pair with no outstanding Medium-or-higher findings, and the required full gate before landing; it stays outside the priority joint train."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Naming owner recovery landed in combo26 a06f2c92 after original fail-first witness, focused62PASS, clean member/composite review pairs and DL560/Windows FULL gates.",
+    "completed_at": "2026-11-09T12:51:58.713761800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1693b-4af5-73d1-8310-c98959145137",
+  "external_ref": null,
+  "title": "Refuse Bash comments in qualified literal-pipe argv proof",
+  "outcome": "A word-leading unquoted Bash comment cannot qualify as a literal-pipe argument vector or claim a filter identity the shell discarded.",
+  "acceptance": [
+    "Refuse word-leading unquoted # in the known-Bash qualified grammar while preserving quoted # and ordinary non-comment argument spellings where supported.",
+    "Add Unknown/Bash controls for comment-containing literal-pipe lines and update the refusal docs.",
+    "Focused tests and independent review cover the change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-recognition",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

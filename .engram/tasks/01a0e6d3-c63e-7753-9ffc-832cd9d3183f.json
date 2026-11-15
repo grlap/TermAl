@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c63e-7753-9ffc-832cd9d3183f",
+  "external_ref": "tm-md1b",
+  "title": "Workspace switcher ordering test asserts against its own render instead of the documented order",
+  "outcome": "Found by the Claude reviewer during the pre-check-in review of the workspace-label changeset. The ordering assertion in ui/src/workspace-labels.test.tsx around line 82 compares the rendered row ids against the ids captured from the components own earlier render. That proves the sort is deterministic when the input order changes, which is worth something, but it never pins the order the feature documentation actually promises: the current workspace pinned first, then sorted by label or id, with the id as a tie-breaker. With the present fixture - a current workspace labelled Backend, another labelled Reviews, and an unlabelled third - removing the current-first branch from the comparator in ui/src/workspace-shell-controls.tsx produces the same sequence, so the test would still pass on that regression. This is the same shape as the other test problems found today: an assertion that cannot fail for the reason it exists. Fix direction: assert the concrete expected id sequence rather than a self-comparison, and add a fixture whose current workspace would NOT sort first alphabetically so the pin is genuinely exercised.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

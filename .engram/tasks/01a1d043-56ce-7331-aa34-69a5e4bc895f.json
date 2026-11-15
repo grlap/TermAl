@@ -1,0 +1,31 @@
+{
+  "id": "01a1d043-56ce-7331-aa34-69a5e4bc895f",
+  "external_ref": null,
+  "title": "Cover copied linked-worktree gitfiles and missing commondir in approval-boundary tests",
+  "outcome": "Cross-platform approval-delivery tests reject a copied valid linked-worktree gitfile whose backpointer targets another worktree, and a Git admin directory with gitdir but no commondir.",
+  "acceptance": [
+    "A behavioural test copies a valid linked-worktree .git file into a different reviewed directory and verifies that both acceptance decisions remain refused with the existing message and no runtime delivery.",
+    "A behavioural test verifies that an admin directory containing a gitdir backpointer but no commondir does not exempt an ancestor approval."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "approvals",
+    "delegation",
+    "git",
+    "greg-reported",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1cd95-9734-76b1-99ba-03b4f6a05337",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

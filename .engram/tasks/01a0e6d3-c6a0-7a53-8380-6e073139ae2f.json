@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6a0-7a53-8380-6e073139ae2f",
+  "external_ref": "tm-pq8",
+  "title": "Native TermAl pair-mailbox: supersedes metadata, sender-visible turn state, doorbell collapse",
+  "outcome": "The Sol+Fable dev-team pattern (docs/dev-team-pattern.md §3) runs on batched cross-session messages, which produced measurable noise in practice: during the tm-drd collaboration, five crossed/echoed completion messages arrived out of order because content lives in the queue and rots while the receiver is mid-turn. We now run a file-based workaround (.collab/ mailbox: per-agent outboxes, sequence-numbered immutable messages with Stamp/Type/Supersedes headers, content-free \"mbx NNNN\" doorbell messages, per-reader cursors — see .collab/PROTOCOL.md). This bead tracks building the doc §3 infrastructure wishlist into TermAl natively so the convention stops being convention: (1) message metadata (topic, supersedes) that auto-collapses superseded queue entries before delivery; (2) sender-visible receiver turn state (\"mid-turn, N queued\") on termal_send_to_session; (3) a first-class per-pair mailbox with an index instead of a scratch directory; (4) a real interrupt flag for round-invalidating events, replacing the session-preview one-liner hack. Success criterion: two collaborating sessions can exchange a multi-round work cycle with zero duplicate/echo messages and zero stale-imperative executions.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

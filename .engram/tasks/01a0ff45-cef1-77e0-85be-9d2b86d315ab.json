@@ -1,0 +1,28 @@
+{
+  "id": "01a0ff45-cef1-77e0-85be-9d2b86d315ab",
+  "external_ref": null,
+  "title": "Non-test Node commands (a freeze script) are recognised as test checks, then reported as uncredited \"no passing test\"",
+  "outcome": "Non-test Node commands (a freeze script) are recognised as test checks, then reported as uncredited \"no passing test\"",
+  "acceptance": [
+    "A Node command that runs no test runner (for example a freeze or fingerprint script that prints a SHA) is not recorded as a test check and produces no 'recognised test gets no credit' line; a test covers that case and the existing recognised forms (npx vitest, cargo test, node scripts/test-launcher.mjs) still record as before.",
+    "The host line for an uncredited recognised test names the command it refers to, or this item records why w-57d917e06cba already covers that."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

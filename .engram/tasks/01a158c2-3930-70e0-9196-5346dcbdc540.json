@@ -1,0 +1,45 @@
+{
+  "id": "01a158c2-3930-70e0-9196-5346dcbdc540",
+  "external_ref": null,
+  "title": "Cover Git run-directory terminators and existing-path validation branches",
+  "outcome": "Extend real launcher boundary controls for single CRLF success, legitimate path-space preservation, nonexistent absolute directory, a file instead of directory, and doubled terminal newline, retaining no-mkdir/no-registration assertions.",
+  "acceptance": [
+    "Real createRun/executeRun controls accept a single CRLF terminator and platform-legal leading/trailing path spaces with correct run placement.",
+    "Missing absolute directory, regular-file path and doubled terminal newline are refused before artifacts or registration.",
+    "Maintained helper parity and the full gate pass on the final input, and an independent review pair has no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "macos",
+    "multi-machine",
+    "remote",
+    "test-coverage",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c511-7bb3-a65f-a661b11c5f38",
+  "external_ref": "tm-gp7p",
+  "title": "Reserve a constant-height activity slot at the end of the transcript so waiting for the agent is always visible without layout jumps",
+  "outcome": "REQUESTED BY GREG (2026-09-11, ~16:45Z, to the coordinator): \"jedna linijka zarezerwowana, to bedzie pare pixeli\" and \"zlec codexowi, musimy zobaczyc co dziala lepiej\". Owner: Termal::Codex, dispatched by the coordinator.\n\nPROBLEM. The text-end squares (tm-il8n) and the card markers (tm-il8n.1) only show activity when there is a current card to attach to. When the last card is a finished command and the model is thinking about its result, nothing in the transcript shows that we are waiting (Greg screenshot: a Command card with Success at 09:32:12, then nothing). The fixed activity strip at the bottom of the pane exists (tm-7cu.38 replaced the transient LIVE TURN card) but it is thin and far from where the eye rests. The earlier LIVE TURN card was removed because its disappearance at the end of a turn shrank the content and made the bottom-pinned view jump.\n\nDESIGN. Add one trailing slot at the end of the message stack with a constant reserved height of one line. It is never unmounted while the pane is open; only its content changes:\n- session working and nothing newer than the last user prompt is streaming or running: show the activity indicator (reuse the existing squares style; optionally the \"Agent\" label in the same style as card headers);\n- otherwise: empty, same height.\nBecause the height is constant, no layout shift when activity starts or ends. New cards appear above the slot as normal growth. Respect prefers-reduced-motion (static). Keep the existing strip and the squares unchanged so Greg can compare the three live and decide which to keep; do not remove anything in this change.\n\nTURN BOUNDARY. Decide \"waiting\" from session status plus message order: the last user message marks the current turn; anything older must not be treated as current (this was the tm-1nk5 trap). Reuse the streaming evidence in ui/src/session-streaming-text.ts where it helps. Known limit to keep explicit: a fresh view that first sees an already-active session has no prior evidence; document the fallback rather than hide it.\n\nPOINTERS (read, do not assume): ui/src/SessionPaneView.tsx, ui/src/panels/session-activity-cards.tsx, ui/src/session-live-tail-follow.ts, ui/src/styles.css, ui/src/message-card-streaming-height.tsx (StreamingMarkdownHeightGuard keeps a height floor for the streaming body; the slot must stay outside its measured subtree), ui/src/message-stack-scroll-sync.ts (single scroll writer; the slot must not write scroll).\n\nCOORDINATION FACTS. HEAD is 942fd3c. The index holds an uncommitted, untested, unreviewed 13-path UI changeset (tm-1nk5, tm-il8n, tm-il8n.1; index diff d1aa6095) staged on Greg instruction. Do not stage, unstage, stash or commit anything; work in the main checkout; keep new CSS in a new file where feasible to limit overlap with the staged styles.css; report every changed path with a fingerprint at hand-back. tsc and focused Vitest for the new code are fine; no full gates unless asked; never build into ui/dist (Greg rebuilds). SSD window coordination has ended (Greg fixed the temp folder).\n\nACCEPTANCE. RED with a named value first (e.g. a test asserting the slot height is unchanged between active and idle, and that it shows activity after a settled command while the session is active); then GREEN; tsc clean; hand back paths, fingerprint and test names. Greg decides by looking at the live UI.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Landed in 0e62085 (ancestor of master f7db2c58).",
+  "completion": null
+}

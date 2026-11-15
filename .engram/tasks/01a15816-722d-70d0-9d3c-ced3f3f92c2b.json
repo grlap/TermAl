@@ -1,0 +1,28 @@
+{
+  "id": "01a15816-722d-70d0-9d3c-ced3f3f92c2b",
+  "external_ref": null,
+  "title": "Verify case-duplicate environment keys survive Windows owner JSON decoding before winner selection",
+  "outcome": "Confirm through a discriminating serialized-environment check whether JavaScriptSerializer preserves case-distinct keys before the Windows native owner applies Node-compatible winner selection; correct only a demonstrated mismatch.",
+  "acceptance": [
+    "Verify case-duplicate environment keys survive Windows owner JSON decoding before winner selection is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "environment",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

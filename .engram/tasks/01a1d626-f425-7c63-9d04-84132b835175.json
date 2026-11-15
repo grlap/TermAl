@@ -1,0 +1,51 @@
+{
+  "id": "01a1d626-f425-7c63-9d04-84132b835175",
+  "external_ref": null,
+  "title": "Session view goes completely blank after scrolling far back in a long session (scrollbar and \"Jump to latest\" still visible) — regression",
+  "outcome": "Scrolling through a long real session (slow wheel, fast large jumps, dragging the scrollbar, then \"Jump to latest\") always shows the messages for the visible range. No message disappears, and returning to latest shows the newest messages.",
+  "acceptance": [
+    "Root cause identified with file:line, and the introducing change named by commit if it is a regression. A behavioural test, failing before the fix, reproduces the blank viewport after a long or fast scroll in a long transcript (virtualized list plus history loading).",
+    "With the fix, behavioural tests cover: scrolling far back with fast large jumps and a scrollbar drag shows the visible messages, never an empty viewport; 'Jump to latest' returns to the newest message; no message disappears during or after history loading. `cd ui && npx tsc --noEmit` is clean and `cd ui && npx vitest run` is green.",
+    "Greg confirms on the live UI (served from the master checkout by the Vite dev server) that long scrolling in a real long session no longer goes blank. The change passes the full gate. Greg waived the review pair in the acting session ('nie uruchamiaj code reviews'), and it landed on his own check-in word under the coordinator's ruling."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "greg-reported",
+    "regression"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Long-session transcript scrolling fixed: the session view no longer goes blank after scrolling far back. Landed on master as 491dd015e75e25ee3f13465ce5e165980346c1f5 (confirmed an ancestor of origin/master at 09:44Z); the post-landing independent evaluation delegation-5bd3c9fe (session-18026) passed all 3 criteria.",
+    "completed_at": "2026-11-14T09:43:53.567351500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

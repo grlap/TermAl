@@ -1,0 +1,28 @@
+{
+  "id": "01a18353-a5b0-78d3-8899-f73f2619b449",
+  "external_ref": null,
+  "title": "Drop impls that expect/unwrap a non-state mutex can double-panic and abort the process if that mutex is poisoned",
+  "outcome": "Drop impls that expect/unwrap a non-state mutex can double-panic and abort the process if that mutex is poisoned",
+  "acceptance": [
+    "Each listed Drop implementation either recovers a poisoned lock (PoisonError::into_inner) or otherwise never panics while the thread is unwinding, preserving its existing bookkeeping; no other behaviour changes.",
+    "Where a mutex can realistically be poisoned, a regression shows dropping the guard after poisoning neither panics nor leaves its bookkeeping inconsistent; the review pair finds no Medium or higher and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "panic-safety",
+    "reliability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

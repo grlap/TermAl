@@ -1,0 +1,40 @@
+{
+  "id": "01a1af47-2661-7340-b4ef-24a72c898d6d",
+  "external_ref": null,
+  "title": "Automatic consumer test credit from ordinary declared native commands, with host-owned registration and artifact validation",
+  "outcome": "An agent runs a committed declared Flutter or .NET test as the first tool activity of a fresh turn. TermAl captures the full source_id from `engram source` (per the shared source_id definition), including local changes, at S0 before prompt dispatch and after the original native process. Credit requires those full source_id objects to be equal, with no clean-repository requirement and no watcher condition. It validates the frozen real result artifact and retains the existing execution, identity, claim, root and store checks, then sends local registered verification without a manual wrapper. Clean is only a landing policy.",
+  "acceptance": [
+    "An agent runs an exact command from the consumer's committed termal-tests.toml in its declared cwd through its ordinary runtime shell form, with no manual launcher, wrapper or --root. Before dispatching that originating turn's prompt, TermAl completes S0: the full source_id from `engram source` (per the shared source_id definition), including local changes, the declaration's hash and entries, and artifact pre-images. The declared command must be that turn's first tool activity, with original new-turn execution identity. At the first host-observed start TermAl persists reservation R against the already-existing exact current named root, session, claim/fence, store and common-dir; registered_at and check.started_at mean host-observed R, not OS spawn, and any original provider time is retained separately. It creates a host-owned registered run and persists immutable request/results only in consumer Git administrative run metadata; config, index, objects, history and status-visible files are unchanged. Credit requires the full source_id at S0 to equal the full source_id after the run; local changes are included and a clean repository is not required.",
+    "A declared native suite (Questly: flutter test with its JSON reporter artifact; PhoenixCodeNav: dotnet test with its result artifact) is classified as a test stage by a reviewed contract that validates the real result artifact, so the verification is not UnclassifiedStages. Neither exit code alone nor a stage label grants credit.",
+    "The host's declared-command recognition and start/end lifecycle create verification for the original process without re-execution, using the existing local registered producer. Tests cover both Codex commands and Claude Bash one-call forms. Missing/failed/wrong-turn S0, a preceding tool activity, adopted/background or uncertain execution identity, wrong project, missing/late start, unknown artifact, changed declaration, changed source_id/claim/root/store earn no credit while retaining the actual result. Native credit requires the full source_id from `engram source` (per the shared source_id definition), including local changes, at S0 to equal the full source_id after the run; there is no clean-repository requirement, and watcher events are not used to grant or refuse it. Clean is only a landing policy. Accepted, documented limit: a change fully reverted between S0 and the post-run capture, or one git status does not report (including edits inside .git and hidden index flags), or a change to an ignored file, is not detected. Existing root.recorded_at <= R, current binding/revision/fence and terminal chronology checks remain unchanged. Other runtime forms are explicitly unsupported.",
+    "The design is agreed with Engram (one host-owned declared execution route, ideally using the single-owner committed-input reader from w-6f42c416b0c7 / Engram w-a6c91d6a7f27), so Engram's launcher copy does not need a parallel fix.",
+    "Standing landing rule: review pair, FULL, Windows. Afterwards, w-e072a871549f C1 runs on real Questly and Phoenix on the installed build after a restart."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "greg-directed",
+    "source-revision"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered host-owned declared native credit with full source_id equality and frozen artifact validation, landed36e5 plus30dd. Exact review/FULLWindows evidence and post-restart real QuestlyWindows,QuestlyLinux,PhoenixWindows credited C1 proofs are linked. Acceptance evaluation is OFF, so no evaluation exists. Per-OS remainingproofs stayw-e072; deferredissues includingrecovered-claimopening remainseparate.",
+    "completed_at": "2026-11-07T15:28:13.659033900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

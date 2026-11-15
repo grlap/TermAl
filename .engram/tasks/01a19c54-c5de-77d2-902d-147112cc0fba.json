@@ -1,0 +1,28 @@
+{
+  "id": "01a19c54-c5de-77d2-902d-147112cc0fba",
+  "external_ref": null,
+  "title": "Legacy pre-flag queued prompts in sessions that never had Engram load as Ambiguous instead of runnable",
+  "outcome": "A queued prompt saved before the promotion-disposition marker existed, in a session that never had Engram, loads after a restart as runnable ordinary input in its FIFO position, while unknown-disposition entries in sessions with any Engram footprint stay Ambiguous and are never replayed.",
+  "acceptance": [
+    "Legacy pre-flag queued prompts in sessions that never had Engram load as Ambiguous instead of runnable is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "review-low",
+    "w-3fe8-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

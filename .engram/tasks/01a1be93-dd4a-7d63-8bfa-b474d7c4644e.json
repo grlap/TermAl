@@ -1,0 +1,32 @@
+{
+  "id": "01a1be93-dd4a-7d63-8bfa-b474d7c4644e",
+  "external_ref": null,
+  "title": "Cover Sessions Project menu panel anchoring through App-level behavior",
+  "outcome": "A regression test fails if the Sessions Project dropdown loses its full-panel anchor or the anchor leaks into a different control-panel scope menu.",
+  "acceptance": [
+    "An App-level test opens the Sessions Project menu with realistic mocked rectangles and asserts the rendered portal uses the session scope row's horizontal bounds, including a panel width change.",
+    "A non-anchored scope menu retains its trigger width; tests assert observable geometry and interaction instead of source text or class-name pins."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "low",
+    "regression",
+    "review-followup",
+    "tests",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be6d-f525-7c61-bfd1-ebf92d7c9453",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

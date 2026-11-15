@@ -1,0 +1,32 @@
+{
+  "id": "01a176bb-e380-7e20-8e69-7b980248b6ae",
+  "external_ref": null,
+  "title": "Qualify safe SQLite reader reuse for overview and history routes that open a connection per request",
+  "outcome": "An independently decided way to eliminate avoidable per-request read-only open/configuration overhead on the relevant routes while preserving path-redirection rejection, fresh/coherent snapshot semantics, read-only behavior and concurrency isolation, or an explicit defer if equivalence/benefit is unproved. Greg's browser totals remain symptoms, not proof that open time dominates.",
+  "acceptance": [
+    "Record and independently concur the read-route safety/consistency contract with running-source file:line: immediate-parent/main/sidecar redirection preflight and existing error/override boundaries remain effective on each required read boundary; retain READ_ONLY/query_only behavior and existing timeouts. A cached handle is not proof that its current pathname is still safe or still names the same database. Cover replacement, newly created sidecars, changed store/path and shutdown. No live-store read, live request measurement or capture is authorized for this research.",
+    "Compare retaining per-request opening, safe reuse of an existing bounded reader owner, and other strictly scoped designs. Specify exclusive connection use (NO_MUTEX is not authority for concurrent sharing), finite resources/backpressure, identity/invalidation, per-request fresh transaction/pin/end, and failure/cleanup. Never cache an open historical read transaction across requests, silently pin the WAL indefinitely, reuse stale prefix/snapshot data or serialize all routes behind a newly global unbounded queue. If path/snapshot equivalence is unproved, defer.",
+    "With disposable repository-contained fixtures ONLY and a separately authorized unchanged-input plan, distinguish blocking admission/StateInner wait, path checks, connection/config/BEGIN, blob read/counting, serialization and close cost, plus opaque remainder. Compare resident/nonresident overview and tail; preserve the exact browser facts and mark causal attribution unavailable until actually measured. Small response bytes are not a cost measurement; no live-store or proxy query.",
+    "If a design is authorized for implementation, deterministic tests cover path/sidecar replacement/reparse failures, cached-reader invalidation, repeated fresh snapshots across concurrent writes/rollback/eviction, prefix count/conflict behavior, remote/local parity, errors, cancellation/shutdown and finite reader ownership. Existing history cursor/snapshot-pin safety, bucket semantics, assertions, deadlines and test load stay intact; no timeout inflation or retry-until-green.",
+    "Relevant focused validation, independent vendor review pair and exact-input maintained full gate precede any implementation landing. Report native/platform and fixture-evidence limits; no claim that a synthetic open reduction proves Greg's live ~1 s delay repaired."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "host-persistence",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

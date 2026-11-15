@@ -1,0 +1,35 @@
+{
+  "id": "01a13b06-79bb-7ee0-853f-9a42d1c6f1dc",
+  "external_ref": null,
+  "title": "The global test-runs GET returns every registered run unpaged (4.7 MB / 2995 rows); bound or page it before any UI or agent polls it",
+  "outcome": "The host's global test-run listing returns a bounded page (with a continuation) or a bounded recent window by default, so a UI view or agent query never transfers the whole registry history in one response.",
+  "acceptance": [
+    "The global test-run listing route returns at most a documented bounded number of rows per response, with a continuation or explicit window, and existing exact-ID GETs are unchanged.",
+    "Callers in the UI and launcher that list runs use the bounded form; none fetches the unbounded history.",
+    "Tests cover the bound, the continuation (or window) and exact-ID lookup; the full gate is green."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "api",
+    "coordination-cost",
+    "host-recording",
+    "performance",
+    "restart-safety",
+    "test-launcher",
+    "test-run-visibility",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a137e1-ffbc-7a83-8866-654bf2d34f93",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a13d33-5083-7181-91cb-749b8dcc62c5",
+  "disposal_reason": "Parent w-654bf2d34f93 (test-run registry) is completed and its code is landed, so this optional child continues as independent work — cleanup queue group 8 (Fable2's #802 order via Engram::Advisor), assigned to Termal::Sol-03d4 while the train is held.",
+  "completion": null
+}

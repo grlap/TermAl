@@ -1,0 +1,41 @@
+{
+  "id": "01a0e6d3-c514-7340-ab97-6cf86d76677a",
+  "external_ref": "tm-gt8c",
+  "title": "Broad delegation state hides structured review capability",
+  "outcome": "Narrowing StateResponse.delegations to only id/childSessionId removed mode and reviewResultRequired, but TermalDelegationMcpBridge classifies reviewer children and advertises termal_submit_review_result from those fields. Real /review-code children therefore complete prose review but cannot submit the required structured result, causing authoritative review fan-in to fail. Restore the minimal capability fields without re-exposing lifecycle/result payloads, and add a test that feeds an actual serialized StateResponse producer snapshot into the MCP classifier/tool-list path.",
+  "acceptance": [
+    "Broad StateResponse delegation links carry only the identity and capability fields (id, childSessionId, mode, reviewResultRequired, reviewFreezeAllowed, and acceptanceEvaluationAllowed when true) and no lifecycle or result payload; reviewer children receive termal_submit_review_result and explorer and worker children do not; a link missing its capability fields never advertises the review tool, and the typed StateResponse rejects it under the one-current-protocol rule; tests use real serialized snapshots for the positive and negative paths."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Closed with evidence; the fix was already on master.\n\n85892f1 (2026-08-26) restored the capability fields (mode, reviewResultRequired) to the broad StateResponse delegation links, so reviewer children are again offered termal_submit_review_result. d41ab91 (2026-09-03) later replaced the serde defaults with the one-current-protocol rule: a link without the fields fails typed deserialization, and the MCP gate fails closed. The acceptance was revised to that contract, with Fable2's concurrence (note 1135c989).\n\nEvidence at master 169fc8b, in the named root .tmp/wt-p0-close-9474:\n- broad_state_snapshot_carries_delegation_links_and_mcp_capability and delegation_mcp_hides_and_rejects_review_submission_for_non_reviewer_child (Explorer and Worker) passed 2 of 2;\n- independent evaluation delegation-9b65b823 (Codex) passed 1 of 1.\n\nThe landing commit and time are the fix commit's own; the original push time is not recorded.",
+    "completed_at": "2026-10-02T09:38:18.590121100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

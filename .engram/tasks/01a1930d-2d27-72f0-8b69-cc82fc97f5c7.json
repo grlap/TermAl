@@ -1,0 +1,31 @@
+{
+  "id": "01a1930d-2d27-72f0-8b69-cc82fc97f5c7",
+  "external_ref": null,
+  "title": "A read-only Kimi reviewer is refused Engram MCP reads (next --peek, memories) that read-only Codex and Claude reviewers can make",
+  "outcome": "A read-only Kimi reviewer can make the same read-only Engram MCP calls (startup recovery: next --peek, memories, show) that read-only Codex and Claude reviewers can, while every Engram write stays refused for all three; a Kimi stand-in for an unavailable reviewer starts with the required recovery.",
+  "acceptance": [
+    "A cause note identifies, from source with file:line, why the read-only policy refuses Engram MCP read calls for a Kimi reviewer but not for Codex or Claude reviewers spawned the same way (tool-name mapping, MCP permission classification, or Kimi-specific approval path).",
+    "Tests show a read-only Kimi reviewer's Engram read calls (next --peek, memories, show) are admitted and every Engram write call (claim, note, update, done, add) is still refused, matching the Codex and Claude reviewer behaviour; existing Codex and Claude read-only controls stay green.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "engram-host",
+    "kimi",
+    "read-only-reviewer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a192fc-0a8e-7143-839d-8eef36ef0b7e",
+  "external_ref": null,
+  "title": "Engram capability records are last-writer-wins: an older overlapping bind/status reply can overwrite a newer one",
+  "outcome": "In EngramHostAdapter::request (src/engram_host_adapter.rs ~2531, w-decd61d62831's capability recording), each capability record carries a per-session monotonic call sequence taken before the call, and a reply from an older call never overwrites a newer record. Today, two overlapping bind/status calls on the same session under the same child generation can leave a stale NotRead/EntryMissing record (or an older token's answer) in place until the next status read. That keeps a verification record pending longer than needed, though it never sends wrongly, because a send needs both the token and the generation to match. A test with overlapping calls completing out of order proves it. Provenance: w-decd review round 5 Low (Claude delegation 183f089a).",
+  "acceptance": [
+    "Engram capability records are last-writer-wins: an older overlapping bind/status reply can overwrite a newer one is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

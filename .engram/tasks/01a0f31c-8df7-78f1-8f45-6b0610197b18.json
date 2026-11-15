@@ -1,0 +1,36 @@
+{
+  "id": "01a0f31c-8df7-78f1-8f45-6b0610197b18",
+  "external_ref": null,
+  "title": "The evaluator brief's floor carries left-out locator names, so the outcome is cut and an oversized contract refused slightly earlier than the criteria alone require",
+  "outcome": "When the evaluator's brief must shrink to its floor, the locator names of left-out entries give way to the bare count before the outcome is cut or the request is refused as too large, and the refusal's \\\"the host's instructions alone\\\" is true of what it measures. The requester's notice still names every left-out locator.",
+  "acceptance": [
+    "Leaving out an entry never makes the brief larger than listing it: the scan takes the smaller render, or the names give way first; a test with short entries covers it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "With criteria sized just under the 65,536-byte cap, a request that fits with a bare count of left-out entries is briefed, not refused; a boundary test covers it and the size one byte past it."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

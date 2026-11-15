@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c788-7081-836a-44c1571fe8a4",
+  "external_ref": "tm-uwx.4",
+  "title": "Expose peer queue depth and a recent cross-session outbox",
+  "outcome": "Extend session discovery with per-peer queued-message count and oldest enqueue time, and provide a query for messages sent by the current session over a bounded recent window. This removes resend guessing and lets an agent recover its own send history after context compaction.",
+  "acceptance": [
+    "Callers can query queued count and oldest timestamp for a peer without reading message bodies, and can list their own recent sends with message id, receiver, sequence, time, delivery state, and supersedes metadata. Cross-repository authorization is preserved. Tests cover queued, delivered, failed, expired-window, and restarted-server states."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c787-7eb0-87d9-543a5293bb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

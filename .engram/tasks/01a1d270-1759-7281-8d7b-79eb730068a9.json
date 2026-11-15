@@ -1,0 +1,30 @@
+{
+  "id": "01a1d270-1759-7281-8d7b-79eb730068a9",
+  "external_ref": null,
+  "title": "Work detail reveal can be undone by window-anchor restoration after ResizeObserver delivery",
+  "outcome": "The loaded Work details reveal remains effective when ResizeObserver-driven row measurement races the passive scroll effect, without losing focus or changing manual scroll behavior.",
+  "acceptance": [
+    "A behavioral witness reproduces the ResizeObserver/anchor ordering and the reveal remains effective in the windowed Work views without stealing focus."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "review-followup",
+    "ui",
+    "work-panel",
+    "work-ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1d23f-3fd7-70f2-bc4d-a9947186b4d5",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1d30f-5415-7161-828d-54cd646cd360",
+  "disposal_reason": "Continue as independent work after parent w-a9947186b4d5 completed; preserve the optional Low and its baseline-evidence retention obligation without a completed-ancestor execution block.",
+  "completion": null
+}

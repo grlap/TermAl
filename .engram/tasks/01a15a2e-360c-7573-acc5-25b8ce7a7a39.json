@@ -1,0 +1,35 @@
+{
+  "id": "01a15a2e-360c-7573-acc5-25b8ce7a7a39",
+  "external_ref": null,
+  "title": "S3 Mac step-1b: rebuild archived Engram ba72314a and verify no-write probes",
+  "outcome": "S3 Mac step-1b: rebuild archived Engram ba72314a and verify no-write probes",
+  "acceptance": [
+    "Record the exact ba72314a archive/tree and unchanged clean Mac checkout; build once in fresh src-b-ba72 with its own target and record native exit, binary SHA256 and version/schema fingerprints.",
+    "Record --version, --help and task-sync --help with explicit home-b and project-file, showing home-b and ~/.engram absent before/after each; report evidence to both coordinators without store, install, sync or host changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "s3-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "S3 Mac step1b completed: archived exact ba72314a/tree dd69e5c1 to fresh src-b-ba72, exactly one release build passed in98.46s; binary187d9d51/build e29a144e0698/schema81b4b805acfb. Explicit-home version/help/task-sync-help all passed with home-b and ~/.engram absent before/after each; checkout/index/source and old binary/summary unchanged. Both coordinators received exact evidence. Independent Sonnet evaluation e3e1779ba963467bb4f4fea91295668c passes2/2 on attributed remote observations; no host-recorded remote test/gate credit asserted. No landing needed. Retain Mac src-b-ba72/evidence while Engram S3 parent w-70c009dde0ec remains open.",
+    "completed_at": "2026-10-20T16:47:04.998585900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

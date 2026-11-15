@@ -1,0 +1,27 @@
+{
+  "id": "01a1ccaf-18ad-7692-abad-e10011ce31f3",
+  "external_ref": null,
+  "title": "Keep website flow-step focus outlines above adjacent buttons",
+  "outcome": "Keep website flow-step focus outlines above adjacent buttons",
+  "acceptance": [
+    "Keyboard focus outlines remain fully visible on each of the four workflow step buttons at desktop and mobile layouts, including the edge beside the next button."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "website"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

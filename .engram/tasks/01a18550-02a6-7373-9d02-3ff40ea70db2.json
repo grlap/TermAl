@@ -1,0 +1,32 @@
+{
+  "id": "01a18550-02a6-7373-9d02-3ff40ea70db2",
+  "external_ref": null,
+  "title": "Avoid repeated full checkpoint serialization while projecting recovery summaries and checking batch custody",
+  "outcome": "Existing recovery projection and batch-custody owners avoid unnecessary repeated full canonical/mirror serialization under the state mutex, while preserving validation and exact custody semantics.",
+  "acceptance": [
+    "Avoid repeated full checkpoint serialization while projecting recovery summaries and checking batch custody is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "b16",
+    "control-plane",
+    "engram-control",
+    "gated-control",
+    "performance",
+    "review-note"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete removed-feature path; not fixed or tested by this sweep. Fable2722/message43b9a7df-11b7-403a-a0d1-1e21100b4562 authorizes disposition. Full original outcome/criteria read; retained note provenance 924edc5756964adfa9468861b6e0ac35. At current master2e03d1a9f0357862cf26e4c6a4f8ddccdadeff00, landed87f49ed0 deleted active admission/begin/replay, containment/reset and checkpoint result-recovery owners (native deleted-path diff inspected). src/engram_session_obligations.rs and engram_containment_checkpoint.rs explicitly retain only passive validated historical records, never restore active exclusion/replay/accounting/admission. The specific old behavior in this item's title/criteria is therefore no longer an executable product contract. Current ordinary delivery/queue/transport/SQLite compatibility concerns were separately preserved in the sweep; this cancels no such behavior. Historical failures, unknown incident causes and existing delivered-work/credit caveats remain unchanged. No source edit, Cargo/test, new verification, old experiment execution or acceptance PASS claimed; keep raw evidence while other open items still cite it.",
+  "completion": null
+}

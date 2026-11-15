@@ -1,0 +1,30 @@
+{
+  "id": "01a19f78-eadc-7d40-8ea5-28f34e09eedb",
+  "external_ref": null,
+  "title": "Capture-lifetime follow-ups: settle refused captures, own the post-serve join, keep the 40 s join off the async shutdown future",
+  "outcome": "A refused capture spawn reads as failed rather than still running; main's post-serve capture join no longer depends on trigger_shutdown_signal having run first; and the graceful-shutdown future does not block a tokio worker for up to 40 s.",
+  "acceptance": [
+    "EngramCapture::spawn settles a capture whose lifetime spawn is refused with an explicit failure, so open_to_writes() does not stay true and the check can fence, with a regression test",
+    "main.rs's post-serve capture join runs retire_capture_observation_workers (or trigger_shutdown_signal) first and uses the stop_and_join result",
+    "trigger_shutdown_signal only stops the captures, keeping the fencing order, and the blocking join runs in main's post-serve path or under spawn_blocking"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capture-lifetime",
+    "review-low",
+    "shutdown"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

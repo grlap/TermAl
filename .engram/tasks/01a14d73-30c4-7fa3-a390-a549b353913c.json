@@ -1,0 +1,31 @@
+{
+  "id": "01a14d73-30c4-7fa3-a390-a549b353913c",
+  "external_ref": null,
+  "title": "Clarify federation operator recovery after an unresolved settings write",
+  "outcome": "The federation operator guide names the actual supported recovery after a failed settings write, explains that the attempted image can later become durable, and makes peer re-verification after disable/re-enable explicit.",
+  "acceptance": [
+    "The 500 guidance accurately describes current production recovery: resolve the persistence problem, arrange the normal operator restart, then re-read GET /api/federation to determine the durable state; it does not claim a supported reconcile endpoint or imply that the failed request rolled back.",
+    "The guide states that a later unrelated state save can persist the attempted settings, and that changed settings downgrade non-revoked peers to Enrolled, requiring fresh verification and explicit reactivation before new placement while retaining reservations.",
+    "The documentation is checked against the existing configuration, persistence and boot behavior; it grants no new agent restart/configuration authority and claims no unimplemented operator action."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "docs",
+    "federation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

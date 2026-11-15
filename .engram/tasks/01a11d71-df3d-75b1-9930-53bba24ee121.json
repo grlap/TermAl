@@ -1,0 +1,29 @@
+{
+  "id": "01a11d71-df3d-75b1-9930-53bba24ee121",
+  "external_ref": null,
+  "title": "Retain SessionBind attribution on post-parse phase and ownership validation errors",
+  "outcome": "Post-parse SessionBind phase or ownership validation errors retain their known request identity and accurate boundary without changing bind or recovery decisions.",
+  "acceptance": [
+    "Retain SessionBind attribution on post-parse phase and ownership validation errors is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "diagnostics",
+    "engram-host-adapter",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

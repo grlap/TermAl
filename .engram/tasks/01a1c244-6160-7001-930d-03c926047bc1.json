@@ -1,0 +1,27 @@
+{
+  "id": "01a1c244-6160-7001-930d-03c926047bc1",
+  "external_ref": null,
+  "title": "Pin owner reachability in the observation missing-workdir positive control",
+  "outcome": "Strengthen closing_missing_workdir_does_not_inherit_enclosing_repository_refusal so its enclosing-root positive control directly proves the source owner ran before the missing-directory negative control.",
+  "acceptance": [
+    "The existing enclosing-root control asserts its owner capture count, the missing-directory capture returns unavailable without increasing it, and nested-root and subdirectory controls still succeed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "source-revision",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

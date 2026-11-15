@@ -1,0 +1,46 @@
+{
+  "id": "01a1418a-5a7f-7000-ad70-a7764752294f",
+  "external_ref": null,
+  "title": "Keep acceptance unread-boundary references within the rationale limit",
+  "outcome": "Evaluator guidance identifies an unread boundary without requiring an opaque continuation longer than the 2000-character rationale limit to be copied.",
+  "acceptance": [
+    "The independent and same-session evaluator briefs both tell the evaluator to identify an omitted unread boundary by its read cut and paging reason, and neither asks it to copy the continuation into its rationale; a test asserts both briefs' guidance.",
+    "docs/features/engram-host-adapter.md describes the same evaluator guidance.",
+    "The full gate passes on the master tree that contains the change."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Updated both acceptance evaluator briefs to identify unread evidence by read cut and paging reason, documented the guidance, and added the regression test. Fresh independent evaluation 0ae05f875ddb4451a122b2c55a3fc65d passed all three criteria on the landed master tree.",
+    "completed_at": "2026-10-16T23:11:44.482561800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

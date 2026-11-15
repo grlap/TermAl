@@ -1,0 +1,34 @@
+{
+  "id": "01a1b9ad-aa48-73e0-87c3-b3855d1cc433",
+  "external_ref": null,
+  "title": "Integrate combined TermAl train on a594f305: declared settlement, test-run overview, root reclamation, fixture speed",
+  "outcome": "Combined candidate d3499b97 (six independently reviewed candidates composed on master a594f305) passes a fresh combined review pair, a DL560 whole-binary focused run and FULLs on DL560 and Windows B from a test ref, then lands by fast-forward and is installed on Central and DL560. Components:\n- 0d9fd6be: declared settlement, the f31f successor (Sol-edfd);\n- f11a7eb6: bounded test-run overview (Sol-c593, w-5f17);\n- 08c4ecc5: named-root reclamation (Sol-c593, w-0bfc);\n- c254b6d8: review-identity fixture bulk staging (Sol-a7bb);\n- 2f46b3cc: HTTP fixture connection close (Sol-d50d, w-6cc);\n- 50f02a17: Git byte seed fixture (Sol-03d4, w-6235).",
+  "acceptance": [
+    "Integrate combined TermAl train on a594f305: declared settlement, test-run overview, root reclamation, fixture speed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration",
+    "train"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Combined candidate d3499b97 landed by fast-forward on master at 07:46:31Z and was installed on Central and DL560 (note 29b3593e). Greg restarted the 4 hosts at about 15:39Z, and census A on all four showed d3499b97. Pair clean with no Medium or higher; whole-binary preflight passed; FULLs on DL560 test-5dccd254 and Windows B test-ed6d2a6f, both eligible.",
+    "completed_at": "2026-11-08T18:23:06.472446600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

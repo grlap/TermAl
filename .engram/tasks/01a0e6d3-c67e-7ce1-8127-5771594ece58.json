@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c67e-7ce1-8127-5771594ece58",
+  "external_ref": "tm-o6b4",
+  "title": "Make the Rust gate invocation explicit and verifiable on Windows",
+  "outcome": "During /review-changes on Windows, invoking scripts/test-rust.sh directly from PowerShell returned exit 0 with no banner or Cargo output because Windows dispatched the .sh file association instead of executing it. Invoking bash scripts/test-rust.sh did execute the wrapper but failed at line 60 with cargo: not found because non-login WSL does not include /home/greg/.cargo/bin, while bash -lc does. This can falsely pass or block the required review gate depending on invocation shape. Provide a documented/cross-platform launcher or make the Windows invocation fail visibly unless the wrapper and Cargo suite actually execute.",
+  "acceptance": [
+    "From PowerShell, the supported Rust gate command executes the wrapper, prints its fd/thread banner, finds the configured Rust toolchain without relying on an implicit interactive PATH, propagates Cargo test failures, and cannot return success without running the suite. Add a focused launcher/smoke check for the Windows path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 4, spot-checked by Termal::Fable2): CLOSE-DONE. The Rust gate invocation is explicit on Windows: scripts/test-launcher.mjs:150-159 resolves Git for Windows bash (same ground as the closed w-21bd4d2dda97).",
+  "completion": null
+}

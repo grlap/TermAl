@@ -1,0 +1,28 @@
+{
+  "id": "01a0f098-fcf4-7c82-8d18-147dc121cdc2",
+  "external_ref": null,
+  "title": "A project default of same_session must not stand in for a task's pin once Engram rejects unpinned same_session",
+  "outcome": "src/acceptance_evaluation_api.rs:740-753 applies the project's default mode as the pin when the task has none. So a project default of same_session selects same_session even when independent_session is also admitted.\nEngram's planned rule (Engram w-a5f404605e07, revision 7; Engram::Coder, TermAl mailbox 62e0c56d #47) rejects an unpinned same_session submission whenever another mode is admitted. Only a peer-authorized same_session pin on the task escapes it, and a host setting is not the task's authored mark.\nOnce that lands, such a request would run a same_session evaluation that Engram then refuses.\nThe fix: the default may choose among admitted modes other than same_session, or apply same_session only when it is the sole admitted mode. Match Engram's final wording when revision 7 lands.",
+  "acceptance": [
+    "A task with a current peer-authorized same_session mark admitted by policy gets the same_session brief/path and its submitted evaluation is accepted by Engram; an executor-authored mark is not treated as that exception.",
+    "With independent_session and same_session both admitted, no task pin, and a project default of same_session, the host does not produce a same_session evaluation; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

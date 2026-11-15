@@ -1,0 +1,35 @@
+{
+  "id": "01a0ee4e-b38a-7173-957b-e15f9aa5f6cc",
+  "external_ref": null,
+  "title": "termal mailbox read (CLI) fails on a page that holds the caller's own sends: missing field `body`",
+  "outcome": "The coordination CLI reads any mailbox page the MCP tool can read, own sends with their bodies omitted included.",
+  "acceptance": [
+    "The CLI decodes a read page that holds an own send with bodyOmitted true and prints it, as JSON and as text; a test shows it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cli",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

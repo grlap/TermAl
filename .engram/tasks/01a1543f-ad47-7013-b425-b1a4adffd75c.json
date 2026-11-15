@@ -1,0 +1,27 @@
+{
+  "id": "01a1543f-ad47-7013-b425-b1a4adffd75c",
+  "external_ref": null,
+  "title": "An owed batch-bind send shares bind_in_progress with rebinds, so an admission during the send drops a changed work binding or backs off",
+  "outcome": "An owed verification_bind send in flight has its own in-flight flag. Settings-reset quiescence and the reset checkpoint claim wait on it (session_crud.rs wait_for_engram_project_reset_quiescence and claim_engram_project_reset_checkpoints_until), but the admission work-binding refresh and the bind paths do not read it as a rebind. An admission arriving during a send therefore neither drops a changed work binding (engram_work_binding_refresh.rs, the bind_in_progress early return) nor backs off with \"Engram binding is already in progress\".",
+  "acceptance": [
+    "An owed batch-bind send shares bind_in_progress with rebinds, so an admission during the send drops a changed work binding or backs off is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

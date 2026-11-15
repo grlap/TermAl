@@ -1,0 +1,37 @@
+{
+  "id": "01a1b4ae-13f5-73d3-b7fd-502cac94fb58",
+  "external_ref": null,
+  "title": "Receipt ACK on a Central-homed native relay mailbox returns 404 'native mailbox association not found' after a successful read (post-restart)",
+  "outcome": "After termal_read_mailbox returns a page and an issued receipt for a native relay mailbox homed on Central, termal_acknowledge_mailbox with the same mailbox id and the unchanged receipt succeeds and advances the cursor, including after a host restart. Strict ownership stays: a different member's ACK is still refused, and is told apart from a missing association.",
+  "acceptance": [
+    "After a valid member reads a Central-homed native relay mailbox and receives a page receipt, losing its cached relay association does not strand the receipt: ACK using the unchanged locator and receipt recovers validated association and advances the proper cursor, or returns an actionable re-resolve refusal without changing any cursor.",
+    "Missing association is distinguished from an association owned by another member; wrong-member, invalid-receipt and mismatched-home ACK attempts remain refused and never advance a cursor or acquire another member's association.",
+    "Behavioural regressions cover read -> association loss -> unchanged receipt ACK for local Central home, plus ownership/refusal controls; required focused checks, independent review pair and exact-input full gate pass before landing. No repository Markdown/instruction-content tests are added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed the concurred actionable409 refusal lane for local-home missing association, retaining ownership/home/receipt guards. Three behavioral regressions, independent source pair, exact-input focused and exact-tree full gate passed before push; original live cause unproven. Installation remains integration-owned and deferred.",
+    "completed_at": "2026-11-07T08:11:18.673934700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

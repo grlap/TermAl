@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c547-7501-bd66-1261c7bd722b",
+  "external_ref": "tm-kfy",
+  "title": "Board panel polish: coalesced-click feedback, visibilitychange refresh, a11y live region, test gaps",
+  "outcome": "Deferred P3 follow-ups from the 2026-07-27 dual review of the board visibility slice (blockers were fixed in-slice): (1) acknowledge coalesced manual Refresh clicks — drive the button's pending state off the in-flight claim so a click during a background probe is not a silent no-op; (2) refresh once on visibilitychange back-to-visible instead of waiting up to a full interval; (3) a11y — polite live region announcing updated entries; the 'updated' badge currently has no AT signal; (4) test gaps — .board-panel-last-write chip, '1 write' pluralisation branch, background-probe-failure-surfaces-error / background-success-clears-standing-error pair, manual-click-coalesces-behind-background-probe path; (5) consider reusing the chained-poll helper (active-prompt-poll.ts) instead of setInterval+guard, or document the deliberate divergence in the module header.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

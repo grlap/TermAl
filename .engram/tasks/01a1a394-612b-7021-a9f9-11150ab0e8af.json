@@ -1,0 +1,28 @@
+{
+  "id": "01a1a394-612b-7021-a9f9-11150ab0e8af",
+  "external_ref": null,
+  "title": "Preserve distinct iota-subscript and iota-adscript hard-link names in content spelling keys",
+  "outcome": "Spelling grouping preserves the concurred simple-fold boundary without merging unrelated tracked hard-link names.",
+  "acceptance": [
+    "Coordinator confirms the U+0345 boundary, with exact rationale recorded.",
+    "A regression distinguishes U+1FB3 from alpha+iota while preserving U+1FB3/U+1FBC equivalence and ordinary content hashes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a31e-1803-7fa0-a1f5-81991023d2c1",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

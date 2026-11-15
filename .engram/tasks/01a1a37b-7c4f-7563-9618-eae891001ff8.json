@@ -1,0 +1,28 @@
+{
+  "id": "01a1a37b-7c4f-7563-9618-eae891001ff8",
+  "external_ref": null,
+  "title": "A declared test command run in a nested repository is silently unrecognised: the declaration preflight checks only the session's root",
+  "outcome": "An agent whose declared command is ignored because its declaration isn't at the root TermAl reads is told so, instead of getting an empty check list and no explanation.",
+  "acceptance": [
+    "When a command that matches a declared-command candidate runs from a cwd inside a worktree or nested repository holding a termal-tests.toml that TermAl did not read, the turn carries a host line naming the root TermAl read and the declaration it ignored, or the design records why nested recognition is admitted instead, by a test.",
+    "Recognition for the documented layout, and for repositories with no declaration, is unchanged, by the existing tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "declared-tests",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

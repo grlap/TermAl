@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c527-7941-bd5b-b4e91886c4bb",
+  "external_ref": "tm-hia1",
+  "title": "Unsent prompt drafts and pending attachments do not survive a reload",
+  "outcome": "Prompt drafts live only in refs - draftsBySessionIdRef: Record<string, string> and draftAttachmentsBySessionIdRef in the live-state layer - and nothing writes them to browser storage (a localStorage search across ui/src finds workspace layout, control-panel section order and orchestrator template state, but no drafts). A refresh, a crash, or a closed tab therefore discards a half-typed prompt and any attached images with no warning and no recovery.\n\nFound while designing the recovery for a failed lazy chunk load (see the chunk-recovery task): that design needs a reliable \"is there anything to lose\" predicate before it may reload automatically, and the workspace-layout pending marker does NOT cover drafts. So this gap is also a blocker for the automatic half of that recovery - not just a usability issue on its own.\n\nScope note: this is the plain user-facing loss. Whether drafts belong in the persisted workspace payload or in their own per-session storage entry is open; the workspace payload is PUT to the server and drafts are local-only, which argues for a separate key.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

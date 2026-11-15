@@ -1,0 +1,31 @@
+{
+  "id": "01a0e6d3-c643-73a1-b8c5-fb35d7e76d72",
+  "external_ref": "tm-miak",
+  "title": "Automatic same-project root access to original structured review results",
+  "outcome": "An eligible native root of the original review project can read the exact original structured review result as itself through a pure, nonexclusive, bounded archive read, preserving explicit unavailable states and every execution and landing authority boundary.",
+  "acceptance": [
+    "The root already responsible for continuing the work calls the supported exact review-result read AS ITSELF.\n   - The host automatically authorizes the original project's actual native root (host-recorded projectId; not a child, hidden, removed or proxy session), scoped to the requested original delegation, attempt and result identity.\n   - No manual grant, parent consent, live claim, special coordinator role or Greg intervention.\n   - Project association is immutable in new commissioning and archive records. Legacy association is recovered only from consistent native stored facts, never by guessing from the brief or cwd; otherwise the read returns project_basis_missing.\n   - Foreign-project roots gain no ambient access.",
+    "The read returns the same original, complete, validated structured packet and provenance, through the existing archive with bounded paging. No prose reconstruction, export, hash or signature ceremony.\n   - Pending/unpromoted, failed, held, missing, quarantined, conflicting and superseded states remain explicit.\n   - Only the appropriate original final attempt counts, under the unchanged review, input and clean-carry rules.",
+    "The pure read never calls the mutating parent GET or recovery, never changes lifecycle, claims or waits, never ACKs mail and never starts commands.\n   - Any explicit audit recording is separate from parent mutation.\n   - Repeated and concurrent reads return the same original result.\n   - Reuse the ea2e archive work, without claiming it has shipped or that its current read is pure. No duplicate archive.",
+    "Reads are non-exclusive: no exclusive takeover and no reader owner. If the first reader fails, another eligible root issues the same supported read, and a returning original parent can read too.\n   - No new scheduler, handoff registration, lease, acceptance fence or backend election.\n   - Outage detection does NOT gate the read.\n   - Explicit Stop/pause and every execution and landing authority boundary remain. A read grants no parent identity, child control, review submission or commit power.",
+    "Validation covers:\n   - an eligible different root retrieves the exact original paged result while the parent is wedged or absent;\n   - another reader and a returning parent concurrently get the same packet;\n   - isolation for a child, the wrong project and the wrong attempt;\n   - explicit pending, invalid and missing-basis cases;\n   - restart continuity.\n   No new review of existing input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

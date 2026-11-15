@@ -1,0 +1,30 @@
+{
+  "id": "01a1c839-f993-7411-9e01-de050541457e",
+  "external_ref": null,
+  "title": "delegation_refresh_cut normalize() masks timestamps by sorted substring replacement, so restartRecovery.restartedAt leaks its fraction and two tests fail whenever the hour is 00-19 UTC (blocks every FULL until 20:00Z)",
+  "outcome": "The delegation refresh equivalence tests pass at every time of day. normalize() masks each timestamp value whole, so a short HH:MM:SS value can never be replaced inside a longer RFC3339 value, and a regression test pins the failing ordering.",
+  "acceptance": [
+    "normalize() in src/tests/delegation_refresh_cut.rs replaces whole timestamp values (or applies substitutions longest-first) so an HH:MM:SS value equal to the time part of an RFC3339 value cannot corrupt that RFC3339 value.",
+    "A regression test builds an RFC3339 restartedAt sharing its HH:MM:SS with a message timestamp at an hour before 20 and shows both are masked; the two named tests pass independent of the wall-clock hour.",
+    "No product code changes; the change is test-only and passes `cargo fmt --check`."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "blocks-landing",
+    "test-defect",
+    "time-of-day"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

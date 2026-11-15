@@ -1,0 +1,31 @@
+{
+  "id": "01a188a4-f7f9-77d3-b5e0-dda3af1495b4",
+  "external_ref": null,
+  "title": "Report or distinguish same-turn provider tool-key reuse instead of silently reusing an old test execution",
+  "outcome": "A later invocation that reuses the same provider tool key in the same runtime and turn is either identified as a distinct occurrence or explicitly reported as an identity collision, without borrowing the first execution's authority or silently losing its observation.",
+  "acceptance": [
+    "Report or distinguish same-turn provider tool-key reuse instead of silently reusing an old test execution is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-7",
+    "acceptance-needed",
+    "host-recording",
+    "post-import",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d9-0ee9-7970-9657-3e6804fa2785",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

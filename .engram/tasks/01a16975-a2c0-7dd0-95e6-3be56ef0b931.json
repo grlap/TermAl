@@ -1,0 +1,30 @@
+{
+  "id": "01a16975-a2c0-7dd0-95e6-3be56ef0b931",
+  "external_ref": null,
+  "title": "Windows host became unresponsive at low CPU/disk and needed a hard reset (2026-10-23 ~15:37–15:46Z) — cause unknown",
+  "outcome": "The cause of the 2026-10-23 Windows hang (unresponsive while CPU and disk use were low, ended by a hard reset) is identified from evidence, or the missing evidence is named and a capture is in place for a recurrence. No attribution is made to load, the full gate, Engram or the persistence writer without evidence.",
+  "acceptance": [
+    "A note records the read-only evidence available after the reset: System and Application event logs around the hang, crash-dump and LiveKernelReports folders, TermAl's run and launcher records, and Engram's diagnostics. It states what each shows and what is missing.",
+    "If no evidence identifies a cause, a recurrence capture is proposed (for example a hang-dump or ETW configuration) and approved by Greg before it is enabled, since enabling it is a system configuration change.",
+    "Every in-flight gate, test run, review delegation and evaluation interrupted by the reset is listed with its recovery disposition."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-incident",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Cancelled under Greg's word of 2026-11-08 (Asistant #1015). Not fixed and not explained. Per Sol-c593's read-only sweep: no code landing, bounded OS, run and I/O triage delivered, and the historical hang cause is UNKNOWN. No new occurrence is reported in my records and nothing further can be investigated without one. If a Windows host hangs at low CPU and disk again, file a new item with fresh evidence.",
+  "completion": null
+}

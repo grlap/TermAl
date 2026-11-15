@@ -1,0 +1,29 @@
+{
+  "id": "01a16dbd-0527-7d21-8b5d-067eb16709a9",
+  "external_ref": null,
+  "title": "Clarify slowest-tick eviction wording for newer equal-duration samples",
+  "outcome": "Persistence diagnostics documentation describes eviction by eight newer ticks with at least equal wall duration.",
+  "acceptance": [
+    "The slowest-retention eviction sentence agrees with newest-first equal-duration tie ordering."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "documentation",
+    "persistence",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16cfa-2e63-7b61-a19d-f1391dace99b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

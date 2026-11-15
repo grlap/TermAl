@@ -1,0 +1,36 @@
+{
+  "id": "01a187f2-acc8-7242-8ab8-39b36c866297",
+  "external_ref": null,
+  "title": "Federation link to Mac and Windows B lost again after the 2026-10-29 build restart (repeated 409 'federation link changed')",
+  "outcome": "After a routine build restart of Central and/or a satellite, an enrolled satellite's authenticated mailbox link recovers automatically, with no re-pairing or operator action; a link-incarnation change during credential read or basis validation converges instead of looping on 409 'federation link changed'.",
+  "acceptance": [
+    "A cause note identifies the stale literal-IP endpoints after LAN renumbering, the exact local no-link source of the repeated Mac relay 409, and the relationship to prior fix 00a4ecea and its open children, with file and line.",
+    "Stored federation endpoints migrate safely to hostnames without re-pairing; names are re-resolved on each connection; fallback and recovery remain bound to the pinned host key, host UUID and enrollment, not to the address.",
+    "Deterministic tests cover hostname dialing and safe migration with enrollment and keys preserved, refusal of a different host key, recovery across restart or credential/basis changes, and mailbox placement/reference behavior across the address transition.",
+    "The deferred native relay drains automatically once the link returns, with deterministic coverage preserving its message, sequence and acknowledgment boundaries.",
+    "The exact input passes an independent review pair and the full five-stage gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "greg-reported",
+    "mac",
+    "regression",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a15a00-db8e-7831-8625-aa8908269d97"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

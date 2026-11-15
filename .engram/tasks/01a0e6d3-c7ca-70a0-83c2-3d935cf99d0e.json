@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7ca-70a0-83c2-3d935cf99d0e",
+  "external_ref": "tm-wqs",
+  "title": "Collapse the four Codex reasoning-effort string parsers",
+  "outcome": "parse_codex_reasoning_effort (runtime.rs), parse_discovered_codex_reasoning_effort (codex_discovery.rs), codex_reasoning_effort_from_json_value (state.rs), and the TERMAL_CODEX_REASONING_EFFORT match (turns.rs) each hand-maintain the same string map and silently drop unknowns (how max/ultra went missing). Route through one CodexReasoningEffort::from_api_value. The runtime path has coverage (codex_model_options_parses_max_and_ultra_reasoning_levels); discovery/state/env still lack direct tests, so add a shared parser test in the collapse.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

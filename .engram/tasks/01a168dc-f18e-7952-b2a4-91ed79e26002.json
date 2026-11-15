@@ -1,0 +1,28 @@
+{
+  "id": "01a168dc-f18e-7952-b2a4-91ed79e26002",
+  "external_ref": null,
+  "title": "Document the read-only reviewer input-identity contract",
+  "outcome": "docs/features/agent-delegation-sessions.md and docs/features/review-freeze-verification.md describe, and cross-link, the read-only reviewer input-identity contract: per-attempt admission and manifest, the rule that the admitted check is the last before submitting, the stable [identity-*] refusal codes and which are 429, the durable envelope's inputIdentity field, and that an attempt in flight across a host restart fails closed.",
+  "acceptance": [
+    "Both feature briefs describe the admission, check ordering, every [identity-*] refusal code with its HTTP status, the inputIdentity envelope field, the accepted-result slot binding, and the restart fail-closed rule, and they link to each other."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "docs",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1c9e1-a709-7f80-bae6-159539eadbfb",
+  "external_ref": null,
+  "title": "Clarify that closing diagnostic revision does not version count snapshots",
+  "outcome": "Clarify that closing diagnostic revision does not version count snapshots",
+  "acceptance": [
+    "The closing-job feature contract explains that revision is the state revision at read time and identical revision/instance pairs may have different counts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "diagnosis",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c961-7839-74e1-b12f-1676809af512",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

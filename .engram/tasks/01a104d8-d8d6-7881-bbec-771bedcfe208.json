@@ -1,0 +1,27 @@
+{
+  "id": "01a104d8-d8d6-7881-bbec-771bedcfe208",
+  "external_ref": null,
+  "title": "Test PowerShell witness commands under-escape an apostrophe in the temp path across nested single-quote layers",
+  "outcome": "src/tests/test_child_temp.rs (the grandchild TEMP witness, :56/:60) escapes the marker path once (' -> '') but embeds it in two nested PowerShell single-quoted layers: the parent's -ArgumentList element and the grandchild's WriteAllText argument. A test temp path with an apostrophe (e.g. C:\\Users\\O'Neil\\…) would make the grandchild command malformed and fail the witness at its marker read, even though TEMP containment is correct. The same pattern is pre-existing at src/tests/terminal.rs:1825 and :1841 (terminal_timeout_process_tree_command and terminal_background_process_tree_command). Fix: pass the marker to the grandchild through an inherited environment variable, or escape each quoting layer independently, with a shared helper for all three call sites.\n\nA related optional follow-up, a reviewer Note: give the two root-as-workdir process-tree tests in src/tests/terminal.rs (timeout_kills_process_tree and cleans_up_background_children_after_shell_exit) a TestTempRoot guard. A panic before their trailing remove_dir_all would otherwise leave a root now holding the killed grandchild's probe residue in child-temp.",
+  "acceptance": [
+    "Test PowerShell witness commands under-escape an apostrophe in the temp path across nested single-quote layers is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a18a02-5fe4-7673-b3a2-cea20bdd4f38",
+  "external_ref": null,
+  "title": "Windows B satellite cannot read its federation pair credential after the 2026-10-29 restart (503 'credential unavailable'): link down before hello",
+  "outcome": "Windows B satellite cannot read its federation pair credential after the 2026-10-29 restart (503 'credential unavailable'): link down before hello",
+  "acceptance": [
+    "Windows B satellite cannot read its federation pair credential after the 2026-10-29 restart (503 'credential unavailable'): link down before hello is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

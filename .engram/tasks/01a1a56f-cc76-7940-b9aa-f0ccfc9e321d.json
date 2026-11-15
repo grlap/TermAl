@@ -1,0 +1,31 @@
+{
+  "id": "01a1a56f-cc76-7940-b9aa-f0ccfc9e321d",
+  "external_ref": null,
+  "title": "Native relay progress should report blocking head and current dispatch lease holds",
+  "outcome": "An exact native relay status identifies observed authority holds that actually prevent dispatch, including a fenced ordinary queue head and the existing peer-handle/current-lease prerequisite, without creating authority or mutating queue/cursors.",
+  "acceptance": [
+    "Native relay progress should report blocking head and current dispatch lease holds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "cross-machine",
+    "mailbox",
+    "remote-runner",
+    "review-low",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1a1e0-eb76-72d2-b95d-c752e99e378b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

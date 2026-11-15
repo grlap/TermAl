@@ -1,0 +1,26 @@
+{
+  "id": "01a15330-a927-7fd2-bbcb-109e3b6c7ed2",
+  "external_ref": null,
+  "title": "Named-root lapse retirement can remove a root after a restart, before its idle holder rebinds its claim",
+  "outcome": "Named-root lapse retirement can remove a root after a restart, before its idle holder rebinds its claim",
+  "acceptance": [
+    "After a TermAl restart, the automatic pass does not retire a root for a claim lapse of more than two hours while the root's naming session is present and has not yet rebound since the restart, unless Engram's claim block shows a holder that is not that session's actor; a regression test covers a restart followed by a pass before the idle naming session's first turn"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

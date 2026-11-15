@@ -1,0 +1,66 @@
+{
+  "id": "01a165e5-f5c7-7380-99c9-5139ddc62738",
+  "external_ref": null,
+  "title": "Durably retire proven-never-sent issued grants with whole-control-session exclusion",
+  "outcome": "Complete the parent's required issued-grant retirement, safe replay and compatible-reader migration obligation.",
+  "acceptance": [
+    "For an issued grant whose first Begin is proven never sent, atomically retain an exact-owner, domain-separated, full-payload retirement intent before wire transmission and promptly attempt one bounded SessionBind retirement under the existing control-call cap, with no new Evaluate, unbegun checkpoint, guessed TTL or timeout/lease inflation. A responsive authoritative-test-clock producer confirms retirement before its expiry; no universal pre-expiry guarantee is claimed during outages or delays.",
+    "Serialize all mutating calls for that exact producer control session against the unresolved retirement, including competing Begin, bind/rebind, Evaluate, boot repair and Resume/reset. Exclusion and frozen identity survive Cancel, queued-head replacement and restart. Possibly-sent or restart-ambiguous Begin keeps exact replay and is never retired on age or status-only inference; local exclusion is not represented as a producer-side CAS.",
+    "Only the matching retained retirement operation, intended control identity and internally consistent no-open-turn/no-open-grant response followed by durable local settlement report released. Failed, lost, late or stale responses preserve unresolved identity and cannot mutate a successor. Replay uses the same retirement key and payload, never the earlier pre-grant bind key.",
+    "An independently allocated compatible primary schema and transactional migration preserve existing authority and unknown Begin state. Old readers reject upgraded stores without destructive rewrite/fallback; unknown safety phases fail closed. Isolated tests cover populated migration, crash/rollback cuts, Cancel/replacement/restart survival and later-schema preservation; no live-store migration or unallocated schema number is used.",
+    "Deterministic focused controls cover healthy producer expiry, lost reply with same-key replay, restart after remote apply before local confirmation, stale owner, concurrent Begin and competing bind/Evaluate, cached original-bind-key collision, and negative no-checkpoint/no-new-Evaluate/no-successor-mutation cases. The exact frozen input passes the maintained full gate, required independent review pair and fresh independent acceptance before authorized integration."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "admission-retry",
+    "engram-host-adapter",
+    "gate-load",
+    "p0-profiling-2026-10-22",
+    "required-slice",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a164fe-ad7d-7622-98bb-260d2528bc15",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

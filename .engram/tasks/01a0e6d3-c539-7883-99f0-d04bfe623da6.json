@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c539-7883-99f0-d04bfe623da6",
+  "external_ref": "tm-j5g5",
+  "title": "Give Engram doctor output its own explicit byte bound and diagnostics",
+  "outcome": "Combined MAIN Claude review session-6499: doctor now uses read_engram_cli_output, capped at ENGRAM_CONTROL_MAX_FRAME_BYTES (256 KiB) for each stream, replacing unbounded wait_with_output. Above-bound reports fail with an unrelated maximum control frame message. Define a deliberate doctor-specific report/output bound and diagnostic; add above-bound coverage and retain resource protection. Do not infer report size from audit duration: existing tracked measurements are about 4.6 KB stdout, not evidence of a current oversized real report. Related concurrent-drain fix tm-s2ce and deadline cleanup tm-ng02 remain separate. Source-confirmed behavior, no executed oversized-doctor reproduction in parent review.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

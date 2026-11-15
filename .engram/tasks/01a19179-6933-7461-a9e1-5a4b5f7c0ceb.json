@@ -1,0 +1,30 @@
+{
+  "id": "01a19179-6933-7461-a9e1-5a4b5f7c0ceb",
+  "external_ref": null,
+  "title": "Observe where a remote SSH connection leads on macOS and Linux, so off-worktree proxies there stop counting in every worktree",
+  "outcome": "On macOS and Linux the connection observer in src/engram_host_identity.rs reads no table (engram_tcp_connections returns None, EngramProcess::is_running is false), so every remote proxy in a turn whose workdir lies in no local worktree counts in every worktree there. That is the safe direction but it withholds credit on those hosts while any proxy is mid-turn. Add an observer for those platforms with the same rule as Windows: the transport's live ssh child owns exactly one outbound TCP connection besides its -L forward, to an address this machine does not hold (for example /proc/net/tcp plus /proc/<pid>/fd on Linux, proc_pidinfo/proc_pidfdinfo on macOS), with injected-table tests.",
+  "acceptance": [
+    "On Linux and on macOS, a remote whose live ssh child owns exactly one outbound connection to a non-local address is classified as another machine, every other case stays maybe this machine, and platform tests with an injected table cover it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "credit",
+    "federation",
+    "linux",
+    "macos",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

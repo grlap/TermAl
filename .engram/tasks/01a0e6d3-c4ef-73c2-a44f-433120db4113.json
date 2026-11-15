@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c4ef-73c2-a44f-433120db4113",
+  "external_ref": "tm-ds1",
+  "title": "Follow-up delegation: narrow window between re-arm and dispatch can lose the follow-up turn",
+  "outcome": "Found in the /review-with-delegate pass on tm-px5 (Codex P1, partially fixed). followup_delegation now\ndoes gate+re-arm atomically (one lock) then RELEASES the lock and calls dispatch_turn_and_snapshot. In\nthe window between the re-arm commit (status=Running, but the child is still Idle holding its prior\n## Result packet) and the dispatch (which makes the child Active), a CONCURRENT status/result poll ->\nrefresh_delegation_from_child_locked sees Running + child Idle-with-packet -> re-Completes the delegation\nwith the STALE result. The delegation is then terminal again while the follow-up turn is about to / does\nrun -> the follow-up's real result is lost (delegation stuck Completed).\n\nNarrow (needs a concurrent poll from another thread during the ~2-lock-acquisition window; the normal\nsingle-parent MCP flow calls followup then waits, so it doesn't hit it), but real. Proper fix: a\ntransitional 'Resuming' state (or a child 'starting' marker) that refresh_delegation_from_child_locked\nrespects so it will not re-derive completion until the new turn produces a result. src/delegations.rs\nfollowup_delegation / refresh_delegation_from_child_locked / delegation_child_outcome.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

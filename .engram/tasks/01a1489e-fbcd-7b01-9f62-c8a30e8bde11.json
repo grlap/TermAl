@@ -1,0 +1,30 @@
+{
+  "id": "01a1489e-fbcd-7b01-9f62-c8a30e8bde11",
+  "external_ref": null,
+  "title": "Preserve failed Worker handoff Notes from the outcome-selecting current-attempt packet",
+  "outcome": "A Failed Worker packet followed by plain assistant text retains its current-attempt handoff/test Notes, or reports unavailable without falsely claiming the child supplied none.",
+  "acceptance": [
+    "A focused regression covers a current-attempt Failed packet with Git/native-outcome Notes followed by a plain trailing chunk, and retains the appropriate Notes without reading a previous attempt.",
+    "Idle scan-back and stricter Error-state selection remain distinct and no current-attempt attribution or recovery decision is weakened."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation",
+    "review-followup",
+    "worker"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

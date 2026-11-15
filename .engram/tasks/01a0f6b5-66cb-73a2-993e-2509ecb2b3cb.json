@@ -1,0 +1,40 @@
+{
+  "id": "01a0f6b5-66cb-73a2-993e-2509ecb2b3cb",
+  "external_ref": null,
+  "title": "Capture and correlate opt-in Engram control phase traces in TermAl",
+  "outcome": "Provide bounded opt-in control-process stderr diagnostics correlated to actual subprocess instances and frame attempts, including timeout/kill gaps, without changing control/admission semantics.",
+  "acceptance": [
+    "Diagnostic output contains only the agreed allowlisted fields, distinguishes host observations from child reports, records timing scope and loss accurately, and exposes useful bounded evidence for an admission timeout.",
+    "Frame correlation matches the documented startup, invalid/blank/oversize/EOF-tail, partial-write/read-failure, process-replacement and spawn-race cases; completed responses are not used as a proxy for consumed frames.",
+    "Opt-in Engram control stderr traces are captured with bounded line, queue and retention budgets, drained independently of control stdout, and associated with a fresh per-spawn instance identity and serialized frame-attempt sequence; missing, malformed, oversized or dropped trace data remains explicitly unknown.",
+    "Regression tests exercise the production capture/lifecycle paths, slow or blocked stderr, timeout/kill and trace-disabled behavior, proving bounded memory and unchanged control responses and admission behavior; the full gate passes on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "control-plane",
+    "diagnostics",
+    "engram",
+    "mailbox",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f629-2ff8-7570-9872-25b4f98cec5f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

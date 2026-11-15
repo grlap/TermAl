@@ -1,0 +1,35 @@
+{
+  "id": "01a110d5-ee81-7171-96fc-cacf8dec6413",
+  "external_ref": null,
+  "title": "Cover Claude provenance and outstanding-work precedence for cut-output check refusals",
+  "outcome": "Retained Low from independent Claude delegation-d79aaafe-47e1-4bb9-84cc-96cb358714ea/session-11150 incl full-body coverage addendum on w-4d18277c0a1a frozen8c0cc205/base151c. New parser+SessionRecorder fixtures use CheckedTurn's Agent::Codex/Ambient provenance, covering only parser/recorder and overlap precedence. Production forwards the flag identically; no product defect shown. Add actual Claude session/provenance recorder path plus outstanding-Claude-work fence with cut metadata; existing claude_turn_provenance/engram_host().observe fixtures provide supporting ownership shape. Preserve outstanding-work refusal ahead of cut and no false PASS.",
+  "acceptance": [
+    "A Claude-session/provenance result travels through the recorder to the cut refusal without credit, and a cut result fenced by outstanding Claude work retains that existing refusal rather than cut text; controls exercise the real disposition/ownership path and preserve overlap and failing/background verdicts."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-followup",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

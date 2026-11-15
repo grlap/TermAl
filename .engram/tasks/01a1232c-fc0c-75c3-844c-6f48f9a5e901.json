@@ -1,0 +1,29 @@
+{
+  "id": "01a1232c-fc0c-75c3-844c-6f48f9a5e901",
+  "external_ref": null,
+  "title": "A failed save of an unacknowledged evaluator's retirement drops the consumed wait's resume and its deltas",
+  "outcome": "When retire_unacknowledged_acceptance_evaluator (src/acceptance_evaluation_api.rs) cannot save the retirement (commit_locked returns Err), the parent still gets its wait-resume dispatch and clients still get the lifecycle and wait-consumed deltas. Alternatively, the wait refresh is applied only after a successful commit. The comment no longer claims that \"nothing here is blocked\".",
+  "acceptance": [
+    "A test whose persist writer fails the retirement's commit shows that a wait registered on the evaluator during its first-brief acknowledgement is either resumed (its parent's resume dispatched) or left registered for a later refresh, never consumed silently without a resume.",
+    "The comment at the commit-failure branch states accurately what is and is not settled when the save fails."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "delegation-waits",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a122f5-4008-7971-9ac3-c2422f97c77d",
+  "disposal_reason": "Fixed by w-c2422f97c77d, landed as 7f6281da. src/acceptance_evaluation_api.rs:2360-2383 now runs enqueue_delegation_refresh_locked and publish_delegation_refresh_side_effects whether the retirement's commit succeeds or fails, so a failed save no longer drops the consumed waits' resume dispatch or their deltas. The round-5 RED/GREEN regression proves it (see this item's evidence note). The test-strength follow-up is w-2e89b0895ad7.",
+  "completion": null
+}

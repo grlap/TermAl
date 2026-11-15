@@ -1,0 +1,28 @@
+{
+  "id": "01a1895b-b288-7cc0-a8d4-ddf9240ef5a3",
+  "external_ref": null,
+  "title": "Working chip's full split can wrap inside the pill just above the 28rem breakpoint in the terminal UI style",
+  "outcome": "In every UI style, the Sessions STATUS Working chip shows its full \"· F foreground / B background\" form only when it fits on one line, and otherwise shows the compact \"(F/B)\" form. The container-query threshold is pinned by a test.",
+  "acceptance": [
+    "Working chip's full split can wrap inside the pill just above the 28rem breakpoint in the terminal UI style is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "session-status",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

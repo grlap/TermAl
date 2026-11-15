@@ -1,0 +1,31 @@
+{
+  "id": "01a1070e-8c74-75a1-b8df-b4bb2a96f31a",
+  "external_ref": null,
+  "title": "Durable per-attempt Engram admission record (which call timed out, its deadline and elapsed time) and distinct Defer and timeout previews",
+  "outcome": "Durable per-attempt Engram admission record (which call timed out, its deadline and elapsed time) and distinct Defer and timeout previews",
+  "acceptance": [
+    "Durable per-attempt Engram admission record (which call timed out, its deadline and elapsed time) and distinct Defer and timeout previews is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "diagnostics",
+    "engram-host-adapter",
+    "mailbox",
+    "retained-prompt",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f8cd-723c-7580-a8ae-7224e6317e55",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,51 @@
+{
+  "id": "01a0ffc3-12da-7d71-b7f4-1313362d795e",
+  "external_ref": null,
+  "title": "Doctor descendant-deadline tests drop their temp root before the whole fixture process tree has exited, leaving delete-pending entries on Windows",
+  "outcome": "check_doctor_descendant_deadline (src/tests/engram_host_adapter.rs, used by doctor_deadline_covers_a_pipe_held_after_direct_child_exit and doctor_deadline_terminates_a_live_process_tree) drops its TestTempRoot only after every process of the fixture tree has exited and released its handles in the root, so a green run never leaves entries in its run root.\n\nOccurrence: full gate test-476c6d53-ed04-48c7-8524-036ecb886da3 (worktree .tmp/wt-category-cli-9474 at c5a1f29, 2026-10-03 about 03:14Z). rust-tests reported 3411 passed, 0 failed. The stage still failed on the temp guard: \"Test temp cleanup: 2 remaining entries in ...\\run-AZFboD: termal-doctor-descendant-d5b57fd1-..., ....owner\", created by doctor_deadline_covers_a_pipe_held_after_direct_child_exit. When inspected afterwards, the directory was gone and only its .owner marker remained. That fits a Windows delete-pending directory whose last open handle closed after the guard looked. The same test passed in gate test-0a35631f, so it is timing-dependent.\n\nMechanism (read from the source):\n- The fixture tree is three processes: the doctor PowerShell (cwd = the temp root, from run_engram_doctor_result_within(..., &home, &home, ...)); its child PowerShell running engram-descendant.ps1 from the root, which inherits that cwd; and that script's child, the parked test executable (cwd = the root).\n- The test learns only the parked executable's PID. assert_engram_control_descendant_was_terminated waits on that handle alone (WaitForSingleObject).\n- TerminateJobObject (src/terminal.rs:711) is asynchronous. When the leaf's exit is signalled, the intermediate PowerShell can still hold its cwd handle in the root. The test then returns, TestTempRoot's drop deletes the root while it is delete-pending, and the guard sees the entries.\n\nFix direction (test-only, no timeout or retry):\n- The test waits for every process of the fixture tree, e.g. the intermediate script reports its own PID with the readiness message so the test holds and waits on both handles; or it observes the job's active-process count reach zero.\n- Alternatively, the fixture processes run with a cwd outside the root they delete.\n- Product behaviour (terminating the doctor's job at its deadline) is unchanged.\n\nNot caused by Coder's 559498f (it does not touch these tests).",
+  "acceptance": [
+    "A deterministic witness first fails on the unmodified fixture: on Windows, the intermediate PowerShell process of the doctor process-tree fixture, alive at readiness with its working directory in the temp root, is not among the processes the fixture's teardown waits for before the root is dropped.",
+    "The fix is test-only: the fixture's readiness record names every process of the fixture tree, and the doctor descendant-deadline tests wait until each has exited before their temp root is dropped. No timeout is raised and no retry is added. The product's doctor deadline and job termination are unchanged, and the other process-tree fixture tests pass.",
+    "The full five-stage gate passes on the exact reviewed tree with no run-root leftover; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-blocker",
+    "temp-root-leak",
+    "test-design",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The doctor descendant-deadline tests now wait for every process of the Windows fixture tree before removing their temp root. Fixture processes name themselves in TERMAL_TEST_FIXTURE_TREE_PIDS, the readiness record probes each one, and a readiness-time witness checks coverage. Test-only. Landed as fe3d3b3fd424d2e9d4776b834bdcc4732330891a in train-20 merge 593c783994bef8d1b7b8de4f5bf87b377c5c1802. Evaluation ee1801a6d52b43c7ae9173e8a94e78b5 passed 3/3.",
+    "completed_at": "2026-10-03T05:48:59.796837300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

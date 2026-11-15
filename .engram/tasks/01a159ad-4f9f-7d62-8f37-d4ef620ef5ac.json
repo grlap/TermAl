@@ -1,0 +1,29 @@
+{
+  "id": "01a159ad-4f9f-7d62-8f37-d4ef620ef5ac",
+  "external_ref": null,
+  "title": "Use a retained row's canonical run identity when checking exact-query alias eligibility",
+  "outcome": "Exact queries for a provider or observation alias deliberately preserve canonical live-row precedence.",
+  "acceptance": [
+    "A noncompacted retained alias with its canonical run live in the index has explicitly defined and regression-covered selection behavior.",
+    "Compacted aliases and ordinary exact registered/indexed queries retain their established contracts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "registration",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

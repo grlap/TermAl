@@ -1,0 +1,30 @@
+{
+  "id": "01a192eb-6cd2-7490-b1c3-4a8414631981",
+  "external_ref": null,
+  "title": "Checkpoint confirm holds the state lock ~350 ms serializing a whole session record to read 8 fields",
+  "outcome": "confirm_existing_checkpoint_send (engram_containment_checkpoint.rs:~719) builds its containment image without full-ledger cloning or full PersistedSessionRecord serialization under StateInner, while preserving the durable Sent-before-RPC guarantee and owner/retry checks exactly.",
+  "acceptance": [
+    "Under the state lock, confirm_existing_checkpoint_send reads only the fields its containment image needs (no full PersistedSessionRecord serialization and no full-ledger clone or JSON); any ledger validation that must remain is either bounded to the checkpoint's own entries or done on an owned copy after release with the existing exact fences.",
+    "Tests show the produced containment image is byte-equal to the current implementation's image for representative sessions, that owner-change and retry-configuration refusals behave exactly as before, and that the durable Sent record still precedes the RPC.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "superseded by EO 87f49ed0 removing gated control; decided by Termal::Fable2. Source: mailbox1330, message mailbox-message-2c078ba9-6d9c-4713-8042-e85f302ec7e3, 2026-11-08T19:18:53.353491600Z. Historical artifacts/failures retained; no new execution/acceptance claim.",
+  "completion": null
+}

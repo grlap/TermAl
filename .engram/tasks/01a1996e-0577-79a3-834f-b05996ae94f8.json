@@ -1,0 +1,30 @@
+{
+  "id": "01a1996e-0577-79a3-834f-b05996ae94f8",
+  "external_ref": null,
+  "title": "A Codex worker delegation on Windows cannot start any terminal process (CreateProcessAsUserW error 5)",
+  "outcome": "A Codex worker delegation on Windows cannot start any terminal process (CreateProcessAsUserW error 5)",
+  "acceptance": [
+    "The cause is identified with source and runtime evidence: which sandbox or token setting makes CreateProcessAsUserW return error 5 for a Codex worker child in an isolated worktree on Windows",
+    "A Codex worker delegation in an isolated worktree on Windows can run an ordinary read command and a focused test, proven by a host-recorded run",
+    "If the restriction is intended, the spawn tool refuses or warns before it starts such a worker, instead of letting the worker fail after its first turn"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex-runtime",
+    "delegation",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c429-7781-9e80-87d351d48eb6",
+  "external_ref": "tm-8bv",
+  "title": "Prevent read-only reviewers from mutating Beads internals",
+  "outcome": "Both TermAl read-only /review-local delegations reported changes under .beads/embeddeddolt after running bd prime/read queries. The files are ignored and tracked source status remained clean, but reviewer writePolicy=readOnly is expected to prevent workspace mutation and the review workflow says children query Beads read-only. Ensure delegated reviewers use bd --readonly without bd prime side effects, or enforce the read-only sandbox over Beads/Dolt internal paths. Add regression coverage that a read-only reviewer query leaves workspace internals unchanged.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Beads was removed from the repository on 2026-10-03 (CLAUDE.md).",
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a13600-932e-7a43-86b2-961b486b2c23",
+  "external_ref": null,
+  "title": "A focused cargo test filter that matches zero tests passes silently; the launcher should name it",
+  "outcome": "When a focused `cargo test` run is given several filter arguments and one of them matches no test, the launcher's summary names that filter as matching zero tests, so a coverage gap is visible in the run's result instead of passing silently. Exit status and pass/fail semantics stay unchanged.",
+  "acceptance": [
+    "A test runs the focused launcher with two filters, one of which matches no test, and shows the summary names the zero-match filter while the run's pass/fail result is unchanged.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination-cost",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

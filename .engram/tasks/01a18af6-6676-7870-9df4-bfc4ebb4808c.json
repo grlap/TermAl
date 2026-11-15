@@ -1,0 +1,28 @@
+{
+  "id": "01a18af6-6676-7870-9df4-bfc4ebb4808c",
+  "external_ref": null,
+  "title": "Live Engram root-recovery fixtures attach their temp root only after boot, so boot-time worker clones do not hold it",
+  "outcome": "Live Engram root-recovery fixtures attach their temp root only after boot, so boot-time worker clones do not hold it",
+  "acceptance": [
+    "Live Engram root-recovery fixtures attach their temp root only after boot, so boot-time worker clones do not hold it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "flaky-cause",
+    "from-review",
+    "test-temp-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

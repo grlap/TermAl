@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7ce-77b2-8139-aaf5262285e6",
+  "external_ref": "tm-wwo1",
+  "title": "Enablement doctor deadline rejects a healthy migrated store (hard 5 s, no override)",
+  "outcome": "A healthy, freshly migrated Engram store cannot be enabled: `PATCH /api/projects/{id}/engram` with enabled:true fails with \"Engram doctor exceeded the 5 second enablement deadline\". Reported by Engram::Advisor on 2026-09-09 during Greg's authorized migration to Engram build 304edbce2b18, whose installed doctor passes in about 5.13 s - roughly 130 ms over the wall.\n\nCONFIRMED IN SOURCE, and their reading of it is correct:\n- run_engram_doctor_result (src/engram_host_adapter.rs around 240-309) spawns `engram ... doctor --json` and polls against `Instant::now() + ENGRAM_ENABLEMENT_COMMAND_TIMEOUT`, killing the child on expiry.\n- The constant is compile-time: 5 s under #[cfg(not(test))] (line 17) and 30 s under #[cfg(test)] (line 23). The larger value is TEST-ONLY headroom for fixture scheduling, so not even a debug build relaxes production. There is no environment or settings override.\n- validate_engram_project_enablement (line 181) runs the doctor UNCONDITIONALLY on every enable; there is no cached-store-key shortcut, so a re-enable to an already validated store pays the full cost again.\n- The per-call `deadlineMs` field is a different knob (1..=10000 ms, validated in update_project_engram_settings_with_grant) and does not reach this path. Wiring it here would conflate two meanings.\n\nSo on the current build there is NO supported route to enable a store whose doctor exceeds 5 s. The only thing that can succeed today is getting the doctor itself under the wall (warm cache), which is outside the host.\n\nNARROW FIX: give the enablement doctor its own deadline constant, separate from ordinary Engram command timeouts, and set it to a value that fits a full post-migration audit. The 5 s was a reasonable bound for a responsive request when a doctor was cheap; a doctor that audits a preserved migration is not cheap, and a one-shot operator-initiated validation is not a hot path. Keep the kill-on-timeout behaviour and keep naming the actual value in the error text.\n\nDO NOT, in this changeset: reuse deadlineMs for it, remove the deadline, skip the doctor when a store key matches, or make enablement asynchronous. Each is a larger design change than the defect requires. Note that the enable request runs through run_blocking_api, so a longer deadline lengthens a blocking request - that is the cost to weigh when choosing the value, and it argues for a bounded increase rather than a generous one.\n\nTests to add with the fix: an enablement whose doctor finishes just under the new deadline succeeds; one that exceeds it still fails with a message naming that deadline; the ordinary command timeout is unchanged by the same edit.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-OBSOLETE. Enablement runs readiness (20 s), not doctor; the audit is separate (engram-host-adapter.md, \"Settings and verification\").",
+  "completion": null
+}

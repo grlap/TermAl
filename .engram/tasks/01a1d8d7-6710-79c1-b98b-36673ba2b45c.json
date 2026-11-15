@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8d7-6710-79c1-b98b-36673ba2b45c",
+  "external_ref": null,
+  "title": "Read-only Codex delegations on Windows: MSYS sh.exe dies (CreateFileMapping error 5) yet reports exit 0, and Node spawnSync returns EPERM",
+  "outcome": "In a read-only Codex delegation on Windows, commands that need the Git for Windows POSIX shell or a Node child process either run, or fail visibly with a non-zero exit that names the sandbox as the cause. A fatal shell crash is never reported as exit 0, so a read-only reviewer cannot mistake a crashed command for a real result.",
+  "acceptance": [
+    "Read-only Codex delegations on Windows: MSYS sh.exe dies (CreateFileMapping error 5) yet reports exit 0, and Node spawnSync returns EPERM is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "read-only",
+    "sandbox",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

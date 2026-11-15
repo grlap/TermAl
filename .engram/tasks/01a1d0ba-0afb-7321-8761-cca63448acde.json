@@ -1,0 +1,29 @@
+{
+  "id": "01a1d0ba-0afb-7321-8761-cca63448acde",
+  "external_ref": null,
+  "title": "Remove orphaned virtualization test helper and imports after overview removal",
+  "outcome": "Remove unused installLongTranscriptScrollNodeMocks and the api and MESSAGE_STACK_SCROLL_WRITE_EVENT imports from AgentSessionPanel.virtualization.test.tsx, preserving retained behavioral assertions.",
+  "acceptance": [
+    "The identified helper/imports have no remaining users and are removed without dropping retained behavioral assertions.",
+    "Typecheck and the affected virtualization test suite pass on the changed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "UI",
+    "cleanup",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

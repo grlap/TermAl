@@ -1,0 +1,29 @@
+{
+  "id": "01a17421-20f4-7b32-a799-3b405f9eb7b1",
+  "external_ref": null,
+  "title": "Make executor diagnostic metadata serialization contract explicit",
+  "outcome": "Make executor diagnostic metadata serialization contract explicit",
+  "acceptance": [
+    "The intended operator metadata keys are represented by an explicit serialization contract, with shared helper/outcome shapes kept distinct and no payload leaks.",
+    "Focused wire-shape/privacy tests and independent review cover the chosen representation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "observability",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173f0-87db-7522-aab0-16cbff19cd11",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c6c7-7121-8c42-c0c0f1d00364",
+  "external_ref": "tm-rsz",
+  "title": "Read-only git cwd matcher conflates backslash with slash on POSIX",
+  "outcome": "src/claude.rs claude_local_dir_match_key rewrites backslash to slash on every OS. On Unix, backslash is a legal filename character, so a command can cd to a different directory whose path contains a backslash while comparing equal to the delegation cwd that contains a slash. That defeats the exact-cwd git guard and can run otherwise read-only git against a repository whose config contains execution sinks. Fold separators only on Windows; preserve backslashes on Unix; add a Unix regression test that distinguishes the two paths.",
+  "acceptance": [
+    "On POSIX, read-only git cwd matching preserves literal backslashes and refuses a backslash-containing directory when only its slash spelling matches the delegated cwd, with a regression covering this boundary.",
+    "On Windows, existing slash/backslash and case-insensitive same-directory matching remains accepted, with cfg-specific controls.",
+    "Required focused validation and independent Codex/Claude source review carry exact input/result references, with no outstanding Medium+ finding; and the standard full gate passes on the landed input on a POSIX host (the DL560 test-ref run) as well as on Windows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

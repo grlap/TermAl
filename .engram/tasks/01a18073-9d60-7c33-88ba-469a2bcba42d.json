@@ -1,0 +1,40 @@
+{
+  "id": "01a18073-9d60-7c33-88ba-469a2bcba42d",
+  "external_ref": null,
+  "title": "Stop whole-history clones before pagination and add observation-only response-size telemetry",
+  "outcome": "A session-history page no longer deep-clones every resident message body under the state lock. The host measures the encoded size of every HTTP response and SSE frame and reports large ones in bounded diagnostics, without changing or refusing any response and without telemetry-induced waiting or buffering. The measurements identify which producers are actually large, so the data-bounding epic can be ordered by evidence.",
+  "acceptance": [
+    "A session-history page request no longer deep-clones every resident message body under StateInner. It reuses MessageSequence's shared immutable ownership and materializes only the requested page, while preserving pinned SQLite/cursor consistency, rollback and missing-cursor behaviour, revision and body-sequence stamps, and the exact response content. Tests show page equality with the previous behaviour and no whole-history body clones.",
+    "Encoded-size telemetry counts bytes for every HTTP response and each SSE frame in the SAME serialization or write pass: from an existing buffer length or a transparent counting wrapper. There is no second serialization, no body clone, no streaming collection and no threshold-sized reserve. Telemetry never refuses or truncates output or introduces a wait for logging or count completion; it preserves existing buffering, streaming, write, flush and partial-write behaviour, saturates its counters, and a telemetry failure never affects delivery. Tests show byte-identical responses with telemetry active, including above the reporting bands.",
+    "Reports at diagnostic bands of 16 MiB and 64 MiB name the producer or route, the measurement stage, whether the count is complete or partial, and capped revision or session context, never payload contents. The log family is fixed, bounded, coalesced and non-blocking.",
+    "The full five-stage gate passes on the exact committed tree with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "host-stability",
+    "memory",
+    "output-bounds",
+    "panic"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1803c-a572-74e0-8240-fd84f21f9a4b",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Historical delivered work reconciled; ab3aa0f6; history paging/transparent telemetry, carried pair + FULL5f122292, installed/running build recorded; closure only; not hard-cap enforcement.",
+    "completed_at": "2026-11-08T19:21:47.915040300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

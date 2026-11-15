@@ -1,0 +1,29 @@
+{
+  "id": "01a103ef-cb0b-71f3-a427-1afdfad2f8b2",
+  "external_ref": null,
+  "title": "Direct-cargo test startup sweep panics on Access denied when an aged-looking fixture is still held by a live process",
+  "outcome": "src/test_temp_paths.rs: on the first fixture use in a direct Cargo or IDE test process (no launcher run root), sweep_unmarked_test_fixtures removes unmarked direct children of the shared temp root %TEMP%\\termal\\tests whose own metadata mtime is older than 48 h (stale_unmarked_test_fixture). A directory's mtime does not move when files inside it change. So a fixture still held open by a long-running or orphaned test process from another worktree can look stale. remove_dir_all then fails with Access is denied (os error 5), and the sweep's error becomes a panic in whichever test first creates a fixture.\n\nObserved 2026-10-03 about 22:45Z in the budget-clock B3 batch: a focused direct-cargo run of 45 tests failed global_kill_switch_does_not_suppress_authority_rotation_or_tombstones. Its isolated child process panicked at test_temp_paths.rs:103 with \"test startup sweep C:\\Users\\grzeg\\AppData\\Local\\Temp\\termal\\tests: stale fixture …\\termal-test-state-1fa2532a-ef5a-400f-89ae-7bd2a2c98c96: Access is denied. (os error 5)\". The directory no longer existed minutes later, so its holder was alive at the time. Earlier in the same session, lingering termal test binaries from other worktrees were still running.\n\nThe launcher-marked runs (the full gate) skip this sweep, so the gate is not affected. Fix direction: treat a removal that fails with a sharing or access violation as in use (skip it and log), and judge staleness by the newest mtime inside the fixture, or by an owner-PID marker, rather than the directory's own mtime.",
+  "acceptance": [
+    "Windows direct-Cargo/IDE startup sweeping treats only native access/sharing denials (OS errors 5 or 32) at an individual unmarked child inspection or removal as a retained in-use-or-inaccessible fixture: it logs the child path, phase and original OS error, continues other candidates, and does not poison or panic first-use initialization. Invalid sweep-root authority, root listing failures and all other I/O failures remain visible with their original diagnostic and existing fail-once/no-retry semantics.",
+    "Deterministic repository-local RED/GREEN tests reproduce a held aged unmarked child without timing: a parent-owned Windows handle denies deletion while a direct-helper subprocess starts, which must retain the held fixture and log the skip; a separate explicit sweep after release removes an eligible unheld fixture. Additional controls cover child-inspection denial, recent children, marked runs, links, the existing removal bound, and unexpected-error diagnostic caching. No live system-temp fixture is edited or removed, and no wait, blind retry, timeout inflation or weakened publication assertion is introduced.",
+    "The existing 48-hour selection and marked-run ownership policy are retained in this bounded fix; directory age is a candidate heuristic, not proof that another process is absent. The focused temp-path/fixture checks pass on the frozen input, a fresh independent Codex/Claude pair has no outstanding Medium-or-higher finding, and Merger's maintained full Windows gate passes on the exact integration tree before landing and independent acceptance evaluation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "pre-existing",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

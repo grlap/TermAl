@@ -1,0 +1,28 @@
+{
+  "id": "01a19f19-d2f8-7bb3-9e3f-a37716917ada",
+  "external_ref": null,
+  "title": "No host-recognized way to run the UI Vitest suite with cwd=ui through the launcher: the bash -c wrapper stays 'pending/unclassified' and earns no verification credit",
+  "outcome": "There is one documented launcher invocation for the full UI Vitest suite that runs with cwd = ui/ (which test-categories.test.ts requires) AND that the host recognizes, so a passing committed-input run produces a settled verification record. Agents no longer have to choose between a correct run that earns no credit and a credited run that fails on the cwd.",
+  "acceptance": [
+    "No host-recognized way to run the UI Vitest suite with cwd=ui through the launcher: the bash -c wrapper stays 'pending/unclassified' and earns no verification credit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "test-launcher",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

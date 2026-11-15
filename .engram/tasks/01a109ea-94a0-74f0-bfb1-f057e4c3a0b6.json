@@ -1,0 +1,56 @@
+{
+  "id": "01a109ea-94a0-74f0-bfb1-f057e4c3a0b6",
+  "external_ref": null,
+  "title": "A carried full gate is refused credit when the session moved focus between two claims it still holds ('its claim is no longer the one this session holds')",
+  "outcome": "At settlement, src/engram_carried_checks.rs:1745-1757 (at 2ad5332a) refuses a terminal carried run when record.engram.work_binding.claim_id != carried.claim_id. The work binding is the session's CURRENT single focus. A session that holds several claims and legitimately moves focus between them in the settling turn (here w-3c25 -> w-7f7f -> w-3c25, all on one source root, with identity and fence unchanged after keyless renewals) therefore loses a passing gate's credit. The refusal should apply only when the carried claim is no longer held by this session (released, expired or replaced) or its root changed, not when it is merely not the current focus. A deterministic test covers both cases: a two-claim focus move still credits, and a released or replaced claim (the existing test terminal_carry_with_retained_old_root_refuses_a_different_current_claim) still refuses.",
+  "acceptance": [
+    "A fail-first test: a session holds two claims, A and B, on one named source root and launches a carried full gate while focused on A. After the run's terminal result exists, the session's FIRST tracker mutation is a write on held claim B, and that write's checkpoint is the first one after the result. On unchanged code the gate is refused with 'its claim is no longer the one this session holds'. After the fix that checkpoint does not refuse it: the gate stays carried, a holder-visible line names A as the item it will settle on, and at the next checkpoint focused on A it is credited with its verification record on A's item, never on B's.",
+    "A carried gate whose launch claim was released, expired or replaced before settlement is still refused. The existing test terminal_carry_with_retained_old_root_refuses_a_different_current_claim still passes, and a released-launch-claim case refuses too.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "carried-check",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the carried-gate focus settlement fix. Independent acceptance evaluation 6e4a7a20edc44349b87f74f83cddfe6e passed all 3 criteria at the evaluated source revision. Commit a6e73617 contains the six gated paths; full gate 7afdcad3438340d2b9343acd441073dc passed all five stages.",
+    "completed_at": "2026-10-13T09:30:19.714296900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

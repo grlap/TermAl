@@ -1,0 +1,24 @@
+{
+  "id": "01a19426-afbf-7cd3-9bec-8dbcbf07e506",
+  "external_ref": null,
+  "title": "Read Engram control child liveness and connection generation under one lock",
+  "outcome": "ProcessEngramControlTransport::connection_generation (src/engram_control_transport.rs ~291, from w-decd61d62831) reads a session child's liveness and its connection generation under ONE consistent lock: read the generation while still holding the processes lock (the spawn path already bumps it under that lock), or keep the generation inside the process entry. Today it reads liveness under the processes lock, releases it, and then reads the generations map. A respawn between the two reads can pair \"live\" with the next child's generation. EngramHostAdapter::request's before/after comparison mostly self-corrects this, so the worst case is an extra status read or a briefly unattributed answer. Provenance: w-decd Y1 fix-delta review, Low (Claude delegation 7a0e1ac7).",
+  "acceptance": [
+    "Read Engram control child liveness and connection generation under one lock is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

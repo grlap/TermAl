@@ -1,0 +1,30 @@
+{
+  "id": "01a14cf6-45d3-7c10-83a2-645c884b2cbc",
+  "external_ref": null,
+  "title": "A detached full gate whose launch the host stamps more than 10 s after the launcher's own start is refused as \"no run of it appeared within ten minutes\", though it ran and passed",
+  "outcome": "A detached full gate whose launch the host stamps more than 10 s after the launcher's own start is refused as \"no run of it appeared within ten minutes\", though it ran and passed",
+  "acceptance": [
+    "A regression test reproduces a launch stamp that lags the launcher's own recorded start by more than the current slack (for example 18 s, as a contended host lock produces), and shows the run is still associated with its launch when root, full mode and owner match and the run had not ended before the stamp.",
+    "The association never takes an earlier run of the same session and root that had already ended before the stamp (test).",
+    "A refusal that does happen names the nearest candidate run and why it was ruled out (start time versus stamp, owner, root or mode), instead of only saying that no run appeared."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording",
+    "load"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

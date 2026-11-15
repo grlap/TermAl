@@ -1,0 +1,32 @@
+{
+  "id": "01a0fec6-03d7-7e10-9b58-f684c39b8d45",
+  "external_ref": null,
+  "title": "Preserve master retry-cap semantics for non-owner forced tail repairs",
+  "outcome": "Master-origin forced tail repairs retain independently agreed retry-cap semantics, without starving an unloaded excluded session after repeated stale answers.",
+  "acceptance": [
+    "Establish independently concurred retry-cap semantics for master-origin forced tail repairs and verify them with stale/stateResync and generic-rejection controls before completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "architecture-escalation",
+    "conversation-view",
+    "low",
+    "regression-suspect",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

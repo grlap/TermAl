@@ -1,0 +1,56 @@
+{
+  "id": "01a1301c-0938-7760-903a-d82e21fd6e9e",
+  "external_ref": null,
+  "title": "A carried Codex test waits for its late end only on the dropped-turn path, and an unended one stays carried until runtime exit, a checkpoint after replacement, or the 6 h TTL",
+  "outcome": "A late Codex end for a carried test is taken whichever way the shared path routes it, also when the active turn takes it (no turnId, or tagged with the turn that polls the exec session), through note_engram_command_finished_with_capture offering the end to a carried check that awaits it; and a carried Codex test whose end never comes while its runtime lives is closed Unknown within a shorter, event-bound limit (for example at the next turn's close or after N turns), not only at runtime exit, replacement or the 6 h TTL.",
+  "acceptance": [
+    "A test delivers a late end routed through the active turn (turnless, or tagged with the polling turn) and shows the carried test recorded at the next checkpoint.",
+    "A test shows a carried Codex test with no end, its runtime alive, still carried across later turns: a check started in its worktree is overlapped with it named as still running, and the holder is told that it is still running, that later checks in its worktree are overlapped until it ends, and that ending the process or Stopping the session (whose runtime exit closes it) ends the wait. Its end, when Codex reports one (item/completed for its item, whatever turn it names), settles it. Codex 0.162.1 reports no other process-gone fact for an agent's exec session, so the 6 h TTL remains the backstop.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed and committed 0f046c431a58699b60c3a844c1fcd326d7ddf224 on base 23e77889. Exact-tree full gate test-bbf30832 passed all five stages (verification ed5286a723214eb7bb3b85790db0a255). Fresh independent acceptance evaluation caf30bb6bad04ca5a6309aad102adcc9 recorded 3/3 pass.",
+    "completed_at": "2026-10-13T06:29:43.484573800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1100a-223e-7d72-8856-e5902b7b2e78",
+  "external_ref": null,
+  "title": "Read-only Codex reviewer: an rg exec_command returned its output but never reported completion; write_stdin polls kept showing it running",
+  "outcome": "Read-only Codex reviewer: an rg exec_command returned its output but never reported completion; write_stdin polls kept showing it running",
+  "acceptance": [
+    "Read-only Codex reviewer: an rg exec_command returned its output but never reported completion; write_stdin polls kept showing it running is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "cross-project",
+    "read-only-delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a102e9-9a98-7fa1-b503-0a5b170ffb4d",
+  "disposal_reason": "Duplicate (net-reduction sweep, Termal::Fable2, 2026-10-15). It is the same defect as w-0a5b170ffb4d: a read-only Codex child's plain read command (here `rg`, there PowerShell Get-Content) delivers its full output, but its exec session never reports completion or an exit status, and write_stdin polls keep showing it running. w-0a5b's outcome is general (\"A read-only Codex review child's plain file read finishes with an exit status, or the hang's owning layer is identified with a reproduction\"), so it covers the rg form. This item has only a placeholder outcome and acceptance. w-a8cc350b11ed was superseded the same way earlier.",
+  "completion": null
+}

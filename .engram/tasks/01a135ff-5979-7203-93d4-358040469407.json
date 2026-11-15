@@ -1,0 +1,33 @@
+{
+  "id": "01a135ff-5979-7203-93d4-358040469407",
+  "external_ref": "engram:w-65fb79ead0c3",
+  "title": "Host prerequisite for Engram import reconciliation: responsibility attestation (G1), hold-aware admission fence (G2), outcome-only intent recovery (G3)",
+  "outcome": "Engram's task-sync import reconciliation (Engram w-65fb79ead0c3, option A, stage 2) can safely reconcile a run that has TermAl responsibility, because the TermAl host proves what it still owes for that run, fences new admission for the run while an import hold is in place, and recovers uncertain intents only from their recorded outcomes. Until this item lands, Engram's stage 1 refuses import for any run with TermAl responsibility, and active reconciliation stays visibly open.",
+  "acceptance": [
+    "G1 (test): every required responsibility owner is covered by durable enrollment. The attestation is bound to: store and project; hold, candidate and scope revision; the original run and claim identities; host incarnation and fence generation; inventory version; the final-apply challenge. Unknown coverage is pending. Coverage includes the six classes (open begun turns, including shutdown cuts; uncertain or retained requests; unsettled carried checks; running hazards; pending reports; late dispatch), release-induced root cleanup, and any known process whose credit or hazard record ended without affirmative process closure. Exact durable final readiness on the current post-settlement basis is required. A changed inventory or an unavailable required host blocks apply. Tests cover each class, legacy gaps, multiple owners, and the dead-host and restart cases.",
+    "G2 (test): while a hold covers a run, the host enforces a fence against NEW provider dispatch on every dispatch and recovery path for that run: direct and queued admission, off-lock return, final handoff, retained, Defer, abort, bind and preparation retries, queued durability release, source-observation continuation, deferred Stop rollback, manual Resume and boot. Work already executing may finish and send its original settlement. The refusal is typed and shown as 'held by import reconciliation'; retained queue heads are kept with their request unchanged, FIFO is preserved, and sibling runs are unaffected. It is not a generic Defer and not a global drain. The fence is kept until the terminal apply or abandon decision is durably RECONCILED, not merely sent or reported. Tests include late handoff, Resume and boot, and that a cancellation grants no new authority.",
+    "G3, TermAl's half of a cross-boundary recovery (test): under a hold the host retains each uncertain intent exactly and fences every provider-dispatch and recovery path for it, with zero provider sends in every recovery branch. A positively unsent intent may be retired by its exact owner under the fence. A possibly sent intent is retired only through Engram's writer-serialized retirement against the ORIGINAL Begin or Evaluate operation, or an authoritative terminal settlement; otherwise it stays pending. A lost Evaluate with no grant id is resolved only by an exact original-key outcome lookup, never by resending. A missing or not-found stored outcome never counts as safe retirement. Tests cover each recovery-table row, the not_found versus late-Begin race in both writer orders, and the never-first-execution case.",
+    "Settlement is never inferred (test): deterministic tests show that elapsed time, a crash, a TermAl restart, an Engram-only query, and initiation by anyone other than an operator each leave reconciliation pending or refused.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "design-pending",
+    "engram-host",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

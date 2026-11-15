@@ -1,0 +1,37 @@
+{
+  "id": "01a1b2ed-e6f2-79a1-acac-52efb0509b45",
+  "external_ref": null,
+  "title": "Commit rule: a carried candidate with a byte-identical contribution adopts the earlier review (Greg 2026-11-06)",
+  "outcome": "The repository's commit-rule text lets a candidate committed afresh on a moved master adopt an earlier review when its contribution is byte-identical. It lands under the authority-text procedure (a)/(b)/(c), with Greg's word recorded verbatim.",
+  "acceptance": [
+    "CLAUDE.md, AGENTS.md (kept in step) and .claude/commands/review-changes.md state that a candidate committed afresh on a moved master adopts the review of an earlier candidate whose contribution (its diff against its parent) is byte-identical and which has no outstanding Medium-or-higher finding; any change to the contribution needs a new review; the full gate still runs on the new candidate; the integration owner still assesses dependencies and conflicts; Greg's word is quoted verbatim with its source.",
+    "Engram::Fable's and Termal::Fable2's concurrence on the exact final wording is recorded in this item's notes before landing, and the exact final wording was sent to Greg before landing.",
+    "The /review-changes final-diff audit of the exact landed diff is recorded on this item as passed, and the change lands under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "commit-rule",
+    "greg-directed",
+    "process"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The commit rule now lets a candidate committed afresh on a moved master adopt an earlier review pair when its contribution is byte-identical. It landed in master 06e0dbcc under the authority-text procedure.",
+    "completed_at": "2026-11-07T07:08:38.176327500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a0fec5-9901-7233-a527-9daef6869d75",
+  "external_ref": null,
+  "title": "Drive model-test convergence reads from owner demand instead of unconditional replacement",
+  "outcome": "Drive model-test convergence reads from owner demand instead of unconditional replacement",
+  "acceptance": [
+    "Drive model-test convergence reads from owner demand instead of unconditional replacement is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "acceptance-needed",
+    "conversation-view",
+    "regression-suspect",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

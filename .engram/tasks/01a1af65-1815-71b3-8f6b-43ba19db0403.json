@@ -1,0 +1,38 @@
+{
+  "id": "01a1af65-1815-71b3-8f6b-43ba19db0403",
+  "external_ref": null,
+  "title": "TermAl source capture and committed-input admission treat a deep Windows worktree of a real consumer (Phoenix/Questly) as dirty or unmeasured because child paths exceed MAX_PATH",
+  "outcome": "On Windows, a clean git worktree of PhoenixCodeNav or Questly placed under a Git-ignored 'target' path (as TermAl's watcher requires) can be measured by TermAl's host source capture and admitted by the committed-input lane even when child paths exceed MAX_PATH. If that is not possible, it is refused with a reason that names the long-path cause and the remedy. It is never reported as a generic dirty child or a silent 'unmeasured'.",
+  "acceptance": [
+    "On Windows, the EXISTING rev-5 committed-source measurement (committed_source_status / committed_source_submodules in src/ordinary_commit_input.rs, used by the committed-input lane and the native route) measures a clean worktree whose child paths exceed MAX_PATH, such as a Phoenix worktree under artifacts/target/b, as clean at its commit. It needs no per-repository, global or system core.longpaths setting: core.longpaths=true is supplied for those Git invocations only, and it reaches submodule processes too. A dirty file in such a child is still reported dirty.",
+    "If a long path still cannot be read, the measurement refuses with a reason naming the long-path cause and the remedy; it is never a generic dirty child or a silent 'unmeasured'.",
+    "Windows regression tests cover a clean fixture child with paths over 260 characters and a dirty one. Behaviour off Windows and the rev-5 predicate are otherwise unchanged. No new source_id, reader or predicate is added.",
+    "On Windows, the existing rev-5 committed-source measurement never reports a worktree as clean when Git could not fully read a child path, whether it fails, exits 0 with an error on stderr, or reports a long-path error. Such a reading is refused with a named long-path reason; a tracked change in a long-path child is reported NotClean or refused, never Taken. A regression test covers the dirty long-path child without core.longpaths, reproducing the false-clean of test-3c7e3e97 before the fix and refusing or reporting NotClean after it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "source-revision",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Git reads through ReviewFreezeGit now refuse incomplete output instead of reporting a false clean, and Windows long paths in deep consumer worktrees (Phoenix, Questly) are measured, so committed-input admission and source capture no longer treat them as dirty or unmeasured. Landed as ca771deb (fast-forward, pushed 10:04:13Z). Gates: DL560 FULL test-675328fc and Windows FULL test-bd98b8c2, both green and eligible with equal fingerprints. Windows focused test-546ff0d4 25/0. Clean review pair (Codex 16541, Claude 16542; 4 Lows filed as optional children). Installed build sha256 bb81919a…5b32. Evaluations are temporarily off (Greg). One earlier Windows FULL failed on a pre-existing path-dependent watcher test, tracked as w-a259a47bb144.",
+    "completed_at": "2026-11-06T10:08:04.049266800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

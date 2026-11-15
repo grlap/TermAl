@@ -1,0 +1,28 @@
+{
+  "id": "01a1d35a-289f-7d92-b698-da5cfbcacdac",
+  "external_ref": null,
+  "title": "Integrate combo85 on e8be8a38: c593 8e4fd2f9 (w-6930 refuse legacy-only named-root sightings, byte-identical carry of 8d7e0409)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 8e4fd2f90f18647b1b00c900640696d1407a9e2c (tree 8711161b3a38d0b72d7aed720863406fc9458fc7) is on origin/master, where master was moved to it by a fast-forward from e8be8a38525960f8a6f301c83264d84429c8cbd8.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 8711161b passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against e8be8a38 is byte-identical (same 9 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 8d7e0409's contribution against 4d5ac4b4, which the R2 pair Codex session 17744 and Claude session 17745 reviewed with no findings (the R1 Medium and two Lows repaired and re-reviewed), and the candidate adopts that pair.",
+    "The release binary built from tree 8711161b was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

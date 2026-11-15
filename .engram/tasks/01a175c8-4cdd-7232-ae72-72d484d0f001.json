@@ -1,0 +1,32 @@
+{
+  "id": "01a175c8-4cdd-7232-ae72-72d484d0f001",
+  "external_ref": null,
+  "title": "Pin mixed explicit/local sends and superseded sender retry refusal in public tests",
+  "outcome": "Public mailbox tests cover mixed bound/unbound native routing and the exact prior-sender refusal contract.",
+  "acceptance": [
+    "Public bare local sends succeed both ways between one unbound and one explicitly bound root, with exact native read/ACK ownership and no domain intent.",
+    "Committed and unknown-outcome retry tests after automatic sender supersession require the documented409 prior-sender refusal and unchanged retained intent/message state."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

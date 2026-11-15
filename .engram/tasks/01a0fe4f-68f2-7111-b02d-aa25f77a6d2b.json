@@ -1,0 +1,50 @@
+{
+  "id": "01a0fe4f-68f2-7111-b02d-aa25f77a6d2b",
+  "external_ref": null,
+  "title": "A reported file edit outside the gated worktree fences every carried gate of the session",
+  "outcome": "A file edit a session reports fences a carried gate only when the edited path may be in the gated worktree; an edit whose path the tool names, outside that worktree, leaves the gate eligible.",
+  "acceptance": [
+    "A deterministic test first fails on the unmodified host: a file edit the session reports with a path outside the carried check's worktree fences that carried check, so its passed run earns no credit.",
+    "A reported edit carries the path the tool named, and fences a carried check only when engram_worktrees_may_hold says that path may lie in the check's worktree; an edit with no known path, or a path that cannot be placed, still fences every unsettled carried check of the session as before. Tests show an edit outside the worktree leaves the check eligible, and an edit inside it, or without a path, still fences it.",
+    "Only the edit observation's fence changes: command-start fences, other sessions' writer marks and host-write fences are unchanged, and their existing tests pass.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "carried-gate",
+    "engram-host",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

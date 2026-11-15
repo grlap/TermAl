@@ -1,0 +1,33 @@
+{
+  "id": "01a194c1-6a65-7c50-86ba-135181fe8685",
+  "external_ref": null,
+  "title": "Container: ordinary Human intake and remote queue follow-ups after gating removal",
+  "outcome": "An explicit human prompt is outside gated-control Evaluate/Begin/grant admission end to end: at source classification, queueing, retained-head handling, reload or restart, and dispatch. With control OFF it runs as an ordinary supported turn, and it is never stranded behind a stale control settlement or exclusion such as control_settlement_unconfirmed. Earlier unsettled operations keep their original intent, key and outcome as separately recoverable records. Nothing is fabricated as settled, no provider effect is resent, no prompt is deleted and no tool permission is added. This replaces the earlier OFF-only abandonment hotfix, which Greg rejected on 2026-11-01 ('NIE CHCE HOT FIX').",
+  "acceptance": [
+    "Tests cover a session holding an earlier unsettled admission or containment obligation, in three variants: the retained head still present, the retained head cancelled, and an OFF checkpoint exclusion such as control_settlement_unconfirmed. In each, an explicit human prompt is classified as human at its source and dispatches as an ordinary turn with control OFF, with no Engram Evaluate/Begin/grant request. This holds through the queue, retained-head and reload paths.",
+    "In the same tests, the earlier obligation's original intent, key and outcome are unchanged after the human turn: not settled, abandoned or deleted. No original provider effect is resent and no tool permission is granted. A test shows that an earlier operation is reconciled only from that same session's own durable evidence, and that one without such evidence stays unresolved.",
+    "With control ON, an explicit human prompt also needs no gated Evaluate/Begin/grant. Agent and automated turns keep the existing containment semantics: a mismatched head still refuses and a matching head resumes through begin_contained_admission_resume. Tests cover both settings.",
+    "The review pair has no outstanding Medium or higher finding, and the full gate passes on the exact committed tree. Where the registration or credit mechanism is broken, the record follows the broken-procedure rule and no pass is claimed.",
+    "Historical queued rows with unknown origin or possible prior provider delivery are not upgraded to Human, replayed, or copied to a new id merely because source is User/default/missing, the user clicks Resume, or no receipt is present. Tests show (a) each such unresolved row preserves its original id, payload and unknown provider attempt; (b) an explicit human choice is recorded without asserting historical non-delivery; (c) a distinct new explicit Human Send dispatches independently of old gated debt under real runtime ownership controls; (d) recovery that reuses a possibly delivered historical row requires matching existing PromptDelivery evidence, and missing evidence remains an explicit recovery capability limit. An ordinary queued User row with known-unpromoted disposition and no prior-intent/retention/handoff evidence may instead follow the existing ordinary/gated Resume path without a receipt: its source/id stay unchanged, it gains no Human exemption or historical recovery certification, and exact-head, containment, runtime and durability guards remain. Tests distinguish this ordinary case from missing legacy disposition, possible prior handoff, and a head replaced after selection. Reports distinguish fresh human availability, ordinary queue continuation and historical recovery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-reported",
+    "stop-the-line"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

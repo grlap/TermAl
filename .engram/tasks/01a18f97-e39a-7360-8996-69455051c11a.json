@@ -1,0 +1,28 @@
+{
+  "id": "01a18f97-e39a-7360-8996-69455051c11a",
+  "external_ref": null,
+  "title": "Worker-level tests for the explicit source-root capture: not-recordable end, waiting without attempts, follow-up install and delivery, measured-unchanged delivered with emission on",
+  "outcome": "Worker-level tests drive the explicit source-root capture through the real observation worker for: (a) emission off with an unchanged root -> the job ends with its explanation and nothing is sent; (b) a capture waiting for another turn longer than the attempt budget is rescheduled without spending attempts and is measured once the turn ends; (c) an unrecorded_change refusal with details installs one follow-up that is delivered under its own key, and a refused follow-up installs none; (d) with emission on, a measured_unchanged capture is delivered and receipted as sighting_only.",
+  "acceptance": [
+    "Worker-level tests for the explicit source-root capture: not-recordable end, waiting without attempts, follow-up install and delivery, measured-unchanged delivered with emission on is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "source-root",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — Explicit source-root capture worker/job API was removed with turn-gated control; those worker-delivery scenarios have no current worker to exercise. Source: src/main.rs; docs/features/engram-host-adapter.md:3283. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

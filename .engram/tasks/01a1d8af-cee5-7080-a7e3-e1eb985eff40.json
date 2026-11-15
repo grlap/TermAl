@@ -1,0 +1,30 @@
+{
+  "id": "01a1d8af-cee5-7080-a7e3-e1eb985eff40",
+  "external_ref": null,
+  "title": "After a restart, Telegram forwarding fails with \"session not found\" for its target session",
+  "outcome": "Telegram forwarding after a host restart either reaches its configured target session or reports clearly and recoverably that the target no longer exists, naming it. It does not fail with a bare \"session not found\" during startup while sessions are still loading.",
+  "acceptance": [
+    "A behavioural test: Telegram forwarding attempted before the target session is loaded at startup is deferred or retried once the session exists, instead of failing with 'session not found'",
+    "A behavioural test: forwarding to a target session that really no longer exists reports which target is missing and how to reconfigure it, once, without a crash or loop",
+    "Existing Telegram forwarding tests stay green"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "restart",
+    "telegram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1a00b-650f-75d0-9a66-041919f5b824",
+  "disposal_reason": "Duplicate: w-041919f5b824's criterion C1 already covers \"telegram forwarding loadFailed\" on Central first start, along with the slow listener. The 2026-11-14 06:11:35Z occurrence is recorded on w-0419 (note 2f1eee57) by Termal::Fable2, who filed this item minutes earlier before finding that coverage.",
+  "completion": null
+}

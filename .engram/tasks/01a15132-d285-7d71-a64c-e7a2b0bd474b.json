@@ -1,0 +1,36 @@
+{
+  "id": "01a15132-d285-7d71-a64c-e7a2b0bd474b",
+  "external_ref": null,
+  "title": "Define and enforce pending common cleanup-lease retention before production attachment",
+  "outcome": "Define and enforce pending common cleanup-lease retention before production attachment",
+  "acceptance": [
+    "Before a production Unix adapter or M4 consumer attaches the common cleanup contract, define the lifecycle owner that keeps the exact backend Arc and RuntimeToken while cleanup is unresolved, including cancellation and dropped-caller paths; do not imply a consuming release alone prevents Rust Drop.",
+    "Portable ownership regressions prove unresolved/error cleanup cannot silently lose the owner and confirmed cleanup releases it under the documented lifecycle; full gate and independent review cover the attached implementation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "greg-directed",
+    "macos",
+    "mailbox",
+    "multi-machine",
+    "platform",
+    "process-cleanup",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-eca0-70a0-b9a7-c1af4362f3ef",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

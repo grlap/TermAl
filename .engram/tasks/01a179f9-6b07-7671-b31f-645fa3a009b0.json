@@ -1,0 +1,31 @@
+{
+  "id": "01a179f9-6b07-7671-b31f-645fa3a009b0",
+  "external_ref": null,
+  "title": "Retain an App watchdog cooldown control driven by a live state event",
+  "outcome": "Rewritten App test now proves body-delta cooldown clear; retain a state-event variant to cover syncLiveTransportActivityFromState default clearWatchdogCooldown branch without relying on metadata snapshots to replace certified transcript bodies.",
+  "acceptance": [
+    "Rewritten App test now proves body-delta cooldown clear; retain a state-event variant to cover syncLiveTransportActivityFromState default clearWatchdogCooldown branch without relying on metadata snapshots to replace certified transcript bodies. Relevant focused checks pass and standard review covers the final change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directive",
+    "performance",
+    "review-followup",
+    "testing",
+    "ui",
+    "watchdog"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a179cc-7346-77c1-b51f-8700e28a5963",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a17575-d252-7b20-b2a7-6dcedc59510f",
+  "external_ref": null,
+  "title": "Exercise real Node fetch reset error shapes for registration confirmation",
+  "outcome": "Exercise real Node fetch reset error shapes for registration confirmation",
+  "acceptance": [
+    "A controlled real Node fetch socket-failure witness or preserved runtime error evidence establishes the observed error shape and its conservative retry disposition without changing the bounded raw-ECONNRESET-only contract; limitations and any unproved historical cause remain explicit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "gate-failure",
+    "review-followup",
+    "test-coverage",
+    "test-launcher",
+    "transport"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1755a-8278-7ae3-9849-c51b6b414885",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,49 @@
+{
+  "id": "01a15187-f344-7110-b848-eda892234c41",
+  "external_ref": null,
+  "title": "Acceptance evaluation submission refused 409 'the work's source root changed while it was evaluated' although the claim still names the same root and generation",
+  "outcome": "Acceptance evaluation submission refused 409 'the work's source root changed while it was evaluated' although the claim still names the same root and generation",
+  "acceptance": [
+    "Both first-submission guards atomically classify and report the observed requested/current naming token, selected root identity/generation, and relevant journal/authority-transition state. A real rename, clear, displacement or different generation is Changed and retains the terminal source-root-changed refusal; unchanged naming identity with transient unresolved authority is Unsettled, never misreported as a changed root.",
+    "Unsettled returns a distinct typed retryable-busy refusal without preparing/sending a tracker write, consuming or replacing the evaluation attempt, or weakening source-fingerprint/current-claim validation. Retrying the same attempt after authority settles can submit normally; Changed still refuses. No blocking wait or reconciliation occurs under the state lock.",
+    "Deterministic tests pin unchanged root/token with Prepared authority and unresolved runs across each submit guard, demonstrate the pre-fix generic-refusal behavior before GREEN, and cover settled same-attempt recovery plus real rename, clear, displacement and generation changes. Struct/enum/call-site inventory, exact-input focused tests/full five-stage gate, independent different-vendor review with no outstanding in-scope Medium-or-higher finding, and independent acceptance are recorded before completion."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "named-roots"
+  ],
+  "assigned_to": "Termal::Coder",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

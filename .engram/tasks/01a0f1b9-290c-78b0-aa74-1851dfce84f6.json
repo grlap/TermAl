@@ -1,0 +1,31 @@
+{
+  "id": "01a0f1b9-290c-78b0-aa74-1851dfce84f6",
+  "external_ref": null,
+  "title": "Keep native-launch diagnostics from adding undocumented variable stderr to freeze results",
+  "outcome": "Keep native-launch diagnostics from adding undocumented variable stderr to freeze results",
+  "acceptance": [
+    "A regression checks successful freeze-observer stderr under the chosen policy while non-contained launches retain actionable diagnostics.",
+    "The chosen diagnostic policy preserves or explicitly documents review-freeze observer stderr when native Git launches are contained, including any per-process identifiers."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "review-low",
+    "terminal",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

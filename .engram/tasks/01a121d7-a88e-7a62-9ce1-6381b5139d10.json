@@ -1,0 +1,28 @@
+{
+  "id": "01a121d7-a88e-7a62-9ce1-6381b5139d10",
+  "external_ref": null,
+  "title": "Document acceptance-submission authority settlement, the retryable refusal and its bound in the engram-host-adapter feature brief",
+  "outcome": "The Invalidation section of docs/features/engram-host-adapter.md describes the following. An evaluator's first submission settles an unconfirmed naming authority over an unchanged naming before its root check. A still-unconfirmed authority gets a retryable 502 (\"nothing was sent; submit the same verdicts again\"), bounded at 3 unconfirmed submissions per attempt, with only the admitting check resetting the count. No authority owner or a stopped writer is refused as final at once. A real naming change is refused as final, as before.",
+  "acceptance": [
+    "Document acceptance-submission authority settlement, the retryable refusal and its bound in the engram-host-adapter feature brief is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — Documentation request describes removed authority settlement plus a 502/three-counter ladder; current typed maintenance 503 is covered by the separate docs item. Source: src/engram_source_roots.rs:916; docs/features/engram-host-adapter.md. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

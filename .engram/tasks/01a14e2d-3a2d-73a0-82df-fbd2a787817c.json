@@ -1,0 +1,35 @@
+{
+  "id": "01a14e2d-3a2d-73a0-82df-fbd2a787817c",
+  "external_ref": null,
+  "title": "Clarify the unshipped satellite configuration prerequisite in onboarding documentation",
+  "outcome": "The onboarding guide accurately distinguishes the implemented verification foundation from the missing operator satellite-role configuration workflow and satellite-side Engram opt-in.",
+  "acceptance": [
+    "The onboarding brief explicitly states that this foundation does not provide a shipped operator surface for satellite-role configuration or initial satellite-side Engram opt-in.",
+    "The guide distinguishes operator provisioning, central enrollment and the satellite configuration prerequisite without presenting fixture-only setup as a currently executable end-to-end operator procedure.",
+    "The guide links to the satellite configuration follow-up workflow or clearly identifies the remaining workflow if it has not yet been designed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "documentation",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14bba-abb8-7110-a31d-c593b94cf600",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

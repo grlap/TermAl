@@ -1,0 +1,35 @@
+{
+  "id": "01a14ada-76bb-7150-957e-529bf54aae40",
+  "external_ref": null,
+  "title": "Named-root operator routes lack HTTP-level tests (request shape, unknown fields, error mapping)",
+  "outcome": "Named-root operator routes lack HTTP-level tests (request shape, unknown fields, error mapping)",
+  "acceptance": [
+    "Router-level tests cover the GET rows' JSON shape and the POST release's 200, 400 (blank reason), 409 (live claim, changed selection), 422 (unknown field) and 500 (unconfirmed persistence) responses."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "named-roots",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

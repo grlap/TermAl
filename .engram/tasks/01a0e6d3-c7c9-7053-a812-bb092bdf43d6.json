@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c7c9-7053-a812-bb092bdf43d6",
+  "external_ref": "tm-wpsv",
+  "title": "Gate or clear pending source-root host lines when Engram control is off or the session unbinds",
+  "outcome": "From the Claude /review-code of tm-5gi4 phase 2, round 13 (499c5af + 1c5e3e57), Low.\n\nturn_dispatch.rs puts engram.pending_source_root_line before any prompt the session sends next. The only code that clears it is the delivery acknowledgement. If Engram control is turned off for the session or its project, or the session unbinds, after a bind, name or withheld-test line was queued, the next plain, unmediated prompt still starts with a stale '[TermAl] ...' source-root line.\n\nFix direction: clear the pending lines, and the in-flight delivery, when control is turned off or the binding ends. Alternatively, skip the lines at build time when the session has no Engram control target.\nTest: queue a line, turn control off, dispatch a prompt, and check the prompt carries no line.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

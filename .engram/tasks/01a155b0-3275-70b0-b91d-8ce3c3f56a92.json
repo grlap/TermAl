@@ -1,0 +1,49 @@
+{
+  "id": "01a155b0-3275-70b0-b91d-8ce3c3f56a92",
+  "external_ref": null,
+  "title": "Read-only federation journal diagnostic route GET /api/federation/journal (S5 evidence)",
+  "outcome": "Split out of M4 increment 2 (w-01da81a029e7) to keep that repair round tight (Fable2's decision on Sol-a7bb #850). Specified by Architect1 (#11 to Sol-a7bb; ruling note be1e2ee7 on w-e41b7112372a) as the read-only diagnostic the first native exchange (w-574269147730) needs for its evidence. It adds one read-only route on every host, GET /api/federation/journal, served on the local operator surface: bounded pages of at most 100, newest first, no payload bytes, no mutation and no new table. It lists executor operations (key, kind, stage, effect, target binding, mirror flag = target_host_id ≠ self), and on the central host the wake obligations (state, exclusion reason capacity|stale_authority|unsupported, mirror present). It must be in the build that S3 installs on both hosts; it lands after M4 increment 2, or carries onto it.",
+  "acceptance": [
+    "GET /api/federation/journal on the local operator surface returns bounded newest-first pages (at most 100 entries, with a continuation) of executor operations with key, kind, stage, effect state, target binding and mirror flag, and on the central host the wake obligations with state, exclusion reason and mirror presence; it returns no payload bytes, performs no mutation and adds no persisted object; tests cover paging, the mirror flag, exclusion reasons and refusal on non-operator surfaces. On the central host the response also reports the dispatcher scan floor rowid, rows scanned in the last pass, window occupancy, and excluded counts by reason as read-only diagnostic observations. Each executor operation also reports queueEntryPresent, deliveryAttemptPresent and runtimeAckPresent as booleans, and processedEvidenceKind as null, mailbox_ack or command_outcome, without exposing the evidence values.",
+    "The full five-stage gate passes on the exact input with an independent Codex plus Claude review pair and no outstanding in-scope Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "remote-mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered local read-only federation journal diagnostics with bounded operations/wakes pages, safe evidence-presence fields, native scan observations and regression coverage. Landed and remotely verified origin/master 70e86f198a9963c3c6c32a68a2511b10d3469eb6; exact parent90304194 and gated treeae055615. Full five-stage gate passed; qualified Codex+Claude review chain has no outstanding Medium+, independent acceptance c5dc7c9ef38e4e82a2219e89cd5bb6ca passed2/2. Two optional Low follow-ups remain open; install/restart handled by integration/coordinators/Greg.",
+    "completed_at": "2026-10-20T07:47:29.212327800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

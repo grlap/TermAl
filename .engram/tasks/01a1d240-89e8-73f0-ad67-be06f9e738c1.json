@@ -1,0 +1,28 @@
+{
+  "id": "01a1d240-89e8-73f0-ad67-be06f9e738c1",
+  "external_ref": null,
+  "title": "Integrate combo77 on a07a70a3: d50d 53e57b9c (w-a6964 stop overview-metadata writers, byte-identical carry of 047cf8b5)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 53e57b9c7d51ebff4995d461ce66f7dce458486a (tree e1352055b212587b13ec18acfbc367b3525fc46c) is on origin/master, where master was moved to it by a fast-forward from a07a70a3623c712c4a72cb7504f64f5e8f920704.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is e1352055 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the candidate's contribution against a07a70a3 is byte-identical (same 19 paths, equal pre-image and post-image blob ids, status and mode, compared without rename detection) to 047cf8b5's contribution against 42851443, which the R1 pair Codex session 17682 and Claude session 17683 reviewed with no Medium or higher finding (its Low filed), and the candidate adopts that pair.",
+    "The release binary built from tree e1352055 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

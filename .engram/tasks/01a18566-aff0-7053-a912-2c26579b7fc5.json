@@ -1,0 +1,30 @@
+{
+  "id": "01a18566-aff0-7053-a912-2c26579b7fc5",
+  "external_ref": null,
+  "title": "Align historical registration-only restart-risk projections with missing attribution proof",
+  "outcome": "Registration-only fallback and registration-view projections consistently represent missing prospective proof, while preserving original per-row final-unbound and receipt facts and existing compaction safety rules.",
+  "acceptance": [
+    "Align historical registration-only restart-risk projections with missing attribution proof is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-followup",
+    "test-credit",
+    "test-runs",
+    "verification-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a183bd-a8cb-7f22-a511-600257272d37",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

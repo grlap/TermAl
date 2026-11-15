@@ -1,0 +1,28 @@
+{
+  "id": "01a0fec5-34bb-71d0-97fe-459efee0b9b4",
+  "external_ref": null,
+  "title": "Reconcile divergent completed text across closed or split assistant bubbles",
+  "outcome": "A divergent full completion after an item switch or recorder boundary repairs its original segments without duplicating previously displayed text.",
+  "acceptance": [
+    "A real Codex/Claude regression asserts original transcript IDs/count and segment bodies for divergent completed text after an item switch or internal recorder boundary; fix is independently reviewed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "UI",
+    "conversation-view",
+    "regression-suspect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

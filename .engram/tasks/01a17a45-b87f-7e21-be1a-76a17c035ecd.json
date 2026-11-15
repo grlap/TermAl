@@ -1,0 +1,27 @@
+{
+  "id": "01a17a45-b87f-7e21-be1a-76a17c035ecd",
+  "external_ref": null,
+  "title": "Correct the stale compaction-deferral comment on persist_test_run_evidence_batch_deferring_compaction_locked",
+  "outcome": "Correct the stale compaction-deferral comment on persist_test_run_evidence_batch_deferring_compaction_locked",
+  "acceptance": [
+    "The doc comment on persist_test_run_evidence_batch_deferring_compaction_locked (src/test_run_observations.rs, about line 729) states that the idle compaction step selects because the batch clears compaction_examined_revision (the else-branch at about line 858), not because the batch commits a new revision."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

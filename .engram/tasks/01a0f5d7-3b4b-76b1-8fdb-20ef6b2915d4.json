@@ -1,0 +1,38 @@
+{
+  "id": "01a0f5d7-3b4b-76b1-8fdb-20ef6b2915d4",
+  "external_ref": null,
+  "title": "Kimi Unknown sessionId on ACP resume leaves repeated dispatch failures without recovery guidance",
+  "outcome": "Diagnose the user-reported repeated Kimi ACP session/resume rejection and provide an explicit, non-destructive recovery path. Preserve the existing TermAl transcript and external-session identity until a verified same-conversation recovery succeeds or the user explicitly chooses a fresh session. A mailbox wake or generic Resume must not silently replace the conversation or conceal repeated continuity failure.",
+  "acceptance": [
+    "A regression covers repeated resume rejection and mailbox/queue wake behavior: retained transcript/external id and queued user work are not lost or silently moved to a new provider session, and the UI exposes the continuity failure and recovery action.",
+    "Any automatic recovery uses a verified provider contract for the same conversation; generic JSON-RPC -32602 or error prose alone never clears the saved id or creates a replacement conversation. A fresh-session recovery is explicit and preserves access to old history.",
+    "Relevant regression checks and the full gate pass on the reviewed input; the independent review pair has no unresolved in-scope Medium-or-higher finding.",
+    "The holder records a source-backed diagnosis distinguishing lost/deleted provider state, launch cwd/profile mismatch, and runtime/session lifecycle defects, with the tested Kimi build and exact recovery method stated; unproven causes remain labelled hypotheses."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acp",
+    "kimi",
+    "session-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

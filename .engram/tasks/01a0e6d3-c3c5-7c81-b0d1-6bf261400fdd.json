@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3c5-7c81-b0d1-6bf261400fdd",
+  "external_ref": "tm-2y7w",
+  "title": "Group the source-root session fields into one struct owned by engram_source_roots.rs",
+  "outcome": "Follow-up from the tm-5gi4 phase 2 round-4 review (Claude note N4). EngramSessionState in engram_host_adapter.rs (already about 6,900 lines) holds four source-root fields: active_turn_source_root, pending_source_root_line, source_root_line_generation and source_root_line_delivery, plus the set_pending_source_root_line helper. Move them into one struct (for example EngramSourceRootSessionState) defined in engram_source_roots.rs, and have EngramSessionState hold that struct as a single field, so the subsystem's state lives next to its logic. Pure move: no behaviour change, and all call sites are updated. Do it after phase 2 lands.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

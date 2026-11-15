@@ -1,0 +1,30 @@
+{
+  "id": "01a110e6-122d-7940-8447-7172eb473875",
+  "external_ref": null,
+  "title": "Admit Engram's show criterion_links argument (and review observations) in the read-only child tracker-read allowlist",
+  "outcome": "A read-only, non-evaluator delegation child can call Engram show with criterion_links (and its after continuation) once Engram ships that read, and the allowlist decision for the existing observations window is made explicitly.",
+  "acceptance": [
+    "ENGRAM_MCP_READ_TOOLS in src/engram_mcp_config.rs admits `criterion_links` for `show` (with the existing `after`), and only after the Engram build that implements it is the installed and pinned one; the argument is a pure read per the Engram contract recorded on this item.",
+    "The existing `observations` show window is either admitted with a stated reason that it only reads, or recorded as deliberately excluded; either way a test pins the decision.",
+    "Tests: a read-only child's show call with criterion_links (and with after) is admitted; an unlisted extra argument is still refused; evaluator children still get no tracker tool."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-mcp",
+    "read-only-child"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

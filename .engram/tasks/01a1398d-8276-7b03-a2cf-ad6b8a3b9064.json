@@ -1,0 +1,29 @@
+{
+  "id": "01a1398d-8276-7b03-a2cf-ad6b8a3b9064",
+  "external_ref": null,
+  "title": "Worktree cargo build directories accumulate under .tmp until drive C: fills (0 bytes free on 2026-10-14 08:33Z), killing a full gate",
+  "outcome": "Per-worktree cargo target directories under the repository's .tmp no longer grow without bound. A worktree whose item is landed, completed or released has its regenerable build directory removed by a defined owner and trigger (or builds share a bounded cache), and gates refuse to start, with a named message, when free disk space is below a safe threshold, instead of failing mid-compile with os error 112.",
+  "acceptance": [
+    "Worktree cargo build directories accumulate under .tmp until drive C: fills (0 bytes free on 2026-10-14 08:33Z), killing a full gate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "disk",
+    "environment",
+    "machine-safety",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

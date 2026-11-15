@@ -1,0 +1,30 @@
+{
+  "id": "01a1d3a1-929c-7c50-b15e-4211264c2ce7",
+  "external_ref": null,
+  "title": "Keep prior sub-agent acceptance evaluators ineligible for independent-session reuse",
+  "outcome": "Schema-1 history for sub-agent evidence recovery does not accidentally widen prior-target reuse eligibility.",
+  "acceptance": [
+    "An independent-session request cannot reuse a prior sub-agent evaluator solely because it now has schema-1 history; the old target mode is checked and the prior child remains unchanged.",
+    "A behavioral regression covers a settled sub-agent prior delegation, an independent-session request with its reuseDelegationId, and a positive independent-session reuse control; typed-resubmit/rationale effects are assessed and documented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "evaluation",
+    "evidence",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c9e8-f08e-7e33-9407-277b7077a6ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

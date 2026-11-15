@@ -1,0 +1,34 @@
+{
+  "id": "01a1d32b-a8ef-7d40-9c11-1474476f824d",
+  "external_ref": null,
+  "title": "Docs: two source_id anchor links use 'source-id' and don't resolve",
+  "outcome": "The cross-links between source-identity.md and execution-observability.md resolve to their headings.",
+  "acceptance": [
+    "docs/features/source-identity.md links to execution-observability.md#canonical-source_id-and-eo-credit, and docs/features/execution-observability.md links to source-identity.md#canonical-native-source_id-and-credit. Both use the underscore slug of the actual heading.",
+    "The change lands under the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Both source_id anchors now use the underscore slugs of their actual headings (source-identity.md#canonical-native-source_id-and-credit, execution-observability.md#canonical-source_id-and-eo-credit). Landed in 2a873f3b (combo91) with a clean review pair and the DL560 FULL test-91491e19 on the exact tree. Independent evaluation passed both criteria.",
+    "completed_at": "2026-11-13T15:46:24.714117800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

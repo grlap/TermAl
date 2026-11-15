@@ -1,0 +1,31 @@
+{
+  "id": "01a1745f-8219-70d3-9b49-50afa3402210",
+  "external_ref": null,
+  "title": "Retire deleted automatic mailbox placements and bound retained admission metadata",
+  "outcome": "Automatic mailbox-only placement and install-intent metadata has an explicit retirement/retention policy after native deletion, without retargeting immutable receipts or weakening creation/enrollment fences.",
+  "acceptance": [
+    "Retire deleted automatic mailbox placements and bound retained admission metadata is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "design-defect",
+    "federation",
+    "federation-mailbox",
+    "greg-reported",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a173bc-87a6-7f93-9ec4-d5e10300b0df",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

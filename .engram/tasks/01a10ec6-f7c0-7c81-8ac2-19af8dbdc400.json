@@ -1,0 +1,28 @@
+{
+  "id": "01a10ec6-f7c0-7c81-8ac2-19af8dbdc400",
+  "external_ref": null,
+  "title": "Acceptance paging budget: the binding-page estimate assumes eight rows a page, but Engram's 16 KiB binding page bound can hold fewer bound rows",
+  "outcome": "Acceptance paging budget: the binding-page estimate assumes eight rows a page, but Engram's 16 KiB binding page bound can hold fewer bound rows",
+  "acceptance": [
+    "The optional notes paging reserve funds every binding page Engram can return for the task, including pages holding fewer than eight rows because of the 16 KiB page bound, or the residual is bounded and documented with the reason.",
+    "A slow-store regression with binding pages holding fewer than eight rows evaluates without a 502 from the binding read."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

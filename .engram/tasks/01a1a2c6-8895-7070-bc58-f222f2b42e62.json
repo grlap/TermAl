@@ -1,0 +1,32 @@
+{
+  "id": "01a1a2c6-8895-7070-bc58-f222f2b42e62",
+  "external_ref": null,
+  "title": "Inspect Git-unreported metadata and unsupported entries in pinned child checkouts",
+  "outcome": "Pinned-child admission explicitly inspects Git-unreported non-repository .git entries and unsupported filesystem types within the existing shared budget, or an independently approved contract revision defines their treatment.",
+  "acceptance": [
+    "Native fixtures cover invalid .git metadata beneath otherwise unreported directories and applicable FIFO/socket/device entries, including excluded subtrees, without relying on Git status to enumerate them.",
+    "The chosen behavior is reviewed against the canonical source-identity contract and preserves the existing capture deadline, path budget, ordinary-root behavior, and read-only boundary."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "conformance",
+    "greg-directed",
+    "review-follow-up",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

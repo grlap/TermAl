@@ -1,0 +1,32 @@
+{
+  "id": "01a1be25-2832-7591-b709-74efbc8c5bff",
+  "external_ref": null,
+  "title": "Cover retained caller retry guidance in the default named-root failure diagnostics fixture",
+  "outcome": "The serialized named-root failure fixture verifies actionable same-intent recovery while retaining its state and replay assertions.",
+  "acceptance": [
+    "A default-run behavioral fixture covers the caller-visible retained-intent retry guidance together with unchanged pending identity and explicit replay behavior; it adds no standalone instruction/prose pin.",
+    "The focused check covering the changed fixture passes on its exact committed input, with required review and full gate evidence before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "diagnostics",
+    "engram-control-transport",
+    "named-root",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bdfb-88c5-7e00-8b6f-a023081b50ea",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

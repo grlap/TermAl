@@ -1,0 +1,30 @@
+{
+  "id": "01a10e0c-968f-7dc0-84a5-d91946d95514",
+  "external_ref": null,
+  "title": "Preserve the scoped post-host-cleanup FIFO handoff across a later crash",
+  "outcome": "An explicitly scoped durable handoff after non-Stop host-head cleanup may resume the following queue across a crash while preserving the general User boot barrier, held/admitted/remote authority, and existing host retention policy.",
+  "acceptance": [
+    "Preserve the scoped post-host-cleanup FIFO handoff across a later crash is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-follow-up",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

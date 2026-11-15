@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c4e6-7da0-8934-c7b5f8646fcb",
+  "external_ref": "tm-daks",
+  "title": "Engram config/read borrows the rollout-replay timeout budget and doubles worst-case new-thread failure latency",
+  "outcome": "Claude review session-6531, Medium at src/codex_engram_bootstrap.rs:99.\n\nThe config/read wait reuses SHARED_CODEX_THREAD_SETUP_TIMEOUT (180s silence) and\nSHARED_CODEX_RESPONSE_MAX_WAIT_WHILE_ACTIVE (900s active). Those budgets have a\ndocumented rationale at src/codex.rs:924-954, and it is `thread/resume`\nREPLAYING TENS TO HUNDREDS OF MEGABYTES OF ROLLOUT. A config/read is a cheap\nlocal read and cannot justify that patience.\n\nBecause the read is now SEQUENTIAL with the thread/start wait, a first prompt on\na busy shared app-server can sit up to 900s in config/read and then up to 900s\nin thread/start: ABOUT THIRTY MINUTES BEFORE THE USER SEES AN ERROR, where the\npre-change worst case was about fifteen.\n\nFIX DIRECTION: give config/read its own, much tighter deadline constant instead\nof borrowing the replay budget. The borrowed constant is also why a stale doc\ncomment now misdescribes its callers - see the related hygiene item.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a, spot-checked by Termal::Fable2): CLOSE-DONE. A fixed 30 s timeout exists: src/codex_engram_bootstrap.rs:10 CODEX_ENGRAM_CONFIG_READ_TIMEOUT on master f7db2c58.",
+  "completion": null
+}

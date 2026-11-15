@@ -1,0 +1,36 @@
+{
+  "id": "01a1a095-8fec-7b12-88bb-cc672688ae8e",
+  "external_ref": null,
+  "title": "review_identity questly fixture test can exceed the CLI's 40 s wall-clock budget under parallel suite load",
+  "outcome": "tests/review_identity_cli.rs::review_identity_questly_fixture_keeps_all_input_layers_and_nested_bytes passes deterministically in the full gate, without depending on how much other work shares the machine's CPU and process-spawn capacity, and without inflating the product's 40 s identity budget.",
+  "acceptance": [
+    "the test's pass or fail no longer depends on wall-clock time consumed by concurrent tests (for example a deterministic deadline seam, or the heavy fixture tests serialized with a stated reason), with REVIEW_FREEZE_TIMEOUT unchanged",
+    "the root cause and the chosen fix are recorded against the failing run test-aeb82ae7"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "gate-flake",
+    "review-identity",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Serialized every review_identity CLI fixture through cleanup with one test-only Mutex; unchanged real40s budget and prior assertions. Landed unchanged ascd79424e withw2529; master/originmaster and ownedpath equality verified. Whole2 Codex/Claude pair noMedium+, existingLowfutureguard-enforcementoptionalP3open. Quiet4focusedf6d28 PASS39/0/1 in200.37s; exactlandedFULL453f35fe PASS5/5, identitysuite39/0/1 in185.84s, before/afterfingerprintmatched. Originaldeadlinefailures/schedulingmitigation/external-loadlimits preserved. Evaluation409 noactiveevaluatedrun/applicablecontract; currentassertednonblockingpolicy, no independentverdict claimed. Test-only; no restartneeded.",
+    "completed_at": "2026-11-03T16:16:52.396728800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

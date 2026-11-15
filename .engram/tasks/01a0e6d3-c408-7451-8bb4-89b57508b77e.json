@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-89b57508b77e",
+  "external_ref": "tm-7cu.19",
+  "title": "Response board v1: one Obsidian-style spatial board for dragging immutable agent-response snapshots",
+  "outcome": "GREG FEATURE REQUEST 2026-07-31: 'a panel/board where I could drag agent responses… inspiration is from Obsidian… we can start from one board and see how it works… for start, one board, immutable message.' Context: checkpoints/markers exist but under-deliver for curation. Mockup (approved pending Greg's look): https://claude.ai/code/artifact/0ff32644-d894-4c9a-aef4-4f30738a2c36\n\nSCOPE v1, pinned by Greg: ONE board. IMMUTABLE message content. See how it works before growing it.\n\nDESIGN (full detail in the mockup's spec section):\n1. CAPTURE, two paths both v1: (a) HTML5 drag of any message card from a transcript pane onto a visible board pane — drag payload is {sessionId, messageId} ONLY, never content; (b) 'Pin to board' hover/menu action on every message for when the board is not open (also the keyboard-accessible path) — card lands at a free position.\n2. SURFACE: one workspace tab (the tm-d09 mailbox-tab pattern: no composer, no agent chrome). Dot-grid canvas, pan by drag on empty space / scroll. Zoom DEFERRED but not precluded: store logical x/y, render through a transform so zoom is additive later.\n3. CARD = SERVER-SIDE SNAPSHOT + PROVENANCE. On POST the SERVER copies the message content into the card from its own transcript store (client sends ids only — content cannot be forged; snapshot survives session pruning by construction). Card renders snapshot as read-only markdown, internally scrollable. Header: agent-colored dot + session name + timestamp. Footer: 'Open in session' deep link via existing around= paging. NO content editing — immutability is the feature.\n4. CARD OPS v1: place, move, resize (width + max-height), remove. Positions persist server-side, debounced. Board survives restart.\n5. API, minimal and new: GET /api/response-board (ENTIRE board in one call — tm-7cu.10 lesson: no progressive assembly); POST /api/response-board/cards {sessionId, messageId, x, y}; PATCH /api/response-board/cards/{id} {x,y,w,h}; DELETE /api/response-board/cards/{id}. SQLite persistence beside sessions (board_cards table: id, x, y, w, h, snapshot_json, source_session_id, source_message_id, created_at). Route name 'response-board' avoids collision with the agent coordination board at /api/sessions/{id}/board.\n\nSTANDING CONSTRAINTS (this week's lessons, non-negotiable):\n- Board reads are cursor-neutral and RESIDENCY-FREE: card creation resolves the message server-side from durable storage, never from what a pane has loaded.\n- No state inferred from geometry; dragging is explicit state.\n- Wide unbreakable content scrolls INSIDE the card (grid-blowout lesson); board pane mounted alongside a session pane in every fixture (production-shape lesson).\n- Fail-first regressions: drop -> server snapshot -> reload -> card persists with position; drag payload carries no content; snapshot unchanged after source session mutates or is pruned.\n\nEXPLICITLY DEFERRED (record so v2 discussions start from here): multiple boards, zoom, edges/arrows between cards, free-text/note cards, card grouping, export.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

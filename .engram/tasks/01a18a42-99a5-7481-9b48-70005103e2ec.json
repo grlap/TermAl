@@ -1,0 +1,33 @@
+{
+  "id": "01a18a42-99a5-7481-9b48-70005103e2ec",
+  "external_ref": null,
+  "title": "Show routine successful Engram events as compact one-line rows, expandable, while errors, warnings, refusals and action-required stay prominent",
+  "outcome": "In the session transcript, routine successful Engram events (for example the dispatch card \"ENGRAM DISPATCH / Turn admitted\") render by default as one compact line that can be expanded to show the full detail. Errors, warnings, refusals and action-required states keep their current prominent rendering. Nothing is hidden: every event stays reachable by expanding it.",
+  "acceptance": [
+    "A routine Engram control card that isRoutineEngramControl classifies renders, collapsed, as a single row carrying its author, its stage and its title (\"Turn admitted\" or \"Turn checkpointed\"), plus a toggle and its time. It shows no separate label or heading row and no detail block.",
+    "The toggle, and the keyboard, expand it to the full card with all of today's detail. Collapsing returns it to the single row. A manual expansion survives ordinary rerenders of the same card, and an active transcript search shows the full card.",
+    "Every card the whitelist does not classify as routine renders exactly as before, prominent and fully expanded with no collapse toggle. This includes errors or a causal failure, degraded, shadow or advisory cards, refusals, deferrals, queued, withheld or ungranted dispatches, an armed repair, directives, a waiting next intent, restart, and unknown values.",
+    "The virtualization height estimate for a routine card matches the single-row rendering.",
+    "Vitest covers (1)–(4) in EngramControlCard.test.tsx and conversation-virtualization.test.ts, and `npx tsc --noEmit` is clean."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "greg-reported",
+    "ui",
+    "ux"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete. The routine-card collapse it covered landed in 972bc08c and was then removed together with turn-gated control in 87f49ed0, so nothing remains to close. Per Opus3's read-only sweep at master 57a762c8 (TermAl mailbox 03723eab #5238); cancelled by coordinator Termal::Fable2, 2026-11-13.",
+  "completion": null
+}

@@ -1,0 +1,36 @@
+{
+  "id": "01a1c8ef-5bed-7e22-9c7d-9c55d9d2f94d",
+  "external_ref": null,
+  "title": "Derive remote cancelled-unstarted status from structural owner state",
+  "outcome": "Define truthful cancelled_unstarted projection when the production status producer is implemented.",
+  "acceptance": [
+    "The production status producer derives cancelled_unstarted from authoritative receipt state and absence of attempts/provider facts, never reason text; controls reject unknown or progressed states."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "stage-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

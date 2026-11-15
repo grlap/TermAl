@@ -1,0 +1,30 @@
+{
+  "id": "01a18afb-5a28-71a2-ae5a-99d7660d589f",
+  "external_ref": null,
+  "title": "Cover native wait evidence filtering during read grace and request replacement",
+  "outcome": "Deterministic native-wait tests protect the existing evidence guards: stale retained results during a failed-read grace window and replacement results under a changed request/native identity render unknown totals and fingerprint comparison rather than leaking stale or foreign diagnostic evidence.",
+  "acceptance": [
+    "A good indexed observation followed by one failed read with the earlier results retained is exercised through native resume delivery, asserting unknown totals and fingerprint comparison while preserving the existing verdict semantics.",
+    "A request or native-locator replacement under the same run id is exercised through native resume delivery, asserting that replacement totals/fingerprint comparison are not exposed and the original wait retains its identity semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "native-wait",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18a20-9551-77b2-87e8-f21a0f3c1777",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

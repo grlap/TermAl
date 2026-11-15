@@ -1,0 +1,27 @@
+{
+  "id": "01a1383c-808c-7161-8386-f6513b4307fb",
+  "external_ref": null,
+  "title": "A typed capacity error arriving before turn-start adoption loses its real failure detail",
+  "outcome": "A typed serverOverloaded with turnId before turn/started follows ordinary terminal failure without arming recovery; discard only a known mismatched active turn.",
+  "acceptance": [
+    "A typed capacity error arriving before turn-start adoption loses its real failure detail is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity-recovery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

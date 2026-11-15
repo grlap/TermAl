@@ -1,0 +1,35 @@
+{
+  "id": "01a12d9a-cd1a-72a3-aec2-5889e96b5268",
+  "external_ref": null,
+  "title": "Resume on a pending prepared-begin hold clears rebind_required unconditionally, dropping a rebind armed for another reason",
+  "outcome": "The ReleasablePending Resume path clears only the rebind that the Stop armed. It never clears one armed by a transport failure's backoff or a work-binding or routing change, so the stored begin is never sent on a routing token that needed a rebind first.",
+  "acceptance": [
+    "release_engram_begin_preparation_hold_for_resume's ReleasablePending path clears rebind_required only when it was armed by the Stop that made the hold, or when the routing token and binding are proven unchanged. Otherwise the rebind stays armed and runs before the begin is sent.",
+    "A scripted-clock test sets rebind_required before the Stop (a transport backoff or a routing change), then Resumes, and shows the bind runs before the same begin is sent once."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

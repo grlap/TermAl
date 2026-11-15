@@ -1,0 +1,29 @@
+{
+  "id": "01a0fb60-bdbc-7373-ba60-35aac795da57",
+  "external_ref": null,
+  "title": "Read-only refusal explainer: drift guard is one-way, and quoted `>&` or `|&` lines are misattributed (background vs redirection)",
+  "outcome": "Two message-accuracy gaps in src/claude_read_only_refusal.rs. Neither changes any allow or deny decision.\n\n(1) Drift. CLAUDE_READ_ONLY_GIT_SUBCOMMANDS and CLAUDE_OPTION_CHECKED_BASH_COMMANDS are tested against the checker in one direction only. claude_git_tokens_are_read_only and claude_bash_tokens_are_read_only still dispatch on literals, so a subcommand or head added to the checker but not to the const goes undetected. The refusal would then say \"`git X` is not one of the read-only commands\" for a command the gate allows with other arguments.\nFix: drive the dispatch from the consts, for example with an early contains check, so a new arm cannot exist without its list entry.\n\n(2) Background versus redirection. When the background-separator scan fires, the explainer looks for `>&`, `<&` or `&>` anywhere in the raw line, quotes included.\n- `echo '2>&1' & git status` is named a redirection, although the checker applied the background rule to the unquoted `&`.\n- `git log |& head` is named a background `&`, although `|&` is a stderr pipe.\nFix: classify the actual unquoted ampersand the scanner found, and treat `|&` as redirection. Add regression rows.",
+  "acceptance": [
+    "A git subcommand or option-checked head the checker allows cannot be missing from the refusal's lists without a test failing.",
+    "A line whose only real `&` is a background separator, with redirection-like text inside quotes, is named as background; `|&` is named as redirection; tests cover both.",
+    "The full five-stage gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "delegations",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

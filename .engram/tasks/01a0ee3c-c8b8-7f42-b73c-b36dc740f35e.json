@@ -1,0 +1,86 @@
+{
+  "id": "01a0ee3c-c8b8-7f42-b73c-b36dc740f35e",
+  "external_ref": "engram:w-d353c681b9ac#E2",
+  "title": "Re-evaluate in the same evaluator session: a fresh attempt with refreshed criteria, bases, source and policy",
+  "outcome": "A requester can ask the evaluator that already judged an item to judge it again, without a new evaluator being spawned: the host gives the attempt its own persisted key, re-reads criteria, bases, source and policy, resets the submission state only after the previous attempt is resolved, and sends a brief it authors itself.",
+  "acceptance": [
+    "A requester can ask for a new judgment of an item in the evaluator session that judged it before; the host reuses that session only while its persisted delegation record shows a read-only evaluator child the host spawned for this item and store, with no requester follow-up delivered and no producer identity refusal recorded, and current policy and the task pin permit independent_session; Engram refuses the record of a session that held or executed the item's run, and that refusal makes the session ineligible; otherwise the host spawns a fresh evaluator and says why; a test shows each case.",
+    "At most three attempt keys are minted for one item on one evaluator delegation, each key one whole judgment under a refreshed host-authored brief: the first brief, each explicit re-evaluation, and each fresh judgment after a definitive refusal (a confirmed acceptance_evaluation_resubmit, or any refusal that recorded nothing); an identical resend of the stored key and payload, and a readback that settles an unknown write, mint nothing; a fourth key is never minted on that delegation: the next request spawns a fresh evaluator and says why; a test shows the fourth.",
+    "Before a new attempt or replacement evaluator is admitted, the preceding submission and any host-brief delivery are settled. An uncertain write is resolved by reading its exact record or resending exactly the stored key and payload, never by a changed payload, new key or replacement evaluator. A later refusal alone does not settle an earlier unknown send. Tests refuse replacement while responsibility remains unsettled and preserve the exact replay identity. the no-field path keeps the specification's completed-unknown notice behaviour and is not used to bypass the settlement rule.",
+    "Each fresh judgment attempt has its own persisted ordinal-bearing key. The host resets the current submission target only after the preceding attempt is settled and the refreshed target is acknowledged durable. Engram accepts two whole records from the same independent evaluator session. Every recorded rationale begins with the attempt ordinal and evaluator session. Tests show both records and persistence failure/restore.",
+    "TermAl's specification of the host's acceptance-evaluation procedure describes re-evaluation as implemented and links Engram's section 'Evaluation unit and re-evaluation'.",
+    "The brief of a re-evaluation is authored by the host from Engram's records read anew for that attempt (criteria, bases, source revision, policy, task pin, carried failure, open obligations); it carries no requester text, names every criterion for a fresh judgment and offers no adoption of earlier verdicts; a test reads the brief.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "When the source has moved from the judged revision the brief says so, asks for a judgment of every criterion against the whole new revision, and a bound criterion passes only on a check rerun there; a test shows it.",
+    "A submission names the host-issued attempt key from the brief. A stale or concurrent reply cannot be submitted under a newer target or cut. Delivered requester follow-up text permanently removes evaluator reuse eligibility. Tests show the old-key refusal, admission races and persisted taint across restore."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 8,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 9,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance",
+    "engram-host",
+    "paired-engram"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed in origin/master as c083c33d8cfd978b5dc72512de67a6c2d76c4f0e (train37, tree9492fb34f79449268edd73bb08b110d2bfd6145b), carrying author842dade exact reviewed/gated merge. Fresh independent acceptance consumed; author full97cc9260/livec11f5fb3 and review pair retained. Integration fullbb953baa PASS Rust3862/0/24,Vitest4566/0,fingerprint2f6f6077 equal; clean Codexd2af1882/Claude34a61253 integration pair and owner remote verification quoted in holder note. Deferred Lows filed separately. Installation pending owner combined batch; preserve/archive artifacts before worktree removal.",
+    "completed_at": "2026-10-04T08:15:23.815341800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

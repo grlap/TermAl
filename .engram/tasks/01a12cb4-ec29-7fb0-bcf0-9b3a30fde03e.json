@@ -1,0 +1,59 @@
+{
+  "id": "01a12cb4-ec29-7fb0-bcf0-9b3a30fde03e",
+  "external_ref": null,
+  "title": "Durable provider-delivery receipt: a host-dispatched prompt records a delivery identity and an acknowledged hand-off, so an ambiguous send is never replayed blindly or called delivered",
+  "outcome": "Durable provider-delivery receipt: a host-dispatched prompt records a delivery identity and an acknowledged hand-off, so an ambiguous send is never replayed blindly or called delivered",
+  "acceptance": [
+    "For such a prompt, the host durably records a write-ahead hand-off attempt (prompt id, transcript message id, attempt number and the runtime attempt key), acknowledged before the runtime is called. It records acceptance on the runtime's first positive acknowledgement: Claude command_lifecycle queued/started for the attempt uuid, or its unique replay echo; Codex's turn/start response or turn/started; for ACP, the session/prompt response. It records a definite rejection only when the hand-off provably never reached the runtime. The prompt's delivery disposition is one of pending, handing-off, accepted, rejected or ambiguous, and is exposed on the wire.",
+    "After a restart, an accepted attempt reads as delivered and is never replayed. A handing-off attempt without acceptance reads as ambiguous: it is never replayed and never called delivered. A rejected attempt may be re-queued only under a new prompt id bound to a new prerequisite, which the old acknowledgement cannot satisfy. Tests cover a restart before the write-ahead commit, after it, after acceptance and after rejection, plus a Codex timeout and a Claude write error (both ambiguous).",
+    "No new poller, watchdog, timer, sleep or enlarged timeout is introduced; dispositions advance only on existing runtime events, acknowledgements and boot reconciliation. The ACP gap (no acceptance signal before the end-of-turn response) is documented in the feature doc, and nothing reports such a prompt delivered earlier.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "delivery",
+    "prerequisite"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a12cbd-05ae-7331-a5ce-6c1d60662410"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed on master by the integration owner, Termal::Opus2.\n\nCommit 13063e3bb4a3871d18ddf2b42e710712b05658a2 (tree 12520262) was pushed to origin/master as a fast-forward from 457714ab, and ls-remote confirmed it at 23:21:09Z.\n\nPre-push checks:\n- 46 files (4 added, 42 modified), +6681 −50, 0 CR. No authority files.\n- Full gate test-eb74d4f6: PASS 5/5 (host record 93afe4ec). Its trackedIndexDiff e78f38b9 was reproduced exactly IN wt-9b3a-carry-457714-11865 and equals the r14 package's (3025b272), so the carry is byte-exact.\n- Review pairs: r13 (Codex aa145252 / Claude 84ac46fb) and r14 (Codex 22226b77 / Claude 254bd923), no Medium or higher; Lows filed.\n- Evaluation efd63c4a: 4/4, independent, not stale.\n\nThe install follows on Fable2's word, outside a gate window.",
+    "completed_at": "2026-10-13T23:21:17.459230700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

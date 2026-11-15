@@ -1,0 +1,29 @@
+{
+  "id": "01a15987-c8a2-7c63-af66-02f2150aa33f",
+  "external_ref": null,
+  "title": "Avoid exact registration-query refusal for unrelated registration metadata updates",
+  "outcome": "The new exact-query content fence compares the entire TestRunRegistration row plus its durable bit. An unrelated metadata update during canonicalization can return409 after a durable ACK, and the current launcher treats a failed confirmation GET as definitive no-start. Evaluate an identity-scoped fence or a bounded server-side recapture without loosening locator/run/digest/owner/start/durability correctness.",
+  "acceptance": [
+    "A deterministic unrelated-metadata update during the off-lock check does not unnecessarily abort an otherwise exact durable confirmation, or the chosen contract explicitly handles a bounded retry.",
+    "Locator, run identity, request digest, owner, start or durability changes cannot select a stale indexed entry; coverage distinguishes these changes from unrelated metadata."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-api",
+    "registration",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

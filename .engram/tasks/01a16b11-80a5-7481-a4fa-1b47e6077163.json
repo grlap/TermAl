@@ -1,0 +1,63 @@
+{
+  "id": "01a16b11-80a5-7481-a4fa-1b47e6077163",
+  "external_ref": null,
+  "title": "Explain the ambiguity wait when changed command or place retires a full-launch check",
+  "outcome": "A holder is told that its full-launch check was retired and why an immediate relaunch may be refused as ambiguous.",
+  "acceptance": [
+    "When a recognized full-launch check is retired because a repeated start or command description changes its command or place, the holder receives one truthful check-credit notice identifying the original check fingerprint, original start and command-or-place change.",
+    "The notice explains that the old launch may already have started a run and states the existing two-minute ambiguity wait; matching repeated starts and ordinary-test retirements create no new full-launch-retirement notice or ambiguity window, and credit/retirement policy is unchanged.",
+    "Deterministic recorder regressions cover both retirement routes through the actual ACP update ordering, verify one notice per retired check with the original identity and time, retain later-carry refusal, and include matching and ordinary-test controls.",
+    "Focused validation and an independent Codex/Claude review pair cover the exact input with no outstanding in-scope Medium or higher; Merger owns the final combined carry audit, exact Windows full gate and fresh independent acceptance before landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the ambiguity notice change. The exact carried input has a passing focused host check, clean independent Codex/Claude review coverage across the disjoint stack and scheduler paths, the final carry audit, the Windows full gate on tree 1981625e, and fresh independent acceptance evaluation d4f59ca1049744db811de48a53ed9f52 (4/4).",
+    "completed_at": "2026-10-24T17:19:13.026283Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

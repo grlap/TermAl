@@ -1,0 +1,40 @@
+{
+  "id": "01a19d4b-38e0-7210-9aa6-7b641238b60e",
+  "external_ref": null,
+  "title": "Correct the focused-claim test's ordinary source-measurement assertions",
+  "outcome": "The focused-claim test on immutable ef5af76f preserves actual check-location measurement and emitted B source context using the current ordinary observation owners, without adding unsupported per-check source credit.",
+  "acceptance": [
+    "Only the body of focusing_another_named_claim_selects_its_next_ordinary_opening_and_check_facts in src/tests/engram_source_root_naming.rs changes relative to immutable treeef5af76fb6f89a7e5d9535bade08243d0bb8e65c; product code and all other test bodies remain untouched.",
+    "Before closing, real existing check start/end captures both identify canonical B. The ordinary observed check explicitly has no source_basis; the same turn's exact-key source_sighting identifies B and its named generation/state. Existing selection/opening/result/no-credit assertions remain, and the master-checkpoint assertion/current equivalents are recorded in a ledger. No sleeps or timeout/budget changes.",
+    "Return the exact source-only scoped delta and native before/after evidence to Sol-03d4 cc Fable2 from a fresh named root, after identifying the diagnostic's capture and confirming its existing seam; no Cargo/compiler/parser/formatter/tests, review, evaluation or landing claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-only",
+    "test-port"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered exact one-body source correction b325f59bce214c875d60235c27b0c8ee4c2cd79e on ef5af76fb6f89a7e5d9535bade08243d0bb8e65c, with approved master/current source-measurement assertion equivalents and complete native before/after evidence. Integration independently audited the entire body, identities, one-body scope, 97 test attributes and all artifact hashes; Fable2081 intake acceptance reported. Source implementation/delivery complete; execution remains UNRUN.",
+    "completed_at": "2026-11-02T17:35:26.367330600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

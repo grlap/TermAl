@@ -1,0 +1,29 @@
+{
+  "id": "01a1d585-95ff-7901-b97c-152c72b65328",
+  "external_ref": null,
+  "title": "Add a docs link checker that resolves relative .md links and #anchors against GitHub heading slugs",
+  "outcome": "TermAl has a small script under scripts/ that a focused launcher run can execute. It checks that every relative markdown link in docs/ resolves: the target file exists and the #anchor matches a heading slug as GitHub renders it, underscores kept. Docs-only changes then have a real registered check.",
+  "acceptance": [
+    "A script under scripts/ resolves every relative link in docs/**/*.md to an existing file and, for a #fragment, to a heading whose GitHub slug equals the fragment. It exits non-zero with the file, line and link for each unresolved one.",
+    "Behavioural tests use fixture markdown the test creates itself (never the repository's own docs or agent instruction files). They cover a resolving link, a missing file, a missing anchor, an underscore-and-punctuation slug, and duplicate-heading suffixes.",
+    "It runs on current master with zero unresolved links, or each pre-existing broken link is fixed or filed. docs/test.md names the focused command."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "tooling"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

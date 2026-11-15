@@ -1,0 +1,30 @@
+{
+  "id": "01a1a74d-77de-7b61-a258-b1faed5b9067",
+  "external_ref": null,
+  "title": "A registered check with no compatible baseline is followed by an assumed source change at close, which refuses its evaluation",
+  "outcome": "A clean registered committed-input check is not refused because the host first accounts an assumed source change after it, when no baseline existed at registration; a real edit after the check is still refused.",
+  "acceptance": [
+    "A deterministic regression against unchanged product shows a clean registered committed-input run with no placed ordinary command and no compatible baseline is followed by an assumed source change at its first close; the repaired path admits evaluation using that actual registered record without a warm-up turn.",
+    "A pinned disposable real-Engram test on Windows and Linux accepts that first-close sequence, including two registered checks in one turn, while actual edits after the checked input are refused and failed or undelivered source reports, rebinds and root changes provide no baseline.",
+    "The implementation records immutable registered-run and measured-source facts without fabricating an ordinary observed check, preserves Engram real-change barriers, and documents the lost-report safety argument."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Superseded by the simple rule Greg approved („tak”, 2026-11-04 about 20:19Z, memory rules-greg-eo-one-check-2026-11-04): Engram's w-633b5cacc42a decides from Git, so an assumed report at close stops refusing a registered check. Nothing landed here. Branches and evidence kept; see note 2531c006.",
+  "completion": null
+}

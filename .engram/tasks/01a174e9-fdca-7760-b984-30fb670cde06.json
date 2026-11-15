@@ -1,0 +1,30 @@
+{
+  "id": "01a174e9-fdca-7760-b984-30fb670cde06",
+  "external_ref": null,
+  "title": "Expose bounded background test-run rescan trace discovery without registration correlation",
+  "outcome": "Operators can discover recent background rescan operation IDs and their existing lock-phase timing records from a bounded read-only diagnostic response, without manufacturing a test registration or reading the live store.",
+  "acceptance": [
+    "A bounded metadata-only diagnostic read enumerates recent background rescan trace IDs, operation IDs, server instance and existing phase marks without requiring a run registration or a previously known random operation ID; existing exact filters remain available.",
+    "Trace discovery preserves bounded storage/output and reset/truncation semantics, exposes no session content or test logs, and changes no admission, state authority, persistence, verification or test execution behavior.",
+    "Deterministic tests cover idle background rescan discoverability, limits/filtering, and restart/epoch qualification. The lifecycle heartbeat item is cross-linked as a consumer of StateInner diagnostic evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "diagnostics",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

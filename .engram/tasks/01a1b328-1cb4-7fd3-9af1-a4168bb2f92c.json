@@ -1,0 +1,30 @@
+{
+  "id": "01a1b328-1cb4-7fd3-9af1-a4168bb2f92c",
+  "external_ref": null,
+  "title": "Assert local transaction rollback before relay append settlement recovery",
+  "outcome": "The relay settlement-failure regression fails if local receipt or association writes commit before authorization succeeds.",
+  "acceptance": [
+    "After the injected local settlement authorization failure and before any retry, the fixture asserts that the relay intent has no committed receipt and that settlement did not publish its association.",
+    "The existing same-key recovery, duplicate receipt identity and exactly-one home message assertions remain and pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "relay",
+    "review-followup",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

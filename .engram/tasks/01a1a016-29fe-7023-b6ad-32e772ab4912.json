@@ -1,0 +1,31 @@
+{
+  "id": "01a1a016-29fe-7023-b6ad-32e772ab4912",
+  "external_ref": null,
+  "title": "Every Central start re-serializes and rewrites all retained transcript tails (2.44 GB, 26 s) in its first persist tick",
+  "outcome": "A clean Central start does not replay and rewrite every retained transcript tail. The first persist tick after boot writes only what changed, so startup persist contention no longer starves the other boot-time writers.",
+  "acceptance": [
+    "The cause of the full retained-tail replay on a clean start is identified in code: the persist cache initialized empty with watermark 0.",
+    "After the fix, the first persist tick after a clean start over an unchanged store serializes no transcript tails that are already durable. A regression test asserts this deterministically, without timing thresholds.",
+    "The review pair is clean, and the first-tick figures before and after the fix are recorded on the item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "performance",
+    "persistence",
+    "post-restart",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1b97a-9861-7e93-9559-0eaf2fb3c740",
+  "external_ref": null,
+  "title": "Keep the EO repository seed usable when Git selects a reftable ref backend",
+  "outcome": "The opt-in immutable EO Git seed remains a valid private repository even when host Git initialization defaults to reftable; it either explicitly selects the supported files backend for the seed or handles the selected backend coherently.",
+  "acceptance": [
+    "The seed initialization and allowlisted snapshot agree on the ref backend without changing global Git configuration or sharing writable metadata; the existing artifact matrices retain all cases and real Git/source captures."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

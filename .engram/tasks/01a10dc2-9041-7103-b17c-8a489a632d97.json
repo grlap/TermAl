@@ -1,0 +1,27 @@
+{
+  "id": "01a10dc2-9041-7103-b17c-8a489a632d97",
+  "external_ref": null,
+  "title": "Summary-view obligation assessments: test the re-read, not-carried, notice and no-history wording, and a later page whose record position changes",
+  "outcome": "Every summary-view wording branch in src/acceptance_obligation_assessment.rs has a test: the missing_continuation re-read text ('must_show rows a-b, already listed'), the not-carried line and the notice for a summary record (complete 'N rows, M must_show' and incomplete 'an unread must_show row'), and the branch with no `history` command; plus a later summary page whose record_position changes stopping as assessment_changed.",
+  "acceptance": [
+    "Summary-view obligation assessments: test the re-read, not-carried, notice and no-history wording, and a later page whose record position changes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

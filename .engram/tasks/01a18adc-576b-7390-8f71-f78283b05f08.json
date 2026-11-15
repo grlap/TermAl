@@ -1,0 +1,30 @@
+{
+  "id": "01a18adc-576b-7390-8f71-f78283b05f08",
+  "external_ref": null,
+  "title": "Use producer-neutral exclusion diagnostics for uncertain Codex and ACP invocations",
+  "outcome": "Unproven or nonqualifying Codex/ACP command activity reports producer-neutral reasons, with an explicitly defined grant/check exclusion scope and no weakening of authority guards.",
+  "acceptance": [
+    "Use producer-neutral exclusion diagnostics for uncertain Codex and ACP invocations is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "command-invocations",
+    "design",
+    "engram-host-adapter",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18a53-c626-7740-9c09-ec8cbcc3efec",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

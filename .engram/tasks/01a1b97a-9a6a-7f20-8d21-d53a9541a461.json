@@ -1,0 +1,27 @@
+{
+  "id": "01a1b97a-9a6a-7f20-8d21-d53a9541a461",
+  "external_ref": null,
+  "title": "Clarify ownership and provenance headers in the EO seed and fixture timing modules",
+  "outcome": "The two new test modules document ownership, exclusions and provenance in their source headers, following the repository convention.",
+  "acceptance": [
+    "eo_repository_seed.rs identifies its seed/initialization ownership, excludes case-owned writable files and other EO fixture policy, and names its extraction from engram_turn_checks.rs; fixture_timings.rs identifies its diagnostic ownership/exclusions and new-module provenance, with no behavior change or tests pinning comment text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "review-follow-up",
+    "test-maintenance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

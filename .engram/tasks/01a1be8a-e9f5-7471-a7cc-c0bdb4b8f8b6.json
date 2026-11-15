@@ -1,0 +1,24 @@
+{
+  "id": "01a1be8a-e9f5-7471-a7cc-c0bdb4b8f8b6",
+  "external_ref": null,
+  "title": "Verification record refusals lose their bounded reason in TermAl's run summary",
+  "outcome": "A definite Engram refusal of a verification record keeps a bounded closed-category cause, so a holder can tell 'work changed since registration' from 'named root moved since registration', without echoing a message that could carry a source object. Found by the joint Claude review (session-16938) at src/engram_verification_record.rs:1605.",
+  "acceptance": [
+    "Verification record refusals lose their bounded reason in TermAl's run summary is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1bdfd-bf4a-7ca1-811f-b1a0b7206672",
+  "disposal_reason": "Duplicate I filed from the joint Claude review (session-16938); w-b1a0b7206672 already tracks the typed refusal cause, per Sol-edfd's dedup.",
+  "completion": null
+}

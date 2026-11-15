@@ -1,0 +1,35 @@
+{
+  "id": "01a1c868-23b2-7251-89d9-21b7154a4f67",
+  "external_ref": null,
+  "title": "Integrate combo47 on 6b1849c4: edfd 6c533f9d + fbff2817 (w-4ac6 P0 named-root journal)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit b3d7dce13cea176cca544aa1bd5b2961b3aa48ec (tree b097bdd5589cf19430a8f6505eccbce235264f4b) is on origin/master, where master was moved to it by a fast-forward from 6b1849c4e6e7c2721b7a3d3b7207cb5aa06c6f95, and its post-image blob of every path except docs/features/engram-host-adapter.md equals edfd 6c533f9d's or fbff2817's post-image of that path.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is b097bdd5 passed every stage, with equal source ids before and after and an eligible clean input, and the adopted 6c533f9d pair (Codex 17316, Claude 17317), the adopted fbff2817 review and the scoped confirmation pair on b3d7dce1 recorded no finding of Medium or higher.",
+    "The release binary built from tree b097bdd5 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo47 landed on master as b3d7dce1 by fast-forward from 6b1849c4 and was pushed (03:45:44Z). DL560 FULL test-d7ba9684 passed on the exact tree b097bdd5. It was installed on Central (7f326b19) and DL560 (4943f731) with the previous binaries kept aside. Acceptance evaluation delegation-ac234969 passed 3/3.",
+    "completed_at": "2026-11-11T07:08:30.943452200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

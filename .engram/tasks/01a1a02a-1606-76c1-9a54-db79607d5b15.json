@@ -1,0 +1,29 @@
+{
+  "id": "01a1a02a-1606-76c1-9a54-db79607d5b15",
+  "external_ref": null,
+  "title": "One candidate covering two items in a shared named root credits its recognised test to only one bound item",
+  "outcome": "When one exact candidate in a shared named root legitimately serves more than one claimed item, its registered test can be credited to each item it verifies, or the host documents and enforces a clear supported workflow that does not require rerunning the same test.",
+  "acceptance": [
+    "The rule that reports a recognised test in a shared named root for one bound item only is located in code, and its intent is documented: safety reason versus limitation.",
+    "Either multi-item credit for one exact run is supported with a regression test, or the notice and docs give a supported path that needs no duplicate run. The notice never advises rerunning a test that already passed only to move credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "engram-host-adapter",
+    "source-roots"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0f15d-8be1-74c3-a208-686c8370d685",
+  "external_ref": null,
+  "title": "Update the evaluation-timing line in CLAUDE.md and AGENTS.md once Engram's same-turn exemption is live",
+  "outcome": "The Engram work tracker section of CLAUDE.md and AGENTS.md says \"request termal_evaluate_acceptance in the turn after the check, never in the same turn\".\nOnce Engram's build with the w-203304a1503a exemption is installed and live, the line can allow a same-turn request under Engram::Fable's condition (TermAl mailbox ebe242f7 #276): every check the turn ran was on the final revision and passed, and no criterion is bound to a check run in this turn; otherwise, in the next turn.\nWhen TermAl w-c119f3c7391b lands, the line simplifies again.\nThis is not the Commit and push section, so it's outside the authority-text scope. Engram::Fable offered to concur on the exact wording anyway.",
+  "acceptance": [
+    "The line in both files states the same-turn condition in wording Engram::Fable concurred on, the two files stay identical in that section, and the change lands only after Engram's exemption build is live."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

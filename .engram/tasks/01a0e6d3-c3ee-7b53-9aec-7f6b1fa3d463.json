@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c3ee-7b53-9aec-7f6b1fa3d463",
+  "external_ref": "tm-5fsy.12",
+  "title": "Cover freeze CLI mode and HTTP integration contracts",
+  "outcome": "Claude session-6887 Low src/review_freeze_api.rs:58. Existing units and tm-5fsy.9 classifier/bridge tests do not cover current_exe checker dispatch, Mode parsing, mode arity/exit/stdout, observer path and post-run identity check. Add isolated CLI and router integration coverage; Work route coverage remains tm-m6r1.6.",
+  "acceptance": [
+    "Mode parse and arity success/failure; checker process exact stdout/exit observation; HTTP JSON unknown fields422, semantic400, busy429, observed failure200 verified:false, transport failure500, stale identity rejection including workdir/hidden/remote. No real provider calls or live repository mutations."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c3ed-7560-b996-e4ead056e0bd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

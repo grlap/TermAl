@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3cc-7f82-8a40-26d7f3feb2bb",
+  "external_ref": "tm-3c43",
+  "title": "Serialize native project folder picker requests",
+  "outcome": "Review follow-up: picker endpoint can hold multiple modal dialogs and blocking workers for repeated requests (existing macOS behavior also). Add single-flight guard with clear busy response and release-on-cancel/error tests. Keep distinct from Windows visibility/DPI desktop verification tracked by tm-i1q7.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

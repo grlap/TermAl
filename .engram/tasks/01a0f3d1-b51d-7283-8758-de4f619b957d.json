@@ -1,0 +1,37 @@
+{
+  "id": "01a0f3d1-b51d-7283-8758-de4f619b957d",
+  "external_ref": null,
+  "title": "The evaluator's host-MCP-only flag is derived by hand at four dispatch sites with no test of the wiring",
+  "outcome": "The flag that gives an acceptance-evaluator child only the host's MCP servers is derived in one place beside the Engram runtime config, and a test on a real dispatch path proves a Claude evaluator's spawn gets --strict-mcp-config.",
+  "acceptance": [
+    "A test dispatches a turn for a Claude evaluator child through a production path and asserts its argv carries --strict-mcp-config; the same path for a non-evaluator does not.",
+    "The full gate passed on the exact landed input.",
+    "host_mcp_servers_only is computed by one locked helper that the dispatch paths in src/turn_dispatch.rs and src/session_config.rs call, not by hand at each site."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "mcp",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Duplicate of w-7797ae5cfddf, which Termal::Fable2 filed at 18:59Z from the same finding one review round earlier and which carries criteria (Fable2, mailbox #479). Filed by me from landing train 2's Claude review (delegation-e02f6106-80b6-44a4-9167-da23bef58e82) before I knew of it.",
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a17e08-dd47-7a31-a71b-1a94544b753a",
+  "external_ref": null,
+  "title": "Named-root authority recovery holds StateInner ~700 ms at engram_root_authority.rs:967, blocking boot and outstanding-work reads",
+  "outcome": "Greg reported this on the central Windows host after the 15:10Z restart (master 86c882dc), relayed by Engram::Advisor #2192. Repeated long StateInner holds at src/engram_root_authority.rs:967:36: 687 ms and 700 ms, each with acquisition wait 0. That line is `recover_engram_authority_batch_until`'s locked read: naming history, namer, reader target, the abandoned-journal scan with `engram_root_reporter_available` per journal, and unresolved runs.\n\nPaths blocked behind it:\n- claude_outstanding_work.rs:785:40, waited 615 ms;\n- app_boot.rs:683:25, waited 700 ms;\n- claude_outstanding_work.rs:684:36, waited 496 ms.\n\nSame window: named-root reclamation for store github.com/grlap/TermAl, work 01a17c3d-07c9-7612-8c94-c346c6671b82 (w-c346), generation 2002, reported persistence unconfirmed (Deadline), writer tick 89 ms, authority image unknown/state busy; pass attempted=2, limit=8, elapsed 2051 ms.\n\nGoal: the recovery batch's locked section is bounded (target: hold p99 under 50 ms, consistent with the trim-slice bound) by moving per-journal work off the lock or making it proportional to the batch, without changing recovery semantics or authority decisions.",
+  "acceptance": [
+    "On the named source root, the existing active-batch and empty-batch recovery_lock::root_recovery_ regressions pass, running 100 samples per case with the unchanged 50 ms bound. For active (sessions,journals)=(64,1),(1024,1),(4096,1),(4096,256) and empty (4096,256), empirical p99 of each call's longest foreground StateInner hold is below 50 ms; with 100 ordered samples this is the logged second_worst_us value, which must be below 50000, independently of the tests' median assertion. Each active case performs exactly 100 canonical reads; the empty case performs none.",
+    "Recovery preserves the existing authorized-reader eligibility and namer-first stable selection, exact original store/run association, eight-read batch limit, current owner/reader/selection/journal/route revalidation and canonical proof/settlement rules. The scaling tests retain exact pending journals and owner identity, clear only the completed unresolved run, and existing recovery/reader parity regressions pass; no focus adoption, new authority owner, persistence change or deadline/timeout increase is introduced.",
+    "The maintained standard full launcher gate passes on the reviewed tree, and the review pair has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "named-root",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a169ec-3eed-77d0-8bda-46d00c53702c",
+  "external_ref": null,
+  "title": "Move EngramCloseBoundary next to EngramUncarried to shrink engram_turn_checks.rs below the module-size threshold",
+  "outcome": "EngramCloseBoundary and its uncarried() reason logic live beside EngramUncarried (engram_reported_ends.rs or a small closure-reason module), with a header comment on provenance. engram_turn_checks.rs gets no larger from it. The move is pure, with no behaviour change.",
+  "acceptance": [
+    "Move EngramCloseBoundary next to EngramUncarried to shrink engram_turn_checks.rs below the module-size threshold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

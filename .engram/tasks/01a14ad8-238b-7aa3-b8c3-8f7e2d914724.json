@@ -1,0 +1,30 @@
+{
+  "id": "01a14ad8-238b-7aa3-b8c3-8f7e2d914724",
+  "external_ref": null,
+  "title": "A Codex native command still running when its turn ends loses its exit status and output: nothing persists or replays the terminal result",
+  "outcome": "When a Codex session's native exec command outlives the turn that started it, TermAl keeps that command's terminal result retrievable: its exit status, and its bounded stdout/stderr or an artifact locator. Or the turn end marks the command as orphaned, and its eventual exit is recorded and shown to the session on its next turn. The lane is not left with only UNKNOWN.",
+  "acceptance": [
+    "A command started by a Codex native exec that is still running at turn end is either (a) kept as a tracked orphan whose eventual exit status and bounded output, or an output locator, are persisted and surfaced to the session on its next turn; or (b) reported at turn end as orphaned, with its later exit recorded. A test covers the command finishing after the turn ended, and a host restart before it finishes (recorded as unknown with a reason, never as success).",
+    "No test credit or verification is inferred from an orphaned command's late exit unless it was started through a recognized, registered test form.",
+    "The full five-stage gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

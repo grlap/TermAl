@@ -1,0 +1,30 @@
+{
+  "id": "01a17bfa-3fee-7e60-a524-1561d29b2a2d",
+  "external_ref": null,
+  "title": "Assess strict closing-observation binding equality after a successor advances the work revision",
+  "outcome": "Decide whether revision/fence-only advances legitimately invalidate retained adopted-turn closing capture, without weakening claim/root/store/connection authority by accident.",
+  "acceptance": [
+    "Record an independently reviewed decision on strict binding equality for closing capture, including the queued-successor and work-note cases, before any behavior change.",
+    "If behavior changes, preserve fail-closed handling of a genuinely different claim/root/store/connection and verify the chosen boundary through production-owner regressions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "host-recording",
+    "review-inventory",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a12858-a1c2-7f71-8e92-e12abe9f8cbe",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

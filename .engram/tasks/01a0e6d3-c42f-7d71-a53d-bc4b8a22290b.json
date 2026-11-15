@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c42f-7d71-a53d-bc4b8a22290b",
+  "external_ref": "tm-95c7",
+  "title": "Stop workspace autosave retries on permanent HTTP failures",
+  "outcome": "Post-fix dual review, parent-verified at HEAD 4dec5eb with frozen source 0cf0e542. ui/src/app-workspace-layout.ts:465 catches every rejected latest save and reschedules indefinitely with a 30-second cap. api-request.ts exposes ApiRequestError.status and rejects all non-ok HTTP responses. A permanent 400/413 therefore keeps resending the unchanged layout while the tab remains mounted. Distinct from tm-e7tp, which observed write-blocked fresh-browser requests rather than permanent HTTP response handling. Classify failures: retry transient network/offline, 5xx, 408/429 appropriately; stop automatic retry for permanent 4xx, preserve unsaved content and surface the failure. Add regression coverage distinguishing permanent failures, transient recovery, and superseding edits. Source-chain confirmation, not a live-server reproduction. No implementation performed in this review.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

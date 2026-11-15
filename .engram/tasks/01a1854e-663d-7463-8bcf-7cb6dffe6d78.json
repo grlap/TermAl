@@ -1,0 +1,32 @@
+{
+  "id": "01a1854e-663d-7463-8bcf-7cb6dffe6d78",
+  "external_ref": null,
+  "title": "Show when a settled original checkpoint needs Resume to deliver its queued successor",
+  "outcome": "The recovery preview/card and documentation accurately state when automatic original settlement leaves a queued successor waiting for explicit Send or Resume, without implicitly granting successor or enclosing-duty settlement.",
+  "acceptance": [
+    "Show when a settled original checkpoint needs Resume to deliver its queued successor is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "b16",
+    "control-plane",
+    "engram-control",
+    "gated-control",
+    "recovery-ui",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Obsolete removed-feature path; not fixed or tested by this sweep. Fable2722/message43b9a7df-11b7-403a-a0d1-1e21100b4562 authorizes disposition. Full original outcome/criteria read; retained note provenance 9f322a15b3af4687b36bc7b1c06d8d18. At current master2e03d1a9f0357862cf26e4c6a4f8ddccdadeff00, landed87f49ed0 deleted active admission/begin/replay, containment/reset and checkpoint result-recovery owners (native deleted-path diff inspected). src/engram_session_obligations.rs and engram_containment_checkpoint.rs explicitly retain only passive validated historical records, never restore active exclusion/replay/accounting/admission. The specific old behavior in this item's title/criteria is therefore no longer an executable product contract. Current ordinary delivery/queue/transport/SQLite compatibility concerns were separately preserved in the sweep; this cancels no such behavior. Historical failures, unknown incident causes and existing delivered-work/credit caveats remain unchanged. No source edit, Cargo/test, new verification, old experiment execution or acceptance PASS claimed; keep raw evidence while other open items still cite it.",
+  "completion": null
+}

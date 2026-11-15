@@ -1,0 +1,28 @@
+{
+  "id": "01a1713a-4cc0-7ad0-a534-22834344ab1f",
+  "external_ref": null,
+  "title": "Project-reset waiting preview loses its pre-wait summary across a host restart",
+  "outcome": "The restart normalization of a persisted project-reset waiting preview has an explicit policy for the previous summary and a shared default preview literal.",
+  "acceptance": [
+    "Project-reset waiting preview loses its pre-wait summary across a host restart is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "preview",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

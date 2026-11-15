@@ -1,0 +1,27 @@
+{
+  "id": "01a18abe-05b8-7662-b36d-662fdd34d0f0",
+  "external_ref": null,
+  "title": "A persistent checkpoint mirror/ledger mismatch now hides its cause behind a generic fence Deadline",
+  "outcome": "When the typed checkpoint mirror/ledger refusal repeats for the same owner instead of clearing on the next coherent tick, the fences it retains end with a diagnostic that names that refusal, or the repetition is bounded, rather than ending only in a generic Deadline.",
+  "acceptance": [
+    "A deterministic test makes the typed refusal repeat for one owner on every tick (for example, a session whose serialization is rejected while its ledger entry keeps changing) and shows that a retained fence's terminal result or progress report names the repeated mirror/ledger refusal, or that the refusal stops being retried after a stated bound, without shortening any fence's original deadline."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "persist"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

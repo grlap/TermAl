@@ -1,0 +1,28 @@
+{
+  "id": "01a19f0a-e83b-7d70-9b7e-34a203ac4ece",
+  "external_ref": null,
+  "title": "File-change tracking visits ~8300 sessions per batch of ~74 changes and waits 300–470 ms for the state lock",
+  "outcome": "File-change tracking work scales with the number of eligible sessions, not with the total retained session population. It does no avoidable scan or I/O under the state lock, and its repeated log line is rate-limited or demoted. Measured before and after on the running host.",
+  "acceptance": [
+    "File-change tracking visits ~8300 sessions per batch of ~74 changes and waits 300–470 ms for the state lock is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

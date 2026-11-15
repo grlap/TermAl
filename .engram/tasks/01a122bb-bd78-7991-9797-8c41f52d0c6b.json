@@ -1,0 +1,28 @@
+{
+  "id": "01a122bb-bd78-7991-9797-8c41f52d0c6b",
+  "external_ref": null,
+  "title": "Isolate authority PersistFences from bulk persist work and move WAL checkpointing off the commit path (termal.sqlite 4.6 GB, WAL never truncated)",
+  "outcome": "A decided persistence design: an authority PersistFence is no longer queued behind a full metadata and transcript tick, and WAL checkpointing no longer runs synchronously inside the persist thread's COMMIT. It is backed by recorded per-phase timing (w-0e3b338ac4a4's F1), and approved by Greg if it changes durability.",
+  "acceptance": [
+    "A design note, with file:line, for: (1) priority or metadata-only commit for pending authority fences; (2) WAL management, i.e. wal_autocheckpoint and journal_size_limit, and a separate checkpoint cadence, given termal.sqlite at about 4.6 GB and a never-truncated 125 MB WAL. It covers durability and crash-safety consequences, and is grounded in timing recorded by w-0e3b338ac4a4's F1, not in synthetic load.",
+    "Greg's or the coordinator's recorded decision on the design, and a follow-up implementation item if one is chosen."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "architecture",
+    "host-persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

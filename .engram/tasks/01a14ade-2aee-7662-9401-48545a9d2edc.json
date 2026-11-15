@@ -1,0 +1,29 @@
+{
+  "id": "01a14ade-2aee-7662-9401-48545a9d2edc",
+  "external_ref": null,
+  "title": "Handoff ledger: show an accepted handoff that is not completed within a bound",
+  "outcome": "Handoff ledger: show an accepted handoff that is not completed within a bound",
+  "acceptance": [
+    "Handoff ledger: show an accepted handoff that is not completed within a bound is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "greg-directed",
+    "reliability",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14a88-8e97-7391-a2a5-d9f93ea08fd2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

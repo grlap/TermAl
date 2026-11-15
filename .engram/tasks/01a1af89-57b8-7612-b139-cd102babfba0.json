@@ -1,0 +1,29 @@
+{
+  "id": "01a1af89-57b8-7612-b139-cd102babfba0",
+  "external_ref": null,
+  "title": "Launcher registration refusal: record HTTP status, endpoint and attempt time as structured fields (reason already kept as prose)",
+  "outcome": "TermAl's launcher records a refused registration's HTTP status, target endpoint and attempt time as structured fields in results.json, alongside the bounded reason it already keeps.",
+  "acceptance": [
+    "When the host refuses a launcher run's registration, results.json carries structured fields for the HTTP status (or transport error kind), the target endpoint without credentials and the attempt time, in addition to the existing bounded reason text in error and registration.reason.",
+    "A test covers a non-2xx refusal with a reason body and a transport failure and asserts the structured fields; the registered path is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-machine",
+    "diagnostics"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

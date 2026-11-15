@@ -1,0 +1,43 @@
+{
+  "id": "01a11144-f6a7-7742-8d83-fec83085cff0",
+  "external_ref": null,
+  "title": "A passed detached full gate carried for an Engram holder got neither a host credit record nor a refusal (test-dfb40cc6, 65+ minutes after it finished)",
+  "outcome": "Every carried full gate ends in exactly one host outcome visible to its holder (a credit record or a named refusal) by the holder's next checkpoint after the run finishes, and a silent case is diagnosable.",
+  "acceptance": [
+    "The test-4e211496 occurrence is classified from existing records and source: registration and owner versus notification recipient are distinguished, the missing recognition/refusal path is identified, and limits on historical test-dfb40cc6 evidence are recorded.",
+    "Foreground focused commands with the actual supported outer launcher options before -- preserve the inner argv and intended Test/Build classification; unknown or malformed outer options yield a named refusal. Existing non-test, watch, shell and detached-focused exclusions remain. Deterministic tests cover Node and the other affected recognizers.",
+    "A regression through the existing command-start/end, validated launcher-result and checkpoint owners shows a supported outer-option Node run produces exactly one test observation and verification input while retaining its actual owner independently of notify. Existing source/grant/identity guards remain; registration or PASS alone never mints credit."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "carried-gates",
+    "check-credit",
+    "cross-project"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

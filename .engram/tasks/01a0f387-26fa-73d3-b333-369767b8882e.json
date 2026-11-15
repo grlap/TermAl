@@ -1,0 +1,28 @@
+{
+  "id": "01a0f387-26fa-73d3-b333-369767b8882e",
+  "external_ref": null,
+  "title": "Relay Engram's structured error.details from an acceptance-evaluation refusal to the evaluator, not only error.message",
+  "outcome": "When `engram work evaluate` refuses, TermAl relays only the envelope's error.message, truncated to 4,000 characters (src/acceptance_evaluation.rs, acceptance_evaluation_error_envelope_message and the Refused arm of the run outcome). Engram is adding a structured field for the deciding observation to the CLI JSON and to MCP error.details (Engram w-130a13e2ddd6; Engram::Fable, mailbox ebe242f7 #341, 2026-09-30). For now Engram also appends one sentence to the message so the evaluator sees it. TermAl should also carry error.details, bounded, to the evaluator's refusal response, so the evaluator does not depend on the prose, and the prose can stay short.",
+  "acceptance": [
+    "An acceptance-evaluation refusal whose envelope carries error.details reaches the evaluator with those details, bounded and marked when cut; a test covers a refusal with and without details.",
+    "The relayed error.message is unchanged from today's behaviour."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

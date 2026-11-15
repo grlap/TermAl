@@ -1,0 +1,30 @@
+{
+  "id": "01a0f9d2-303f-7751-a779-e157f102bbec",
+  "external_ref": null,
+  "title": "Mailbox wake transition owner with persisted obligation and attempt identities, and a durable attempt fence before the runtime send",
+  "outcome": "One session-owned transition owner (a reducer over session state) is the only way a mailbox wake's ownership changes: accept, coalesce, promote, arm and confirm. Each accepted wake carries a durable obligation identity with its frozen scope. Each promotion carries a fresh durable attempt identity: re-promoting the same sequence is a new attempt, and one attempt's evidence never classifies another. Before a mailbox turn can reach the runtime, its exact attempt crosses a durability fence. The fence is waited off StateInner, following the Engram admission PersistFence pattern; if persistence is missing or uncertain, the send is withheld. Queue and active ownership are replaced in one persisted session image; no path pops a wake and leaves only a stack-local boundary.\n\nProvenance: Architect2's structural decision f639826d on w-3bd74078208d (item 1 of the decomposition the holder Termal::Opus3 proposed in TermAl mailbox 03723eab #42; Fable2 accepted it in #43). Read-only facts: commit_locked only queues for the persist worker, and no revision fence exists (sse_broadcast.rs:80, persist_fence.rs:8-19). active_turn_generation is not persisted (persisted_state.rs:521). MailboxNotificationDelivery has no attempt id (runtime.rs:553).\nReview findings it carries: round-3 Low (Claude, delegation-34e81e3e): a stale handoffAttempted mark left by a rejected or superseded attempt makes boot hold a re-promoted, never-sent continuation as unknown, because the attempt is not identified.\nDesign of the mailbox wake: docs/features/agent-mailboxes.md. Criteria to be proposed by the holder and concurred by the coordinator.",
+  "acceptance": [
+    "Mailbox wake transition owner with persisted obligation and attempt identities, and a durable attempt fence before the runtime send is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "mailbox",
+    "session-blocking",
+    "turn-dispatch",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a19fb1-da91-7473-b374-e0df13ce8a30",
+  "external_ref": null,
+  "title": "Hidden-retention scaling test runs the quadratic reference loop on every gate",
+  "outcome": "The default test suite no longer spends seconds timing the old O(hidden × (delegations + sessions)) reference loop, and the linear-cost property of retain_hidden_source_observation_sessions is guarded by a checkable work-unit count instead of printed timings.",
+  "acceptance": [
+    "hidden_retention_pass_scaling_is_printed_for_diagnosis no longer runs the reference loop at ~8,400 sessions in the default suite",
+    "a test asserts a bounded operation count for the indexed pass, without elapsed-time thresholds"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "gate-load",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

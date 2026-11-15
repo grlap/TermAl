@@ -1,0 +1,36 @@
+{
+  "id": "01a1a5a1-4d24-7dc1-a610-d49dbbcb9e58",
+  "external_ref": null,
+  "title": "A named source root goes unconfirmed mid-claim when a settled run's retained-run read or its publication doesn't finish: 'latest root-authority transition was not published'",
+  "outcome": "A session whose root was confirmed keeps it confirmed unless a real authority change happened. If a root-authority transition is left unpublished, the host settles it or a supported call does, so evidence isn't withheld turn after turn, and a truly unsettled transition still can't be overtaken.",
+  "acceptance": [
+    "The way a root's latest transition ends up not Published on a named, previously confirmed root is identified from source and shown by a deterministic test, or the investigation stops and reports that it can't be reproduced, with what was ruled out",
+    "After the fix that sequence ends with a confirmed root through an automatic or supported path, without a restart, a retry loop or a turn run only to recover: a turn opening inside it stays honestly unconfirmed and the next ordinary turn opens confirmed. A transition that truly remains unsettled still blocks credit.",
+    "The review pair is clean and behaviour tests cover both the recovery and the still-blocked case; no time-based assertions"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A settled run's root no longer stays unconfirmed when its retained-run read or publication doesn't finish: the host settles it through the ordinary maintenance path, and the next ordinary turn opens confirmed. A truly unsettled transition still blocks credit. Field samples aren't shown to have taken this path.",
+    "completed_at": "2026-11-04T12:06:56.220166700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

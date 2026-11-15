@@ -1,0 +1,27 @@
+{
+  "id": "01a150eb-2e23-7672-9f98-4225e10f6f80",
+  "external_ref": null,
+  "title": "Add an unbind or migration workflow for satellite sessions bound to a central's domain mailbox",
+  "outcome": "Add an unbind or migration workflow for satellite sessions bound to a central's domain mailbox",
+  "acceptance": [
+    "Add an unbind or migration workflow for satellite sessions bound to a central's domain mailbox is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

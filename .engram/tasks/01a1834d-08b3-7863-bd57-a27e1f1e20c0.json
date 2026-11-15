@@ -1,0 +1,32 @@
+{
+  "id": "01a1834d-08b3-7863-bd57-a27e1f1e20c0",
+  "external_ref": null,
+  "title": "SourceObservationPreparationGuard::drop panics on a poisoned state mutex, so any panic during Engram turn-delivery preparation aborts the process (0xc0000409)",
+  "outcome": "If anything panics while a SourceObservationPreparationGuard is alive (for example inside prepare_engram_turn_delivery_off_lock), unwinding drops the guard without a second panic. The preparation count is still decremented when the state lock is usable, even if it is poisoned, and the guard never panics, so the original panic is reported normally instead of aborting the whole process (test binary or host).",
+  "acceptance": [
+    "src/engram_source_observation_removal.rs: SourceObservationPreparationGuard's Drop no longer uses lock().expect(...). It recovers a poisoned lock (PoisonError::into_inner) to keep the preparation count consistent, and never panics while the thread is already panicking. No other behaviour of the guard or of delivery preparation changes.",
+    "A regression test panics inside the guarded delivery-preparation span (via an existing test hook) and asserts that the test fails with its own panic and does not abort the process. Run it in a child process, as in w-e8dbee10ac89. It aborts (RED) before the fix and passes after it. The preparation count is shown to be decremented.",
+    "An audit lists any other Drop implementation in src/ that locks the state mutex with expect/unwrap, so it can be fixed here or filed separately. The review pair has no outstanding finding of Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "abort",
+    "engram-host-adapter",
+    "pre-existing",
+    "robustness",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

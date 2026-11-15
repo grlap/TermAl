@@ -1,0 +1,31 @@
+{
+  "id": "01a1a5fc-edc3-73c2-8510-248dad07af08",
+  "external_ref": null,
+  "title": "Align Node and Rust commit-input eligibility for non-UTF-8 ordinary tracked paths",
+  "outcome": "The committed-input producers use one explicit rule for ordinary non-UTF-8 tracked paths on Unix, with a named refusal if unsupported and parity evidence, without silently changing the content-v1 path encoding contract.",
+  "acceptance": [
+    "Align Node and Rust commit-input eligibility for non-UTF-8 ordinary tracked paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "review-finding",
+    "source-identity",
+    "source-revision",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10d00-b399-72e2-a509-c07c410dac75",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

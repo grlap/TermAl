@@ -1,0 +1,28 @@
+{
+  "id": "01a1bc21-eb77-7f20-b8c2-0e21714cbb8f",
+  "external_ref": null,
+  "title": "Keep the first validated pending stateLock evidence when a recovered registration stays pending",
+  "outcome": "When recovering a registration, a second valid durability-pending reply no longer replaces the first validated pending evidence. The terminal error and results.json keep the original stateLock diagnostics, while execution and credit eligibility stay unchanged.",
+  "acceptance": [
+    "When POST 1 returns a validated pending reply with a stateLock block, and POST 2 is also pending but has no block or a different one, the terminal failure and results.json keep POST 1's validated stateLock block.",
+    "A test covers recovery from pending to pending, both with the second advisory block absent and with it different, and checks the preserved evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

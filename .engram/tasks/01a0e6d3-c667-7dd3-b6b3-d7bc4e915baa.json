@@ -1,0 +1,29 @@
+{
+  "id": "01a0e6d3-c667-7dd3-b6b3-d7bc4e915baa",
+  "external_ref": "tm-nqc",
+  "title": "Detach can race Codex thread-setup completion (reverse thread map inserted after the session lock is released)",
+  "outcome": "Found by the Codex reviewer during round-2 review of the thread-setup state machine. PRE-EXISTING (predates the parking work) but adjacent to it.\n\ncomplete_shared_codex_thread_setup (codex.rs) releases the sessions lock before inserting the reverse thread_id -> session_id mapping into thread_sessions. session_runtime.rs detach can run between those two operations: it misses the not-yet-inserted mapping, so completion then inserts a stale mapping and queues a turn AFTER the session was detached.\n\nFix direction: hold the sessions lock through reverse-map registration, or re-validate that the session is still attached immediately before the StartTurnAfterSetup handoff.",
+  "acceptance": [
+    "A deterministic regression interleaves detach with thread-setup completion at the forward/reverse registration boundary and proves a detached attachment leaves neither mapping nor a usable StartTurnAfterSetup handoff.",
+    "Current attached setup completion still binds both maps and returns its parked command exactly once; stale setup completion cannot overwrite a successor attachment.",
+    "The change preserves the existing shared-Codex lock order and process/session ownership, with no new parallel registry.",
+    "The final input passes focused compile/tests covering the race and existing setup/detach controls, the independent review pair, and the integration owner's exact-input full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

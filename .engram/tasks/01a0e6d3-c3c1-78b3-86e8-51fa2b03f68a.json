@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c3c1-78b3-86e8-51fa2b03f68a",
+  "external_ref": "tm-2jql",
+  "title": "Compact mailbox wake text: ids, sequence, unread count and sender only, protocol taught once",
+  "outcome": "Phoenix::Fable report 17 (Engram pilot, relayed by Engram::Advisor 2026-09-06): roughly 40 wakes in one day each repeated about 600 characters of protocol instructions (list -> read after processedThrough -> process -> CAS acknowledge, CLI fallback with TERMAL_CLI/TERMAL_SESSION_ID/TERMAL_BASE_URL). This is reported context overhead per turn, not measured token accounting. Desired: the routine wake carries only mailbox id, latest sequence, unread count and latest sender (plus topic), and the protocol lives once in persistent instructions or a help/prime surface (the coordination CLI teaching in tm-1b9a is the natural home). Wake text must stay metadata-only and free of imperative prose (tm-uwx.5). Acceptance: a wake fits in a few lines; a test pins the wake body; the protocol text is reachable from the tool description or bd prime/AGENTS guidance rather than repeated per wake.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. The compact wake text landed in d786dfa (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

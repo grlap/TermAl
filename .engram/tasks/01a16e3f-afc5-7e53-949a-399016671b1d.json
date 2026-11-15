@@ -1,0 +1,28 @@
+{
+  "id": "01a16e3f-afc5-7e53-949a-399016671b1d",
+  "external_ref": null,
+  "title": "Phase timing for the other Engram project-fence paths: authority-only settings change (rotation/removal, immediate MCP teardown) and project deletion",
+  "outcome": "Phase timing for the other Engram project-fence paths: authority-only settings change (rotation/removal, immediate MCP teardown) and project deletion",
+  "acceptance": [
+    "Phase timing for the other Engram project-fence paths: authority-only settings change (rotation/removal, immediate MCP teardown) and project deletion is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a16d12-ec1a-7ba3-87f0-001e3dde7f84",
+  "disposal_reason": "Covered by the w-001e3dde7f84 change after review round 4. EngramProjectResetTimer now runs in the authority-only settings branch, with optional phases: authority preflight, commit, checkpoint claims, a checkpoint per session, authority revocation, MCP runtime shutdown, and release and drain. It runs in delete_project_with_engram_reset too, with quiescence, checkpoint claims, a checkpoint per session, commit, authority revocation, control shutdown per session, MCP runtime shutdown, and release and drain. The test is an_authority_only_settings_change_writes_its_phases_while_it_holds_the_fence. GREEN-5 test-5aaed6b1 passed 701/0 at fp bd0e1405.",
+  "completion": null
+}

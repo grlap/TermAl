@@ -1,0 +1,29 @@
+{
+  "id": "01a1caef-5a68-7271-9a56-1df2e834a10b",
+  "external_ref": null,
+  "title": "Document evaluation-request closing comparison scope and unknown earlier interval",
+  "outcome": "The two feature contracts accurately describe the single-use same-turn evaluation-request comparison endpoint, precedence and unknown earlier interval.",
+  "acceptance": [
+    "Both execution-observability.md and engram-host-adapter.md describe the evaluation-request endpoint consumed at its capturing turn's first close, ordinary and registered-check precedence, and the unobserved interval before measurement.",
+    "Documentation is checked against current production owners without adding Markdown phrase-pinning tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "execution-observability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ca5f-4ff3-7d92-a00e-ab5d3352bbc0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

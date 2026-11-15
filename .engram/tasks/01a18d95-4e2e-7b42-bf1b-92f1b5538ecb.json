@@ -1,0 +1,24 @@
+{
+  "id": "01a18d95-4e2e-7b42-bf1b-92f1b5538ecb",
+  "external_ref": null,
+  "title": "Add a Windows test for a link swapped in at open in review_freeze_file_versioned (FILE_FLAG_OPEN_REPARSE_POINT path)",
+  "outcome": "A Windows test drives review_freeze_open_without_waiting's FILE_FLAG_OPEN_REPARSE_POINT and reparse_appeared refusal (e.g. a junction swapped in via the before-open hook, or a skip-with-reason where unprivileged), plus a redirected review-runs parent case and the 500 test_run_results_unreadable mapping.",
+  "acceptance": [
+    "Add a Windows test for a link swapped in at open in review_freeze_file_versioned (FILE_FLAG_OPEN_REPARSE_POINT path) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

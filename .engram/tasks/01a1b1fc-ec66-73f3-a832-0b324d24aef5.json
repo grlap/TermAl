@@ -1,0 +1,31 @@
+{
+  "id": "01a1b1fc-ec66-73f3-a832-0b324d24aef5",
+  "external_ref": null,
+  "title": "Keep conflicting Codex delta locator invalidation sticky through reported end",
+  "outcome": "A locator rejected after a conflict or overflow cannot regain exact native correlation when a later provider end overwrites runtime output flags.",
+  "acceptance": [
+    "Conflicting or overflowed delta locator ingress remains invalid when a later Codex finished end arrives.",
+    "A conflicting-then-finished regression preserves honest original custody and refuses exact run correlation; valid locator behavior remains covered."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "codex",
+    "cross-project",
+    "diagnostics",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1afc5-e25c-7f03-9b54-6184e40634a0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

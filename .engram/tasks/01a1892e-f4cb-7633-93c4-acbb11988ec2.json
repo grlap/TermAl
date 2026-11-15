@@ -1,0 +1,27 @@
+{
+  "id": "01a1892e-f4cb-7633-93c4-acbb11988ec2",
+  "external_ref": null,
+  "title": "Narrow the degraded-dispatch wording in the project status brief",
+  "outcome": "docs/features/project-status.md describes the degraded-dispatch exception as narrowly as the Engram host adapter brief and the README do: only a fresh ordinary root prompt whose control request provably never started.",
+  "acceptance": [
+    "Narrow the degraded-dispatch wording in the project status brief is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

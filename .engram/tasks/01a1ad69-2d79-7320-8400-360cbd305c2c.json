@@ -1,0 +1,28 @@
+{
+  "id": "01a1ad69-2d79-7320-8400-360cbd305c2c",
+  "external_ref": null,
+  "title": "Escape origin-supplied remote test completion text in coordinator resume prompts",
+  "outcome": "Remote test reason, finished time, pending detail and conflict text cannot forge Markdown verdict or credit lines in a coordinator resume prompt.",
+  "acceptance": [
+    "Origin-supplied free text is safely rendered or normalized consistently without changing native verdict, qualification or delivery semantics.",
+    "Tests cover newlines, backticks and control characters in terminal and pending/conflict details, preserving bounded prompt output."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "remote-runner",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

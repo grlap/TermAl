@@ -1,0 +1,27 @@
+{
+  "id": "01a0eed8-8027-73d2-920d-6d073c02a691",
+  "external_ref": null,
+  "title": "Read-only Claude reviewer was denied `git diff --cached --check`, a read-only command",
+  "outcome": "A read-only reviewer can run git diff with --check (whitespace errors in the diff; it writes nothing), or the denial is shown to come from a deliberate rule and the reason is documented.",
+  "acceptance": [
+    "Read-only Claude reviewer was denied `git diff --cached --check`, a read-only command is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "read-only",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

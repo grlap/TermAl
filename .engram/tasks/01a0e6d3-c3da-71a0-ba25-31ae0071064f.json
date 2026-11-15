@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3da-71a0-ba25-31ae0071064f",
+  "external_ref": "tm-4jr",
+  "title": "Re-enable read-only reviewer git -C / --git-dir behind git-env hardening",
+  "outcome": "Repository-retargeting git global options were dropped from the read-only reviewer checker (a tracked bare-repo fixture .git/config core.fsmonitor/diff.external would exec). To restore, have TermAl neutralize the exec sinks in the reviewer child git env (e.g. GIT_CONFIG_COUNT with diff.external=, core.fsmonitor=, core.pager=cat), since the checker cannot rewrite the verbatim command. GIT_CONFIG_NOSYSTEM=1 does not help (system config only).",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

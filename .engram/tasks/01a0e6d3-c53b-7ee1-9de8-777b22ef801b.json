@@ -1,0 +1,33 @@
+{
+  "id": "01a0e6d3-c53b-7ee1-9de8-777b22ef801b",
+  "external_ref": "tm-jfwg",
+  "title": "Delegation isolated worktrees are never removed: hundreds of stale checkouts under ~/.termal/delegations and stale git worktree registrations",
+  "outcome": "Reported by Greg 2026-09-02 ('we must stop creating mysterious workspaces outside the main directory'). Facts (read-only): ~/.termal/delegations holds 317 delegation directories, each with a worktree/ git checkout; git worktree list in the TermAl repo still registers 4 of them (delegation-508d5446 -> session-1544, delegation-726fe542 -> session-1352, delegation-c72676fe -> session-1388, delegation-e7305cd4 -> session-1545; all long-finished reviewer delegations at old commits eab8ed4/7cdb08b), the rest are orphaned directories whose registrations were pruned. Code: prepare_isolated_delegation_worktree (delegations.rs) creates a git worktree for DelegationWritePolicy::IsolatedWorktree under ~/.termal/delegations/<id>/worktree; IsolatedWorktreeCleanupGuard only removes it when CREATION fails (guard is disarmed on success at delegations.rs:657); nothing removes the worktree when the delegation completes, fails, is canceled, or when the child session/delegation record is removed, and there is no boot-time sweep. Expected: (1) on terminal delegation cleanup (the same path that tears down the child runtime, publish_delegation_refresh_side_effects / remove_delegation_child_session) remove the isolated worktree when it carries no uncommitted changes (reviewer/read-only children always; writer children once their patch has been consumed or the delegation record is removed) via git worktree remove --force + prune, and record the removal on the delegation; (2) never delete a worktree with uncommitted changes silently — keep it and surface it (delegation note / operator warning) so a writer's deliverable is not lost; (3) a boot-time sweep that prunes registrations and directories whose delegation record no longer exists, with the same dirty-tree guard and a log line per removal; (4) docs/features/agent-delegation-sessions.md documents the lifecycle. Also review whether reviewer (read-only) delegations should ever get a worktree at all. Standing rule recorded in bd memory no-worktrees-outside-main covers agent-created worktrees; this bead covers TermAl-created ones. No Beads IDs in code comments.",
+  "acceptance": [
+    "Isolated delegation worktrees are cleaned through the existing lifecycle only after their runtime/turn/admission users have released them; dirty or unconsumed writer data and uncertain ownership are retained with an observable reason; follow-up remains usable.",
+    "A bounded post-inventory startup sweep removes eligible managed orphan/terminal roots and their Git registrations using the same rules, without touching unrelated or live worktrees.",
+    "Cleanup and its tests never follow a symlink/junction outside the validated delegation root; tests use only owned temporary roots; and default delegation storage derives from AppState persistence while resolving, for the production host, to the same delegation directory as before this change, so existing roots stay recognised as managed.",
+    "Deterministic lifecycle/path/refusal tests and the standard review pair are complete, and the lifecycle is documented. The full landing gate remains integration-owned."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated",
+    "cleanup",
+    "delegations",
+    "disk"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

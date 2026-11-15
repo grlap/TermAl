@@ -1,0 +1,43 @@
+{
+  "id": "01a0f689-8e8d-7a33-a8c0-9991dc0d390f",
+  "external_ref": null,
+  "title": "A holder or worktree change is never reported as a source change: the first turn's last_reported starts from that turn's own basis, so passed checks stay stale_source_revision",
+  "outcome": "When a run's source moves to a new revision between turns (a new holder, or a new named worktree, with content different from the run's last reported source), TermAl reports that change to Engram before any check in the new turn. A check that passes on the new revision then satisfies the run's open test obligations.\n\nDiagnosed by Engram::Coder (TermAl mailbox 62e0c56d #110, 2026-10-01 08:16Z, Engram item w-f263747eac87) on TermAl w-2ccd39a4ff5a. Prior holder's last flagged mutation: observation 71, revision a433, on the old root. New holder Termal::Coder's integrated root: c96ce116, seen only as quiet sightings 105/106 (source_changed: false). Verification 1c96c01b passed at c96ce116 and was assessed stale_source_revision on all 5 open rows (triggers 11, 13, 51, 65, 71).\n\nEngram's verdict: the unbound matcher is right to keep comparing against the latest flagged mutation. A quiet sighting states \"no new mutation\" and must not displace old obligations. The defect is on TermAl's side. engram_turn_report, as on master 2696e6f, initializes last_reported from the current turn's start basis instead of the run's prior reported basis. So a transition that is already present when the turn starts never produces the change report. Engram::Coder says TermAl must account for the real run-source transition under an admitted mutation grant before the verification, or use the named-root binding and stamping protocol (w-370c). Never fake a filesystem edit, never stamp an old check retrospectively, never retry or waive.",
+  "acceptance": [
+    "A turn whose start revision equals the run's last reported source reports no change; a test covers it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "When a turn starts with the run's source at a revision different from the run's last reported source (after a holder or worktree change), TermAl reports that change before any check in the turn, under the admitted mutation grant. A test reproduces Engram::Coder's sequence (old unbound changed R1, then the new holder's quiet R2, then a check passing on R2) and shows the pass stays stale before the fix and satisfies the obligations after it."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fable2 #1217 triage at master 8f544b4553a14b87a0c7a55fb82d67e91d71d825: obsolete — Original fix requires mutation-grant/content-v1 last_reported accounting. That producer/protocol was removed by Execution Observability; current source-owner/registered-run defects need their current items. Source: src/engram_turn_observations.rs; src/engram_observation_source.rs; docs/features/engram-host-adapter.md:3283. Work planning only; no historical evaluation, verification or seal changed.",
+  "completion": null
+}

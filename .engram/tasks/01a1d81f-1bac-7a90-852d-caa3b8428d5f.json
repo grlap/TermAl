@@ -1,0 +1,30 @@
+{
+  "id": "01a1d81f-1bac-7a90-852d-caa3b8428d5f",
+  "external_ref": null,
+  "title": "Extend relay-behind-history behavioral coverage for pause, capacity and runnable-user FIFO",
+  "outcome": "Behavioral tests cover direct-user relay bypass with retained history across the currently unpinned pause, capacity and runnable-user successor combinations.",
+  "acceptance": [
+    "Add a controlled history-plus-refused-relay test with Stop/pause latched, and a history/refused-relay/runnable-user successor test verifying user FIFO and unchanged retained rows.",
+    "Cover a busy or capacity-retrying case and a valid relay behind history with observable dispatch/queue/authority assertions; share repeated historical-row fixture construction where useful without source-text or tautological tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "prompt-delivery",
+    "review-low",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1d73f-656b-7b32-a712-610b5060255e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

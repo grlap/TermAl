@@ -1,0 +1,50 @@
+{
+  "id": "01a11090-3626-7842-a5f1-fd51a03bd0a8",
+  "external_ref": null,
+  "title": "Declared test commands: JUnit result reader (P4b), the follow-up to the TRX pilot",
+  "outcome": "A declared test command whose artifact is JUnit XML (root `testsuites` or `testsuite`) is judged PASS, FAIL or UNKNOWN by the P4b rules, on the same declaration and artifact rules as the TRX pilot.",
+  "acceptance": [
+    "P4b JUNIT READER — a SEPARABLE criterion, never a reason to slip TRX. Same declaration, same artifact rules (P1, P3), same scanner style (P4). Dialect is chosen by the root element: `TestRun` = TRX (P4), `testsuites` or `testsuite` = JUnit (P4b); any other root is UNKNOWN \"unparsed artifact\". JUnit counts: `tests`, `failures`, `errors`, `skipped` read from `<testsuites>` when present, otherwise summed over the `<testsuite>` elements; a mismatch between the two levels, a missing `tests`, or a non-integer is UNKNOWN. Outcome: PASS = exit 0 AND tests − skipped ≥ 1 AND failures = errors = 0; FAIL = exit ≠ 0 OR failures + errors ≥ 1; UNKNOWN otherwise (zero tests, all skipped, unparsed). JUnit has no single schema, so the scanner admits the common shape (Vitest's junit reporter, pytest --junitxml, Maven Surefire, the dotnet JunitXml.TestLogger) and says UNKNOWN for anything else; that is the stated limit, not a gap.",
+    "FIXTURES for P4b: real files from a producer at hand without new packages — this repository's own Vitest run with `--reporter=junit` on a tiny spec under `.tmp` (pass, fail, zero) — plus one synthetic malformed file; a dotnet JunitXml.TestLogger capture is welcome but not required.",
+    "the live proof gains one step only if P4b landed: a Vitest spec with a declared `--reporter=junit` artifact, pass credited, fail published."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "declared-tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a10cfc-06d2-7f81-82e0-8e72f7e16778"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a16ec3-ef6e-7640-b923-6f4de555915d",
+  "external_ref": null,
+  "title": "The source watcher reports a deletion under a worktree's own .tmp/termal-test-state-* runner directory as an active-turn source change",
+  "outcome": "Runner-owned test-state paths under a worktree's own .tmp/ (for example .tmp/termal-test-state-<uuid>/…) are never captured or attributed as source changes of an active turn, while real source files in nested .tmp/ worktrees stay observed, as workspace_watch.rs deliberately does today. The filter is narrow: it classifies runner-owned test-state paths and does not blanket-ignore .tmp.",
+  "acceptance": [
+    "The source watcher reports a deletion under a worktree's own .tmp/termal-test-state-* runner directory as an active-turn source change is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "check-recording",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

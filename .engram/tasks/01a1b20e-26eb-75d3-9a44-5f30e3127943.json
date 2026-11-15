@@ -1,0 +1,36 @@
+{
+  "id": "01a1b20e-26eb-75d3-9a44-5f30e3127943",
+  "external_ref": null,
+  "title": "Session list: slower, calmer spinner for sessions in the background state",
+  "outcome": "Session list: slower, calmer spinner for sessions in the background state",
+  "acceptance": [
+    "In the session list, a session in the existing background state shows its spinner turning clearly slower than the spinner of an actively working session; sessions in other states keep their current animation, and no new labels or states are added.",
+    "Under prefers-reduced-motion the background spinner follows the existing reduced-motion behaviour, and a UI test covers both the background pace and the unchanged foreground pace.",
+    "`cd ui && npx tsc --noEmit` and `npx vitest run` are green. The look in the running UI is observed on the installed build after the next restart and reported to Greg; that observation does not block completion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered slower 3200ms background-only session spinner, static under reduced motion, with unchanged 850ms foreground/stopping/combined states and deterministic actual-Chrome checks. No acceptance evaluation exists.",
+    "completed_at": "2026-11-09T01:16:46.452503800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

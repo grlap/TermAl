@@ -1,0 +1,28 @@
+{
+  "id": "01a1859e-a777-7a31-bd6a-2b3688302ad9",
+  "external_ref": null,
+  "title": "Supported settlement path for an explicitly Refused turn checkpoint (refusal operability gap)",
+  "outcome": "A retained explicit Refuse result for a turn checkpoint has a supported, contract-backed disposition in TermAl and Engram, so it no longer stays held with no settlement path, and no changed-report or rotated-key fallback is invented.",
+  "acceptance": [
+    "Supported settlement path for an explicitly Refused turn checkpoint (refusal operability gap) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "contract-needed",
+    "cross-project",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "01a1707a-8436-7be1-8def-4e3dfafc7402",
+  "external_ref": null,
+  "title": "Keep a fenced run wait pending across a transient native-locator read failure",
+  "outcome": "A transient canonicalization failure is distinguished from a proved native-locator substitution: pending waits retain uncertainty and retry without accepting a different request/locator/input.",
+  "acceptance": [
+    "A deterministic canonicalization-failure interleaving does not prematurely settle a matching running gate as UNKNOWN.",
+    "Actual changed native locator, request identity or pinned input still settles UNKNOWN and never supplies PASS.",
+    "The rightful project authority recovers on the next successful locator observation without a host restart."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "merge-workflow",
+    "review-follow-up",
+    "test-launcher",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17006-54af-7732-931d-9b0cfb7f2485",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

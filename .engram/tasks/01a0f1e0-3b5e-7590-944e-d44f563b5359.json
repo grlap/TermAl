@@ -1,0 +1,31 @@
+{
+  "id": "01a0f1e0-3b5e-7590-944e-d44f563b5359",
+  "external_ref": null,
+  "title": "Strengthen or qualify the Windows raw process-creation source guard",
+  "outcome": "Strengthen or qualify the Windows raw process-creation source guard",
+  "acceptance": [
+    "Discriminating guard cases distinguish supported bypass spellings from approved process creation without relying solely on exact rustfmt line layout.",
+    "The documented source-guard guarantee matches its enforcement for grouped/aliased process constructors and legitimate native/reference seams."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "field-report",
+    "process-containment",
+    "review-follow-up",
+    "terminal",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f042-237b-7e03-8b97-2900a7cfebdc",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

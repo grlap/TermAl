@@ -1,0 +1,33 @@
+{
+  "id": "01a1832e-6a31-7c83-a402-8237ff227695",
+  "external_ref": null,
+  "title": "Gates keep the failing test's name and backtrace even when the Rust test process aborts (panic journal plus RUST_BACKTRACE)",
+  "outcome": "When a Rust test panics during a full or focused gate, the run keeps a durable record of each panic with the test name (libtest's thread name), the panic message, its location and a backtrace. The record survives even when the test process later aborts (for example 0xc0000409 from a panic during unwinding), so an aborted gate still names the test that triggered it and shows the backtrace. The launcher's summary of an abnormal exit points to the last recorded panics.",
+  "acceptance": [
+    "Recording: a test-only (#[cfg(test)]) panic hook, installed once for the test binary, appends one record per panic to a per-run file whose path the launcher passes in the environment. Each record holds the thread or test name, the message, the location and a backtrace, written and flushed outside libtest's output capture, so it survives a process abort. It chains to the previous hook, so normal libtest reporting is unchanged. Without the environment variable it writes nothing.",
+    "Backtraces: the launcher's Rust test stages run with RUST_BACKTRACE=1 (full and focused), unless the caller already set it. No test changes behaviour because of it; any test that depends on that variable is identified and kept deterministic.",
+    "Abort survival: a child-process regression test triggers a panic during unwinding (a double panic) so the process aborts, and asserts that the per-run file contains the first panic's test name, message and backtrace. The launcher's terminal summary for an abnormal Rust exit lists the last recorded panic records with the file path.",
+    "Scope and cost: test and launcher only, with no production behaviour, timeout, retry or test-assertion change. The added cost is measured on one full gate and reported. The review pair has no outstanding finding of Medium or higher, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "abort",
+    "diagnostics",
+    "greg-requested",
+    "launcher",
+    "test-harness"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

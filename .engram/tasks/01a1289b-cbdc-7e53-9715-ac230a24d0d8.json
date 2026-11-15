@@ -1,0 +1,50 @@
+{
+  "id": "01a1289b-cbdc-7e53-9715-ac230a24d0d8",
+  "external_ref": null,
+  "title": "The common Engram re-admission schedule retries every 60 s without end; make it bounded, with a Resume card on exhaustion (Greg 2026-10-11)",
+  "outcome": "TermAl's shared automatic Engram recovery schedule (admission, abort and bind retries, w-7224e6317e55; including the certified non-applied control_request_expired/control_store_busy retries that w-339b57a1d89d routes into the admission schedule) currently continues every 60 s without end. Under Greg's timeout contract of 2026-10-11 (memory greg-decision-2026-10-11-unpark-wcfcf-timeout-contract; supersedes this item's earlier 'about 30 min from first hold'), each control attempt is at most 20 s and an admitted head has one overall automatic-recovery budget of 240 s, started when the queue head is accepted for control admission, persisted, and never reset by restart. w-cfcf10b68c9b captures that start for every head but enforces it only on prepared-Begin recovery; this item enforces the same budget, reusing w-cfcf's persisted fields with no second clock and no attempt counter as the bound, for every other retry kind. On exhaustion the head holds for explicit Resume/Cancel with a card naming the attempt count and last cause, keeping the exact request, key, report and earlier uncertainty; docs/features/engram-host-adapter.md describes the bound.",
+  "acceptance": [
+    "Every automatic Engram control retry kind (admission, bind and abort retries, including the certified non-applied codes control_request_expired and control_store_busy that w-339b57a1d89d routes into the admission schedule) stops when the head's persisted 240 s automatic-recovery budget is exhausted. The budget is started when the queue head is accepted for control admission, using w-cfcf10b68c9b's persisted start, with no second clock, and is never reset by restart. On exhaustion the host keeps the exact request, key, report and earlier uncertainty, takes no fresh grant or binding, changes no payload or key, and shows a Resume/Cancel hold naming the attempt count and the last cause. The hold says no changes were committed only for certified non-applied codes. Tests cover repeated expiry to exhaustion, success before the bound, a restart mid-sequence (the budget is not reset), and persistent Remote bind refusals.",
+    "docs/features/engram-host-adapter.md describes the bound and the exhaustion hold.",
+    "The full five-stage gate passes on the exact committed tree, with a clean independent review pair."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "autonomy",
+    "engram-host-adapter",
+    "greg-direction"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed as a4c1d4037ee3263ecb354a460a235ed2b942776e on origin/master and installed from the landed tree (binary SHA-256 d8085d99cd25b4de61b29585ddb6e4c3405bcb489c502e977b8caf1797aea805). Independent post-landing acceptance evaluation 173a9949a3e04029abb90360b91af29c passed 3/3.",
+    "completed_at": "2026-10-23T06:55:36.951748Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

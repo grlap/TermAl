@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c79b-78b0-94ea-65ffed8087b7",
+  "external_ref": "tm-v9r.15",
+  "title": "Unloaded transcript inserts can shrink the known message count",
+  "outcome": "sync_retained_transcript_metadata always replaces session.message_count with message_start_index plus the resident message length. insert_message_on_record calls it for every insert, including remote proxy/tail records where messages_loaded is false and message_count may represent a larger authoritative transcript. A remote non-tail message or command/parallel-agent insert can therefore regress the known total and publish an incorrect smaller count.",
+  "acceptance": [
+    "For records with messagesLoaded=false, insert and update paths never reduce an existing authoritative messageCount; they preserve max(existing count, retained end) or use an equivalent explicit invariant. Remote MessageCreated, CommandUpdate, and ParallelAgentsUpdate edge cases have regressions proving SSE and persisted counts remain monotonic."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

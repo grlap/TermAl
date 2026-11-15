@@ -1,0 +1,30 @@
+{
+  "id": "01a1292b-1ee1-7912-a855-be20a217b4c6",
+  "external_ref": null,
+  "title": "Minimap seek can remain pending when its loaded target never becomes positionable",
+  "outcome": "A minimap seek settles or can be retried when its history target is displaced before a positionable transcript commit.",
+  "acceptance": [
+    "If the applied target window is superseded before it becomes positionable, the pending seek terminates without overriding newer navigation.",
+    "A failed seek releases the rail indicator and allows requesting the same position again.",
+    "Regression covers a history response whose target never becomes positionable without imposing an arbitrary timeout on legitimate deferred commits."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "minimap",
+    "review-followup",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

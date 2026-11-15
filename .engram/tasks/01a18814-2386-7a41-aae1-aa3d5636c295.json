@@ -1,0 +1,30 @@
+{
+  "id": "01a18814-2386-7a41-aae1-aa3d5636c295",
+  "external_ref": null,
+  "title": "Sessions panel shows 'Working sessions (0)' while a session's detached test or build is running",
+  "outcome": "The Sessions panel never shows a session as idle while it owns an active background test, build or detached run. The count or label distinguishes an active foreground turn from background work and shows the session as busy.",
+  "acceptance": [
+    "A note identifies, with file and line, how the Sessions panel's 'Working sessions' count and per-session status are derived, and why a session carrying a detached or background test run is counted as not working while its own pane shows 'vitest: running' or 'Agent is working'.",
+    "With the fix, the Sessions panel shows a session with an active background or detached test, build or gate as busy, with a label or count distinguishing it from an active foreground turn, and never as idle; component tests cover a foreground turn, background-only work, both together, and neither.",
+    "The exact input passes an independent review pair and the full five-stage gate before landing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "session-status",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

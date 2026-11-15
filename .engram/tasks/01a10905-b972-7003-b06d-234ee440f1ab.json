@@ -1,0 +1,27 @@
+{
+  "id": "01a10905-b972-7003-b06d-234ee440f1ab",
+  "external_ref": null,
+  "title": "An admission retry attempt the drain declines for a cause the retry step does not read is due again every tick with no backoff",
+  "outcome": "An admission retry attempt the drain declines for a cause the retry step does not read is due again every tick with no backoff",
+  "acceptance": [
+    "A declined admission retry attempt whose cause the step does not read falls back to a bounded re-due instead of repeating every tick, without charging declines whose cause the step does read; a test drives repeated declines and shows the bounded cadence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

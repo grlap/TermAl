@@ -1,0 +1,28 @@
+{
+  "id": "01a19466-1195-71f0-8862-bd766b7cb6aa",
+  "external_ref": null,
+  "title": "Workspace watcher ignores every file when any ABSOLUTE ancestor of the workspace is named target/dist/node_modules (workspace_watch.rs:393)",
+  "outcome": "Workspace file-event filtering judges only path components inside the watched workspace root, so a repository that lives under a directory named target, dist, node_modules or a dot-directory (for example a runner clone at …/Engram-runner/target/termal-runner-clone) still reports its source file events, while build output inside the workspace stays ignored.",
+  "acceptance": [
+    "Workspace watcher ignores every file when any ABSOLUTE ancestor of the workspace is named target/dist/node_modules (workspace_watch.rs:393) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "remote-runner",
+    "windows",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a19466-23ba-75c2-a131-a259a47bb144",
+  "disposal_reason": "Duplicate filed within the same minute. Termal::Opus2 filed the same workspace-watcher absolute-'target'-ancestor bug (workspace_watch.rs:393, found by the Windows B run test-4d0311df) as w-a259a47bb144. This item's creation note holds the code reading (IGNORED_COMPONENTS matched over the whole absolute path, case-insensitively; the DL560 clone is also under target/) for the holder of w-a259a47bb144.",
+  "completion": null
+}

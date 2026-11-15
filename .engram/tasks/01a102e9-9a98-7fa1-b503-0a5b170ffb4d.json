@@ -1,0 +1,29 @@
+{
+  "id": "01a102e9-9a98-7fa1-b503-0a5b170ffb4d",
+  "external_ref": null,
+  "title": "A read-only Codex child's PowerShell `Get-Content` returned output but never an exit status, and Ctrl-C did not settle the exec session",
+  "outcome": "A read-only Codex review child's plain file read finishes with an exit status, or the hang's owning layer is identified with a reproduction: the Codex runtime's exec tool, the read-only sandbox, or TermAl's command handling.",
+  "acceptance": [
+    "A read-only Codex child's PowerShell `Get-Content` returned output but never an exit status, and Ctrl-C did not settle the exec session is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "codex",
+    "delegations",
+    "read-only"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

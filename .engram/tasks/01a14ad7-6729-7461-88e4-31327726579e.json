@@ -1,0 +1,30 @@
+{
+  "id": "01a14ad7-6729-7461-88e4-31327726579e",
+  "external_ref": null,
+  "title": "Align interrupted Resume refusal with recovered-admission and busy drain states",
+  "outcome": "An unchanged interrupted head yields an accurate Resume refusal without telling a recoverable or busy session to cancel unnecessarily, while retained authorization remains protected.",
+  "acceptance": [
+    "Recovered-admission and busy delivery/admission cases are inspected against the drain's exemptions and either excluded from the interrupted authorization refusal or described accurately without inappropriate Cancel guidance.",
+    "Regression tests cover the chosen Resume responses and preserve prompt, delegation, prepared Begin and authorization ownership without a fresh handoff.",
+    "The feature brief describes the final Resume contract; credited tests pass and review has no outstanding Medium or higher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-control",
+    "queue-resume",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

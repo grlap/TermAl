@@ -1,0 +1,28 @@
+{
+  "id": "01a0f0a2-0098-7821-a59a-90aeb5a87854",
+  "external_ref": null,
+  "title": "termal_name_source_root silently treats an unknown argument as a clear: refuse unknown keys",
+  "outcome": "Termal::Fable2 called termal_name_source_root twice with {\"work\": ..., \"root\": \"C:\\\\...\\\\.tmp\\\\wt-lows\"}, 2026-09-30 about 04:44Z. The tool ignored the unknown key `root`. Because an omitted `path` means \"clear\" (src/delegation_mcp_source_root.rs:21-31), both calls cleared the name and returned generation 0 with the notice \"has no named source root\". The call did not fail.\nThe next turn's host line then reported that no worktree was named. Edits made in the meantime would have been measured in the session's workdir.\nThe fix: the tool refuses arguments other than `work` and `path`, naming the expected key. A clear stays an explicit omission of `path` on a known-key call.",
+  "acceptance": [
+    "A call with only `work` still clears the name, and a call with `work` and `path` still names it.",
+    "A termal_name_source_root call with any key other than `work` and `path` is refused with an error naming the unknown key and the expected `path`, and changes no recorded name; a test covers it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation-mcp",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a0ee3d-d791-73d3-a3ac-d3f42e26a806",
+  "disposal_reason": "Duplicate of w-d3f42e26a806 (filed 2026-09-29), which covers the same refusal of unknown keys. This item's criterion 1 (a call with only `work` still clears; `work`+`path` still names) is a regression control the implementer of w-d3f42e26a806 should keep.",
+  "completion": null
+}

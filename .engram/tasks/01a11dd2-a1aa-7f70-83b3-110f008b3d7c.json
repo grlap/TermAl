@@ -1,0 +1,56 @@
+{
+  "id": "01a11dd2-a1aa-7f70-83b3-110f008b3d7c",
+  "external_ref": null,
+  "title": "termal_review_freeze_check refuses a relative manifestPath in a linked worktree",
+  "outcome": "termal_review_freeze_check resolves a relative manifestPath such as .git/engram-review-freeze.json correctly in a linked worktree, where .git is a file pointing to the worktree's Git dir, or refuses it with a message naming the absolute gitdir path to use. The documented relative example works, or the docs say it doesn't in linked worktrees.",
+  "acceptance": [
+    "In a linked worktree whose .git is a file, a relative manifestPath whose first component is \".git\" resolves under that worktree's own Git dir, so \".git/engram-review-freeze.json\" finds a manifest written there, for both termal_review_freeze_check and the compiled review-freeze-check command.",
+    "A test that creates a real linked worktree, writes the manifest in its own Git dir and checks it by the relative path passes; it fails on the unfixed code (RED first).",
+    "Absolute paths, relative paths in a main checkout, and the existing escape refusals (e.g. \"../outside.json\", paths outside the root and own Git dir) behave exactly as before, shown by the existing tests passing unchanged.",
+    "The freeze documentation states that the relative \".git/...\" form works in linked worktrees."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "review-freeze",
+    "worktree"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Implemented exact leading .git relative manifest resolution in linked worktrees; added real linked-worktree unit/compiled CLI RED→GREEN coverage and documentation. Fresh independent evaluation049b45d2 passes4/4 on source d1b92d27/rev2; actual Codex7ed647c3+Claude4fa455ca clean Medium+, two Low followups filed. Full gate f75a58fe host36f9ffdb PASSED exact tree dd44d2a0/inputc61c18a1. Evaluator diff-length note resolved: ordinary diff7352B SHA302e4e8d, --full-index7608B SHA1f5cb473, exact recorded pins. Branch commit/integration handoff next; no push.",
+    "completed_at": "2026-10-09T00:48:05.967761100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a16ec8-3954-7023-98c7-65afd9cec452",
+  "external_ref": null,
+  "title": "Prune TermAl's 565 registered worktrees under .tmp/ (remove clean ones whose items are closed); decide whether new TermAl worktrees move to .worktrees/",
+  "outcome": "TermAl keeps only worktrees that serve an open item, an active session, or a recorded retention need. Clean worktrees whose items are closed are removed with `git worktree remove` (never a forced or recursive delete of a dirty tree), with owner consent and path checks, and the removal is recorded. Whether NEW TermAl worktrees go under .worktrees/ instead of .tmp/ is decided by the coordinators and recorded, with its effect on named source roots and tests. Existing live worktrees are never moved.",
+  "acceptance": [
+    "An inventory (git worktree list --porcelain plus each worktree's owner session, item ref and lifecycle, dirty or clean, and active test runs) is recorded in .evidence/ and summarized on this item.",
+    "Every removed worktree was clean, its items closed, its owner consented (or the owner session has ended and the coordinator consents), its path was checked to be under C:\\github\\Personal\\TermAl\\.tmp\\, and no test run was active there. Removal used git worktree remove. Counts and freed space are recorded.",
+    "No worktree that holds a frozen input, a named source root of an open claim, retained evidence, or an active run is moved or removed.",
+    "The convention decision for new worktrees (.tmp/wt-* as today, or .worktrees/) is recorded with both coordinators' concurrence. If it changes, docs, CLAUDE.md wording and the tests that pin .tmp/wt-* observation are updated in their own reviewed change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "disk",
+    "hygiene",
+    "worktrees"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

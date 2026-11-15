@@ -1,0 +1,24 @@
+{
+  "id": "01a19363-5627-7c02-a058-817b8b0bf64e",
+  "external_ref": null,
+  "title": "Pin a cross-language (JS/Rust) registration identity digest for test-run requests that name input \"commit\"",
+  "outcome": "A fixture pins the launcher's JS requestIdentity (scripts/test-run-registration.mjs) and the host's test_run_registration_identity (src/test_run_registration.rs) to the same digest for a request with input \"commit\", and ideally also for input null. The pinned no-input digest that exists today stays. Today only a Rust test checks that a request with input hashes differently from the no-input digest. If the two implementations drift, every committed-input run fails at registration acknowledgement, and only at runtime. Provenance: w-decd61d62831 review round 6 Low (Claude delegation 63db1c89).",
+  "acceptance": [
+    "Pin a cross-language (JS/Rust) registration identity digest for test-run requests that name input \"commit\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6ac-7481-b86f-a15ddef5b258",
+  "external_ref": "tm-qu8",
+  "title": "Windows read-only Codex delegations run with full-access sandboxing",
+  "outcome": "src/delegations.rs maps read-only Codex delegations to CodexSandboxMode::DangerFullAccess on Windows to dodge the windows-sandbox spawn-setup failure, so a read-only reviewer child has full filesystem and network access via Codex-owned tools despite writePolicy readOnly. Fix: narrower Windows fallback or reject with a clear error; surface reduced enforcement in the UI; restore true read-only sandboxing once the upstream issue is fixed.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1a, spot-checked by Termal::Fable2): CLOSE-DONE. Fixed under w-4b1e11b6bfdc in 27bf0b6 (ancestor of master f7db2c58). Closed by evidence.",
+  "completion": null
+}

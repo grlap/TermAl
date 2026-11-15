@@ -1,0 +1,27 @@
+{
+  "id": "01a19cc3-eba4-70f3-8fce-f83094005168",
+  "external_ref": null,
+  "title": "Carried checks no longer expire or settle except on a reported end or runtime clear",
+  "outcome": "Carried checks have a defined end of life under Execution Observability (expiry or settlement) so they cannot accumulate until the eviction limit and keep marking later checks overlapped.",
+  "acceptance": [
+    "Carried checks no longer expire or settle except on a reported end or runtime clear is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "execution-observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

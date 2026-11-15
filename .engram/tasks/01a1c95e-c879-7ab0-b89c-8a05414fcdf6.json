@@ -1,0 +1,33 @@
+{
+  "id": "01a1c95e-c879-7ab0-b89c-8a05414fcdf6",
+  "external_ref": null,
+  "title": "Integrate combo51 on c6516440: c593 cfc4516f (w-2a95 P1 bounded capacity witnesses), direct child of combo50",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit cfc4516f0cfa32c60193bba399b7adc34fbaa563 (tree feea2a6ababe9e6552ac7c8f602fa248d72f2248) is on origin/master, where master was moved to it by a fast-forward from c651644038747fe2ea606e986ae51d1428d0df5d.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is feea2a6a passed every stage, with equal source ids before and after and an eligible clean input, and the review pairs recorded no finding of Medium or higher: the whole-8 pair on 2184bf78 (Codex 17356, Claude 17357) and the scoped confirmation pair on cfc4516f (Codex 17358, Claude 17359).",
+    "The release binary built from tree feea2a6a was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo51 landed: master fast-forwarded c6516440..cfc4516f (tree feea2a6a) and pushed, verified on origin at 09:14:25Z. FULL gate: DL560 test-40da21d4 on test ref tree feea2a6a, all stages passed (Rust 7604/0/113, Vitest 5090/5090), equal source ids. Review pairs clean (no Medium or higher). Installed on DL560 (0b9bb345, previous kept as termal.3ac0b89b.bak) and Central (55d082a5, previous kept as termal-before-cfc4516f-2d0ce07a.exe), no restart. Independent evaluation (Codex 17394, delegation c82d377f) passed 3/3.",
+    "completed_at": "2026-11-11T09:53:20.571459600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

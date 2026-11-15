@@ -1,0 +1,27 @@
+{
+  "id": "01a0ed1c-07ba-7f83-b4b9-573684877501",
+  "external_ref": null,
+  "title": "A delegation MCP call queued behind another can be cut by Codex's tool_timeout_sec and still run in the serial bridge (duplicate spawn risk on retry)",
+  "outcome": "A delegation tool call that Codex has already given up on is not sent by the bridge afterwards, or the caller is told for certain whether it was, so a retry of a spawn or an evaluation request cannot make a duplicate child.",
+  "acceptance": [
+    "A delegation MCP call queued behind another can be cut by Codex's tool_timeout_sec and still run in the serial bridge (duplicate spawn risk on retry) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "delegation-bridge"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a156b7-8031-7db0-a0a1-f026ccaa46c2",
+  "external_ref": null,
+  "title": "Bind the TermAl S3 pilot authority reference to an identified Engram text and version",
+  "outcome": "The cross-project authority record identifies the exact Engram S3 pilot text/version used by the TermAl exception, or explicitly records the approved meaning of a live reference, under the authority change-control procedure.",
+  "acceptance": [
+    "Bind the TermAl S3 pilot authority reference to an identified Engram text and version is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "cross-project",
+    "review-follow-up",
+    "s3-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a156ad-5dba-7162-9221-fe358d16d425",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

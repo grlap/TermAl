@@ -1,0 +1,28 @@
+{
+  "id": "01a0e9ef-efa0-7840-8985-b1b335ef59fb",
+  "external_ref": null,
+  "title": "Investigate: a raw `cargo test --bin termal` in the main checkout at 13c7023 exited 101 once (15:26–15:29Z) with the failing test unknown, and did not reproduce in two reruns",
+  "outcome": "Investigate: a raw `cargo test --bin termal` in the main checkout at 13c7023 exited 101 once (15:26–15:29Z) with the failing test unknown, and did not reproduce in two reruns",
+  "acceptance": [
+    "Investigate: a raw `cargo test --bin termal` in the main checkout at 13c7023 exited 101 once (15:26–15:29Z) with the failing test unknown, and did not reproduce in two reruns is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "PI-37",
+    "post-import",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

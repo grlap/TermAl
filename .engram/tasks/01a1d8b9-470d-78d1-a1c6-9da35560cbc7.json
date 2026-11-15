@@ -1,0 +1,29 @@
+{
+  "id": "01a1d8b9-470d-78d1-a1c6-9da35560cbc7",
+  "external_ref": null,
+  "title": "C6 probe: Cursor harness records ordinary evidence after the EO restart",
+  "outcome": "Root session Termal::Cursor-EO (session-17857) on running build 491dd015 claims this item, names a clean registered worktree, and runs one registered focused check there; the host records its turn observation, named-root sighting, verification record and credit result through Engram's ordinary writer, as evidence for criterion 6 of w-3fe8f4472e5d.",
+  "acceptance": [
+    "Session-17857 holds a claim on this item and has named .tmp/wt-c6-cursor-17857 as its source root.",
+    "A registered test-kind run, `node scripts/test-launcher.mjs focused --input commit -- node --test scripts/check-doc-links.test.mjs`, in that root ends eligible, and its verification record, credit result and the session's turn observations appear on this item's run feed.",
+    "The evidence (run id, records and running build) is cited on w-3fe8f4472e5d for C6's Cursor row."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cursor",
+    "eo-c6-probe"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

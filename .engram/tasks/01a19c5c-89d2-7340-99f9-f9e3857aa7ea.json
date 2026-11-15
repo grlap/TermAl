@@ -1,0 +1,39 @@
+{
+  "id": "01a19c5c-89d2-7340-99f9-f9e3857aa7ea",
+  "external_ref": null,
+  "title": "Keep empty-custody session Delete free of observation-removal fencing",
+  "outcome": "Restore ordinary removal for sessions without observation custody while preserving every actual observation/naming-custody ACK, deadline and final owner safety.",
+  "acceptance": [
+    "Record the originating owner/provenance answer and fix rationale against exact tree0c00cea3, after a fresh named root and next-turn wake.",
+    "Apply Fable1918's corrected scope: preserve master's unconditional reserve=true retention/latch behavior; condition only the observation-removal ACK per row on blocker || raw active/closing/report custody, including naming blockers and settled report presence, with the20-second deadline unchanged. Empty-custody removal reaches ordinary success without that ACK or its409.",
+    "Return frozen tree, before/after blobs and rationale for src/engram_source_observation_removal.rs plus one small deterministic slow-writer no-custody regression in the matching test file; retain existing real-custody settlement test493. No Cargo/test/retry or execution-credit claim."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gated-control",
+    "greg-directed",
+    "source-fix"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Source-only exact2 H6 fix frozen as tree c1f597435e0bd17dcf81e7e1ccec9628c6614ac8 and returned to Sol-03d4 mailbox132, cc Fable1919. Restores master per-row ACK eligibility without changing reservation/latch or deadline. New controlled-writer empty-custody regression added; existing real-custody test unchanged. All execution UNRUN; original FULL FAIL preserved. No parent review/gate/landing certification.",
+    "completed_at": "2026-11-02T13:16:47.890421Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

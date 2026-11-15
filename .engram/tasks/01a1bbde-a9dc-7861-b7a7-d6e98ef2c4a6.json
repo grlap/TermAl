@@ -1,0 +1,28 @@
+{
+  "id": "01a1bbde-a9dc-7861-b7a7-d6e98ef2c4a6",
+  "external_ref": null,
+  "title": "Scope bare-name source owner trust to the configured project root",
+  "outcome": "Naming and ordinary observation exclude PATH-resolved owners inside the configured project even when measuring a different named worktree.",
+  "acceptance": [
+    "Naming and ordinary observation resolve a bare-name owner against the configured project root and measure the intended named root without changing explicit trusted-path semantics.",
+    "A fixture with a PATH owner inside the project but outside the measured worktree is refused; an external trusted owner still succeeds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

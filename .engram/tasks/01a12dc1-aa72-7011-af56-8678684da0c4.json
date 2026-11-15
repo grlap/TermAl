@@ -1,0 +1,50 @@
+{
+  "id": "01a12dc1-aa72-7011-af56-8678684da0c4",
+  "external_ref": null,
+  "title": "A full gate's credit is refused for a change under its own worktree's .tmp/ scratch directory when the watcher's cached routing key disagrees with the fresh scratch resolution (a scratch subdirectory that became a repository)",
+  "outcome": "A change under the `.tmp/` scratch directory at the root of a carried full gate's own worktree never fences the gate: neither when the changed file's directory has already been removed by the time the late watcher event is processed, nor when a subdirectory there became a repository after the watcher remembered its routing key. Routing and the scratch judgement of such a path use one resolution, without widening by case folding.",
+  "acceptance": [
+    "The holder's note records, with file:line and host-recorded runs, that the deleted-directory hypothesis is refuted (a change under a removed `<worktree>/.tmp/<subdir>/` leaves the carried gate unfenced on unchanged code) and that the confirmed mechanism is the routing key cached for up to 30 s (`engram_worktree_root`, engram_check_paths.rs:103-153, used at engram_carried_checks.rs:2046) disagreeing with the fresh exact resolution the scratch test uses (engram_carried_checks.rs:2073-2084): once a `.git` appears in a scratch subdirectory, the stale key routes the change to the gate while the fresh resolution judges it against the nested repository, so the gate is fenced. The note says whether retained evidence attributes the wt-6c1d-merger occurrence to this mechanism.",
+    "A fail-first test shows, on unchanged code, a carried full gate fenced by a change under `<worktree>/.tmp/<subdir>/` after `<subdir>` became a repository while the watcher's routing key for it was still remembered, and after the fix the same sequence leaves the gate unfenced and credited: a path that names the scratch directory is routed and judged by one resolution. A change under a removed `<worktree>/.tmp/<subdir>/` (watcher spelling, Deleted and Modified, alone and batched with the directory's own deletion) leaves the gate unfenced before and after the fix; existing tests that fence on real source changes, a `.TMP` case variant, and a nested worktree under another checkout's scratch directory still pass unchanged.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "carried-checks",
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Fixed carried full-gate source attribution for .tmp scratch paths that name a nested repository, while preserving the removed-directory exemption. Committed as 4cc45f90bcf20cd000a7c3d6bb49ffc51412413a on the exact tree that passed full gate verification.",
+    "completed_at": "2026-10-12T13:15:26.877123500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

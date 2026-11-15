@@ -1,0 +1,28 @@
+{
+  "id": "01a0f8cc-65c2-7612-8489-06e4fd486280",
+  "external_ref": null,
+  "title": "A Stop in the moment after a retried admission ends in a saved Defer turns that resumable wait into an interrupted must-cancel hold",
+  "outcome": "A Stop in the moment after a retried admission ends in a saved Defer turns that resumable wait into an interrupted must-cancel hold",
+  "acceptance": [
+    "A Stop in the moment after a retried admission ends in a saved Defer turns that resumable wait into an interrupted must-cancel hold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

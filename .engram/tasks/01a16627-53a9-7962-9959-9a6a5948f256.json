@@ -1,0 +1,30 @@
+{
+  "id": "01a16627-53a9-7962-9959-9a6a5948f256",
+  "external_ref": null,
+  "title": "Persistence shutdown can panic on a poisoned state mutex during fixture unwinding and abort the test binary",
+  "outcome": "A failed test or prior state-lock panic does not cause a second panic from shutdown_persist_blocking; persistence failure is reported conservatively without claiming a successful flush.",
+  "acceptance": [
+    "A deterministic subprocess regression demonstrates that shutdown after state mutex poisoning reports failure without aborting during an existing panic, preserving the first failure diagnostic.",
+    "Shutdown still joins its writer and preserves its durability semantics on the normal path; poison recovery does not manufacture a successful final flush.",
+    "Focused tests and the final landing gate pass with the required independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-persistence",
+    "panic-unwind",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

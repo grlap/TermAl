@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-54d780c7f27f",
+  "external_ref": "tm-m6r1.11",
+  "title": "Work notes: preserve owner versus peer status provenance",
+  "outcome": "Codex session-6888 Medium, src/work_visualizer_detail.rs:35. Normalization drops status_owner/non_holder, so owner commitments and peer status observations from the same observations family become indistinguishable. Source-confirmed against local Engram, not installed-build runtime acceptance. Preserve optional source flags through API and label peer status as observation with no commitment; do not infer ownership from family alone.",
+  "acceptance": [
+    "Adapter and drawer regression with owner and peer status rows sharing family=observations; preserve unknown/missing provenance without inventing owner commitment. Use build-tagged actual receipts when available."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch 10f6b1ad, spot-checked by Termal::Fable2): CLOSE-DONE. Optional provenance is preserved in the adapter (src/work_visualizer_detail.rs:39) and rendered separately for owner, peer and unknown (ui/src/panels/WorkItemDetails.tsx:87), with regressions at tests/work_visualizer.rs:411 and WorkPanel.test.tsx:559. Closed by evidence.",
+  "completion": null
+}

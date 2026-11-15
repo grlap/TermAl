@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c3a9-7d53-9ba1-8a7cdbf79042",
+  "external_ref": "tm-039y",
+  "title": "One mailbox message produced two wake notifications for the same sequence",
+  "outcome": "Single observation from Phoenix::Fable report 17 (Engram pilot via Engram::Advisor 2026-09-06): Codex mailbox #373 woke the receiver twice; the message itself was appended once (no duplicate row). No claim about root cause or about a stronger-than-documented delivery guarantee; wake delivery is best-effort metadata and duplicates are tolerable by protocol. Task: correlate wake dispatch with message identity in diagnostics (log the message id and disposition per wake) so a repeat can be classified as coalescing, retry after a lost response, or a real double dispatch; fix only if a real double dispatch is found. Acceptance: a wake log line carries mailbox id, sequence, message id and disposition; a test pins one wake per append on the ordinary path.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

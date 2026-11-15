@@ -1,0 +1,31 @@
+{
+  "id": "01a1ba27-952b-7870-af1c-7a181e30464c",
+  "external_ref": null,
+  "title": "Specify declared artifact verdict when a task notification reports failed or error",
+  "outcome": "The ordinary task-END route has an explicit tested contract for a failed/error provider task status with an otherwise valid passing artifact, consistent with the artifact-based declared-command rules.",
+  "acceptance": [
+    "Record the source semantics of a provider task's failed/error status separately from a numeric command exit and from the declared artifact verdict; obtain coordinator concurrence before changing product verdict semantics.",
+    "A deterministic fixture supplies a failed/error task status with a valid PASS artifact and verifies the agreed observable verdict and diagnostic; native verification and declaration/source admission are not widened or newly restricted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "design-pending",
+    "greg-reported",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

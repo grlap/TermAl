@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c424-7c90-a8b1-40822fb334b9",
+  "external_ref": "tm-eaw",
+  "title": "Peer MCP cannot resolve session names beginning with session-",
+  "outcome": "src/delegation_mcp.rs resolve_session_reference classifies any reference starting with session- as an id and never attempts a name match. A valid root session named session-review therefore cannot be targeted by name even though the tool contract accepts names. Resolve an exact live id first, then fall back to case-insensitive name matching with the existing ambiguity and root/self guards; add regression tests for an id-shaped name.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The commit cited in its notes, 0a1e144, is the triage commit, not a fix. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

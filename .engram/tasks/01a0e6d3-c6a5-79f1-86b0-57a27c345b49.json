@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6a5-79f1-86b0-57a27c345b49",
+  "external_ref": "tm-px6x",
+  "title": "TermAl cannot report which build it is running, nor which UI bundle it serves",
+  "outcome": "You cannot ask a running TermAl which build it is. /api/health returns only {ok, serverInstanceId} and there is no route that reports a commit, a build time, or a UI bundle identity. Grepping src for a build/version route finds only CARGO_PKG_VERSION echoed inside the ACP, Codex-RPC and delegation-MCP protocol handshakes - a package version that does not change between commits and is not exposed to an operator at all.\n\nCONCRETE CASE, measured 2026-09-08 23:3x, three different versions in play at once on this machine:\n- Served UI bundle: assets/index-Bsg3TWqz.js, built 2026-09-07 01:03 from commit 829d832.\n- Running server binary: target/release/termal.exe, mtime 2026-09-07 22:19, launched 22:55 as `cargo run --release` (PID 15284, child PID 59664). The newest commit before that build time is 4dec5eb.\n- Repository HEAD: 511cd20, 2026-09-08 10:55, one large commit ahead of the binary.\n\nThe binary's identity there is INFERRED from mtime against the commit timeline. It is not proof: the tree could have been dirty at build time, and nothing in the process or the API can settle it. That inability is the issue.\n\nWHY IT MATTERS OPERATIONALLY, not theoretically: the decision in front of us tonight is which UI bundle to deploy, and the correct answer depends on which commit the RUNNING BINARY corresponds to, because a UI newer than its backend can call endpoints that do not exist yet. Right now that question can only be answered by reading file timestamps and reasoning about a commit log. A deploy decision should not rest on an inference from an mtime.\n\nMINIMUM USEFUL SHAPE: a read-only endpoint reporting the commit the binary was built from, whether that tree was dirty, the build time, and the identity of the UI bundle currently being served - plus the same values surfaced where an operator will actually look. Engram has this modelled in its own identity slices; TermAl has nothing equivalent for itself, which is the gap.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

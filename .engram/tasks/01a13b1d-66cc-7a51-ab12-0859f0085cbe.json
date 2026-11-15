@@ -1,0 +1,27 @@
+{
+  "id": "01a13b1d-66cc-7a51-ab12-0859f0085cbe",
+  "external_ref": null,
+  "title": "Bound receipt pruning after retiring non-mailbox wake provenance",
+  "outcome": "Canceled delegation-wait and recovery-notice receipts obey settled-receipt retention limits without losing mailbox ACK fencing.",
+  "acceptance": [
+    "Bound receipt pruning after retiring non-mailbox wake provenance is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "wake-recovery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

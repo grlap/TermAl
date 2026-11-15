@@ -1,0 +1,30 @@
+{
+  "id": "01a108ab-0689-7e83-bedf-d65a5da30139",
+  "external_ref": null,
+  "title": "Extract host-wake handoff bookkeeping from the shared runtime handoff",
+  "outcome": "Host-specific pre-send and post-send ordering remains exact while ownership logic lives in a focused module.",
+  "acceptance": [
+    "Extract host-wake handoff bookkeeping from the shared runtime handoff is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "agent-runtime",
+    "agent-workflow",
+    "review-low",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a10415-c6fa-7000-921b-1df557dae3ac",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

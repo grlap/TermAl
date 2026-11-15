@@ -1,0 +1,44 @@
+{
+  "id": "01a0f315-4d7e-75e3-9a0e-4a3324d6da5c",
+  "external_ref": null,
+  "title": "An acceptance evaluation requested for a held item that is not the session's bound claim is measured and run in the session's workdir and carries the other item's claim",
+  "outcome": "An acceptance evaluation is measured, run and recorded for the REQUESTED work: its source root is the root the requesting session has named for that work's claim, its declared fingerprint is that root's live revision, its evaluator runs there, and its source claim is that work's claim, whichever claim the session is bound to for its turn. It never falls back to the session's workdir while a root is named for the requested work, and never carries a claim of another work. Where the requested work has no named root, the workdir is used and the record and the request's notice say so.",
+  "acceptance": [
+    "A test reproduces the reports: one session holds two items with named roots (one case with the same root named for both, one with two roots) and is bound to the first; an evaluation requested for the second carries the second item's claim as its source claim, the second item's named root as its source root and evaluator directory, and that root's live revision as its declared fingerprint; it fails before the fix.",
+    "An evaluation of a held item with no named root, requested while the session is bound to another item that has one, uses the session's workdir, carries no claim of the other item, and its notice says no root is named for the requested work; a test covers it.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and diff hash cited in a note.",
+    "The note on the item names, with the source read, how the root and the claim were resolved before the fix."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

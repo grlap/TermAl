@@ -1,0 +1,27 @@
+{
+  "id": "01a1a553-6636-7c60-9f9a-96004958e8cc",
+  "external_ref": null,
+  "title": "The gating removal landed as 87f49ed0 without a complete Codex review: C3 R2 and C4 R3 failed coverage, C5 was not reviewed",
+  "outcome": "Either a read-only Codex review has covered the gating removal's owned paths as they stand on master, with any Medium or higher finding fixed, or Greg has decided the gap stays as it is.",
+  "acceptance": [
+    "A read-only Codex review reports complete coverage of the owned paths named by w-f7dbe7cef863, w-14df8701db1f, w-ed00fdaac064 and w-c962a451f7f6 as they stand on master, and each finding of Medium or higher is fixed or filed with provenance; or Greg's own decision to leave the gap is recorded here verbatim"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "review-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

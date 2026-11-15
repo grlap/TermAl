@@ -1,0 +1,27 @@
+{
+  "id": "01a18af6-358b-7cb3-92a7-4b29e962beae",
+  "external_ref": null,
+  "title": "Delegation-root regression test should also cover the broadcast-worker clone made inside new_before_listen_with_paths",
+  "outcome": "Delegation-root regression test should also cover the broadcast-worker clone made inside new_before_listen_with_paths",
+  "acceptance": [
+    "Delegation-root regression test should also cover the broadcast-worker clone made inside new_before_listen_with_paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "from-review",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

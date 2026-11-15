@@ -1,0 +1,30 @@
+{
+  "id": "01a1c713-68d3-7ea2-bc71-eda4b83f073b",
+  "external_ref": null,
+  "title": "Evaluation on a freshly named root is refused (named_root_sighting_required): quiet host-delivered turns there are recorded only as unadmitted observations, so no admitted sighting ever exists",
+  "outcome": "Evaluation on a freshly named root is refused (named_root_sighting_required): quiet host-delivered turns there are recorded only as unadmitted observations, so no admitted sighting ever exists",
+  "acceptance": [
+    "After a claim names a fresh clean source root, an ordinary host-delivered turn in that root (or another defined, documented step that needs no source edit) produces the acknowledged measured sighting termal_evaluate_acceptance requires, so an evaluation can be requested for landed work with no new code change; a test drives naming a fresh clean root, one quiet turn, and an evaluation request that is admitted.",
+    "If some step other than a quiet turn is required (for example a registered check), the named_root_sighting_required refusal names that step exactly, and the documented evaluation procedure says so; a test shows the refusal text.",
+    "No turn gating is reintroduced: ordinary turns still never call turn_evaluate, turn_begin or a grant."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "execution-observability",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

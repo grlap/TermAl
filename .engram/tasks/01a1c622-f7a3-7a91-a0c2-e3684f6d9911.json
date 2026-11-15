@@ -1,0 +1,30 @@
+{
+  "id": "01a1c622-f7a3-7a91-a0c2-e3684f6d9911",
+  "external_ref": null,
+  "title": "Mac root TermAl MCP mailbox and session-list reads abort while the CLI succeeds",
+  "outcome": "Ordinary macOS root sessions can read their mailbox and list sessions through the injected TermAl MCP tools, or receive a concrete actionable error rather than an unexplained aborted result.",
+  "acceptance": [
+    "A disposable macOS root reproducer exercises termal_read_mailbox and termal_list_sessions through the actual injected bridge and distinguishes provider cancellation, bridge failure and backend refusal from a successful equivalent CLI read.",
+    "Any confirmed in-scope bridge defect is fixed with behavioral coverage; mailbox reading and receipt acknowledgement retain their existing authority and FIFO semantics."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "macos",
+    "mcp",
+    "needs-diagnosis",
+    "reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

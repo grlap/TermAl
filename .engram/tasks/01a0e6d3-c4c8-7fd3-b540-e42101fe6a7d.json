@@ -1,0 +1,28 @@
+{
+  "id": "01a0e6d3-c4c8-7fd3-b540-e42101fe6a7d",
+  "external_ref": "tm-c7l",
+  "title": "Stale Codex thread-setup waiter can clobber the record's thread identity and orphan a live thread",
+  "outcome": "Round-8 review (Codex High #1), plus the residue of the fix for its High #2. Same root cause as tm-nqc: the waiter has NO WAY to learn that its session detached and re-attached underneath it.\n\nMECHANISM. Every session on the shared Codex app-server carries the SAME runtime_id — spawn_codex_runtime (src/codex.rs:44) clones it straight off SharedCodexRuntime. So detach + re-attach yields the same id, and set_external_session_id_if_runtime_matches / record_codex_runtime_config_if_runtime_matches CANNOT distinguish 'same process' from 'same attachment'. They are PROCESS checks, not ATTACHMENT checks.\n\nTWO CONSEQUENCES:\n\n(1) Identity clobber. The waiter checks setup ownership (~codex.rs:1097), persists external_session_id (~:1142), and only re-checks ownership at complete_shared_codex_thread_setup (~:1214). If a detach + fresh prompt + fast waiter B slip into the persist window, waiter A overwrites thread B's persisted identity with thread A, then finds itself Superseded — and deliberately does NOT roll back (correctly, for the normal case). Record claims A, runtime is on B. Restart resumes the wrong thread and rediscovers B as a duplicate: THE LEAK RETURNS in this narrow race.\n\n(2) Orphaned thread. When the stale StartTurnAfterSetup hand-off is abandoned (the new bail in handle_shared_codex_start_turn), the thread it was carrying is unowned — and NOTHING suppresses it, because waiter A took the Completed path, not Superseded. Discovery re-imports it as a phantom.\n\nFIX DIRECTION (Codex's, and it is right): an attachment GENERATION/epoch. Stamp each attachment; carry the generation on PendingCodexThreadSetup and on the hand-off; make every waiter-side mutation (identity persist, thread bind, turn hand-off, suppression) conditional on the generation still matching. This is a design change and deserves its own changeset and review — it is NOT a comment fix.\n\nBoth consequences require a detach at an exact instant, which is why the headline leak (one prompt -> 8 threads, firing constantly) is unaffected and already fixed.",
+  "acceptance": [
+    "A test drives detach + re-arm during an in-flight setup and asserts: the record's external_session_id is never overwritten by the stale waiter, and the stale attachment's thread is suppressed rather than left discoverable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a0e6d3-c4c9-76e0-afcf-712f5b25a7ba"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

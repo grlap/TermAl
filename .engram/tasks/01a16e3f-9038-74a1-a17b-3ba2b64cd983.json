@@ -1,0 +1,28 @@
+{
+  "id": "01a16e3f-9038-74a1-a17b-3ba2b64cd983",
+  "external_ref": null,
+  "title": "Engram project-reset abort releases the fence but never drains queued prompts, so a wake queued during an aborted settings change stays undelivered on an idle session",
+  "outcome": "After an Engram project settings change aborts (abort_engram_project_reset) or its commit rolls back, every session the fence held has its queue drained, as release_engram_project_reset_fence does, so a wake queued during the fence starts its turn without another trigger.",
+  "acceptance": [
+    "Engram project-reset abort releases the fence but never drains queued prompts, so a wake queued during an aborted settings change stays undelivered on an idle session is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "dispatch",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a16d12-ec1a-7ba3-87f0-001e3dde7f84",
+  "disposal_reason": "Implemented in the w-001e3dde7f84 change after review round 5 (Claude delegation-abc396a8 raised it as a Medium against w-001e). abort_engram_project_reset now drains the affected sessions after its commit (drain_engram_project_reset_sessions). The authority-branch early releases and both persistence-failure rollbacks drop the lock and call release_engram_project_reset_fence, which clears the waiting reason, commits and drains. The test an_aborted_settings_change_drains_what_it_held_and_restores_the_preview asserts that the held wake is admitted.",
+  "completion": null
+}

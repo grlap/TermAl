@@ -1,0 +1,43 @@
+{
+  "id": "01a13181-d78a-7591-a4cf-4d4d1cc69be4",
+  "external_ref": null,
+  "title": "A Codex test's still-running record has no release when its end is lost while its runtime lives: Stop is the only way out",
+  "outcome": "When a still-running Codex test's end is lost while its runtime lives (EngramSessionState::running_codex_tests), the holder can tell, and an explicit, recorded release exists or the holder line says plainly that Stopping the session is the only release. The release never uses a count, an age or a slot limit, which the architect ruling forbids. Every later check in that worktree is otherwise overlapped until the runtime exits.",
+  "acceptance": [
+    "A design note, agreed with the TermAl architect, chooses the release (an explicit recorded action or a Codex liveness signal) or the holder wording, consistent with the no-bound ruling.",
+    "A test shows the chosen release or wording.",
+    "The full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "carried-checks",
+    "codex",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

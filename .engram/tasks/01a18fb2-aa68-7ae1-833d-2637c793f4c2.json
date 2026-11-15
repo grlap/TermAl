@@ -1,0 +1,32 @@
+{
+  "id": "01a18fb2-aa68-7ae1-833d-2637c793f4c2",
+  "external_ref": null,
+  "title": "Let /review-code review a candidate commit (its diff against a recorded base), not only working-tree changes",
+  "outcome": "Let /review-code review a candidate commit (its diff against a recorded base), not only working-tree changes",
+  "acceptance": [
+    "Both /review-changes and /review-code accept an explicitly supplied candidate commit and recorded base commit as the review target, inspect the complete BASE-to-COMMIT change including added and deleted files, and do not stop merely because the candidate checkout is clean; without a supplied commit target, the existing staged, unstaged and untracked workflow remains available.",
+    "The parent records the resolved base commit, candidate commit and candidate tree id on the item and in each reviewer's multiline brief; committed-input reviews verify the expected HEAD, tree and clean tracked/index/untracked state independently at start and end, and missing or invalid identities, a dirty candidate checkout or an identity mismatch are reported explicitly rather than treated as a clean review.",
+    "The candidate workflow requires the existing maintained gate on the same unchanged recorded candidate commit only once, without a mandatory working-tree gate followed by a second candidate gate; the current staged-input gate path, failed-gate investigation and changed-input revalidation requirements remain unchanged.",
+    "The change reuses Engram's existing committed-input and F1 target-selection wording where applicable, cites both CLAUDE.md and AGENTS.md when referring to the standing rule, and grants no new commit, push, install, restart, review-reuse or test-ref exception; any authority-sensitive instruction wording completes the required instruction-change process before landing.",
+    "Validation covers a clean recorded commit with a nonempty base diff, added/deleted-file inventory, missing or invalid target identity, dirty committed input, and the existing no-commit-target path, using bounded read-only Git examples and independent review; evidence identifies the exact instruction revision and its limits."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "follow-up",
+    "instructions",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

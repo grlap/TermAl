@@ -1,0 +1,30 @@
+{
+  "id": "01a1b825-f5b2-7bb1-b8a1-1a63b9ff7e08",
+  "external_ref": null,
+  "title": "Scope central-authority requirement for mailbox names to domain mode",
+  "outcome": "Mailbox documentation states that central-domain alias resolution requires central authority while standalone local friendly-name resolution remains available from local session metadata.",
+  "acceptance": [
+    "The names/central-authority paragraph in docs/features/agent-mailboxes.md is scoped to domain mode and describes standalone friendly-name resolution accurately."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "coordination",
+    "docs",
+    "federation",
+    "mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b598-c875-7d02-abab-59e712e2dd9e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

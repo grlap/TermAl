@@ -1,0 +1,31 @@
+{
+  "id": "01a1bd70-d472-71d1-bfe7-1c464148f270",
+  "external_ref": null,
+  "title": "Removing a session silently deletes its whole delegation-child subtree, with no warning or count shown first",
+  "outcome": "An operator or agent removing a session knows beforehand how many delegation-child sessions go with it, and can't lose them by accident. Whether removal should cascade at all, or keep or archive children, is decided with Greg.",
+  "acceptance": [
+    "Greg's decision on the intended behaviour is recorded verbatim: cascade with explicit confirmation, keep children, or archive them.",
+    "The UI and the HTTP route implement that decision, shown by behaviour tests driving a parent with nested delegation children, including the count the operator is shown or the explicit acknowledgement the route requires.",
+    "The review pair has no outstanding Medium or higher and the normal gate passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "data-loss",
+    "delegations",
+    "needs-triage",
+    "session-lifecycle"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Greg's decision, relayed by Asistant 588693a8 #1035 and #1036: 'A. Usuwamy i tyle', corrected by 'Juz pytamy o potwiedzenie. Nie potrzebujemy info o delegacjach.' Removing a session together with its delegations is the intended behaviour, and the existing confirmation is enough. So no count, extra confirmation or new UI or API step is wanted. Nothing was changed, fixed or tested under this item. The 8581 incident's scope and recovery continue separately on w-43f00f77c160.",
+  "completion": null
+}

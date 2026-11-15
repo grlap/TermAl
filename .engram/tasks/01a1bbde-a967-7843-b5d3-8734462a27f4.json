@@ -1,0 +1,28 @@
+{
+  "id": "01a1bbde-a967-7843-b5d3-8734462a27f4",
+  "external_ref": null,
+  "title": "Make naming and sealing fixtures distinguish old and new root identities",
+  "outcome": "A rename regression fails if the old and new roots' full identities are swapped.",
+  "acceptance": [
+    "The scripted owner returns distinct source identities for two roots; a production rename asserts that the old root is sealed and the new root is the response basis.",
+    "A focused behavioral check passes; the fixture demonstrably rejects swapped or first-root-only identity selection."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

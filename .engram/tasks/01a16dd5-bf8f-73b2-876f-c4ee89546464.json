@@ -1,0 +1,62 @@
+{
+  "id": "01a16dd5-bf8f-73b2-876f-c4ee89546464",
+  "external_ref": null,
+  "title": "Project reset-fence release drains affected sessions serially in id order, so one slow gated admission holds the others (head-of-line)",
+  "outcome": "After the reset-wait and API-contention repairs land, releasing a project reset schedules affected sessions through bounded independent background drains, so one slow admission does not block other eligible sessions while a worker slot is free. Exact project/runtime/head ownership and durability are preserved, and a paired modeled-load measurement demonstrates that the unchanged API, lock-hold and writer bounds remain met without additional logical Engram admission work.",
+  "acceptance": [
+    "Both project-only and combined project/runtime fence release, including reset-triggered runtime-completion drains, hand off ordinary per-session drain work after the exact release critical section. No Engram RPC, persistence wait, worker join or provider delivery is awaited while StateInner is held or inline by the reset-release caller. The released-reset waiting reason is cleared before release returns. A session still waiting for a background drain slot instead shows a separately owned admission-queue waiting reason; it cannot look idle and ready silently. That reason is cleared only by its exact job or current session transition, without overwriting a newer pause/Stop/busy preview. Deferred callback/runtime-owner ordering and project-generation-loss behavior are preserved.",
+    "A phase-controlled regression fails on the serial pre-fix input and passes after repair: with six eligible gated sessions and the string-first session blocked at admission, release returns and the other five reach their provider-handoff receipts before that block is released. The same discrimination covers project-only and combined runtime release, including a completion requesting another drain. At most two reset-triggered drains run host-wide, never more than one per session; a two-project case verifies the cap across projects and verifies pending sessions progress when a slot frees.",
+    "Deterministic races cover duplicate hints and a new hint arriving during an active drain, head cancellation/replacement, pause/Stop, a newer reset, project/session removal, failed worker start and host shutdown. They show no lost eligible wake, duplicate evaluate/Begin/provider handoff, clearing of a newer owner, resurrection of a cancelled head or delivery from a stale runtime. Slot-wait preview tests cover queued and active jobs, duplicate hints, stale completions and a concurrent pause/Stop/new reset; the reset-fence reason remains absent after release and only the exact scheduler-owned waiting reason may be removed. Queue/prompt durability, exact prepared-operation replay, existing admission deadlines, explicit retained failures and the retry cap remain unchanged. Worker redirects retain their slot until real admission settlement; no inline slow fallback or unjoined test worker is permitted.",
+    "Before source repair and after it, execute the same disposable real-router/real-SQLite parallel fixture defined by w-d428 revision2:6793 sessions; eight changing64-message/16KiB sessions;512 named-root/journal pairs and512 test registrations; eight lanes each100 valid read/receipt-ACK/paused-empty-Resume triplets; at least100 nonempty writer commits. Add six eligible gated sessions across two reset projects and simultaneous fence release, using an instrumented deterministic Engram transport through the real admission/durability paths. Preserve the fixture between the serial and parallel measurements, run each once without retries or omitted outliers, and report cold/warm and baseline/candidate deltas. Candidate API latency per type stays p99<=1s/max<=5s, affected StateInner hold p99<=50ms/max<=250ms, writer tick p99<=2s/max<=5s, with zero contention-induced500/503/timeouts. Healthy stable heads generate no more logical control requests per operation type than the serial baseline and no added automatic retries, capacity or durability refusals. Peak active reset drains stays<=2; report engine-request in-flight counts and service/queue/settlement durations separately. Any breached bound is a failure to investigate, not permission to loosen it.",
+    "The focused race/HOL regressions, paired modeled-load check and full five-stage gate pass on the exact final input that lands, with independent review pair and no outstanding in-scope Medium-or-higher findings. Source fixture timings and a shorter reset RAII timer are not live multi-lane or real-Engram-engine proof; any such closure requires a separately authorized recorded observation. Implementation starts only after w-001e and w-d428 have landed and the design is revalidated on their actual combined base."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "dispatch",
+    "engram-control"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

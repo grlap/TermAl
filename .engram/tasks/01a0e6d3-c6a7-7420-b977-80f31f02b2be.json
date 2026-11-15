@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c6a7-7420-b977-80f31f02b2be",
+  "external_ref": "tm-q54v",
+  "title": "Handle unavailable browser storage during cold workspace bootstrap",
+  "outcome": "Parent-confirmed pre-existing limitation from consolidated review6464/6465: main.tsx:27 calls getStoredWorkspaceLayout at module evaluation; workspace-storage.ts:126 reads window.localStorage unguarded; createInitialWorkspaceBootstrap:57 repeats the getter. If access throws before React mounts, no recovery-marker hydration error UI can run. Six-file b8f3eaaa patch handles later marker reads only and does NOT introduce this cold-start failure. No browser-specific settings matrix reproduced; do not claim all private modes fail. Design an explicit non-destructive startup-unavailable state, preserve unknown recovery authority (do not treat read failure as empty and overwrite), cover getter/getItem denial before bootstrap, and clearly bound docs. Search storage/localStorage/bootstrap/workspace recovery found no matching dedicated item; related tm-95c7 documents exclusion, not implementation. Implementation not authorized by this review, no source edits.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a0e6d3-c441-7090-87c9-499b1e5bba16",
+  "external_ref": "tm-aemk",
+  "title": "Close modal dialogs with Escape",
+  "outcome": "Keyboard users currently cannot consistently dismiss modal dialogs such as New Session and New Project with Escape. Add centralized or shared Escape handling that respects each dialog's existing close guards and does not interfere with nested interactive surfaces.",
+  "acceptance": [
+    "Pressing Escape closes New Session, New Project, and other dismissible modal dialogs; guarded/busy dialogs retain their existing dismissal rules; focused tests cover representative dialogs and no duplicate key handlers cause double close."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect2 batch 10f6b1ad, spot-checked by Termal::Fable2): CLOSE-DONE. Shared Escape dismissal (ui/src/dialog-escape-dismiss.ts:24) and guarded New Session/New Project tests (AppDialogs.test.tsx:366,374,443,451) are present; earlier clean pair and gates recorded. Closed by evidence.",
+  "completion": null
+}

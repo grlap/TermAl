@@ -1,0 +1,63 @@
+{
+  "id": "01a13894-4981-7120-b08b-ac4361c284dc",
+  "external_ref": null,
+  "title": "The focused launcher cannot run npm or npx on Windows (only .exe runners resolve), so a focused Vitest run through the launcher never starts",
+  "outcome": "On Windows, `node scripts/test-launcher.mjs focused -- npm test --prefix ui -- <files>` (or an npx form) runs the local Vitest and records its counts, or the launcher refuses it up front with a message naming the supported form, instead of leaving the stage UNRUN with \"runner executable not found: npm\".",
+  "acceptance": [
+    "On Windows, the documented root-level command `node scripts/test-launcher.mjs focused -- npx vitest run <UI-relative file filters>` runs only this checkout's installed `ui/node_modules/vitest/vitest.mjs` through Node with stage cwd `ui`, preserves the requested filters and native exit, and records requested and resolved invocation/cwd without a command shell or package download.",
+    "The focused Vitest stage writes a fresh run-owned JSON reporter artifact and records coherent safe-integer passed, failed and ignored counts from that artifact alone; its human summary names the counts and artifact. Text output, missing/malformed/incomplete JSON, zero executed tests, all-skipped tests or inconsistent terminal evidence cannot produce passing test credit.",
+    "A successful supported foreground run in the named source root obtains one host-recorded passed Test on the same source revision with at least one passed test and no failed tests; a failing assertion, collection error, interruption or nonzero native exit remains failed or Unknown and never receives passing credit. Existing Cargo/native-Node focused checks and full-gate Vitest accounting remain valid.",
+    "Unsupported focused npm/npx/Vitest invocation forms are refused before a runner starts, with a bounded message naming the documented supported form; arbitrary cmd/bat/ps1 execution, watch mode and caller overrides of the owned reporter/artifact are not silently enabled.",
+    "Holder evidence preserves fail-first witnesses against the unchanged base for Windows npm/npx resolution and absent focused Vitest counts, plus passing regression evidence after the fix. Real Vitest producer cases cover passing/failing assertions, skipped/todo tests, file filtering and collection failure; artifact-negative cases cover missing, malformed, stale or contradictory reports. No skipped test, inflated timeout or unchanged retry substitutes for diagnosis.",
+    "The full maintained five-stage gate passes on the exact final input compiled from that tree, followed by the required independent review pair and fresh acceptance evaluation before completion and landing."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

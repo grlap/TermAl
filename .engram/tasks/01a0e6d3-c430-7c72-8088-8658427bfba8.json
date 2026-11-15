@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c430-7c72-8088-8658427bfba8",
+  "external_ref": "tm-9do",
+  "title": "Collapse delegation fan-in prompts in the conversation by default with an expand toggle",
+  "outcome": "The review-with-delegate fan-in prompts (queued into the parent by termal_resume_after_delegations) render as full-height 'You' text messages and eat the whole viewport. Collapse them by default — show the title line, hide the body behind a 'Show delegation results' toggle — mirroring the existing command-block / ExpandedPromptPanel collapse. Frontend-only cosmetic; detect by the fan-in template's structural anchors.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 3a re-check, spot-checked by Termal::Fable2): CLOSE-DONE. Fan-in collapse shipped; ui/src/MessageCard.test.tsx:731 \"collapses a delegation fan-in message by default and expands on toggle\".",
+  "completion": null
+}

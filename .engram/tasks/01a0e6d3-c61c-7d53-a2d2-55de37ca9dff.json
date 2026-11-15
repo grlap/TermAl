@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c61c-7d53-a2d2-55de37ca9dff",
+  "external_ref": "tm-m6r1.26",
+  "title": "Work Updated sorting: compare chronological instants across source timestamp formats",
+  "outcome": "Consolidated parent review 2026-09-15: Codex session-7003 Medium and Claude session-7004 Low report the same defect in ui/src/panels/work-sort.ts:43. sortValue returns updatedAt verbatim and sortWorkRows uses localeCompare. Source values may have different offsets and fractional precision; 2026-09-15T09:00:00-07:00 is later than 2026-09-15T15:00:00Z but sorts incorrectly descending. Affects Updated ordering in table and both trees. Compare normalized instants, define invalid/missing-value policy and precision policy explicitly, preserve deterministic id/source ties and input immutability. Add ascending/descending, equal-instant, mixed-offset, fractional-precision and invalid/missing regression cases. Existing full gates pass but do not cover these cases. No implementation performed by this review. Dedup: searched Updated and work-sort descriptions and inspected all Work children.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

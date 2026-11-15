@@ -1,0 +1,28 @@
+{
+  "id": "01a135eb-1ab4-76a0-a065-fce1d9290063",
+  "external_ref": null,
+  "title": "Receipted Codex prompt that provably never left is settled Ambiguous, not Rejected, when the runtime-config persist fails before turn/start",
+  "outcome": "Receipted Codex prompt that provably never left is settled Ambiguous, not Rejected, when the runtime-config persist fails before turn/start",
+  "acceptance": [
+    "On the shared Codex start-turn path, a failure to persist the runtime config (src/codex.rs, the Err arm of record_codex_runtime_config_if_runtime_matches before fail_shared_codex_turn_without_runtime_exit) notes PromptDeliveryOutcome::Rejected for the turn's receipted prompt before the turn fails, as the thread-setup failure paths in the same file already do; the other pre-write early exits of handle_shared_codex_start_turn_inner are audited the same way.",
+    "A test forces that persist failure and shows the receipt Rejected (re-queueable), never Ambiguous."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delivery",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a13609-a7f3-7ca1-9261-6c4fc505c4dc",
+  "disposal_reason": "Folded into the class item w-6c4fc505c4dc (Codex failures before turn/start is written settle Ambiguous), per Termal::Fable2 #2385; codex.rs:1875 is one of its listed sites.",
+  "completion": null
+}

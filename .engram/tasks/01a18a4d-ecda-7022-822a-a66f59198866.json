@@ -1,0 +1,27 @@
+{
+  "id": "01a18a4d-ecda-7022-822a-a66f59198866",
+  "external_ref": null,
+  "title": "Raw results route refuses runs under cloud-file (non-surrogate) reparse directories as redirected",
+  "outcome": "Raw results route refuses runs under cloud-file (non-surrogate) reparse directories as redirected",
+  "acceptance": [
+    "Raw results route refuses runs under cloud-file (non-surrogate) reparse directories as redirected is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

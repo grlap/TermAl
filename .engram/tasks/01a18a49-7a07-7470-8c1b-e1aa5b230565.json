@@ -1,0 +1,30 @@
+{
+  "id": "01a18a49-7a07-7470-8c1b-e1aa5b230565",
+  "external_ref": null,
+  "title": "Let a remote full gate on the exact tree count for landing without a check-record import: amend the test-ref sentence in CLAUDE.md and AGENTS.md",
+  "outcome": "In CLAUDE.md and AGENTS.md, the \"Test refs for remote runs\" bullet no longer requires a remote full gate's result to be imported as a recognized check record. Instead it requires that the integration owner has recorded on the item the run id, host, commit, tree id and the launcher's before and after fingerprints from that run's results. No other wording of either file changes, and the change lands under the authority-text procedure (a), (b) and (c) with Greg's recorded word.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md each replace exactly the clause \"and that result has been imported on the host that evaluates and lands the change as a recognized check record bound to the recorded tree id\" with \"and the integration owner has recorded on the item the run id, host, commit, tree id and the launcher's before and after fingerprints from that run's results\", and the final diff contains no other change.",
+    "The item records (a) both coordinators' concurrence on the exact wording, (b) the exact wording and its consequence sent to Greg, Greg's recorded word with its source, and (c) a passed final-diff audit naming the input fingerprint of the reviewed and gated input, all before the landing.",
+    "The full gate passes on the exact final input that lands, with an independent review pair and no outstanding in-scope Medium-or-higher finding on that input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "greg-directed",
+    "remote-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

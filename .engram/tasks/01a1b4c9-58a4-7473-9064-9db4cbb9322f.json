@@ -1,0 +1,31 @@
+{
+  "id": "01a1b4c9-58a4-7473-9064-9db4cbb9322f",
+  "external_ref": null,
+  "title": "Exercise host-filtered status counts, search totals and independent session surfaces",
+  "outcome": "Behavior tests catch host status/count/breakdown/search-total regressions and cross-surface selection leakage.",
+  "acceptance": [
+    "Mixed-host/mixed-status tests select a host and a status, assert visible rows plus chip totals/working breakdown/search total on docked and standalone panels.",
+    "Selecting a host in one mounted surface leaves the other surface's host choice and rows unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "greg-directed",
+    "review-low",
+    "session-panel",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b4ac-b691-77a3-9373-2050f215638d",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

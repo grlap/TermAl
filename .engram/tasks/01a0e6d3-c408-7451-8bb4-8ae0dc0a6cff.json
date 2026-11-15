@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c408-7451-8bb4-8ae0dc0a6cff",
+  "external_ref": "tm-7cu.44",
+  "title": "Tab activation paints a stale transcript viewport and then jumps when hydration or measurement settles",
+  "outcome": "Reported by Termal::Scroll on Greg word (2026-09-06, report only, no implementation started; Greg stresses this is very important and belongs to the scroll epic). Observed in a real isolated browser against the live served UI (bundle index-Bov9_yDx.js from the ui/dist build of 14:19 local; the latest scroll source edit of 14:36 and the pending native-movement work were NOT in that bundle, so this is evidence of the live symptom, not a test of the unbuilt review fixes): switching existing session tabs produced one rendered frame with older transcript content, followed about 99 ms later by different content and a large viewport jump, without page reload. Measured on the Termal::Scroll tab: at t=41 ms scrollTop=10284, scrollHeight=11058, clientHeight=729, first visible message message-578286; at t=140 ms scrollTop=2113.5, scrollHeight=2842, first visible message message-677024; navigation entries stayed at 1. The diagnostic sequence included browsing and paging history before switching tabs. Synchronous scroll-write samples also briefly had zero visible cards, but a fully blank painted frame is not proven. Suspects, not an isolated root cause: resident history-window replacement or tail hydration racing tab activation restore and virtualizer measurement; relevant paths: app-live-state.ts startSessionHydration and fetchSessionTail, session-history-loading.ts, SessionPaneView.scroll.ts activation restore, VirtualizedConversationMessageList.tsx initial estimated bottom and post-activation measurement, virtualized-conversation-rendering.tsx deferring cold measurement until after one paint (that estimated path needs at least twenty pages, so it must not be assumed to have caused this captured jump). Acceptance: tab activation must not paint an unrelated or stale viewport and then jump when history hydration or measurement settles; per-tab FOLLOW or STAY intent and the visible anchor are preserved, including long or partially resident history, completed sessions and post-stop or restart cases; validation covers both rendered frames and the final position, not only the final scrollTop, and retains the measured frame evidence. Do not treat tm-7cu.41 as proof this symptom is fixed. Ownership stays with Termal::Scroll; starts only on explicit dispatch.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c405-7263-8726-91614b45aaf0",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 1 re-check with marker, spot-checked by Termal::Fable2): CLOSE-DONE. Landed and deployed 09-09; four commits whose subjects name tm-7cu.44 (6759c84, fd1396c, 9c26898, 8dc570e), ancestors of master.",
+  "completion": null
+}

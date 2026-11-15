@@ -1,0 +1,28 @@
+{
+  "id": "01a10cfc-e173-7902-be21-af7a6983edf9",
+  "external_ref": null,
+  "title": "termal_list_sessions lists a session (session-7901, idle) that termal_send_to_session then rejects with 404 \"target session not found\"; discovery and send disagree",
+  "outcome": "Every session termal_list_sessions returns as sendable can be addressed by termal_send_to_session. Or the listing marks entries that cannot receive mail (for example discovered or imported agent threads that are not live TermAl sessions), and send's error names the reason. Discovery and delivery use the same notion of a session.",
+  "acceptance": [
+    "termal_list_sessions lists a session (session-7901, idle) that termal_send_to_session then rejects with 404 \"target session not found\"; discovery and send disagree is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "session-discovery",
+    "team-pilot"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

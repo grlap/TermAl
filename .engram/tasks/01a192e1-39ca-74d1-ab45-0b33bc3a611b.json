@@ -1,0 +1,29 @@
+{
+  "id": "01a192e1-39ca-74d1-ab45-0b33bc3a611b",
+  "external_ref": null,
+  "title": "Decide pass-2b and removal for the 107 EXCLUDED-UNSAFE worktree roots (~83 GB target\\)",
+  "outcome": "Each of the 107 phase-1 EXCLUDED-UNSAFE roots has a recorded disposition (keep with an owner and reason; pass-2b of target\\ only; or full removal once its work is merged or owned elsewhere), decided with its owner, and executed under the canonical cleanup rule without discarding dirty or unmerged work.",
+  "acceptance": [
+    "Every root listed in C:\\github\\Personal\\TermAl\\.evidence\\w-413d-phase2-11519\\excluded-unsafe-107.csv has a recorded disposition (RETAIN with accountable owner and ending event, PASS-2B target\\ only, or REMOVE) confirmed with its owner or the coordinator.",
+    "No dirty, unmerged or unpushed work in those roots is discarded; any removal uses `git worktree remove` without --force after a live P1–P6 recheck, and any pass-2b deletes only target\\ and ui\\node_modules with junctions unlinked, never followed.",
+    "Each action and its measured reclaimed space is appended to C:\\github\\Personal\\TermAl\\.evidence\\w-65af-removal\\log.csv and summarised on this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "worktree-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

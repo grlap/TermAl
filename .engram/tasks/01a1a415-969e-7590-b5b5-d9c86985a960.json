@@ -1,0 +1,29 @@
+{
+  "id": "01a1a415-969e-7590-b5b5-d9c86985a960",
+  "external_ref": null,
+  "title": "Threads were measured sleeping while holding the state lock in a 430-thread test process; cause and production impact unknown",
+  "outcome": "It's known, by measurement, what a thread sleeps on while holding the state lock in a many-threaded process, and whether that happens on a production host; if it does, the follow-up is filed with its impact.",
+  "acceptance": [
+    "A measured note names what the thread sleeps on at the recorded sites, or says the measurement can't tell",
+    "Whether long holds on a running host share this cause is answered from production-side diagnostics that don't open the live store, or the note says why it can't be",
+    "If it's a product defect, a follow-up item with its measured impact is filed; if not, the reason is recorded"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

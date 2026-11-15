@@ -1,0 +1,35 @@
+{
+  "id": "01a1cda8-d404-7562-97c2-f6a30b68c62c",
+  "external_ref": null,
+  "title": "Integrate combo69 on 046951e8: Website d3a6c0de (w-704d federation chapter, nav and multi-host diagram)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit d3a6c0de306228c9615e3b475209215f8af04bf2 (tree 9b4c594579b794178fd9b95030d6645a9efdf2d5) is on origin/master, where master was moved to it by a fast-forward from 046951e88541ff27efd13705d8444d9ed5b649c4.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is 9b4c5945 passed every stage, with equal source ids before and after and an eligible clean input, and no review finding of Medium or higher is outstanding: the read-only pair Codex session 17606 and Claude session 17608 reviewed the whole 3-path change of d3a6c0de against 046951e8 with no Medium or higher finding (Claude's one Low is filed as w-7b27c634d51c).",
+    "The release binary built from tree 9b4c5945 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "combo69 integrated. Website d3a6c0de (tree 9b4c5945; Federation chapter, nav and multi-host diagram, 3 website files) is on origin/master by a fast-forward from 046951e8, and the DL560 full launcher gate test-6b93a66f passed on the exact tree. It is installed on Central (faaeb2ea) and DL560 (ddb31157), with the previous binaries kept aside; the bytes are identical because no Rust changed. An independent evaluation (Codex session 17620, delegation-9dfb5d0b) passed all 3 criteria.",
+    "completed_at": "2026-11-12T03:34:34.470024900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

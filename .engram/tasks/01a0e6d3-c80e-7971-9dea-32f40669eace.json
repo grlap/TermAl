@@ -1,0 +1,25 @@
+{
+  "id": "01a0e6d3-c80e-7971-9dea-32f40669eace",
+  "external_ref": "tm-zvg",
+  "title": "Extract delegation follow-up out of src/delegations.rs (4152 lines) into src/delegation_followup.rs",
+  "outcome": "Both reviewers flagged size/altitude during the 2026-07-16 batch review:\n- src/delegations.rs is 4,152 lines and src/tests/delegations.rs is 5,550; both exceed the thresholds in .claude/reviewers/architecture.md and both GREW in this batch (followup + re-arm).\n- Suggested extraction boundary (Claude reviewer): src/delegation_followup.rs owning followup_delegation + rearm_terminal_delegation_for_followup_locked + their tests.\nPer CLAUDE.md, a split must be a pure code move (no renames, no signature changes, no behaviour change) landing in its own commit, with a header comment on the new file stating what it owns, what it deliberately does not own, and that it was split out of src/delegations.rs.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "NOT PLANNED (backlog triage w-930e4d333f07, 2026-10-05; Greg's approval via Engram::Advisor #293). P3/P4, never started, no holder or children, untouched since before 2026-09-21, not reliability, data safety or pilot. The record is kept; reopen or re-file if it becomes relevant.",
+  "completion": null
+}

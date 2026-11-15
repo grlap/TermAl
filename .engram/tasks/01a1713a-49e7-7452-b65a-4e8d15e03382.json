@@ -1,0 +1,28 @@
+{
+  "id": "01a1713a-49e7-7452-b65a-4e8d15e03382",
+  "external_ref": null,
+  "title": "Project-reset fenced authority preflight and absence validation lack named timing phases",
+  "outcome": "Stalls during fenced reset/deletion authority preflight and absence-store validation identify the running phase in diagnostics.",
+  "acceptance": [
+    "Project-reset fenced authority preflight and absence validation lack named timing phases is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "engram-control",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

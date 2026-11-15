@@ -1,0 +1,26 @@
+{
+  "id": "01a0e6d3-c444-70f0-9bab-5c16f1127d93",
+  "external_ref": "tm-7cu.19.2",
+  "title": "Response board zoom: cursor-centered wheel/pinch + keyboard + reset, logical coordinates unchanged",
+  "outcome": "GREG REQUEST 2026-08-01: 'zoom in/zoom out is missing, can we do that?' YES — v1 deliberately stored logical x/y and renders transform-ready so zoom is additive (recorded in tm-7cu.19's deferred list).\n\nSPEC: wheel/trackpad pinch zoom (ctrl+wheel per canvas convention) centered on the CURSOR position, plus keyboard Cmd/Ctrl+= / Cmd/Ctrl+- and a small +/- control with a reset-to-100% affordance. Range ~25%-200%, step smooth. Implementation: single CSS transform (scale) on the canvas content layer with pan offsets composed in the same transform — logical card coordinates unchanged (positions persist zoom-agnostically; PATCH payloads stay in logical space). Hit-testing and drag deltas divide by scale. Zoom level is view state: persist per-board client-side (localStorage) — it is not board data, so no API change.\n\nACCEPTANCE: zoom at cursor keeps the point under the cursor stationary; dragging a card at 50% zoom moves it 1:1 with the cursor (delta/scale correct); positions saved at any zoom reload identically at any other zoom; text remains crisp (transform, not font scaling tricks); pan+zoom compose without drift. Wide-content-in-card and grid-blowout guards unaffected.",
+  "acceptance": [],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a0e6d3-c408-7451-8bb4-89b57508b77e",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Backlog triage w-930e4d333f07 (Architect1 batch 2, spot-checked by Termal::Fable2): CLOSE-DONE. Board zoom shipped in ui/src/panels/ResponseBoardPanel.tsx on master f7db2c58.",
+  "completion": null
+}

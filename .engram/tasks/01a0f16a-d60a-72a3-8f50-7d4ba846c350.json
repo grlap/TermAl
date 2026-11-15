@@ -1,0 +1,27 @@
+{
+  "id": "01a0f16a-d60a-72a3-8f50-7d4ba846c350",
+  "external_ref": null,
+  "title": "Carried gates: review-round-9 Lows — same-turn order, reaping on the tick, watcher scope, unknown-exit detach, `ended` validation, refused-report notice, woken-holder fence, contract test, unwatched roots",
+  "outcome": "Carried gates: review-round-9 Lows — same-turn order, reaping on the tick, watcher scope, unknown-exit detach, `ended` validation, refused-report notice, woken-holder fence, contract test, unwatched roots",
+  "acceptance": [
+    "Carried gates: review-round-9 Lows — same-turn order, reaping on the tick, watcher scope, unknown-exit detach, `ended` validation, refused-report notice, woken-holder fence, contract test, unwatched roots is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "engram-host",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

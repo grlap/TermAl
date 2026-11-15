@@ -1,0 +1,63 @@
+{
+  "id": "01a0e6d3-c3f9-70a3-ab78-38f8d03576b4",
+  "external_ref": "tm-5n19",
+  "title": "Prevent duplicate Codex MCP status requests after cache eviction",
+  "outcome": "Residual of the already-implemented duplicate-request fix: revisiting an evicted Codex session whose MCP status request is still in flight restores the visible loading state without a second request, and each composer MCP status request is bounded by a client deadline with abort and cleanup, so a request that never settles no longer holds in-flight ownership or blocks the ordinary refetch. Request deduplication, per-session generation checks and safe eviction of the old cache are preserved, and no global API timeout changes. Final closure is reserved for Greg.",
+  "acceptance": [
+    "Revisiting a Codex session whose /mcp status entry was evicted from the bounded per-session cache while its MCP status request is still in flight shows the loading state (\"Loading Codex MCP servers...\" with the refresh control disabled) without starting a second request, and the original request's result is shown when it settles; a component test covers this.",
+    "Each composer Codex MCP status request has a fixed client deadline longer than the server's 60-second total MCP status budget; a request that has not settled by then is aborted through an AbortSignal passed to fetch, releases the session's in-flight ownership, and, while the session is in the bounded cache, shows a timeout error with the Retry MCP status action; a component test with fake timers and a never-settling fetch covers this.",
+    "After such a deadline, the session's MCP status can be loaded again by an ordinary request: Retry starts a new fetch, and revisiting the session after its entry was evicted starts a new fetch without a forced refresh; a component test covers both paths.",
+    "Every pending request when the composer unmounts is aborted and its deadline timer cleared, and its late settlement never changes visible state, and a forced refresh, the only caller that bypasses an in-flight request, cannot start while the active session's request is loading; component tests cover both.",
+    "Request deduplication, the per-session generation checks and the safe eviction of completed cache bookkeeping are preserved: the existing /mcp tests in AgentSessionPanelFooter.test.tsx pass unchanged, ui/src/api.ts changes only in fetchCodexMcpServers, no global API timeout changes, and `npx tsc --noEmit` in ui is clean."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

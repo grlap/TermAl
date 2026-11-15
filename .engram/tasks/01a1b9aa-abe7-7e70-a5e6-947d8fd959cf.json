@@ -1,0 +1,26 @@
+{
+  "id": "01a1b9aa-abe7-7e70-a5e6-947d8fd959cf",
+  "external_ref": null,
+  "title": "Cover project or connection changes during a completed-root own-clear read",
+  "outcome": "A deterministic request-level regression proves the completed-result path refuses a changed Engram target after the held-claims read.",
+  "acceptance": [
+    "A controlled target/connection or project-settings change after the held-claims read causes the completed own-clear request to return its project/store-changed 409, without a completion success reply or mutation of the retained naming authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "coordination"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1b8b7-2993-7d40-ade6-0bfc97b43f43",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

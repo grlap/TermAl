@@ -1,0 +1,30 @@
+{
+  "id": "01a1ba27-9443-7510-b843-1c38fbe72707",
+  "external_ref": null,
+  "title": "Preserve settled interruption when a declared artifact applier outlives runtime loss",
+  "outcome": "A runtime replacement during declared artifact reading cannot leave a row with a later PASS/FAIL that contradicts an already delivered interrupted UNKNOWN and its provider-never-reported detail.",
+  "acceptance": [
+    "Preserve settled interruption when a declared artifact applier outlives runtime loss is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "declared-commands",
+    "greg-reported",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

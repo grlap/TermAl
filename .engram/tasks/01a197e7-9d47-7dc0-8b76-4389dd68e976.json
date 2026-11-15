@@ -1,0 +1,34 @@
+{
+  "id": "01a197e7-9d47-7dc0-8b76-4389dd68e976",
+  "external_ref": null,
+  "title": "Restore fresh Human starts under OFF after cancellation; recover a retained legacy head only with proven delivery disposition",
+  "outcome": "Two ordered tracks: restore empty-queue fresh Human availability under OFF without inheriting old authority; separately provide exact retained-head recovery only under Architect2's delivery-proof ruling.",
+  "acceptance": [
+    "Track 2 (first priority): with control OFF and an empty queue, including after cancellation of a retained head and after reload, explicit Resume releases the ordinary queue pause when its captured session/configuration/runtime/Stop/pause owner is still current and no active safety fence prevents the transition. Resume creates no prompt, dispatches no turn and resends no prior operation. It does not clear rebind_required or old control recovery state to declare control ready. Under otherwise runnable conditions, a distinct newly submitted explicit Human prompt reaches the provider once in the successful fixture without enabling control or issuing Evaluate, Begin or a grant request; fresh Human Send does not require a preceding empty Resume.",
+    "Track 2 preserves every old uncertain begin, frozen authorization, original intent, key, outcome and delivery evidence as separately recoverable data. Fresh Human execution neither inherits nor settles that authority. Busy runtime, Stop, active project reset/checkpoint, identity, custody and durability fences remain effective. The empty transition revalidates its owner, OFF configuration and queue emptiness after asynchronous work; concurrent queue insertion or owner replacement cannot release or dispatch a successor through it. In the live process, success and release of the live pause require the existing exact persistence acknowledgement and final owner revalidation; a rejected, missing or superseded acknowledgement cannot report durable release or enable that unconfirmed live transition. After reload, an actually committed valid completed empty-release image may restore the ordinary unpaused state despite loss of the former acknowledgement, subject to later durable state and existing boot safety holds; this proves no provider delivery or old control settlement. Automated and peer sends gain no Human bypass.",
+    "Track 1 (second priority): a selected-head OFF Human continuation uses the existing authoritative PromptDelivery proof and write-ahead machinery for the exact original id/content/intent. Eligible Pending and already-owned unpromoted HandingOff states follow the recorded delivery-proof model; a proven rejection returns through its existing owner before becoming eligible. The selection, original control image, session/runtime, Stop/pause and write-ahead owner are preserved and revalidated through provider dispatch. Stale, replaced, accepted, ambiguous, promoted or federation-owned evidence cannot start a successor or authorize another send. An unnecessary ordinary-control recovery diversion does not veto this already-proven Human continuation.",
+    "A historical unreceipted row whose provider outcome remains unknown is explicitly refused for replay with the original id, payload, intent/key and uncertainty preserved. Human content confirmation is recorded without asserting historical non-delivery. No receipt is fabricated, recovered_admission is not cleared to manufacture eligibility, and a possibly delivered row is not copied, reclassified, resent or retired by this change. A distinct fresh Human Send remains independent. Existing ordinary known-unpromoted and exact control-recovery paths retain their original semantics and guards; this item introduces no resend-and-retire operation or conversion of control evidence into a delivery receipt.",
+    "Disposable fixtures first reproduce the empty-queue Resume failure and distinguish it from fresh Human Send that may already work. They cover OFF -> cancel retained head -> empty -> Resume and fresh Human Send, both in memory and after reload; an eligible receipt-backed selected continuation; and an unreceipted unknown historical row that remains refused. They verify zero control requests and one provider delivery in the successful Human cases, no provider delivery on unresolved historical replay or persistence failure, unchanged old uncertain authority, matching evidence versus mismatched/reloaded handoff evidence, and races involving queue insertion, content/owner replacement, Stop/pause, reset and configuration change. No test queries or mutates live session-6219.",
+    "Before landing, the independent Codex/Claude review pair has no outstanding in-scope Medium or higher finding and the full gate passes on the exact candidate whose parent is current master. Existing persistence repair has Central priority; Cargo runs require Fable's GO. Acceptance is independently evaluated under the project policy, without invented registration or verification evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "engram-host-adapter",
+    "gated-control",
+    "greg-reported",
+    "stop-the-line"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a194c1-6a65-7c50-86ba-135181fe8685",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "superseded by EO 87f49ed0 removing gated control; decided by Termal::Fable2. Source: mailbox1330, message mailbox-message-2c078ba9-6d9c-4713-8042-e85f302ec7e3, 2026-11-08T19:18:53.353491600Z. Historical artifacts/failures retained; no new execution/acceptance claim.",
+  "completion": null
+}

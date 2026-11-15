@@ -1,0 +1,27 @@
+{
+  "id": "01a16a08-aebe-76c0-bb3a-acc645031589",
+  "external_ref": null,
+  "title": "Use shell provenance when rendering quoted-pipe Test Runs observations",
+  "outcome": "The Test Runs view agrees with Engram verification for accepted quoted-pipe focused commands.",
+  "acceptance": [
+    "Quoted-pipe focused commands accepted by Engram are represented with the same outcome and evidence association in Test Runs, including escaped quotes and repeated whitespace."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a16827-bfc6-7af3-948f-ba7f38f569aa",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

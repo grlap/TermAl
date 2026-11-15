@@ -1,0 +1,36 @@
+{
+  "id": "01a0f535-2501-74a3-ad8a-26c1cadd0a7a",
+  "external_ref": null,
+  "title": "A follow-up to a completed reviewer delegation flips it from completed to failed (\"Reviewer completed without the required structured result\") although its structured result was already accepted",
+  "outcome": "Asking a completed reviewer-mode delegation a follow-up question does not cost it its completed status or its accepted structured result. Reported by Engram::Kimi (TermAl mailbox 38e17f30 #44, 2026-10-01 02:04Z). Kimi resumed the completed reviewer delegation-115a15c4-ac97-4437-b85f-e505bd93276a (Claude child session-9261), whose structured result had already been accepted, with a follow-up question (termal_followup_session). Afterwards the delegation's status read failed: \"Reviewer completed without the required structured result\". So a parent that asks a reviewer something after the fact turns a valid review into a failed delegation, which could also break a review pair's evidence.",
+  "acceptance": [
+    "A test resumes a completed reviewer delegation with a follow-up whose turn submits no new structured result, and the delegation keeps its completed status and its originally accepted result.",
+    "The full five-stage gate passes on the exact reviewed tree, its run directory and fingerprint cited in a note.",
+    "Whatever the follow-up turn returns is available to the parent without replacing the accepted result, or the follow-up is refused up front with a clear message; the chosen behaviour is documented in docs/features/agent-delegation-sessions.md."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

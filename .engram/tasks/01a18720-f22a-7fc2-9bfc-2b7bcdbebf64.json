@@ -1,0 +1,32 @@
+{
+  "id": "01a18720-f22a-7fc2-9bfc-2b7bcdbebf64",
+  "external_ref": null,
+  "title": "w-c205 slice F: the acceptance-policy write and the project-reset checkpoint tell unsent from unknown",
+  "outcome": "The acceptance-evaluation policy write and the project-reset turn_checkpoint distinguish a request that provably never ran from one dispatched without a valid reply, instead of treating both as unknown.",
+  "acceptance": [
+    "For the acceptance-evaluation policy write and the project-reset turn_checkpoint, the original identity and arguments are retained before send, and a lost reply is classified as proven-unsent or dispatched-without-valid-reply, a proven spawn failure being proven-unsent; timeout or cancel alone is never treated as rollback.",
+    "A dispatched-without-valid-reply outcome is disclosed as unresolved and is retried only as an identical replay, or after a readback through Engram's supported contract.",
+    "Tests show each path's proven-unsent and dispatched-without-valid-reply classification and its disclosure; a path already conforming is named with the existing test that shows it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-host",
+    "engram-interop",
+    "lost-reply",
+    "w-c205-slice"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a18617-8de1-79e3-b1cb-c205c0fecb44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

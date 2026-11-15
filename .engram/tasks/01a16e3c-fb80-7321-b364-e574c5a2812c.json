@@ -1,0 +1,56 @@
+{
+  "id": "01a16e3c-fb80-7321-b364-e574c5a2812c",
+  "external_ref": null,
+  "title": "Full gate: source_observation_audit_rejects_wrong_receipts_without_releasing_the_provider returns Delivered instead of Held under full-suite load (passes in isolation)",
+  "outcome": "The test passes deterministically under full-gate load. The nondeterminism is classified with evidence (test, product or runner) and fixed without retries, timeout inflation or weakening.",
+  "acceptance": [
+    "A deterministic test that expires the turn-start capture deadline in the source-observation audit fixture shows the dispatch delivering with an Unmeasured opening and no source observation, which classifies the full-gate failure's cause.",
+    "Delivering without source evidence when the opening capture overruns its budget remains the product behavior, as documented, and the production capture budget is unchanged.",
+    "Source-observation fixtures control the turn-start capture's clock, so source_observation_audit_rejects_wrong_receipts_without_releasing_the_provider can reach the overrun path only when a test arms it; the fixtures' default wait for capture completion is bounded by the existing deadlock guard, so a capture that never completes fails the test rather than hanging; no retry, ignore or timeout increase is added.",
+    "Focused tests covering the change pass, and an independent Codex + Claude review pair has no outstanding Medium-or-higher finding on the final input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-control",
+    "gate-failure",
+    "nondeterminism"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

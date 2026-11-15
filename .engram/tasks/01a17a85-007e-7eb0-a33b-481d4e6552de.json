@@ -1,0 +1,29 @@
+{
+  "id": "01a17a85-007e-7eb0-a33b-481d4e6552de",
+  "external_ref": null,
+  "title": "Keep federation fixture terminal diagnostics faithful after the first heartbeat",
+  "outcome": "The shared federation attestation fixture preserves or explicitly documents the lifecycle of its satellite receiver so a fixture-only drop cannot masquerade as the link's first production terminal cause.",
+  "acceptance": [
+    "A fixture-attested context does not silently consume its first terminal diagnostic through a receiver future dropped immediately after readiness; the fixture lifetime or its documented limitation makes this behavior explicit.",
+    "Relevant attestation fixture consumers retain real heartbeat readiness, exact context ownership and existing deadline/authority behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-low",
+    "test-fidelity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

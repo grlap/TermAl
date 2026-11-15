@@ -1,0 +1,27 @@
+{
+  "id": "01a0fbe5-f573-7fd3-9355-9966f91308e4",
+  "external_ref": null,
+  "title": "Under the launcher's isolated git environment, `git diff --cached` renders whole-file rewrites, so a freeze exported that way cannot be applied as a patch",
+  "outcome": "A freeze exported with the launcher's own recipe (scripts/review-freeze-fingerprint.mjs isolatedGitEnvironment: GIT_CONFIG_NOSYSTEM=1, GIT_CONFIG_GLOBAL=NUL, and so on) applies cleanly onto another base, with minimal hunks. Or the integration procedure documents an export recipe that does, with a check that it names the same blobs as the fingerprinted index.",
+  "acceptance": [
+    "Under the launcher's isolated git environment, `git diff --cached` renders whole-file rewrites, so a freeze exported that way cannot be applied as a patch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

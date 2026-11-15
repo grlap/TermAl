@@ -1,0 +1,31 @@
+{
+  "id": "01a19337-438f-7370-a474-c1eba9e51744",
+  "external_ref": null,
+  "title": "Test-run retention: a configurable age limit (default 7 days) for unprotected logs and detail, with a read-only preview before any cleanup",
+  "outcome": "Operators can set how long positively unprotected test-run raw logs and verbose detail are kept (default 7 days, or keep indefinitely), see a read-only preview of what is protected, eligible and unknown, and only later have a bounded, restart-safe cleanup remove exactly eligible files; active, unresolved, verification-bound and evidence-cited results, compact identities and proofs are never removed.",
+  "acceptance": [
+    "Slice 1 (non-destructive): a settings field for unprotected test-run log/detail retention (positive finite days, default 7, or keep indefinitely) and a read-only preview listing counts and bytes protected, eligible and unknown, with the reason per class; no file is deleted and protection semantics are unchanged. Tests cover validation, the preview classes, and that changing the setting deletes nothing.",
+    "Eligibility is measured from a trustworthy terminal endedAt; missing, future or ambiguous times, active, unresolved, pending-wait/card/notification, uncertain-ownership, verification-bound, evidence-cited and unknown-citation-coverage runs are all protected; tests cover each exemption.",
+    "Slice 2 (destructive, separately reviewed): bounded restart-safe cleanup outside StateInner, owned by the existing test-run/artifact lifecycle, that durably records the survivor identity and cleanup intent first, revalidates identity/path/terminal/protection at application, deletes only allowlisted files in the exact managed run directory, refuses links/junctions/foreign paths, reports partial deletion idempotently, and keeps a durable identity/result with an explicit log-unavailable reason; deterministic tests cover hold/deletion interleavings, crash recovery and path refusal.",
+    "Each slice: independent review pair with no outstanding Medium-or-higher finding and the full gate on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "greg-direction",
+    "retention",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

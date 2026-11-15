@@ -1,0 +1,29 @@
+{
+  "id": "01a1c231-f82f-7090-9e9d-02b04465d6f8",
+  "external_ref": null,
+  "title": "Recheck observation workdir after owner capture when the directory disappears",
+  "outcome": "An ordinary Workdir source capture whose session directory disappears or changes repositories during owner I/O cannot return an enclosing or replacement repository's source identity.",
+  "acceptance": [
+    "Capture revalidates the session directory and its intended worktree at the owner-I/O boundary, failing unavailable on drift while retaining legitimate stable subdirectory captures.",
+    "A deterministic behavior regression deletes or redirects the workdir during capture, preserves a stable positive control, and proves no enclosing identity is admitted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "review-follow-up",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

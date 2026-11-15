@@ -1,0 +1,30 @@
+{
+  "id": "01a1c46c-4160-7331-a34d-f5fc6bce999a",
+  "external_ref": null,
+  "title": "Doc-link Lint admission accepts any program whose basename is node, including repo-relative paths",
+  "outcome": "Doc-link Lint admission accepts only the bare node program or an absolute Node executable path, and refuses repo-relative programs such as ./node or tools/node; docs/test.md describes what is actually checked.",
+  "acceptance": [
+    "A recorded focused command whose program is ./node or tools/node with scripts/check-doc-links.mjs is refused for Lint admission, shown by behavioural refusal tests",
+    "The bare node program and an absolute Node executable path are still admitted",
+    "docs/test.md describes what is actually checked"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "declared-commands",
+    "read-only-gate",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

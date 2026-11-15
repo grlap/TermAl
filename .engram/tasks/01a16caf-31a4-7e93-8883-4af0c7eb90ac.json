@@ -1,0 +1,30 @@
+{
+  "id": "01a16caf-31a4-7e93-8883-4af0c7eb90ac",
+  "external_ref": null,
+  "title": "With turn-gated control OFF, source-root naming and host check credit stop for new roots (naming requires turn_gated_control)",
+  "outcome": "Turning a project's turn-gated control off (to stop turn-begin admission) no longer takes away source-root naming and host verification credit for new work, so agents can keep earning recorded checks while admission is disabled.",
+  "acceptance": [
+    "An agreed design (Architect concurrence recorded on this item) states which host behaviours depend on turn-begin admission (turn_gated_control) and which only on Engram being enabled for the project (is_base_enabled); source-root naming and check recording are classified explicitly.",
+    "With enabled=true and turn_gated_control=false, termal_name_source_root for a root session holding the work's claim succeeds or is refused only for a reason other than 'Engram control is not enabled', per the agreed design; a regression test covers it and fails on the current code.",
+    "With enabled=false the refusal is unchanged; focused tests for source roots and turn checks pass on the exact input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-control",
+    "greg-reported",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

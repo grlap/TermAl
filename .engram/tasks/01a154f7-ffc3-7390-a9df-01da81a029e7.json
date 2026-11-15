@@ -1,0 +1,69 @@
+{
+  "id": "01a154f7-ffc3-7390-a9df-01da81a029e7",
+  "external_ref": null,
+  "title": "M4 increment 2: durable runtime wake/command admission and boot recovery",
+  "outcome": "Wire the landed inert executor journal into authenticated satellite wake/prompt queue admission and bounded recovery for M4 criterion 1. Preserve distinct received, queued, runtime-accepted and processed evidence and captured M1 target binding; no Start/Stop lifecycle envelope (increment 3), binding installation, replication or global claim lock. Exact C1–C5 concurred by Architect1 note c99bb36cd43c4d20b83324afb5aa78b5 and Fable2 note fad8a74bc86f471dba54e72928c9e3e1 / mailbox#796. Base9c698380. Source RED authorized; builds held until post-restart scheduled GO.",
+  "acceptance": [
+    "An authenticated current central-to-satellite wake/command request for an already placed session is validated against captured host, enrollment and session/placement identity, then durably deduplicated in the landed executor journal before any acceptance response or runtime effect. An exact duplicate returns retained evidence; changed content or authority under the same operation key is refused. Failure before commit never reports acceptance, and a lost response after commit does not create a second operation. Authority is revalidated at durable acceptance and again before any runtime effect. A fresh link incarnation that transports the same operation after reconciliation does not create a new application command.",
+    "The production receiver connects the retained operation to the existing local prompt/command queue using a stable operation-derived identity. Received, durably queued, runtime-accepted and processed remain separate evidence states; queue admission alone never claims runtime acceptance, and a mailbox ACK alone never confirms an unknown runtime effect. Concurrent delivery creates at most one logical queue entry and one effect attempt for that identity. The journal and session persistence are separate durability surfaces: the operation is persisted first, its queue/attempt association is persisted before dispatch (reusing held-content persistence and the PromptDelivery write-ahead), and recovery finds the existing association by that identity rather than creating another entry. Mailbox wakes keep their existing mailbox source and ACK semantics unchanged.",
+    "Startup/reconnect recovery on the central and satellite production paths reuses retained sender intents, wake obligations and executor records. Tests cover receive commit, queue commit, queue-evidence commit, effect-attempt marking, runtime acknowledgement and processed-evidence persistence boundaries, including lost replies and reopening both stores. Recovered work is not duplicated; an uncertain effect remains held for reconciliation and is never blindly re-executed or reassigned. Recovery is bounded and never globally resumes queues; dormant persisted queues and explicit pause/Resume behaviour are preserved.",
+    "The channel carries ordinary wakes, prompts and the authorized commands for already placed sessions; any Git-folder export/merge/import, ownership or handoff work it instructs is performed by the agent as ordinary work on source the satellite already fetched from the shared Git remote; the channel carries no task-sync records, no mailbox replica and no source or workspace (joint-v7.1 §0 boundary sentence). It introduces no SQLite replication, global claim lock, source/workspace transfer, alternate executor, timeout reassignment or broad queue resume. Existing stale-authority checks remain required; the complete central-down and stale-receipt/epoch matrices remain explicit parent follow-ups unless separately demonstrated here. The target identity used by the receiver is M1's central placement binding (host id, qualified session id, creation identity, placement generation); M5's proxy→native association (w-fc620307cb7a) resolves to that same binding and no proxy id travels on this channel.",
+    "Fail-first regressions exercise the production receiver, queue and boot recovery rather than only journal predicates; focused tests and the exact-input full five-stage gate pass, an independent read-only Codex/Claude review pair has no outstanding in-scope Medium-or-higher finding, and independent acceptance evaluates this increment without completing the M4 parent. The RED matrix states which of the brief's C1 cut points (C append+wake commit, S inbox commit and acceptance response, inbox→queue persistence, queue durability acknowledgement, handoff write-ahead, runtime acknowledgement and settlement, C receipt settlement) this increment covers and which it defers."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 5,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "design-pending",
+    "federation-m4",
+    "greg-directed",
+    "mailbox",
+    "multi-machine",
+    "remote-foundations",
+    "runtime-journal"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a14bba-c160-77c3-b4e2-c50515867f37",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed M4 increment2: authenticated durable native wake/prompt receive, exact operation-derived held queue association, separate queue/runtime/processed evidence, bounded boot/reconnect recovery, owned shutdown and exact unsent hold restoration. Origin/master ec9385a69a8d215060894598f90f98405d47a88e is the exact reviewed/gated v25 tree01cd92bc on cff7b73a; native full gate db5c2afdb93948f69570c9ce41428da6 PASS and supported fresh independent acceptance837248c5c5924ef88d3eaa3acc3b87bb 5/5. Parent M4 remains open.",
+    "completed_at": "2026-10-20T05:24:08.815501900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

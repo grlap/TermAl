@@ -1,0 +1,31 @@
+{
+  "id": "01a0f4a0-b906-7fc0-aa38-daccfddf0ae9",
+  "external_ref": null,
+  "title": "Avoid an empty read-record clause in same-session omission notices",
+  "outcome": "A same-session notice with unread records and no read records reports the unread boundary without '0 entries ... ()'.",
+  "acceptance": [
+    "Avoid an empty read-record clause in same-session omission notices is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "beads-in-progress",
+    "beads-migrated",
+    "host-recording",
+    "repeated-problem",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a0ea91-e695-7472-8e21-67e7b8bdcade",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1418a-5edb-71e1-9652-9b98c0e65bfa",
+  "disposal_reason": "The parent is completed. Continue as independent work: a small notice fix (Termal::Opus3's triage, TermAl mailbox 03723eab #2675).",
+  "completion": null
+}

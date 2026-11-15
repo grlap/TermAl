@@ -1,0 +1,46 @@
+{
+  "id": "01a0e6d3-c3b3-7f70-beda-d9a518a0e9a1",
+  "external_ref": "tm-132q",
+  "title": "Report in settings and readiness that TermAl cannot satisfy require_source_freshness at done, instead of supplying a copied fingerprint",
+  "outcome": "Re-scoped 2026-10-03 by Termal::Fable2 on Architect1's ruling 7ce7d9a3 as qualified by Architect2's second check c49efe75, with Architect1's joint reconciliation d4ba4fa9.\n\nTermAl does not mediate done: agents call Engram's MCP binary directly (src/engram_mcp_config.rs 736-784). So TermAl cannot present a host-measured source fingerprint at done, and an agent-copied value would be asserted freshness, not measured freshness. TermAl therefore never supplies a copied fingerprint and never weakens a project's policy automatically.\n\nEngram 4e1b0e1 still enforces require_source_freshness after the named-root checks, with no named-root exemption (acceptance_evaluation.rs 1707-1732). Under a policy with the flag on, a done without the required matching fingerprint is refused. Supplying a matching argument remains a live producer route, but TermAl has no host-measured value to supply. That refusal stays Engram's, and TermAl preserves it.\n\nWhat this item delivers: TermAl names the unsupported capability, host-measured completion freshness, where a project's policy is read (acceptance settings and readiness):\n- for a policy with the flag on, it says so;\n- for a policy whose flag state cannot be read, it shows the state as unknown, not as flag-on and not as flag-off;\n- a policy change is picked up by re-reading.\nThe gap then shows before any done is attempted, the same pattern as w-14ddc4e4ca4f criterion 2 for sub_agent.\n\nNot this item:\n- the named-root sighting mechanism (w-370c19557c00 and w-e16e7268155a), which judges freshness at done from host sightings and is not equivalent to a done-boundary measurement;\n- closing the done-calling-turn window, which no host-sighting comparison closes and which is a producer-side question for Engram.\nrequire_source_freshness stays OFF in TermAl's own policy.",
+  "acceptance": [
+    "When a project's acceptance policy has require_source_freshness on, TermAl's acceptance settings and readiness views tell that project that TermAl provides no host-measured completion fingerprint, that a direct done without one is refused by Engram, and that copying the evaluated fingerprint is not a remedy.",
+    "The policy is re-read rather than trusted from an earlier read. An unreadable policy is shown as unknown, with the same warning, and is never treated as flag-off.",
+    "TermAl supplies nothing at done: no copied value, no done proxy, and no automatic change to any project's policy. Engram's refusal of a done without a fingerprint is preserved.",
+    "Tests cover a policy with the flag false, true, unreadable, and changed between reads.",
+    "docs/features/engram-host-adapter.md documents the flag-off workflow and its observation interval separately from the unsupported flag-on capability, replacing the sentence at lines 2374-2376.",
+    "The full five-stage gate passes on the exact reviewed tree; its run directory and fingerprint are cited in a note."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 6,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "engram",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

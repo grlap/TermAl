@@ -1,0 +1,29 @@
+{
+  "id": "01a1cb9f-3518-7f72-9e77-1d4818a2b4d3",
+  "external_ref": null,
+  "title": "Require thread identity in automatic Codex archive barriers",
+  "outcome": "An automatic archive barrier without a matching thread and Codex home identity grants no automatic unarchive permission; behavioral fixtures use explicit matching identity.",
+  "acceptance": [
+    "Automatic archive authorization refuses a missing or mismatched thread/home identity, and permits a matching automatic barrier.",
+    "Existing hand-built fixtures carry the identity needed for their intended behavior, with behavioral negative controls for missing and mismatched identity."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "hardening",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

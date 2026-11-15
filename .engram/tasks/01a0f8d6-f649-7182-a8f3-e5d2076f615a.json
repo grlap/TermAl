@@ -1,0 +1,36 @@
+{
+  "id": "01a0f8d6-f649-7182-a8f3-e5d2076f615a",
+  "external_ref": null,
+  "title": "Reserve mandatory canonical discovery time before optional notes paging",
+  "outcome": "Optional older-note pages give way before their calls consume the time required for the full contract, selected records and their revalidation, and canonical binding reads; slow successful optional pages should not force an otherwise admissible request into a discovery-budget refusal.",
+  "acceptance": [
+    "A request-path test with successful slow optional notes pages and funded mandatory discovery reads stops optional paging with time_budget while retaining enough time for the full contract, selected-record revalidation and canonical binding reads; an actually issued failed canonical page still refuses before evaluator admission."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "repeated-problem",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0f464-f38b-7f82-a402-e57a7f7e8da0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

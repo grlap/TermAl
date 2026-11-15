@@ -1,0 +1,31 @@
+{
+  "id": "01a1b92a-3fd1-7e32-b679-fbd9ff804d12",
+  "external_ref": null,
+  "title": "Keep failed test-run continuation Retry visible during unrelated refresh",
+  "outcome": "A failed continuation retains its Retry and remaining explicit page budget when another page refreshes; history stays user-controlled and errors never trigger an automatic retry loop.",
+  "acceptance": [
+    "An unrelated first/visible-page refresh does not clear the failure for a different continuation or silently lose its retained explicit page budget.",
+    "A controlled failure followed by invalidation leaves Retry available until that continuation succeeds or the panel identity changes, with no automatic failure retry."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "performance",
+    "review-low",
+    "state-flood",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a14b89-c82a-7330-b1db-5f17deb1e060",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

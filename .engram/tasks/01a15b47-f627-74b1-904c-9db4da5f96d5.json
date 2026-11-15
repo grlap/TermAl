@@ -1,0 +1,30 @@
+{
+  "id": "01a15b47-f627-74b1-904c-9db4da5f96d5",
+  "external_ref": null,
+  "title": "Mint read admission offers only for bridge reads, avoiding non-read protocol churn",
+  "outcome": "Protocol capability probes and agent-facing protocol inspection do not unnecessarily consume read-offer slots or shorten retained-page recovery windows.",
+  "acceptance": [
+    "Mint read admission offers only for bridge reads, avoiding non-read protocol churn is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "gate-load",
+    "greg-directed",
+    "mailbox",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15a23-842a-7c72-b323-c931b0f63084",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

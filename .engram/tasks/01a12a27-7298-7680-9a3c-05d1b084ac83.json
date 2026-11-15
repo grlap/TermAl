@@ -1,0 +1,28 @@
+{
+  "id": "01a12a27-7298-7680-9a3c-05d1b084ac83",
+  "external_ref": null,
+  "title": "The 240 s admission budget still clips post-Begin steps (delivery fence, source observation) after a Begin was applied",
+  "outcome": "Once a head's Begin has been applied (active_grant_id set), the admission budget no longer clips the steps after the Begin, such as the post-Begin delivery durability fence and the source-observation steps using target.dispatch_deadline. A turn whose Begin succeeded near the deadline is not thrown away to the AdmissionFence abort path and an exhausted hold. A regression test covers a Begin applied just before the budget deadline.",
+  "acceptance": [
+    "The 240 s admission budget still clips post-Begin steps (delivery fence, source observation) after a Begin was applied is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "engram-host-adapter",
+    "retained-prompt",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Fixed inside w-cfcf10b68c9b's package and lands with it. The round-4 Claude reviewer (delegation-0041847d-55c1-4d7a-8b8e-22941511480b) raised this to a Medium, with a scenario where an applied begin gets stuck in source observation. engram_admission_budget_enforced now exempts an active grant as well as an uncertain one, so post-Begin steps keep only their per-attempt bounds. The regression is in the_admission_budget_clips_attempts_and_spares_a_possibly_applied_begin. Frozen at schema-1 7342bf9d….",
+  "completion": null
+}

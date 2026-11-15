@@ -1,0 +1,28 @@
+{
+  "id": "01a1d5df-7112-7d22-95c3-f4c16527531e",
+  "external_ref": null,
+  "title": "Integrate combo94 on 1bf874d9: a7bb 05062f47 (K3 slice 1 remote completion qualification; Opus2 chain carry of c9ed7f20 onto the P0)",
+  "outcome": "The candidate is on master as one commit, gated by a full launcher run on the exact tree, pushed, and installed on Central and DL560.",
+  "acceptance": [
+    "Commit 05062f47658d48fb656f00237f87145e61d73268 (tree cddfbe983e7a135371d0bff68f73377a5807923d) is on origin/master, where master was moved to it by a fast-forward from 1bf874d9cafa90cecba51a1802b90c5b67c6c426.",
+    "A full launcher run (node scripts/test-launcher.mjs full --input commit) on a test ref whose tree is cddfbe98 passed every stage, with equal source ids before and after and an eligible clean input; the Windows leg on the exact candidate passed (tests::delegation_process_cleanup:: on Central); and no review finding of Medium or higher is outstanding: Sol-a7bb's fresh whole-9 review pair (Codex 17852, Claude 17853 attempt 2 after Fable2's one same-session follow-up) on exactly 1bf874d9..05062f47 found no Medium or higher, with its Low filed as its own item.",
+    "The release binary built from tree cddfbe98 was installed at target/release/termal(.exe) on Central and DL560, with the previous binary kept aside, and the running hosts were not restarted by the install; a later landing's install or a host restart's `cargo run --release` rebuild may since have replaced it, and only a replacing install keeps the replaced binary aside."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

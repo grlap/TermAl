@@ -1,0 +1,29 @@
+{
+  "id": "01a1c6dc-9e2a-7913-bcbe-a5f3b88704b7",
+  "external_ref": null,
+  "title": "sibling_worktree tests fail on Windows when TEMP is a long path: git init writes .git/hooks sample files past 260 characters",
+  "outcome": "sibling_worktree tests fail on Windows when TEMP is a long path: git init writes .git/hooks sample files past 260 characters",
+  "acceptance": [
+    "The sibling_worktree fixture tests pass on Windows when TEMP points at a repo-local scratch directory deep enough that default git init hook samples would exceed 260 characters; a test or fixture change shows it (for example fixtures created without hook samples).",
+    "No test depends on the length of the TEMP path for correctness, and fixture scratch stays inside the repository's scratch area."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "environment",
+    "tests",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
