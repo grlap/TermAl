@@ -144,18 +144,21 @@ in Engram::Advisor's session, recorded verbatim):
   recorded, and at the latest when the item closes, and records the push and
   the deletion (commit id, times) on the item. This grants no other commit,
   push, install or restart.
+- Task-sync data branch. An agent session may commit task and memory exports in the project's dedicated data worktree (MAIN/.engram-data/) to the orphan branch engram-data and push that branch to origin as a routine sync step. Only that branch, fast-forward only (fetch, agent merge, commit, push); never force-push, rebase or history rewrite, never master or another branch, never code, docs or tests. The origin repository may be public, so every pushed export is visible to anyone: before each push the pusher confirms the export carries no secret, credential or private personal data. This grants no other commit, push, install or restart.
+
 - A commit in a feature branch or detached worktree is not yet on `master`.
   Hand its hash and exact-input gate, review and task evidence to the
   integration owner; do not run `git push origin master` from that worktree.
-- Apart from author test refs, only the integration owner performs
-  pushes under this rule. Every other
+- Apart from author test refs and task-sync data-branch pushes, only the
+  integration owner performs pushes under this rule. Every other
   committing session, including one committing directly on master, sends
   the commit hash and exact-input gate, review and task evidence to that
   owner by TermAl mailbox.
-- Before every push under this rule, including for a commit made directly
-  on master, the integration owner must verify that master's tip is the
-  reviewed and gated commit, that `origin/master` still matches the reviewed
-  integration base, and that the push is a fast-forward; for a candidate
+- Before every push of master under this rule, including for a commit made
+  directly on master, the integration owner must verify that master's tip
+  is the reviewed and gated commit, that `origin/master` still matches the
+  reviewed integration base, and that the push is a fast-forward; for a
+  candidate
   that adopts a review pair, the gated commit is its own and the
   integration base is the master it was committed on. For a change that
   conditions (a), (b) and (c) below cover, the integration owner also
@@ -188,10 +191,12 @@ in Engram::Advisor's session, recorded verbatim):
   narrowing, or clarifying needs only (a), (b) and (c). No other approval
   is asked.
 - Outside the standing rule's three conditions above, the
-  candidate-commits bullet and the author test refs bullet, a commit or
-  push needs Greg's own word in the acting session. Outside this standing
-  rule, the candidate-commits bullet and the author test refs bullet, a
-  word relayed by another session never carries a commit or push.
+  candidate-commits bullet, the test refs for remote runs bullet, the author
+  test refs bullet and the task-sync data-branch bullet, a commit or push
+  needs Greg's own word in the acting session. Outside this standing rule,
+  the candidate-commits bullet, the test refs for remote runs bullet, the
+  author test refs bullet and the task-sync data-branch bullet, a word
+  relayed by another session never carries a commit or push.
   This rule grants no restart, deploy or global-configuration authority; those
   acts are Greg's and need his explicit word. The moment of a TermAl
   restart is the agents' decision (Greg, 2026-10-02: 'Wolę aby agenci
