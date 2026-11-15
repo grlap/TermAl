@@ -3769,8 +3769,8 @@ fn refresh_delegation_from_child_locked(
             let completed_at = stamp_now();
             let unavailable = if delegation.mode == DelegationMode::Reviewer {
                 Some((
-                    "Reviewer completed without the required structured result. Inspect the full child output; TermAl did not classify this review as clean.",
-                    "Structured review result was not submitted; findings are unavailable, not empty.",
+                    "Reviewer completed without the required structured result. Inspect the full child output; TermAl did not classify this review as clean.".to_owned(),
+                    "Structured review result was not submitted; findings are unavailable, not empty.".to_owned(),
                 ))
             } else {
                 acceptance_evaluator_unavailable_result(&delegation)
@@ -3824,7 +3824,7 @@ fn refresh_delegation_from_child_locked(
                     inner,
                     &delegation.child_session_id,
                     SessionStatus::Idle,
-                    unavailable_summary,
+                    &unavailable_summary,
                 );
                 let parent_card_delta = update_parent_delegation_card_locked(
                     inner,

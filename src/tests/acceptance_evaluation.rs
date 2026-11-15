@@ -86,6 +86,9 @@ mod durability_pending;
 #[path = "acceptance_evaluation_evidence_recovery.rs"]
 mod evidence_recovery;
 
+#[path = "acceptance_evaluation_read_callers.rs"]
+mod read_callers;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 /// These request/submission fixtures begin after a canonical no-event read
