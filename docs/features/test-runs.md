@@ -40,6 +40,25 @@ creates no verification record. Native completion and destination qualification
 remain separate owners. Remote observer identities omit causal custody and
 refuse injected custody rather than turning it into observer identity.
 
+### Native completion diagnostics
+
+The existing `GET /api/test-runs/:id` detail response includes
+`detail.nativeCompletionRefusal` when the native completion owner or the
+original provider's artifact correlator could not retain its facts. The
+diagnostic is retained on the existing registration or provider observation
+and survives reload. It names the phase and a closed reason code, boolean
+observations of the deciding predicates, an outcome (`refused`, `pending`, or
+`unknown`), and a remedy. It contains no producer text, paths or runtime tokens.
+The registration-confirmation view and snapshot/SSE summaries omit this detail.
+
+Missing original origin, runtime or provider correlation cannot be repaired by
+inferring an association or borrowing a later session's authority. Pending
+registration acknowledgement is distinct from absent evidence and a refused
+match. A later successful original association clears its diagnostic. A valid
+retained completion is never replaced by a diagnostic. These observations do
+not create completion, a verification receipt or test credit. Earlier provider
+placement diagnostics retain their own owner and deciding reason.
+
 ### Reading an original causal completion
 
 The host-private `readCausalTestCompletion` operation uses the existing

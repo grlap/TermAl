@@ -242,6 +242,26 @@ fn get_test_run_observed(
     diagnostics: &mut TestRunRegistrationDiagnostics,
     include_detail: bool,
 ) -> Result<Json<TestRunDetailResponse>, ApiError> {
+    let mut response = get_test_run_observed_without_native_diagnostics(
+        state.clone(),
+        run_id,
+        diagnostics,
+        include_detail,
+    )?;
+    if include_detail {
+        let inner = diagnostics.lock(&state.inner);
+        response.0.detail.native_completion_refusal =
+            test_run_native_completion_refusal_for_detail(&inner, &response.0.run);
+    }
+    Ok(response)
+}
+
+fn get_test_run_observed_without_native_diagnostics(
+    state: AppState,
+    run_id: &str,
+    diagnostics: &mut TestRunRegistrationDiagnostics,
+    include_detail: bool,
+) -> Result<Json<TestRunDetailResponse>, ApiError> {
     diagnostics.enter("get_retained_lookup");
     {
         let inner = diagnostics.lock(&state.inner);
