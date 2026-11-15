@@ -250,6 +250,7 @@ mod remote_prompt_projection;
 mod remote_proxy_rebase_collision;
 mod remote_session_workdir;
 mod remote_state_events;
+mod remote_sync_noop_stamp;
 mod remote_terminal;
 mod response_board;
 mod review;

@@ -144,9 +144,9 @@ impl RemoteSyncRollback {
 ///   NOT mutate `inner.projects` — project rows are managed by the
 ///   project-create/delete API paths); runs `retain_sessions` to
 ///   drop local proxies not in the snapshot and tombstone them via
-///   `record_removed_session`; updates every remaining remote
-///   session via `session_mut_by_index` +
-///   `apply_remote_session_summary_to_record`; then syncs every remote
+///   `record_removed_session`; applies the summary of every remaining
+///   remote session with `apply_remote_session_summary_to_record`,
+///   stamping only those it changed (see "Mutation stamps"); then syncs every remote
 ///   orchestrator instance via `sync_remote_orchestrators_inner`,
 ///   each id translated from remote to local proxy ids. A failure
 ///   inside orchestrator sync triggers `rollback.restore(inner)`
@@ -174,9 +174,12 @@ impl RemoteSyncRollback {
 /// or `Project`, so downstream code never has to disambiguate "whose
 /// id is this".
 ///
-/// **Mutation stamps.** Every updated session lands through
-/// `session_mut_by_index`, so the delta-persist path picks up the
-/// remote-sourced changes the same way a local mutation would.
+/// **Mutation stamps.** Every mirrored session takes the remote summary,
+/// but only one whose `RemoteProxyChangeView` differs before and after is
+/// stamped, through `stamp_session_at_index`, so the delta-persist path and
+/// the broadcast cache pick up real changes while an unchanged snapshot
+/// stamps nothing. A broad snapshot carries every mirrored session; stamping
+/// unchanged ones would rewrite all of them on the next persist tick.
 ///
 /// **Called from:** the SSE bridge (`process_remote_event_stream`),
 /// the periodic resync path (`resync_remote_state_snapshot_with_authority`), the
@@ -194,7 +197,7 @@ impl RemoteSyncRollback {
 ///   PreCapture --> BuildMap[build remote→local project id map<br/>read-only scan of inner.projects]
 ///   BuildMap --> BroadRetain{broad-sync?}
 ///   BroadRetain -- yes --> Retain[retain_sessions: drop local proxies<br/>not in snapshot, queue tombstones]
-///   BroadRetain -- no --> SessionUpdates[two-phase session updates:<br/>collect indexes, then<br/>session_mut_by_index + apply_remote_session_summary_to_record]
+///   BroadRetain -- no --> SessionUpdates[two-phase session updates:<br/>collect indexes, then<br/>apply_remote_session_summary_to_record,<br/>stamp only if RemoteProxyChangeView differs]
 ///   Retain --> SessionUpdates
 ///   SessionUpdates --> FocusedCapture{focused path?}
 ///   FocusedCapture -- yes --> PostCapture[RemoteSyncRollback::capture<br/>AFTER session updates]
@@ -220,11 +223,11 @@ fn sync_remote_state_inner(
 ) {
     // Mutation contract — this function mutates only these fields of
     // `StateInner`: `sessions` (via retain_sessions /
-    // upsert_remote_proxy_session_summary_record / session_mut_by_index),
+    // upsert_remote_proxy_session_summary_record / the summary apply),
     // `orchestrator_instances` (via localize_remote_orchestrator_instance),
     // `next_session_number` (via push_session), `removed_session_ids` (via
     // retain_sessions → record_removed_session), and `last_mutation_stamp`
-    // (side-effect of session_mut_by_index / push_session). If a future
+    // (side-effect of stamp_session_at_index / push_session). If a future
     // change adds mutation of any other `StateInner` field here (e.g.
     // `projects`, `remote_applied_revisions`), extend `RemoteSyncRollback`
     // to capture that field too or the rollback below will silently
@@ -281,11 +284,11 @@ fn sync_remote_state_inner(
         .collect::<HashMap<_, _>>();
 
     // Two-phase update: first scan immutably to collect `(index,
-    // remote_session_id, local_project_id)` tuples, then mutate via
-    // `session_mut_by_index` so each changed record gets a fresh
-    // `mutation_stamp`. Iterating `&mut inner.sessions` directly would
-    // skip stamping, and the new SQLite delta persist would then drop
-    // these remote-proxy updates entirely.
+    // remote_session_id, local_project_id)` tuples, then apply each summary
+    // and stamp the record only if it changed. The record is reached through
+    // `inner.sessions` directly, not a stamping accessor, so the stamp below
+    // is the only one; omitting it for a real change would drop that update
+    // from the SQLite delta persist and leave the broadcast cache stale.
     let updates: Vec<(usize, String, Option<LocalProjectId>)> = inner
         .sessions
         .iter()
@@ -322,15 +325,26 @@ fn sync_remote_state_inner(
         let Some(remote_session) = remote_sessions_by_id.get(remote_session_id.as_str()) else {
             continue;
         };
-        let Some(record) = inner.session_mut_by_index(idx) else {
+        // The mirror always takes the remote summary. It is stamped only
+        // when something a stamp consumer observes changed: a broad snapshot
+        // carries every mirrored session, so stamping unchanged ones would
+        // send them all to the next persist delta, each rewritten in full
+        // when it has no transcript baseline. Contract: any state a stamp
+        // consumer reads that none of `RemoteProxyChangeView`'s views covers
+        // must be added to that view, or its change goes unstamped.
+        let Some(record) = inner.sessions.get_mut(idx) else {
             continue;
         };
+        let before = RemoteProxyChangeView::capture(record);
         apply_remote_session_summary_to_record(
             record,
             remote_id,
             local_project_id.map(LocalProjectId::into_inner),
             remote_session,
         );
+        if before.differs_from(&RemoteProxyChangeView::capture(record)) {
+            inner.stamp_session_at_index(idx);
+        }
     }
 
     let rollback_state = if focus_remote_session_id.is_some() {
@@ -353,6 +367,85 @@ fn sync_remote_state_inner(
             "remote state warning> failed to sync remote orchestrators for `{remote_id}` at revision {}: {err:#}",
             remote_state.revision
         );
+    }
+}
+
+/// What a consumer of a mirrored proxy's mutation stamp can observe, so a
+/// broad remote snapshot stamps only the proxies it actually changed:
+/// - the broadcast summary, which the SSE state cache reuses while the stamp
+///   is unchanged;
+/// - the full live activity: persistence drops it, and the summary carries
+///   only a whitespace-normalized, truncated form of it, while the full
+///   session response exports it beside the stamp;
+/// - the record persistence writes, without its transcript;
+/// - the transcript identity, which decides whether the cached transcript
+///   suffix is kept.
+///
+/// The summary, live activity and persisted record are compared serialized,
+/// so a field added to any of them is covered without a list kept here. Only
+/// the stamp itself (the summary's `session_mutation_stamp`) and the
+/// per-write `source_stamp` are left out. A view that cannot be serialized
+/// counts as changed.
+struct RemoteProxyChangeView {
+    summary: Option<Vec<u8>>,
+    live_activity: Option<Vec<u8>>,
+    persisted: Option<Vec<u8>>,
+    transcript: RemoteProxyTranscriptIdentity,
+}
+
+#[derive(PartialEq)]
+struct RemoteProxyTranscriptIdentity {
+    message_start_index: usize,
+    retained_messages: usize,
+    message_count: u32,
+    remote_mutation_stamp: Option<u64>,
+    body_seq: Option<u64>,
+    body_seq_epoch: Option<String>,
+    remote_applied: Option<u64>,
+    remote_epoch: Option<String>,
+}
+
+impl RemoteProxyChangeView {
+    fn capture(record: &SessionRecord) -> Self {
+        // A proxy is never a local session, so the summary does not depend on
+        // the local instance id.
+        let mut summary = AppState::wire_session_summary_from_record("", record);
+        summary.session_mutation_stamp = None;
+        let mut persisted = PersistedSessionRecord::from_record(record).clone_without_messages();
+        persisted.source_stamp = None;
+        Self {
+            summary: serde_json::to_vec(&summary).ok(),
+            live_activity: serde_json::to_vec(&record.session.live_activity).ok(),
+            persisted: serde_json::to_vec(&persisted).ok(),
+            transcript: RemoteProxyTranscriptIdentity {
+                message_start_index: record.message_start_index,
+                retained_messages: record.session.messages.len(),
+                message_count: record.session.message_count,
+                remote_mutation_stamp: record.session.session_mutation_stamp,
+                body_seq: record.session.body_seq,
+                body_seq_epoch: record.session.body_seq_epoch.clone(),
+                remote_applied: record.body_sequence.remote_applied,
+                remote_epoch: record.body_sequence.remote_epoch.clone(),
+            },
+        }
+    }
+
+    fn differs_from(&self, after: &Self) -> bool {
+        let serialized = [
+            &self.summary,
+            &after.summary,
+            &self.live_activity,
+            &after.live_activity,
+            &self.persisted,
+            &after.persisted,
+        ];
+        if serialized.iter().any(|view| view.is_none()) {
+            return true;
+        }
+        self.summary != after.summary
+            || self.live_activity != after.live_activity
+            || self.persisted != after.persisted
+            || self.transcript != after.transcript
     }
 }
 
@@ -491,7 +584,10 @@ fn apply_remote_session_summary_to_record(
     remote_session: &StateSessionSummary,
 ) {
     let local_session_id = record.session.id.clone();
-    let previous_messages = record.session.messages.clone();
+    // Moved, not copied: `record.session` is replaced just below, and the
+    // transcript is restored or cleared before this function returns. The
+    // caller holds StateInner throughout, so no reader sees it taken.
+    let previous_messages = std::mem::take(&mut record.session.messages);
     let previous_message_start_index = record.message_start_index;
     let previous_messages_loaded = record.session.messages_loaded;
     let previous_prompt_history = record.session.prompt_history.clone();
