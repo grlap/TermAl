@@ -60,6 +60,9 @@ import {
   unknownSource,
 } from "./test-launcher-source.mjs";
 
+import { PARALLEL_FULL_SCHEDULE, assertParallelFullHost, fullSchedule, isolatedStageEnvironments,
+  removeStageIsolation, runStageSchedule, validateCargoOutputTarget } from "./test-full-schedule.mjs";
+
 export { captureSourceMetadata };
 
 const script = fileURLToPath(import.meta.url);
@@ -76,6 +79,7 @@ export const helperTestFiles = Object.freeze([
   "scripts/test-categories-plan.test.mjs",
   "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
+  "scripts/test-full-schedule.test.mjs",
   "scripts/test-launcher-request-message.test.mjs",
   "scripts/test-launcher-panic-journal.test.mjs",
   "scripts/test-launcher-plan.test.mjs",
@@ -120,6 +124,7 @@ export const helperSupportFiles = Object.freeze([
   "scripts/test-durations.mjs",
   "scripts/test-fixture-cleanup.mjs",
   "scripts/test-launcher.mjs",
+  "scripts/test-full-schedule.mjs",
   "scripts/test-launcher-source.mjs",
   "scripts/test-launcher-input.mjs",
   "scripts/test-launcher-registration-fixtures.mjs",
@@ -284,7 +289,7 @@ function unavailableDuration(report) {
 // persisted: unknown numbers and diagnostic text use their longest JSON form.
 // Optional duration lists are handled from their actual artifact after close;
 // verdict-affecting accounting is never removed by this reservation.
-function reserveCommandResult(result, entry, field, index, runDir, sourceId, { owned = false, report } = {}) {
+function commandResultReservation(result, entry, { owned = false, report, platform = process.platform } = {}) {
   const integer = -Number.MAX_VALUE;
   const diagnostic = "\0".repeat(diagnosticLimit);
   const completed = { ...entry, state: "failed", ended: new Date().toISOString(), code: integer,
@@ -305,7 +310,7 @@ function reserveCommandResult(result, entry, field, index, runDir, sourceId, { o
       stall: { state: "unknown", runId: result.runId, stage: entry.name, pid: integer, log,
         inactiveMs: integer, episode: integer, error: diagnostic, observedAt: new Date().toISOString() },
     });
-    if (process.platform === "win32") {
+    if (platform === "win32") {
       // The native owner JSON line is admitted under a UTF-16 character cap.
       // Its UTF-8 image costs at most three bytes per code unit. Serialization
       // keeps the same closed fields and escaping; parent-only fields above
@@ -316,8 +321,12 @@ function reserveCommandResult(result, entry, field, index, runDir, sourceId, { o
         pids: [integer], pidScope: "command root only", ownership: "posix-process-group" };
     }
   }
+  return completed;
+}
+
+function reserveCommandResult(result, entry, field, index, runDir, sourceId, options = {}) {
   const entries = [...result[field]];
-  entries[index] = completed;
+  entries[index] = commandResultReservation(result, entry, options);
   reserveResultSource({ ...result, [field]: entries, interrupted: true }, runDir, sourceId);
 }
 
@@ -338,7 +347,7 @@ function windowsGitBash(env) {
 // `node` is the Node executable the stages run under; it defaults to this
 // process's own, and a reader rebuilding another host's plan passes that
 // host's recorded one.
-export function requiredStages(platform = process.platform, env = process.env, node = process.execPath) {
+export function requiredStages(platform = process.platform, env = process.env, node = process.execPath, { parallelRustVitest = false } = {}) {
   const rustCommand = platform === "win32" ? windowsGitBash(env) : "sh";
   const rustArgs = platform === "win32"
     ? ["-c", "exec scripts/test-rust.sh"]
@@ -360,12 +369,14 @@ export function requiredStages(platform = process.platform, env = process.env, n
     },
     {
       name: "rust-tests",
+      ...(parallelRustVitest ? { schedule: PARALLEL_FULL_SCHEDULE } : {}),
       command: rustCommand,
       args: rustArgs,
       durationReport: "unavailable",
     },
     {
       name: "vitest",
+      ...(parallelRustVitest ? { schedule: PARALLEL_FULL_SCHEDULE } : {}),
       command: node,
       args: ["node_modules/vitest/vitest.mjs", "run"],
       cwd: "ui",
@@ -417,8 +428,16 @@ export function fullGatePlan(input) {
   if (!input.executables || typeof input.executables !== "object") {
     throw new Error("plan executables must map stage names to executables");
   }
-  const stages = requiredStages(input.platform, { TERMAL_TEST_GIT_BASH: input.gitBash }, input.node);
-  return { planSchema: 1, stages, entries: expectedStageEntries(stages, input) };
+  if (input.parallelRustVitest !== undefined && typeof input.parallelRustVitest !== "boolean") {
+    throw new Error("plan parallelRustVitest must be boolean");
+  }
+  if (input.parallelRustVitest && input.platform !== "linux") {
+    throw new Error("parallel full plan requires Linux");
+  }
+  const stages = requiredStages(input.platform, { TERMAL_TEST_GIT_BASH: input.gitBash }, input.node,
+    { parallelRustVitest: input.parallelRustVitest === true });
+  return { planSchema: 1, stages, entries: expectedStageEntries(stages, input),
+    ...(input.parallelRustVitest ? { schedule: PARALLEL_FULL_SCHEDULE, failFast: false } : {}) };
 }
 
 // One UI category run: that Vitest project alone, under the same
@@ -661,6 +680,8 @@ export async function createRun({
   // The committed-input status reader; tests replace it to act between the
   // reads.
   commitInputStatus = captureCommitInputStatus,
+  // Function-only fixture seam; the CLI never supplies an admission override.
+  parallelAdmission = assertParallelFullHost,
 }, env = process.env) {
   if (requestMessageId !== undefined) {
     validateRequestMessageId(requestMessageId);
@@ -673,6 +694,8 @@ export async function createRun({
   if (runInput !== undefined && !["commit", "plain"].includes(runInput)) {
     throw new Error(`unsupported run input: ${runInput}`);
   }
+  const schedule = fullSchedule(stages ?? [], full);
+  if (schedule) parallelAdmission();
   const normalizedRoot = resolve(root);
   const gitEnv = isolatedGitEnvironment(env);
   let notification;
@@ -750,6 +773,7 @@ export async function createRun({
     sourceIdAfter: null,
     ...(plainInputReason ? { inputSelection: { kind: "plain", reason: plainInputReason } } : {}),
     preflight: [],
+    ...(schedule ? { scheduling: { mode: schedule, failFast: false } } : {}),
     ...(scope ? { scope } : {}),
     stages: (stages ?? []).map(({ name, liveTests }) => ({
       name,
@@ -1052,21 +1076,24 @@ export function diskSpacePreflight(request, runDir, env = process.env, {
   };
 }
 
-export async function runCommand(command, args, { cwd, env, log }) {
+export async function runCommand(command, args, { cwd, env, log, stdout }) {
   const fd = openSync(log, "wx");
+  let outputFd;
   try {
+    outputFd = stdout === undefined ? fd : openSync(stdout, "wx");
     return await new Promise((done) => {
       let error;
       const child = spawn(command, args, {
         cwd,
         env,
         windowsHide: true,
-        stdio: ["ignore", fd, fd],
+        stdio: ["ignore", outputFd, fd],
       });
       child.on("error", (value) => { error = value.message; });
       child.on("close", (code, signal) => done({ code, signal, ...(error ? { error } : {}) }));
     });
   } finally {
+    if (outputFd !== undefined && outputFd !== fd) closeSync(outputFd);
     closeSync(fd);
   }
 }
@@ -1156,7 +1183,7 @@ function validateNotification(request, env) {
   };
 }
 
-function validateInitialRequest(runDir, request, env) {
+function validateInitialRequest(runDir, request, env, parallelAdmission = assertParallelFullHost) {
   if (!request || typeof request !== "object" || request.runId !== basename(runDir) ||
       !isAbsolute(request.root)) {
     throw new Error("invalid worker request identity or repository root");
@@ -1177,6 +1204,8 @@ function validateInitialRequest(runDir, request, env) {
     }
     names.add(stage.name);
   }
+  const schedule = fullSchedule(request.stages, request.full);
+  if (schedule) parallelAdmission();
   if (request.input !== undefined && request.input !== "commit") {
     throw new Error("worker request names an unsupported input");
   }
@@ -1347,7 +1376,11 @@ export function saveProgressObservation(resultPath, result, entry, observation, 
   }
 }
 
-export async function executeRun(runDir, env = process.env, { onReady, diskSpace, signal, progress, commandPhase, uiSetup } = {}) {
+export async function executeRun(runDir, env = process.env, { onReady, diskSpace, signal, progress, commandPhase, uiSetup,
+  parallelAdmission = assertParallelFullHost, ownedStage = runOwnedCommand,
+  // Linux-only scheduling fixtures can use its projection on a Windows host.
+  // Production always reserves the native owner's complete response bound.
+  parallelReservationPlatform = process.platform } = {}) {
   // Exclusive admission: an interrupted run is not a retryable test command.
   closeSync(openSync(join(runDir, "execution.lock"), "wx"));
   const resultPath = join(runDir, "results.json");
@@ -1356,7 +1389,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
   let requestTrusted = false;
   try {
     request = readJson(join(runDir, "request.json"));
-    validateInitialRequest(runDir, request, env);
+    validateInitialRequest(runDir, request, env, parallelAdmission);
     await validateRunRegistration(request, env, runDir);
     requestTrusted = true;
     result = readJson(resultPath);
@@ -1382,21 +1415,28 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     }
     return result;
   }
+  const parallel = fullSchedule(request.stages, request.full) !== undefined;
+  const pairAbort = new AbortController();
+  const pairSignal = signal ? AbortSignal.any([signal, pairAbort.signal]) : pairAbort.signal;
+  let stageIsolation;
+  let parallelCargoTarget, parallelBuildTarget;
   const childEnv = runEnvironment(env, runDir);
   result.panicJournal = childEnv[PANIC_JOURNAL_ENV];
   save(resultPath, result);
   // `entries` is where the probe is recorded: `result.preflight` for a probe
   // that gates the run, `result.toolchainProbes` for provenance only, which
   // no failure reader treats as the run's failure.
-  const probe = async (name, command, args, entries = result.preflight) => {
+  const probe = async (name, command, args, entries = result.preflight, { stdout } = {}) => {
     const log = join(runDir, `preflight-${name}.log`);
-    const entry = { name, command: [command, ...args], cwd: request.root, log };
+    const entry = { name, command: [command, ...args], cwd: request.root, log,
+      ...(stdout === undefined ? {} : { stdout }) };
     const field = entries === result.preflight ? "preflight" : "toolchainProbes";
     reserveCommandResult(result, entry, field, entries.length, runDir, request.sourceId);
     const outcome = await runCommand(command, args, {
       cwd: request.root,
       env: childEnv,
       log,
+      stdout,
     });
     entries.push({ ...entry,
       ...outcome,
@@ -1500,6 +1540,40 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     result.preflight = [];
     save(resultPath, result);
     if (!request.full) await onReady?.();
+    if (parallel) {
+      // Ask Cargo to resolve its own config hierarchy without fetching or
+      // changing the lockfile. Do not replace configured output with a guessed
+      // default, or create any output before its existing ancestors are checked.
+      const program = executable(childEnv.TERMAL_TEST_CARGO?.trim() || "cargo", request.root, childEnv);
+      const metadataPath = join(runDir, "preflight-cargo-output.stdout.json");
+      await probe("cargo-output", program, ["metadata", "--format-version=1", "--no-deps", "--locked", "--offline"],
+        result.preflight, { stdout: metadataPath });
+      if (statSync(metadataPath).size > 1024 * 1024) throw new Error("Cargo output metadata exceeds its read bound");
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+      if (metadata.version !== 1 || typeof metadata.target_directory !== "string" ||
+          !isAbsolute(metadata.target_directory)) {
+        throw new Error("Cargo output metadata has no supported absolute output directory");
+      }
+      if (typeof metadata.build_directory !== "string" || !isAbsolute(metadata.build_directory)) {
+        throw new Error("Cargo output metadata requires an absolute build_directory for intermediate output");
+      }
+      const rawBuildDirectory = cargoOutputEnvironment(childEnv, "CARGO_BUILD_BUILD_DIR");
+      if (rawBuildDirectory !== undefined && (typeof rawBuildDirectory !== "string" ||
+          resolve(request.root, rawBuildDirectory) !== resolve(metadata.build_directory))) {
+        throw new Error("CARGO_BUILD_BUILD_DIR disagrees with reported build_directory");
+      }
+      const validate = (target) => {
+        // Preserve raw matching env paths for the component walk, including a
+        // link followed by '..' that metadata may normalize in its display.
+        for (const name of ["CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR", "CARGO_BUILD_BUILD_DIR"]) {
+          const raw = cargoOutputEnvironment(childEnv, name);
+          if (raw && resolve(request.root, raw) === resolve(target)) validateCargoOutputTarget(request.root, raw);
+        }
+        return validateCargoOutputTarget(request.root, target);
+      };
+      parallelCargoTarget = validate(metadata.target_directory);
+      parallelBuildTarget = validate(metadata.build_directory);
+    }
     result.diskSpace = diskSpacePreflight(request, runDir, childEnv, diskSpace);
     save(resultPath, result);
     for (const warning of result.diskSpace.warnings) console.error(warning);
@@ -1558,7 +1632,16 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       // No version is claimed until this run's own preflight reports one.
       if (result.source) result.source.toolchain = pendingToolchain(cargo, result.cargo.source);
       save(resultPath, result);
-      ensureCargoTargetDirectory(request.root, childEnv);
+      if (!parallel || parallelCargoTarget === join(realpathSync.native(request.root), "target")) {
+        ensureCargoTargetDirectory(request.root, childEnv);
+      }
+    }
+    if (parallel) {
+      // Pin the effective Cargo-selected paths only AFTER the original env
+      // has driven fresh-target preparation. Both writer phases use the same
+      // validated output; no private HOME changes Cargo's config selection.
+      childEnv.CARGO_TARGET_DIR = parallelCargoTarget;
+      childEnv.CARGO_BUILD_BUILD_DIR = parallelBuildTarget;
     }
     const names = new Set();
     // What each stage command resolved to on this host, and the duration
@@ -1649,7 +1732,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       try { await onReady?.(); }
       catch (error) { throw new Error(`detached readiness failed: ${error.message}`); }
     }
-    for (let index = 0; index < request.stages.length; index += 1) {
+    const executeStage = async (index) => {
       const stage = request.stages[index];
       const entry = result.stages[index];
       // The duration report only adds a machine-readable artifact beside the
@@ -1664,14 +1747,21 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         log: join(runDir, `${stage.name}.log`),
       };
       reserveCommandResult(result, running, "stages", index, runDir, request.sourceId,
-        { owned: stage.name === "focused" && !request.full, report });
+        { owned: (stage.name === "focused" && !request.full) || (parallel && index >= 4), report,
+          platform: parallel && index >= 4 ? parallelReservationPlatform : process.platform });
       const proposed = { ...result, stages: result.stages.map((value, position) => position === index ? running : value) };
       save(resultPath, proposed);
       // Only adopt running after the durable proposed record fits. Refusal
       // before this point leaves this unspawned stage unrun.
       Object.assign(entry, running);
       let outcome;
-      if (stage.name === "focused" && !request.full) {
+      if (parallel && index >= 4) {
+        outcome = await ownedStage(stage.command, args, {
+          cwd: stage.cwd, env: stageIsolation.environments[stage.name], log: entry.log, signal: pairSignal,
+          onOwner: (owner) => { entry.processOwner = owner; save(resultPath, result); },
+          onStart: (pid) => { entry.pid = pid; save(resultPath, result); },
+        });
+      } else if (stage.name === "focused" && !request.full) {
         let stopProgress;
         let releaseCommandPhase;
         const notices = [];
@@ -1712,6 +1802,17 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         state: outcome.code === 0 && !outcome.error ? "passed" : "failed",
       });
       if (entry.error) entry.error = boundedRunError(entry.error, runDir);
+      const fatalOwner = parallel && index >= 4 && (outcome.error || outcome.interrupted || outcome.cleanup?.state !== "reaped");
+      const fatalError = fatalOwner ? new Error(entry.error || "parallel stage owner interrupted or cleanup unresolved") : undefined;
+      if (fatalError) {
+        // A returned owner failure is an infrastructure failure, just like a
+        // thrown one. Retain its facts before aborting the held peer, then let
+        // the scheduler await both owners' terminal cleanup and publication.
+        entry.state = "failed";
+        entry.error ??= fatalError.message;
+        save(resultPath, result);
+        pairAbort.abort(fatalError.message);
+      }
       if (report) entry.durations = readDurationReport(report, stage.cwd);
       // A focused run's exit says nothing about how many tests ran; its
       // wrapped runner's own result lines do (scripts/test-counts.mjs).
@@ -1753,7 +1854,37 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       entry.diagnostics = await diagnostics(entry.log, entry.state === "failed");
       fitDurationReport(result, entry, runDir, request.sourceId);
       save(resultPath, result);
-      if (entry.state === "failed") break;
+      if (fatalError) throw fatalError;
+      return entry.state === "passed";
+    };
+    let releasePairCommandPhase;
+    try { await runStageSchedule(request.stages.length, executeStage, {
+      parallel,
+      onFatal: (error) => pairAbort.abort(error.message),
+      beforeParallel: (indices) => {
+        validateCargoOutputTarget(request.root, parallelCargoTarget);
+        validateCargoOutputTarget(request.root, parallelBuildTarget);
+        stageIsolation = isolatedStageEnvironments(request.root, request.runId, childEnv, parallelCargoTarget);
+        result.scheduling = { mode: PARALLEL_FULL_SCHEDULE, failFast: false, isolation: stageIsolation.paths };
+        const projected = [...result.stages];
+        for (const index of indices) {
+          const stage = request.stages[index];
+          const report = durationReportPlan(stage, runDir);
+          const args = report ? [...report.prefix, ...stage.args, ...report.suffix] : stage.args;
+          projected[index] = commandResultReservation(result, { ...result.stages[index],
+            state: "running", started: new Date().toISOString(), command: [stage.command, ...args],
+            cwd: stage.cwd, log: join(runDir, `${stage.name}.log`),
+          }, { owned: true, report, platform: parallelReservationPlatform });
+        }
+        reserveResultSource({ ...result, stages: projected, interrupted: true }, runDir, request.sourceId);
+        save(resultPath, result);
+        releasePairCommandPhase = commandPhase?.();
+      },
+    }); } finally { releasePairCommandPhase?.(); }
+    if (stageIsolation && result.stages.every((stage) => stage.state === "passed")) {
+      removeStageIsolation(request.root, stageIsolation.directory);
+      result.scheduling.isolationCleanup = "removed";
+      save(resultPath, result);
     }
     let status, sourceRefusal;
     try {
@@ -2289,6 +2420,7 @@ export async function startDetachedRun(runDir, env = process.env) {
 function parseCommon(args) {
   let notifyTo;
   let detach = false;
+  let parallelRustVitest = false;
   let liveBinary;
   let liveSha256;
   let input;
@@ -2297,6 +2429,7 @@ function parseCommon(args) {
   while (args.length && args[0] !== "--") {
     const flag = args.shift();
     if (flag === "--detach") detach = true;
+    else if (flag === "--parallel-rust-vitest" && !parallelRustVitest) parallelRustVitest = true;
     else if (flag === "--input" && ["commit", "plain"].includes(args[0])) input = args.shift();
     else if (flag === "--request-message-id") {
       if (requestMessageId !== undefined || !args.length) throw new Error("request-message-id requires one non-duplicate message id");
@@ -2310,7 +2443,7 @@ function parseCommon(args) {
     else throw new Error(`invalid option: ${flag}`);
   }
   if (args[0] === "--") args.shift();
-  return { notifyTo, detach, liveBinary, liveSha256, input, requestMessageId, requiredBinaryEnv, rest: args };
+  return { notifyTo, detach, parallelRustVitest, liveBinary, liveSha256, input, requestMessageId, requiredBinaryEnv, rest: args };
 }
 
 async function main(args) {
@@ -2343,7 +2476,7 @@ async function main(args) {
     return;
   }
   if (!["full", "focused", "live", "category"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--input commit|plain] [--request-message-id MESSAGE_ID (full/focused only)] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit|plain] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
+    throw new Error("usage: test-launcher.mjs full|focused|live [--parallel-rust-vitest (DL560 full only)] [--notify SESSION] [--detach] [--input commit|plain] [--request-message-id MESSAGE_ID (full/focused only)] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit|plain] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
   }
   // A category is resolved, or refused, before any run directory exists.
   let category;
@@ -2355,6 +2488,10 @@ async function main(args) {
     category = resolveCategory(await loadCategoryManifest(repository), name);
   }
   const options = parseCommon(args);
+  if (options.parallelRustVitest) {
+    if (mode !== "full") throw new Error("parallel Rust/Vitest is supported only by full runs");
+    assertParallelFullHost();
+  }
   if (options.requestMessageId !== undefined && !["full", "focused"].includes(mode)) {
     throw new Error("request-message-id is supported only by full and focused");
   }
@@ -2376,7 +2513,7 @@ async function main(args) {
     throw new Error("detached mode requires a different coordinator --notify SESSION; otherwise use foreground host completion wait");
   }
   const stages = mode === "full"
-    ? requiredStages()
+    ? requiredStages(process.platform, process.env, process.execPath, { parallelRustVitest: options.parallelRustVitest })
     : mode === "live"
       ? [liveStage(process.platform, process.env, liveTests)]
       : mode === "category"

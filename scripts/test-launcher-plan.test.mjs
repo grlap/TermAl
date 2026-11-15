@@ -90,6 +90,20 @@ test("full gate plan: the plan never depends on the host computing it", () => {
   assert.deepEqual(fullGatePlan(mac), fullGatePlan(structuredClone(mac)));
 });
 
+test("full gate plan records the Linux opt-in without changing any stage command or selection", () => {
+  const input = { ...mac, platform: "linux" };
+  const sequential = fullGatePlan(input);
+  const parallel = fullGatePlan({ ...input, parallelRustVitest: true });
+  assert.equal(parallel.schedule, "dl560-rust-vitest-v1");
+  assert.equal(parallel.failFast, false);
+  assert.deepEqual(parallel.entries, sequential.entries);
+  assert.deepEqual(parallel.stages.filter((stage) => stage.schedule).map(({ name }) => name), ["rust-tests", "vitest"]);
+  assert.deepEqual(parallel.stages.map(({ schedule: _schedule, ...stage }) => stage), sequential.stages);
+  assert.equal(sequential.schedule, undefined);
+  assert.throws(() => fullGatePlan({ ...mac, parallelRustVitest: true }), /requires Linux/);
+  assert.throws(() => fullGatePlan({ ...input, parallelRustVitest: "true" }), /must be boolean/);
+});
+
 test("full gate plan: missing host-bound values are refused, never filled from this host", () => {
   assert.throws(() => fullGatePlan({ ...mac, platform: "beos" }), /plan platform/u);
   assert.throws(() => fullGatePlan({ ...windows, gitBash: undefined }), /needs the run's gitBash/u);

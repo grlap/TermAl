@@ -21,7 +21,7 @@ import fs, {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, relative } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import test, { after } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -64,6 +64,8 @@ import { registerLauncherRegistrationTests, withHostedRegistrationFixture } from
 import { registerLauncherLifecycleTests } from "./test-launcher-lifecycle-tests.mjs";
 import { writeUiBootstrapFixture } from "./test-ui-bootstrap-fixtures.mjs";
 import * as launcherSourceMetadata from "./test-launcher.mjs";
+import { PARALLEL_FULL_SCHEDULE } from "./test-full-schedule.mjs";
+import { runOwnedCommand } from "./test-process-owner.mjs";
 
 const fixtureEnv = {
   ...process.env,
@@ -91,7 +93,7 @@ const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 // Private launcher copies must include its complete runtime dependency
 // closure, including the native helpers selected only when a stage executes.
 const copiedLauncherFiles = Object.freeze([
-  "test-launcher.mjs", "test-launcher-source.mjs", "test-launcher-input.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
+  "test-full-schedule.mjs", "test-launcher.mjs", "test-launcher-source.mjs", "test-launcher-input.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
   "source-id-budget.mjs", "source-id-budget-ms.json", "engram-call-budget-ms.json",
   "review-freeze-fingerprint.mjs",
   "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
@@ -3637,3 +3639,278 @@ test("focused native Node launcher writes real TAP/spec success and failure coun
     }
   }
 });
+
+
+// Full execution fixtures use only Node stand-ins, with normal registration,
+// source observations, result publication and native process ownership.
+const parallelNames = ["fmt", "cargo-check", "typescript", "fingerprint-tests", "rust-tests", "vitest"];
+const eventBarrier = () => {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+};
+async function parallelExecutionFixture(t, callback,
+  metadataResponse = (target) => ({ version: 1, target_directory: target, build_directory: target })) {
+  const fixtureDirectory = join(projectRoot, ".tmp");
+  mkdirSync(fixtureDirectory, { recursive: true });
+  await repository(t, async (root, inherited) => {
+    const env = { ...inherited, HOME: root, TERMAL_TEST_CARGO: process.execPath,
+      RUSTC: process.execPath, CARGO_HOME: join(root, ".git", "cargo-home") };
+    for (const key of Object.keys(env)) {
+      if (["CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR", "CARGO_BUILD_BUILD_DIR"].includes(key.toUpperCase())) delete env[key];
+    }
+    writeFileSync(join(root, ".gitignore"),
+      readFileSync(join(root, ".gitignore"), "utf8") + "/target\n/configured-target\n/.tmp\n");
+    execFileSync("git", ["add", "--", ".gitignore"], { cwd: root, env });
+    execFileSync("git", ["commit", "--quiet", "--no-gpg-sign", "-m", "ignore fixture output"], { cwd: root, env });
+    const witness = join(root, ".git", "stage-starts.jsonl");
+    // The tool boundary is still a native Node child. Model Cargo's metadata
+    // response for these fixture-owned settings; no real compiler is started.
+    const nativeSpawn = childProcess.spawn;
+    const cargoMetadata = t.mock.method(childProcess, "spawn", (command, args, options) => {
+      if (command !== process.execPath || args[0] !== "metadata") return nativeSpawn(command, args, options);
+      const config = join(root, ".cargo", "config.toml");
+      const configured = existsSync(config)
+        ? /target-dir\s*=\s*'([^']+)'/u.exec(readFileSync(config, "utf8"))?.[1] : undefined;
+      const target = resolve(root,
+        options.env.CARGO_TARGET_DIR || options.env.CARGO_BUILD_TARGET_DIR || configured || "target");
+      return nativeSpawn(process.execPath, ["-e", "console.error('fixture metadata warning'); console.log(" +
+        JSON.stringify(JSON.stringify(metadataResponse(target, options.env))) + ");"], options);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { cargoMetadata.mock.restore(); syncBuiltinESMExports(); });
+    const makeStages = (configuredTarget) => parallelNames.map((name, index) => ({
+      name, command: process.execPath,
+      args: ["-e", [
+        "const fs = require('node:fs'), path = require('node:path');",
+        "const target = process.env.CARGO_TARGET_DIR || process.env.CARGO_BUILD_TARGET_DIR || " +
+          JSON.stringify(configuredTarget ?? "target") + ";",
+        "fs.appendFileSync(" + JSON.stringify(witness) +
+          ", JSON.stringify({name:" + JSON.stringify(name) +
+          ", target:path.resolve(target), buildTarget:process.env.CARGO_BUILD_BUILD_DIR," +
+          " tagged:fs.existsSync('target/CACHEDIR.TAG')}) + '\\n');",
+      ].join("\n")],
+      ...(index >= 4 ? { schedule: PARALLEL_FULL_SCHEDULE } : {}),
+    }));
+    const create = (options = {}, runEnv = env) => createRun({
+      root, full: true, stages: makeStages(), parallelAdmission: () => {}, ...options,
+    }, runEnv);
+    const execute = (runDir, options = {}, runEnv = env) =>
+      executeRun(runDir, runEnv, { parallelAdmission: () => {},
+        parallelReservationPlatform: "linux", ...options });
+    const observed = () => existsSync(witness)
+      ? readFileSync(witness, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse) : [];
+    await callback({ root, env, witness, makeStages, create, execute, observed });
+  }, fixtureEnv, fixtureDirectory);
+}
+
+test("parallel repair: a returned fatal owner outcome cancels and settles its held sibling", async (t) => {
+  await parallelExecutionFixture(t, async ({ root, create, execute }) => {
+    const peerStarted = eventBarrier(), failureSaved = eventBarrier();
+    const release = join(root, ".git", "release-peer");
+    const runDir = await create();
+    const resultPath = join(runDir, "results.json");
+    let peerSignal, peerOutcome;
+    const rename = fs.renameSync;
+    const renameMock = t.mock.method(fs, "renameSync", (from, to) => {
+      const result = rename(from, to);
+      if (to === resultPath) {
+        const rust = json(to).stages.find((entry) => entry.name === "rust-tests");
+        if (rust?.state === "failed" && rust.error?.includes("fixture owner observation failed")) {
+          failureSaved.resolve();
+        }
+      }
+      return result;
+    });
+    syncBuiltinESMExports();
+    const execution = execute(runDir, {
+      ownedStage: async (command, args, options) => {
+        if (basename(options.log) === "rust-tests.log") {
+          await peerStarted.promise;
+          return runOwnedCommand(command, args, { ...options, onStart: (pid) => {
+            options.onStart?.(pid);
+            throw new Error("fixture owner observation failed");
+          } });
+        }
+        peerSignal = options.signal;
+        const held = [
+          "const fs = require('node:fs');",
+          "const path = " + JSON.stringify(release) + ";",
+          "const watcher = fs.watch(require('node:path').dirname(path), () => {",
+          "  if (fs.existsSync(path)) { watcher.close(); process.exit(0); }",
+          "});",
+          "if (fs.existsSync(path)) { watcher.close(); process.exit(0); }",
+        ].join("\n");
+        peerOutcome = await runOwnedCommand(command, ["-e", held], {
+          ...options, onStart: (pid) => { options.onStart?.(pid); peerStarted.resolve(); },
+        });
+        return peerOutcome;
+      },
+    });
+    try {
+      assert.equal(await Promise.race([
+        failureSaved.promise.then(() => "fatal saved"), execution.then(() => "run ended"),
+      ]), "fatal saved", "the returned fatal owner's actual facts must be saved");
+      // One event-loop checkpoint lets the scheduler consume the saved
+      // outcome. The peer is still held by an explicit file barrier.
+      await new Promise((done) => setImmediate(done));
+      assert.equal(peerSignal.aborted, true, "returned owner infrastructure failure must abort the peer");
+    } finally {
+      writeFileSync(release, "release\n");
+      await execution;
+      renameMock.mock.restore();
+      syncBuiltinESMExports();
+    }
+    assert.equal(peerOutcome.interrupted, true);
+    assert.equal(peerOutcome.cleanup.state, "reaped");
+    const result = json(resultPath);
+    assert.equal(result.state, "failed");
+    assert.match(result.stages[4].error, /fixture owner observation failed/);
+  });
+});
+
+for (const kind of ["outside override", "linked target", "linked ancestor"]) {
+  test("parallel repair: rejects " + kind + " before any stage starts", async (t) => {
+    await parallelExecutionFixture(t, async ({ root, env, create, execute, observed }) => {
+      const outside = mkdtempSync(join(dirname(root), "cargo-outside-"));
+      removeFixtureOnPass(t, outside);
+      const runEnv = { ...env };
+      if (kind === "outside override") {
+        runEnv.CARGO_TARGET_DIR = join(root, "..", basename(outside), "not-created");
+      } else {
+        const link = join(root, "target");
+        symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir");
+        if (kind === "linked ancestor") runEnv.CARGO_TARGET_DIR = join(link, "missing", "output");
+      }
+      const runDir = await create({}, runEnv);
+      const result = await execute(runDir, {}, runEnv);
+      assert.equal(result.state, "failed");
+      assert.deepEqual(observed(), [], "target refusal must precede every stage writer");
+      assert.deepEqual(readdirSync(outside), [], "validation must not create output through the escaped target");
+      assert.ok(result.stages.every((entry) => entry.state === "unrun"));
+    });
+  });
+}
+
+test("parallel repair: fresh ignored Cargo output is tagged before the first stage", async (t) => {
+  await parallelExecutionFixture(t, async ({ root, create, execute, observed }) => {
+    const result = await execute(await create({ needsCargo: true }));
+    assert.equal(result.state, "passed");
+    assert.equal(observed().length, 6);
+    assert.equal(observed()[0].tagged, true, "first writer must observe target/CACHEDIR.TAG");
+    assert.match(readFileSync(join(root, "target", "CACHEDIR.TAG"), "utf8"),
+      /^Signature: 8a477f597d28d172789f06886806bc55\n/u);
+    assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true);
+  });
+});
+
+for (const kind of ["explicit target", "build target environment", "Cargo configuration"]) {
+  test("parallel repair: preserves effective " + kind + " for every stage", async (t) => {
+    await parallelExecutionFixture(t, async ({ root, env, makeStages, create, execute, observed }) => {
+      const target = join(root, "configured-target");
+      const runEnv = { ...env };
+      if (kind === "explicit target") runEnv.CARGO_TARGET_DIR = target;
+      if (kind === "build target environment") runEnv.CARGO_BUILD_TARGET_DIR = target;
+      if (kind === "Cargo configuration") {
+        mkdirSync(join(root, ".cargo"));
+        writeFileSync(join(root, ".cargo", "config.toml"), "[build]\ntarget-dir = 'configured-target'\n");
+        execFileSync("git", ["add", "--", ".cargo/config.toml"], { cwd: root, env });
+        execFileSync("git", ["commit", "--quiet", "--no-gpg-sign", "-m", "configure fixture target"], { cwd: root, env });
+      }
+      const runDir = await create({ needsCargo: true, stages: makeStages(target) }, runEnv);
+      const result = await execute(runDir, {}, runEnv);
+      assert.equal(result.state, "passed");
+      assert.equal(observed().length, 6);
+      assert.deepEqual(observed().map((entry) => entry.target), Array(6).fill(target));
+      assert.equal(existsSync(join(root, "target")), false, "configured output must not create the default target");
+    });
+  });
+}
+
+
+for (const kind of ["missing field", "missing with environment", "missing with config", "missing with linked environment"]) {
+  test("parallel build-dir: refuses " + kind + " before setup or writers", async (t) => {
+    await parallelExecutionFixture(t, async ({ root, env, create, execute, observed }) => {
+      const runEnv = { ...env };
+      if (kind !== "missing field") {
+        const outside = mkdtempSync(join(dirname(root), "build-outside-"));
+        removeFixtureOnPass(t, outside);
+        if (kind === "missing with environment") runEnv.CARGO_BUILD_BUILD_DIR = join(outside, "intermediate");
+        if (kind === "missing with linked environment") {
+          const link = join(root, "configured-target");
+          symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir");
+          runEnv.CARGO_BUILD_BUILD_DIR = join(link, "intermediate");
+        }
+        if (kind === "missing with config") {
+          mkdirSync(join(root, ".cargo"));
+          writeFileSync(join(root, ".cargo", "config.toml"),
+            "[build]\nbuild-dir = '" + join(outside, "intermediate") + "'\n");
+          execFileSync("git", ["add", "--", ".cargo/config.toml"], { cwd: root, env });
+          execFileSync("git", ["commit", "--quiet", "--no-gpg-sign", "-m", "configure independent fixture build output"], { cwd: root, env });
+        }
+      }
+      const result = await execute(await create({}, runEnv), {}, runEnv);
+      assert.equal(result.state, "failed", "unobserved intermediate output must refuse admission");
+      assert.match(result.error, /build.directory|intermediate output/i);
+      assert.deepEqual(observed(), [], "no writer may precede missing-build-directory refusal");
+      assert.equal(result.preflight.some((entry) => entry.name === "ui-dependencies"), false);
+    }, (target) => ({ version: 1, target_directory: target }));
+  });
+}
+
+test("parallel build-dir: refuses environment that disagrees with reported build output", async (t) => {
+  let reported;
+  await parallelExecutionFixture(t, async ({ root, env, create, execute, observed }) => {
+    reported = join(root, ".tmp", "reported-build");
+    const outside = mkdtempSync(join(dirname(root), "build-disagreement-"));
+    removeFixtureOnPass(t, outside);
+    const runEnv = { ...env, CARGO_BUILD_BUILD_DIR: join(outside, "unreported-build") };
+    const result = await execute(await create({}, runEnv), {}, runEnv);
+    assert.equal(result.state, "failed");
+    assert.match(result.error, /disagree|mismatch/i);
+    assert.deepEqual(observed(), []);
+    assert.deepEqual(readdirSync(outside), []);
+  }, (target) => ({ version: 1, target_directory: target, build_directory: reported }));
+});
+
+for (const kind of ["outside", "linked"]) {
+  test("parallel build-dir: refuses reported " + kind + " output before setup", async (t) => {
+    let reported;
+    await parallelExecutionFixture(t, async ({ root, create, execute, observed }) => {
+      const outside = mkdtempSync(join(dirname(root), "reported-build-outside-"));
+      removeFixtureOnPass(t, outside);
+      reported = outside;
+      if (kind === "linked") {
+        reported = join(root, "configured-target");
+        symlinkSync(outside, reported, process.platform === "win32" ? "junction" : "dir");
+      }
+      const result = await execute(await create());
+      assert.equal(result.state, "failed");
+      assert.deepEqual(observed(), []);
+      assert.equal(result.preflight.some((entry) => entry.name === "ui-dependencies"), false);
+      assert.deepEqual(readdirSync(outside), []);
+    }, (target) => ({ version: 1, target_directory: target, build_directory: reported }));
+  });
+}
+
+for (const kind of ["configuration", "matching environment"]) {
+  test("parallel build-dir: retains validated distinct output from " + kind, async (t) => {
+    let reported;
+    await parallelExecutionFixture(t, async ({ root, env, create, execute, observed }) => {
+      reported = join(root, ".tmp", "configured-intermediate");
+      const runEnv = { ...env };
+      if (kind === "matching environment") runEnv.CARGO_BUILD_BUILD_DIR = reported;
+      if (kind === "configuration") {
+        mkdirSync(join(root, ".cargo"));
+        writeFileSync(join(root, ".cargo", "config.toml"), "[build]\nbuild-dir = '" + reported + "'\n");
+        execFileSync("git", ["add", "--", ".cargo/config.toml"], { cwd: root, env });
+        execFileSync("git", ["commit", "--quiet", "--no-gpg-sign", "-m", "configure fixture intermediate output"], { cwd: root, env });
+      }
+      const result = await execute(await create({ needsCargo: true }, runEnv), {}, runEnv);
+      assert.equal(result.state, "passed");
+      assert.equal(observed().length, 6);
+      assert.deepEqual(observed().map((entry) => entry.buildTarget), Array(6).fill(reported));
+      assert.equal(sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter), true);
+    }, (target) => ({ version: 1, target_directory: target, build_directory: reported }));
+  });
+}

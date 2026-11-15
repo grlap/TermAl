@@ -86,6 +86,53 @@ TypeScript and Vitest use their JavaScript entrypoints rather than `.cmd` shims.
 working directories and required files are preflighted, and a missing
 prerequisite leaves every stage explicitly unrun.
 
+DL560 has an experimental, explicit opt-in:
+
+```bash
+node scripts/test-launcher.mjs full --input commit --parallel-rust-vitest
+```
+
+Only the allowlisted native Linux machine can run this mode. The launcher
+checks an application-specific digest of `/etc/machine-id` before creating
+the run and again in its worker; the raw id is never recorded. Other hosts,
+unreadable identities and mismatches refuse the flag without a fallback or
+an environment override. Without the flag every host keeps the existing
+sequential, fail-fast schedule.
+
+Setup and the first four stages, including the entire Node helper group,
+finish before Rust and Vitest start together. The opt-in does not fail fast
+on ordinary stage failures: both siblings finish and retain their own logs,
+diagnostics and result rows under one run id. Setup, identity and integrity
+failures still refuse execution. Cancellation interrupts both separately
+owned process groups and awaits their cleanup; unresolved cleanup fails the
+run. Returned owner infrastructure failures also abort the peer and retain
+both owners' terminal facts. Stage commands, worker caps, UI project order
+and timeouts are unchanged.
+
+Before setup or any stage writer, the opt-in reads Cargo's effective output
+paths with `cargo metadata --format-version=1 --no-deps --locked --offline`.
+Metadata stdout is separate from diagnostic stderr, and its read is bounded
+to 1 MiB. The launcher refuses output outside the worktree, links/junctions
+and non-directory ancestors, including links hidden before `..`; it creates
+no output during validation. Cargo's environment and configuration choose
+the effective paths. The original environment drives fresh ignored
+`target/CACHEDIR.TAG` preparation before those validated paths are pinned
+for both writer phases. Metadata must report absolute `target_directory` and
+`build_directory` paths; missing or unsupported fields refuse execution. An
+explicit `CARGO_BUILD_BUILD_DIR` must agree with the reported build directory
+or the launcher refuses before setup or any stage writer.
+
+The overlapping stages use separate temporary roots, HOME/XDG directories,
+Git config and disposable Engram homes under the worktree's ignored `.tmp/`.
+The Rust stage uses the validated Cargo target already used by cargo-check.
+Toolchain and registry caches retain their explicit original paths. Source-owner capture
+and registration use the original parent environment, before and after both
+stages; either stage failing, incomplete accounting or source drift fails
+the aggregated run. Successful private roots are removed after both settle;
+failed roots stay for diagnosis. Existing DL560 resource admission and named
+placement still apply. The request's immutable stage entries bind the
+schedule; `plan` input sets `parallelRustVitest: true` to reconstruct it.
+
 In a registered full run, the exact `cargo fmt --check` stage is a Lint check,
 including when it fails. It grants no Test or Build credit. A stage that never
 runs stays `not_run` in the run body and mints no verification record. Ordinary
