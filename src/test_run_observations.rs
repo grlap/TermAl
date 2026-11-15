@@ -46,6 +46,10 @@ struct TestRunCommandObservation {
     evidence: Vec<TestRunEvidenceAssociation>,
     #[serde(default)]
     artifact: Option<TestRunObservedArtifact>,
+    // Kept separately from start-placement diagnostics. Only the original
+    // provider event's later artifact correlation may update this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
     #[serde(default)]
     declared_artifact: Option<String>,
     // Original declaration and artifact start image, retained for the task's
@@ -666,6 +670,7 @@ impl AppState {
             final_unbound_proof: None,
             declared_verdict_pending: false,
             evidence: Vec::new(),
+            native_completion_refusal: None,
             artifact: native.as_ref().map(|start| TestRunObservedArtifact {
                 run_id: start.run_id.clone(), run_directory: start.run_directory.clone(),
                 request_identity: Some(start.request_identity.clone()), terminal_digest: None,

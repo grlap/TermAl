@@ -146,6 +146,8 @@ struct TestRunPreflight {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TestRunDetail {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
     stages: Vec<TestRunStageDetail>,
     preflight: Vec<TestRunPreflight>,
     source_id: Option<EngramSourceId>,
