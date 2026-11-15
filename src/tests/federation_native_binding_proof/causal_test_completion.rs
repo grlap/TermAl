@@ -3,6 +3,7 @@ use super::*;
 use crate::tests::test_runs::test_run_registration::causal_completion_fixture::{
     compact, finish, producer,
 };
+use crate::tests::test_runs::test_run_registration::selected_provider::selected_provider_completion;
 
 pub(super) struct Handles(Vec<AppState>);
 impl Drop for Handles {
@@ -144,6 +145,73 @@ async fn wire(
             MailboxRelayOperation::ReadCausalTestCompletion { selector },
         )
         .await
+}
+
+async fn selected_provider_over_relay(mode: MailboxTestMode) {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let (mut server, handles) = connect(&fixture).await;
+    selected_provider_completion(fixture.satellite.clone(), mode, |runner| async move {
+        let key = "selected-provider-relay";
+        let request = SendMailboxMessageRequest {
+            target_session_id: format!(
+                "host:{}::{runner}",
+                fixture.satellite_channel.snapshot.local.host_id
+            ),
+            message: "run the original selected request".into(),
+            idempotency_key: key.into(),
+            topic: None,
+            state_stamp: None,
+            class: None,
+        };
+        let input = crate::tests::mailboxes::test_request::typed_request(mode);
+        let capture = fixture
+            .central
+            .prepare_mailbox_test_request(&fixture.native, key, Some(&input))
+            .unwrap()
+            .unwrap();
+        let receipt = fixture
+            .central
+            .send_native_mailbox_relay_with_test_custody(&fixture.native, &request, Some(&capture))
+            .await
+            .unwrap()
+            .unwrap();
+        let page = fixture
+            .satellite
+            .read_native_mailbox_relay(
+                &runner,
+                MailboxRelayLocator::decode(&receipt.mailbox_id, false)
+                    .unwrap()
+                    .unwrap(),
+                ReadMailboxRequest {
+                    read_key: None,
+                    issue_receipt: false,
+                    after_sequence: None,
+                    limit: 50,
+                },
+            )
+            .await
+            .unwrap();
+        page.messages
+            .iter()
+            .find(|message| message.id == receipt.message_id)
+            .expect("recipient receives the actual typed relay request")
+            .id
+            .clone()
+    })
+    .await;
+    drop(handles);
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn focused_relay_selector_records_provider_and_native_completion_with_engram_disabled() {
+    selected_provider_over_relay(MailboxTestMode::Focused).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn full_relay_selector_records_provider_and_native_completion_with_engram_disabled() {
+    selected_provider_over_relay(MailboxTestMode::Full).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -7,6 +7,9 @@ use super::*;
 #[path = "test_run_causal_request.rs"]
 mod causal_request;
 
+#[path = "test_run_selected_provider.rs"]
+pub(in crate::tests) mod selected_provider;
+
 #[path = "test_run_causal_completion_fixture.rs"]
 pub(in crate::tests) mod causal_completion_fixture;
 
