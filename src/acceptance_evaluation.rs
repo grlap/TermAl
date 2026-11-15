@@ -2893,7 +2893,7 @@ fn acceptance_evaluation_outcome_line(evaluation: &DelegationAcceptanceEvaluatio
         }
         AcceptanceEvaluationSubmission::None if acceptance_evidence_unfinished(evaluation).is_some() => {
             let reason = &acceptance_evidence_unfinished(evaluation).expect("checked unfinished read").reason;
-            format!("{subject}: evidence recovery unfinished; no verdict was sent. {}. The parent may request a fresh evaluation.",
+            format!("{subject}: evaluator infrastructure failure: evidence recovery unfinished; no verdict was sent. {}. The parent may request a fresh evaluation.",
                 acceptance_brief_text(reason, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS))
         }
         AcceptanceEvaluationSubmission::None => format!(

@@ -754,10 +754,6 @@ fn acceptance_evaluation_host_target_locked(
     work_host_reader(inner, project).map_err(ApiError::conflict)
 }
 
-fn acceptance_evaluation_transport_error(operation: &str, error: EngramTransportError) -> ApiError {
-    ApiError::bad_gateway(format!("{operation}: {error}"))
-}
-
 // Conservative Windows command-line bound, as the Work reader applies it.
 fn validate_acceptance_evaluation_command_size(
     connection: &EngramConnectionConfig,
@@ -779,34 +775,6 @@ fn validate_acceptance_evaluation_command_size(
         ));
     }
     Ok(())
-}
-
-fn run_acceptance_evaluation_read(
-    connection: &EngramConnectionConfig,
-    args: &[String],
-    timeout: Duration,
-    host_workdir: &FsPath,
-) -> std::result::Result<Value, EngramTransportError> {
-    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    if is_acceptance_selected_note_read(&args) {
-        // Exact selected-record refusals carry a structured code on stderr.
-        // Retain the exit observation before the generic JSON reader erases it.
-        let output = run_engram_cli_command_with_lock_retry(
-            connection,
-            &args,
-            timeout,
-            ACCEPTANCE_EVALUATION_READER_LABEL,
-            host_workdir,
-        )?;
-        return decode_acceptance_selected_cli_output(output);
-    }
-    run_engram_json_command_with_lock_retry(
-        connection,
-        &args,
-        timeout,
-        ACCEPTANCE_EVALUATION_READER_LABEL,
-        host_workdir,
-    )
 }
 
 // A locked store is retried once: the attempt key makes a resend a replay.

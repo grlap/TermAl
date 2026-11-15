@@ -364,7 +364,8 @@ impl AppState {
                 write_applied: None,
                 available: false,
                 error: Some(format!(
-                    "Policy unavailable (older binary or read failure): {error}"
+                    "Policy unavailable (older binary or read failure): {}",
+                    acceptance_cli_read_error_detail(&error)
                 )),
                 reader_key: target.reader_key,
                 policy: None,
