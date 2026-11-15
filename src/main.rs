@@ -1123,6 +1123,8 @@ include!("test_temp_paths.rs");
 #[cfg(test)]
 include!("test_temp_root.rs");
 #[cfg(test)]
+mod test_fixture_lifecycle_diagnostics;
+#[cfg(test)]
 include!("test_panic_journal.rs");
 include!("state.rs");
 include!("state_lock_observer.rs");
@@ -1257,6 +1259,7 @@ include!("declared_run_observer.rs");
 mod native_test_completion;
 include!("test_run_native_completion.rs");
 include!("test_run_causal_completion.rs");
+include!("test_run_causal_completion_scan.rs");
 include!("test_run_causal_completion_batch.rs");
 include!("mailbox_test_request_settlement.rs");
 include!("engram_causal_completion_delivery.rs");

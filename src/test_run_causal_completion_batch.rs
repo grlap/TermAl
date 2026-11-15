@@ -50,55 +50,15 @@ impl MailboxStore {
         while let Some(row) = rows.next()? {
             visited += 1;
             last = row.get(0)?;
-            let Some(payload) = mailbox_test_payload_from_row(row, 3)? else {
-                continue;
-            };
-            let owner: String = row.get(1)?;
-            let key: String = row.get(2)?;
-            // A relay home also has a public copy, with a participant-key
-            // sender. Only the original local owner or sender intent schedules.
-            if owner != payload.requester.native_session_id
-                || key != payload.request_send_key
-                || payload.requester.store_id != local_store
-            {
-                continue;
+            match causal_test_completion_plan_from_row(row, cursor.intents, &local_store) {
+                Ok(Some(plan)) => plans.push(plan),
+                Ok(None) => continue,
+                Err(failure) => {
+                    self.causal_completion_scan_skips
+                        .note(cursor.intents, last, failure);
+                    continue;
+                }
             }
-            let stored: Option<String> = row.get(5)?;
-            let canonical_message_id = if cursor.intents {
-                // An unsettled original send stays pending in its existing
-                // owner. This reader never guesses its home-assigned id.
-                let Some(receipt) = stored else {
-                    continue;
-                };
-                serde_json::from_str::<MailboxAppendReceipt>(&receipt)?.message_id
-            } else {
-                let Some(id) = stored else {
-                    continue;
-                };
-                id
-            };
-            let selector = CausalTestCompletionSelector {
-                canonical_message_id,
-                payload,
-            };
-            selector
-                .validate()
-                .map_err(|error| relay_store_error(&error.message))?;
-            let scope = mailbox_test_scope_from_row(row, 4)?;
-            let peer: Option<String> = row.get(6)?;
-            let peer = peer.map(|json| serde_json::from_str(&json)).transpose()?;
-            let encoded: Option<String> = row.get(7)?;
-            let settlement = encoded.as_deref().map(|s|
-                CausalTestSettlement::decode(s, &selector, scope.as_ref())).transpose()?;
-            // The original receipt/refusal owns completion. Settled history
-            // never performs another federation RPC or creates another intent.
-            if settlement.as_ref().is_some_and(CausalTestSettlement::complete) { continue; }
-            plans.push(CausalTestCompletionPlan {
-                selector,
-                scope,
-                peer,
-                settlement,
-            });
             if plans.len() == CAUSAL_COMPLETION_BATCH {
                 break;
             }
@@ -220,7 +180,8 @@ impl AppState {
             }
             if let Some(saved) = &plan.settlement {
                 deliveries.push(CausalTestCompletionDelivery {
-                    selector: plan.selector, scope: plan.scope,
+                    selector: plan.selector,
+                    scope: plan.scope,
                     completion: saved.completion.clone(),
                 });
                 continue;

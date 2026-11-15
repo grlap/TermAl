@@ -5,6 +5,8 @@ use crate::tests::test_runs::test_run_registration::causal_completion_fixture::{
     destination, destination_with_targets, finish, producer,
 };
 
+mod scan;
+
 fn source() -> Value {
     json!({"commit":"a".repeat(40),"tree":"b".repeat(40),"submodules":[],"changes":[]})
 }

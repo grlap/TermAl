@@ -60,6 +60,16 @@ is still unconfirmed remains with its existing send owner; the reader never
 guesses a canonical message id. Reads create no run, send intent, delivered bit
 or local completion ledger. Private sender mappings remain local.
 
+A malformed historical custody row is retained and skipped, so healthy rows
+on that page and later pages can still settle. SQL or connection failures
+remain page failures. `GET /api/diagnostics/mailbox-relay-wakes` exposes
+`causalCompletionScanSkips`: at most 64 process-local table/row-id records with
+closed decode/validation reason codes, attempt counts and timestamps. The
+eviction counter reports records displaced by the bound; these diagnostics
+reset on restart. They contain no request, private scope or peer payload and
+do not imply a completion or receipt. Report the row identity and reason for
+custody diagnosis; do not edit the live store.
+
 The joined federation supervisor drives this batch and sends
 `remote_verification_record` on the original requester's ordinary Engram
 connection, after that exact child advertises `remote_verification_record_v1`.

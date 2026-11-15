@@ -129,6 +129,7 @@ impl TestTempRoot {
                 .unwrap_or("unnamed test thread"),
         )
         .expect("test temp root owner marker should be written");
+        test_fixture_lifecycle_diagnostics::root_event(&root.path, "root_created", None);
         root
     }
 
@@ -140,6 +141,7 @@ impl TestTempRoot {
     }
 
     fn own(path: PathBuf) -> Self {
+        test_fixture_lifecycle_diagnostics::root_event(&path, "root_owned", None);
         Self {
             path,
             cleanup_observers: Mutex::new(Vec::new()),
@@ -174,6 +176,7 @@ impl TestTempRoot {
 
 impl Drop for TestTempRoot {
     fn drop(&mut self) {
+        test_fixture_lifecycle_diagnostics::root_event(&self.path, "root_drop_begin", None);
         let outcome = if self
             .retain_for_diagnosis
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -208,6 +211,11 @@ impl Drop for TestTempRoot {
         if let Err(detail) = &outcome {
             eprintln!("{detail}");
         }
+        test_fixture_lifecycle_diagnostics::root_event(
+            &self.path,
+            "root_drop_end",
+            Some(outcome.is_ok()),
+        );
         // This receipt is a resource-release barrier: AppState keeps its root
         // last, so every state-owned file handle is gone before it is sent.
         let observers = self.cleanup_observers.get_mut().unwrap_or_else(|poisoned| {
