@@ -221,6 +221,7 @@ fn record_run(fixture: &RunFixture, run_id: &str, request: Value, results: Value
         run_id: run_id.to_owned(),
         native_origin: None,
         native_completion: None,
+        native_completion_refusal: None,
         source_owner: None,
         project_id: Some(fixture.project_id.clone()),
         run_directory: test_run_display_path(&run_dir),
@@ -922,6 +923,7 @@ fn producer_fixture_run(
             .to_owned(),
         native_origin: None,
         native_completion: None,
+        native_completion_refusal: None,
         registered_at: registration["registered_at"].as_str().unwrap().to_owned(),
         initiating_session_id: registration["initiating_session_id"]
             .as_str()

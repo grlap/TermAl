@@ -43,6 +43,9 @@ struct TestRunRegistration {
     native_origin: Option<TestRunNativeOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     native_completion: Option<TestRunNativeCompletion>,
+    // Latest failed native-retention prerequisite, never an identity or proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
     // Host-verified executable provenance, immutable with the request. Legacy
     // registrations do not acquire a pin from a later project configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,8 +100,8 @@ struct TestRunRegistration {
 impl TestRunRegistration {
     // A scan may append its original native terminal while an identity read
     // or registration ACK is off-lock. That append does not supersede the
-    // acknowledged registration. Every other field, and any completion already
-    // present in the snapshot, must still match. Full equality remains required
+    // acknowledged registration. Diagnostics may also change, but every identity
+    // field and any completion already present must still match. Full equality remains required
     // for publishing a durable completion and retiring its compaction custody.
     fn matches_registration_snapshot(&self, expected: &Self) -> bool {
         if expected.native_completion.is_some() {
@@ -106,6 +109,9 @@ impl TestRunRegistration {
         }
         let mut identity = self.clone();
         identity.native_completion = None;
+        // Factual diagnostics may change during an off-lock ACK read. They
+        // grant nothing and cannot invalidate the original registration ACK.
+        identity.native_completion_refusal = expected.native_completion_refusal.clone();
         if expected.declared_terminal.is_none() {
             identity.declared_terminal = None;
         }
@@ -1053,6 +1059,7 @@ impl AppState {
             let registration = TestRunRegistration {
                 run_id: request.run_id.clone(),
                 native_completion: None,
+                native_completion_refusal: None,
                 source_owner,
                 native_origin: inner
                     .federation

@@ -200,6 +200,12 @@ mod source_owner;
 #[path = "test_run_native_completion.rs"]
 mod native_completion;
 
+#[path = "test_run_native_completion_diagnostics.rs"]
+mod native_completion_diagnostics;
+
+#[path = "test_run_native_completion_diagnostics_recovery.rs"]
+mod native_completion_diagnostics_recovery;
+
 #[path = "engram_remote_verification.rs"]
 mod remote_verification;
 
