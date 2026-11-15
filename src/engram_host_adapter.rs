@@ -848,6 +848,8 @@ struct EngramTransportError {
     /// The control sidecar this failure was observed on, when the transport
     /// saw one (`engram_control_transport.rs`); `None` is never filled in.
     control_process: Option<EngramControlProcessEvidence>,
+    /// Physical CLI read facts, without producer text or inferred exit state.
+    cli_failure: Option<EngramCliFailureObservation>,
 }
 
 impl EngramTransportError {
@@ -865,6 +867,7 @@ impl EngramTransportError {
             process_never_started: true,
             request_never_sent: false,
             control_process: None,
+            cli_failure: None,
         }
     }
 
@@ -877,6 +880,7 @@ impl EngramTransportError {
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
+            cli_failure: None,
         }
     }
 
@@ -897,6 +901,7 @@ impl EngramTransportError {
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
+            cli_failure: None,
         }
     }
 
@@ -944,6 +949,7 @@ impl EngramTransportError {
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
+            cli_failure: None,
         }
     }
 
@@ -956,6 +962,7 @@ impl EngramTransportError {
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
+            cli_failure: None,
         }
     }
 
@@ -1466,6 +1473,12 @@ enum EngramCliExit {
     /// A signal, or a status outside the exit codes a program returns on its
     /// own (on Windows a crash reports an NTSTATUS value such as 0xC0000005).
     Abnormal,
+}
+
+#[derive(Clone, Debug)]
+struct EngramCliFailureObservation {
+    exit: EngramCliExit,
+    stderr_bytes: usize,
 }
 
 impl EngramCliExit {

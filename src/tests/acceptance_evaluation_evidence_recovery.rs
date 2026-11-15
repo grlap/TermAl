@@ -7,6 +7,9 @@ const OLDER_PROOF: &str = "00000000000000000000000000000003";
 #[path = "acceptance_evaluation_recovery_regressions.rs"]
 mod regressions;
 
+#[path = "acceptance_evaluation_catalog_recovery.rs"]
+mod catalog_recovery;
+
 fn catalog_note(index: u64) -> Value {
     let body = if index == 3 {
         "Older proof: both route criteria were checked.".to_owned()
@@ -19,10 +22,17 @@ fn catalog_note(index: u64) -> Value {
 }
 
 fn catalog_page(index: u64) -> Value {
-    json!({"work":{"short_ref":"w-task"}, "notes":[catalog_note(index)],
-        "notes_window":canonical_notes_window(4,index,1,42,
-            (index < 3).then(|| format!("page-{}",index+1)).as_deref()),
-        "notes_omitted":3-index})
+    recovery_catalog_page(index, 4, 1)
+}
+
+fn recovery_catalog_page(index: u64, total: u64, page_size: u64) -> Value {
+    let first = index * page_size;
+    let shown = page_size.min(total - first);
+    let after = (first + shown < total).then(|| format!("page-{}", index + 1));
+    json!({"work":{"short_ref":"w-task"},
+        "notes":(first..first + shown).map(catalog_note).collect::<Vec<_>>(),
+        "notes_window":canonical_notes_window(total,first,shown,42,after.as_deref()),
+        "notes_omitted":total-first-shown})
 }
 
 fn recovery_fixture() -> (AppState, String, String, String, String) {
@@ -36,6 +46,15 @@ fn recovery_fixture_for(mode: &str) -> (AppState, String, String, String, String
 fn recovery_fixture_with_indexed(
     mode: &str,
     selected: bool,
+) -> (AppState, String, String, String, String) {
+    recovery_fixture_with_catalog(mode, selected, 4, 1)
+}
+
+fn recovery_fixture_with_catalog(
+    mode: &str,
+    selected: bool,
+    total: u64,
+    page_size: u64,
 ) -> (AppState, String, String, String, String) {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
@@ -65,7 +84,7 @@ fn recovery_fixture_with_indexed(
                 } else if let Some(i) = args.iter().position(|a| a == "--after") {
                     let index = args[i + 1].strip_prefix("page-").unwrap().parse().unwrap();
                     elapsed.set(elapsed.get() + ENGRAM_MIN_CALL_TIMEOUT);
-                    Ok(catalog_page(index))
+                    Ok(recovery_catalog_page(index, total, page_size))
                 } else if args.iter().any(|a| a == "held") {
                     Ok(json!({"items":[],"omitted":0}))
                 } else if args.iter().any(|a| a == "--full") {
@@ -74,9 +93,10 @@ fn recovery_fixture_with_indexed(
                     Ok(policy_receipt(Some(&[mode])))
                 } else {
                     let mut show = show_receipt(None);
-                    show["notes"] = catalog_page(0)["notes"].clone();
-                    show["notes_window"] = catalog_page(0)["notes_window"].clone();
-                    show["notes_omitted"] = json!(3);
+                    show["notes"] = recovery_catalog_page(0, total, page_size)["notes"].clone();
+                    show["notes_window"] =
+                        recovery_catalog_page(0, total, page_size)["notes_window"].clone();
+                    show["notes_omitted"] = json!(total - page_size);
                     Ok(show)
                 }
             },
@@ -86,11 +106,14 @@ fn recovery_fixture_with_indexed(
         .unwrap();
     let wire = serde_json::to_value(&response).unwrap();
     assert_eq!(wire["evidenceOmissions"]["unread"]["reason"], "time_budget");
-    assert_eq!(wire["evidenceOmissions"]["unread"]["count"], 1);
+    assert_eq!(
+        wire["evidenceOmissions"]["unread"]["count"],
+        total - 3 * page_size
+    );
     let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
         panic!("evaluator")
     };
-    if !selected {
+    if !selected && 3 >= 3 * page_size {
         assert!(
             !delegation.delegation.prompt.contains(OLDER_PROOF),
             "older locator was not discovered by the brief"
