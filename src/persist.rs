@@ -277,6 +277,8 @@ fn wait_for_sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission
 /// must complete the applicable path-aware schema setup (including foreign-key
 /// enforcement and post-WAL hardening), or explicitly configure it themselves.
 fn open_sqlite_state_connection_unconfigured(path: &FsPath) -> Result<rusqlite::Connection> {
+    #[cfg(test)]
+    test_fixture_lifecycle_diagnostics::sqlite_open(path, "read_write");
     if let Some(parent) = path.parent() {
         harden_local_state_directory_permissions(parent)?;
     }
@@ -364,6 +366,8 @@ fn open_sqlite_state_read_connection_with_busy_timeout(
     path: &FsPath,
     busy_timeout: Duration,
 ) -> Result<rusqlite::Connection> {
+    #[cfg(test)]
+    test_fixture_lifecycle_diagnostics::sqlite_open(path, "read_only");
     reject_existing_sqlite_state_path_redirection(path)?;
     let connection = rusqlite::Connection::open_with_flags(
         path,
