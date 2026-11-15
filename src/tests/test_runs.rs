@@ -20,6 +20,9 @@ mod test_run_listing;
 #[path = "idle_state_lock.rs"]
 mod idle_state_lock;
 
+#[path = "test_run_rescan_publication.rs"]
+mod rescan_publication;
+
 #[path = "test_run_scan_projection.rs"]
 mod scan_projection;
 

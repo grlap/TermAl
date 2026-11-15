@@ -918,10 +918,16 @@ impl AppState {
                 let request_stamp = test_run_file_stamp(&run_dir.join("request.json"));
                 let results_stamp = test_run_file_stamp(&run_dir.join("results.json"));
                 // An entry that kept an earlier read after a failed one is
-                // read again whatever its stamps say.
+                // read again whatever its stamps say, and so is one whose read
+                // failed outright: the failure may be transient. Results read
+                // whole that do not parse read the same way again while both
+                // stamps are unchanged, so that entry is kept: a new one on
+                // every pass would defeat the history projection cache and
+                // republish all state. It stays unknown (results unreadable),
+                // and any stamp change reads it again.
                 let disk = match earlier {
                     Some(disk)
-                        if disk.read_failures == 0
+                        if (disk.read_failures == 0 || disk.results_malformed)
                             && disk.locator_identity.is_some()
                             && disk.request_stamp == request_stamp
                             && disk.results_stamp == results_stamp =>

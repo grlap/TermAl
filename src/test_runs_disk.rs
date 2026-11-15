@@ -222,9 +222,13 @@ enum TestRunJson {
     Parsed(Value, String, TestRunFileStamp),
     /// The file does not exist.
     Missing,
-    /// The file could not be read whole or parsed: the launcher replaced it
-    /// during the read, or its content is malformed.
+    /// The file could not be read whole: the launcher replaced it during the
+    /// read, or the filesystem refused it. Reading it again may succeed.
     Failed,
+    /// The file was read whole, at the version this stamp names, and its
+    /// content does not parse. The same bytes fail the same way until the
+    /// file changes.
+    Malformed(TestRunFileStamp),
     /// The file is larger than TermAl reads. Unlike a failed read this is
     /// not a race, so retrying cannot help until the file changes.
     TooLarge,
@@ -235,16 +239,16 @@ fn test_run_read_json(path: &FsPath) -> TestRunJson {
         return TestRunJson::TooLarge;
     }
     match review_freeze_file_versioned(path, TEST_RUN_JSON_MAX_BYTES) {
-        Ok((bytes, version)) => match serde_json::from_slice(&bytes) {
-            Ok(value) => {
-                let stamp = version
-                    .modified()
-                    .ok()
-                    .map(|modified| (version.len(), modified));
-                TestRunJson::Parsed(value, file_content_hash(&bytes), stamp)
+        Ok((bytes, version)) => {
+            let stamp = version
+                .modified()
+                .ok()
+                .map(|modified| (version.len(), modified));
+            match serde_json::from_slice(&bytes) {
+                Ok(value) => TestRunJson::Parsed(value, file_content_hash(&bytes), stamp),
+                Err(_) => TestRunJson::Malformed(stamp),
             }
-            Err(_) => TestRunJson::Failed,
-        },
+        }
         Err(err)
             if err
                 .downcast_ref::<io::Error>()
@@ -531,8 +535,14 @@ struct TestRunDisk {
     started_at: Option<String>,
     /// Consecutive rescans whose read of a file failed. Nonzero means the
     /// next rescan reads the files again whatever their stamps, so a failed
-    /// read is never cached as if it were an answer.
+    /// read is never cached as if it were an answer, unless
+    /// `results_malformed` says the failure was the content itself.
     read_failures: u8,
+    /// The last read found `results.json` whole and unparseable, with no
+    /// earlier results kept. The same bytes fail the same way, so while both
+    /// stamps are unchanged the rescan keeps this entry instead of reading it
+    /// again; the run stays unknown (results unreadable).
+    results_malformed: bool,
     /// Set when these results were read again after the liveness check found
     /// their responsible process gone (`Some(pid)`), or found no pid at all
     /// (`None`). Such a read is final for that process, so an unchanged run
@@ -596,10 +606,13 @@ impl TestRunDisk {
             // The run directory is still listed (a removed directory leaves
             // the index at once), so a missing request is a failed read like
             // any other.
-            TestRunJson::Missing | TestRunJson::Failed => {
+            // A malformed request is retried like any failed read: only
+            // malformed results settle into a kept entry.
+            TestRunJson::Missing | TestRunJson::Failed | TestRunJson::Malformed(_) => {
                 return match grace {
                     Some(previous) => TestRunRead::Run(Self {
                         read_failures: 1,
+                        results_malformed: false,
                         ..previous.clone()
                     }),
                     None => TestRunRead::Pending,
@@ -661,6 +674,7 @@ impl TestRunDisk {
             (None, false)
         };
         let mut read_failures = 0;
+        let mut results_malformed = false;
         // A confirmation belongs to the results it was made on, so it is kept
         // only with the grace's copy of those same results.
         let mut confirmed_unknown = None;
@@ -689,21 +703,31 @@ impl TestRunDisk {
             // Deterministic, not a race: unknown at once, with no grace, and
             // not read again until the file changes.
             TestRunJson::TooLarge => (None, results_stamp),
-            TestRunJson::Missing | TestRunJson::Failed => match grace {
-                // The grace: the last good results stand for one rescan, with
-                // what was confirmed about them, so a known reason does not
-                // flicker over one failed read.
-                Some(grace) => {
-                    read_failures = 1;
-                    confirmed_unknown = grace.confirmed_unknown;
-                    (grace.results.clone(), grace.results_stamp)
+            failed @ (TestRunJson::Missing | TestRunJson::Failed | TestRunJson::Malformed(_)) => {
+                match (grace, failed) {
+                    // The grace: the last good results stand for one rescan,
+                    // with what was confirmed about them, so a known reason
+                    // does not flicker over one failed read.
+                    (Some(grace), _) => {
+                        read_failures = 1;
+                        confirmed_unknown = grace.confirmed_unknown;
+                        (grace.results.clone(), grace.results_stamp)
+                    }
+                    // Whole and unparseable at this version: unknown, and kept
+                    // until a stamp changes, since the same bytes cannot read
+                    // differently.
+                    (None, TestRunJson::Malformed(stamp)) => {
+                        read_failures = failures;
+                        results_malformed = true;
+                        (None, stamp)
+                    }
+                    // No evidence to keep: unknown, read again next rescan.
+                    (None, _) => {
+                        read_failures = failures;
+                        (None, results_stamp)
+                    }
                 }
-                // No evidence to keep: unknown, read again next rescan.
-                None => {
-                    read_failures = failures;
-                    (None, results_stamp)
-                }
-            },
+            }
         };
         // A session reference or worktree the index cannot hold whole makes
         // the run unsupported; a cut one could name another session or tree.
@@ -750,6 +774,7 @@ impl TestRunDisk {
             results,
             started_at,
             read_failures,
+            results_malformed,
             confirmed_unknown,
         })
     }
@@ -912,7 +937,7 @@ fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
     let results = match test_run_read_json(&run_dir.join("results.json")) {
         TestRunJson::Parsed(results, _, _) => results,
         TestRunJson::Missing => return Ok(TestRunDetail::default()),
-        TestRunJson::Failed => return Err(test_run_results_unreadable()),
+        TestRunJson::Failed | TestRunJson::Malformed(_) => return Err(test_run_results_unreadable()),
         TestRunJson::TooLarge => return Err(test_run_results_too_large()),
     };
     let request = match test_run_read_json(&run_dir.join("request.json")) {
@@ -1002,7 +1027,7 @@ fn test_run_stage_log_tail(
     let results = match test_run_read_json(&run_dir.join("results.json")) {
         TestRunJson::Parsed(results, _, _) => results,
         TestRunJson::Missing => return Err(ApiError::not_found("run results are unavailable")),
-        TestRunJson::Failed => return Err(test_run_results_unreadable()),
+        TestRunJson::Failed | TestRunJson::Malformed(_) => return Err(test_run_results_unreadable()),
         TestRunJson::TooLarge => return Err(test_run_results_too_large()),
     };
     let log = results
