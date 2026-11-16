@@ -249,6 +249,9 @@ struct DetachedDelegationChildRuntime {
     codex_release: Option<CodexDelegationReleaseTicket>,
     codex_compensation_session: Option<String>,
     runtime: Option<KillableRuntime>,
+    /// The child session whose worktree stays fenced from reclaim until this
+    /// runtime's shutdown succeeds (`delegation_worktree_reclaim.rs`).
+    shutdown_fence: Option<String>,
     transcript_deltas: Vec<DelegationChildTranscriptDelta>,
 }
 
@@ -642,7 +645,6 @@ impl AppState {
                 let prepared = prepare_isolated_delegation_worktree(
                     &source_cwd,
                     worktree_path.as_deref(),
-                    &self.default_workdir,
                     &delegation_id,
                     (mode == DelegationMode::Worker).then_some(base.as_deref().unwrap_or("HEAD")),
                 )?;
@@ -1568,6 +1570,7 @@ impl AppState {
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let child = inner.delegations[index].child_session_id.clone();
+            refuse_followup_without_worktree_locked(&inner, index)?;
             validate_delegation_followup_child_locked(
                 &inner,
                 &child,
@@ -1681,6 +1684,9 @@ impl AppState {
                 Some(ApiError::conflict(
                     "review terminal attempt changed after retention; no follow-up was admitted",
                 ))
+            } else if let Err(error) = refuse_followup_without_worktree_locked(&inner, index) {
+                // The same lock the worktree sweep reserves under.
+                Some(error)
             } else if inner
                 .delegation_followup_admissions
                 .contains_key(delegation_id)
@@ -1982,6 +1988,17 @@ impl AppState {
                 );
             }
         }
+        // A delegation that just ended, or a child runtime about to be shut
+        // down, can make a worktree reclaimable.
+        let worktree_sweep_due = detached_child.runtime.is_some()
+            || matches!(
+                &lifecycle_delta,
+                Some(
+                    DelegationLifecycleDelta::Completed { .. }
+                        | DelegationLifecycleDelta::Failed { .. }
+                        | DelegationLifecycleDelta::Canceled { .. }
+                )
+            );
         let lifecycle_reason = delegation_lifecycle_trace_reason(lifecycle_delta.as_ref());
         let canceled_child_cleanup = matches!(
             &lifecycle_delta,
@@ -2060,7 +2077,13 @@ impl AppState {
                     None,
                     Some(cleanup_reason),
                 );
+                if let Some(child) = detached_child.shutdown_fence.as_deref() {
+                    self.release_delegation_child_shutdown(child);
+                }
             }
+        }
+        if worktree_sweep_due {
+            self.request_delegation_worktree_sweep();
         }
         self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         trace_shared_codex_event(
@@ -2323,12 +2346,17 @@ impl AppState {
         };
 
         if let Some(runtime) = detached_child.runtime {
-            if let Err(err) =
-                shutdown_removed_runtime(runtime, &format!("failed delegation `{delegation_id}`"))
+            match shutdown_removed_runtime(runtime, &format!("failed delegation `{delegation_id}`"))
             {
-                eprintln!("delegation cleanup warning> {err:#}");
+                Ok(_) => {
+                    if let Some(child) = detached_child.shutdown_fence.as_deref() {
+                        self.release_delegation_child_shutdown(child);
+                    }
+                }
+                Err(err) => eprintln!("delegation cleanup warning> {err:#}"),
             }
         }
+        self.request_delegation_worktree_sweep();
         self.dispatch_delegation_wait_resumes(revision, wait_refresh.dispatch_parents);
         Ok(())
     }
@@ -4105,6 +4133,10 @@ fn detach_terminal_delegation_child_runtime_locked(
         // Transfer cleanup ownership at reservation, before any caller can
         // launch a second detach_async that outlives the release barrier.
         detached.runtime = None;
+        // A shared app-server thread never runs in the worktree.
+        if let Some(child) = detached.shutdown_fence.take() {
+            inner.delegation_child_shutdowns.remove(&child);
+        }
     }
     detached
 }
@@ -4492,10 +4524,16 @@ fn detach_delegation_child_runtime_locked(
             session_seq,
         });
     }
+    // Until this runtime is shut down, its worktree is not reclaimed.
+    let shutdown_fence = runtime.is_some().then(|| child_session_id.to_owned());
+    if let Some(child) = &shutdown_fence {
+        inner.delegation_child_shutdowns.insert(child.clone());
+    }
     DetachedDelegationChildRuntime {
         codex_release: None,
         codex_compensation_session: None,
         runtime,
+        shutdown_fence,
         transcript_deltas,
     }
 }
@@ -4621,7 +4659,6 @@ fn delegation_codex_sandbox_mode(write_policy: &DelegationWritePolicy) -> CodexS
 fn prepare_isolated_delegation_worktree(
     source_cwd: &str,
     requested_worktree_path: Option<&str>,
-    default_workdir: &str,
     delegation_id: &str,
     worker_base: Option<&str>,
 ) -> Result<PreparedIsolatedWorktree, ApiError> {
@@ -4658,16 +4695,7 @@ fn prepare_isolated_delegation_worktree(
         .to_path_buf();
 
     let worktree_root =
-        resolve_isolated_worktree_root(requested_worktree_path, default_workdir, delegation_id)?;
-    let source_repo_root_text = source_repo_root.to_string_lossy();
-    let worktree_root_text = worktree_root.to_string_lossy();
-    if path_contains(source_repo_root_text.as_ref(), &worktree_root)
-        || path_contains(worktree_root_text.as_ref(), &source_repo_root)
-    {
-        return Err(ApiError::bad_request(
-            "isolated worktree path must be outside the source repository",
-        ));
-    }
+        resolve_isolated_worktree_root(requested_worktree_path, &source_repo_root, delegation_id)?;
 
     ensure_isolated_worktree_target_available(&worktree_root)?;
     if let Some(base) = worker_base {
@@ -4725,19 +4753,26 @@ fn prepare_isolated_delegation_worktree(
     })
 }
 
+/// Where an isolated delegation's worktree goes: by default
+/// `<source repo>/.worktrees/delegation-<id>`, otherwise the requested path.
+/// Either way it lies strictly inside the source repository, outside its
+/// `.git`, in a directory Git ignores, so the parent's status and dirty-state
+/// capture never see it (delegation_worktree_reclaim.rs).
 fn resolve_isolated_worktree_root(
     path: Option<&str>,
-    default_workdir: &str,
+    source_repo_root: &FsPath,
     delegation_id: &str,
 ) -> Result<PathBuf, ApiError> {
     let requested_path = match path.map(str::trim).filter(|value| !value.is_empty()) {
         Some(path) => resolve_requested_path(path)?,
-        None => resolve_termal_data_dir(default_workdir)
-            .join("delegations")
-            .join(delegation_id)
-            .join("worktree"),
+        None => source_repo_root
+            .join(DELEGATION_WORKTREES_DIR)
+            .join(format!("delegation-{delegation_id}")),
     };
-    canonicalize_path_with_existing_ancestor(&requested_path)
+    let worktree_root = canonicalize_path_with_existing_ancestor(&requested_path)?;
+    let relative = isolated_worktree_relative_path(source_repo_root, &worktree_root)?;
+    ensure_isolated_worktree_ignored(source_repo_root, &relative)?;
+    Ok(worktree_root)
 }
 
 fn ensure_isolated_worktree_target_available(worktree_root: &FsPath) -> Result<(), ApiError> {

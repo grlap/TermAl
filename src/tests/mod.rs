@@ -84,6 +84,7 @@ mod delegation_validation;
 mod delegation_wait;
 mod delegation_worker;
 mod delegation_worker_handoff;
+mod delegation_worktree_location;
 mod delegations;
 mod session_restart_recovery;
 mod source_capture;
@@ -1005,6 +1006,7 @@ pub(crate) fn test_app_state() -> AppState {
         orchestrator_templates_path: Arc::new(test_temp_root.path().join("orchestrators.json")),
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
         review_documents_lock: Arc::new(Mutex::new(())),
+        delegation_worktree_sweeper: DelegationWorktreeSweeper::new(false),
         engram_carried_poll_lock: Arc::new(Mutex::new(())),
         runtime_retry_slots: RuntimeRetrySlots::default(),
         state_broadcast_senders: StateBroadcastSenders {

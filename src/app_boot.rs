@@ -872,6 +872,8 @@ impl AppState {
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
+            // Test builds run sweep passes themselves, never in the background.
+            delegation_worktree_sweeper: DelegationWorktreeSweeper::new(cfg!(not(test))),
             engram_carried_poll_lock: Arc::new(Mutex::new(())),
             runtime_retry_slots: RuntimeRetrySlots::default(),
             state_broadcast_senders,
@@ -1012,6 +1014,8 @@ impl AppState {
             self.spawn_runtime_retry_tick();
             self.spawn_engram_verification_ticks();
         }
+        // Whatever a restart left behind is reconciled once at boot.
+        self.request_delegation_worktree_sweep();
         // Structured reviewer envelopes live in coordination.sqlite. Recover
         // them before wait reconciliation so a restart between mailbox append
         // and primary-state recording cannot resume a parent with a false

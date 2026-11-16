@@ -275,6 +275,15 @@ impl AppState {
                     .min_by_key(|work| work.due().to_owned());
                 let Some(work) = pending else {
                     state.unadmitted_worker_running = false;
+                    // A delegation child's settled observation no longer
+                    // reads its worktree, which may now be reclaimable.
+                    let delegation_child = inner
+                        .find_delegation_index_by_child_session_id(session_id)
+                        .is_some();
+                    drop(inner);
+                    if delegation_child {
+                        self.request_delegation_worktree_sweep();
+                    }
                     #[cfg(test)]
                     self.runtime_observation_lifetime.observe("idle");
                     return;

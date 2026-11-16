@@ -753,6 +753,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
         orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),
         review_documents_lock: state.review_documents_lock.clone(),
+        delegation_worktree_sweeper: state.delegation_worktree_sweeper.clone(),
         engram_carried_poll_lock: state.engram_carried_poll_lock.clone(),
         runtime_retry_slots: state.runtime_retry_slots.clone(),
         state_broadcast_senders: StateBroadcastSenders {

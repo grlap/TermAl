@@ -180,7 +180,15 @@ fn name_observed_worktree(turn: &EOCheckedTurn, worktree: &FsPath) -> EngramSour
 // receiver. The production delegation owner creates the child and worktree.
 fn ordinary_delegation_child(label: &str, isolated: bool) -> EOCheckedTurn {
     let parent = EOCheckedTurn::idle(label, true);
-    run_git_test_command(&parent.root, &["add", ".engram-project"]);
+    // Delegation worktrees live in the source repository's ignored .worktrees/.
+    let mut ignore = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(parent.root.join(".gitignore"))
+        .unwrap();
+    std::io::Write::write_all(&mut ignore, b"\n.worktrees/\n").unwrap();
+    drop(ignore);
+    run_git_test_command(&parent.root, &["add", ".engram-project", ".gitignore"]);
     run_git_test_command(
         &parent.root,
         &["commit", "--quiet", "-m", "declare observed child project"],
@@ -192,8 +200,7 @@ fn ordinary_delegation_child(label: &str, isolated: bool) -> EOCheckedTurn {
             worktree_path: Some(
                 parent
                     .root
-                    .parent()
-                    .unwrap()
+                    .join(".worktrees")
                     .join(format!("{label}-child"))
                     .to_string_lossy()
                     .into_owned(),

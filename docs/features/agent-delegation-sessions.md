@@ -2053,7 +2053,9 @@ be explicit about which guarantees are enforced and which are advisory.
 - Commit and push remain human-approved operations.
 
 `isolatedWorktree`:
-- TermAl creates or selects a TermAl-owned worktree root.
+- TermAl creates the worktree inside the source repository, by default under
+  its Git-ignored `.worktrees/`, and removes it when the delegation ends with
+  nothing to keep (see [Delegation worktrees](./delegation-worktrees.md)).
 - The child runs inside that worktree, not the main workspace.
 - `ownedPaths` still constrain the intended write set and review surface.
 - Import back into the main workspace is an explicit compare/apply step.
@@ -2087,7 +2089,8 @@ All path boundaries must be enforced server-side:
 - normalize and canonicalize `ownedPaths`, `cwd`, and `worktreePath`
 - reject `..`, absolute paths outside the project/worktree root, drive-relative
   Windows paths, UNC/device paths, and symlink/junction escapes
-- keep isolated worktrees under a TermAl-owned root
+- keep isolated worktrees strictly inside the source repository, in a
+  Git-ignored directory ([Delegation worktrees](./delegation-worktrees.md))
 - compare changed files by canonical path, not by string prefix
 - treat path normalization failures as hard launch/import failures
 

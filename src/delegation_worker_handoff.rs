@@ -13,7 +13,8 @@ fn worker_handoff_prompt(delegation: &DelegationRecord) -> String {
 - An uncommitted workspace locator is mutable, not an immutable snapshot. Describe changes relative to the recorded base; neither workspace separation nor watcher paths prove who authored them.\n\
 - In `Notes:` include `Child-reported native test outcome:` with the command, actual exit/counts and/or a result artifact locator, or explicitly say unavailable. Do not infer a test pass from completed status or Commands Run success.\n\
 - This child-reported outcome is not host-recorded verification. Only the separate host/tracker record can establish that verification.\n\
-- The parent chooses whether and how to integrate with ordinary Git. Completion and result retrieval do not stage, commit, import, merge, push, delete or synchronize either workspace."
+- The parent chooses whether and how to integrate with ordinary Git. Completion and result retrieval do not stage, commit, import, merge, push or synchronize either workspace.\n\
+- After this delegation ends, the host removes the dedicated worktree only if it holds no uncommitted or untracked change and no commit off a branch or tag. Leave work uncommitted, or committed on a ref, for the parent to integrate; a clean worktree at the base may be gone when the parent reads this result."
     )
 }
 

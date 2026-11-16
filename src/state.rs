@@ -1258,6 +1258,9 @@ struct AppState {
     /// Must not be held at the same time as `self.inner`; review file I/O stays
     /// outside the main state mutex so disk writes do not stall unrelated state work.
     review_documents_lock: Arc<Mutex<()>>,
+    /// Runs requested passes of the delegation worktree sweep
+    /// (`delegation_worktree_reclaim.rs`).
+    delegation_worktree_sweeper: DelegationWorktreeSweeper,
     /// Serializes carried-run polls (`EngramHost::test_run_tick`), so a
     /// terminal read made off the state lock is stored before another poll,
     /// or a checkpoint's settlement after it, can read the same run.
@@ -1885,6 +1888,16 @@ struct StateInner {
     /// ownership until release. A new user boundary or queue entry transfers
     /// ownership from pre-prompt archive compensation to the new attempt.
     delegation_followup_admissions: HashMap<String, FollowupAdmissionReservation>,
+    /// Delegations whose worktree the sweep is inspecting or removing; a
+    /// follow-up is refused meanwhile (`delegation_worktree_reclaim.rs`).
+    /// Memory only, like the two sets below.
+    reclaiming_delegation_worktrees: HashSet<String>,
+    /// Delegation child sessions whose detached runtime is still shutting
+    /// down; their worktree is not reclaimed until that shutdown finishes.
+    delegation_child_shutdowns: HashSet<String>,
+    /// Delegations whose recorded worktree the sweep found it must never
+    /// touch (not a linked worktree inside its repository).
+    settled_delegation_worktrees: HashSet<String>,
     /// Evaluator delegations with an acceptance submission in progress, from
     /// its admission to its last durability acknowledgement. Memory only: a
     /// restart has no request in flight, and the persisted `pending` already
@@ -2038,6 +2051,9 @@ impl StateInner {
             orchestrator_instances: PersistTracked::default(),
             delegations: Vec::new(),
             delegation_followup_admissions: HashMap::new(),
+            reclaiming_delegation_worktrees: HashSet::new(),
+            delegation_child_shutdowns: HashSet::new(),
+            settled_delegation_worktrees: HashSet::new(),
             acceptance_evaluation_submissions_in_flight: HashMap::new(),
             acceptance_evidence_recovery: HashMap::new(),
             acceptance_source_captures_live: Arc::default(),
