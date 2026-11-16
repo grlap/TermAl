@@ -5,6 +5,7 @@
 #[derive(Default)]
 struct FederationExecutorRecovery {
     after: String,
+    clock: EngramBudgetClock,
     pending: Option<tokio::sync::oneshot::Receiver<String>>,
     task: Option<std::thread::JoinHandle<()>>,
 }
@@ -37,11 +38,12 @@ impl FederationExecutorRecovery {
         let (send, receive) = tokio::sync::oneshot::channel();
         let app = app.clone();
         let after = self.after.clone();
+        let clock = self.clock.clone();
         // One owned blocking pass at a time. An unresolved persistence wait
         // never blocks the federation supervisor or starts a second pass.
         match std::thread::Builder::new().name("federation-executor-recovery".into())
             .spawn(move || {
-                let mut recovery = Self { after, ..Self::default() };
+                let mut recovery = Self { after, clock, ..Self::default() };
                 recovery.recover(&app);
                 let _ = send.send(recovery.after);
             }) {
@@ -74,7 +76,7 @@ impl FederationExecutorRecovery {
         };
         let Some(central) = central else { return; };
         let Ok(host) = app.federation_executor_host_id() else { return; };
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = self.clock.now() + Duration::from_secs(2);
         loop {
             if app.federation_executor_wake_signal.is_stopping() { return; }
             let previous = self.after.clone();
@@ -105,10 +107,10 @@ impl FederationExecutorRecovery {
                     }
                 }
                 self.after = row.operation.operation_key;
-                if std::time::Instant::now() >= deadline { return; }
+                if self.clock.now() >= deadline { return; }
             }
             if exhausted { self.after.clear(); return; }
-            if self.after <= previous || std::time::Instant::now() >= deadline { return; }
+            if self.after <= previous || self.clock.now() >= deadline { return; }
             std::thread::yield_now();
         }
     }

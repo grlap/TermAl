@@ -114,9 +114,7 @@ async fn federation_m4_round_two_central_drain_continues_a_settled_history_prefi
     assert_eq!(pending, 0, "bounded scan progress must chain without waiting another supervisor tick");
 }
 
-#[test]
-fn federation_m4_round_two_satellite_recovery_reaches_work_after_settled_history() {
-    let fixture = Fixture::new();
+fn seed_satellite_settled_prefix(fixture: &Fixture) {
     let operation = fixture.operation();
     fixture.satellite.mailbox_store.admit_federation_executor_operation(&operation, || Ok(())).unwrap();
     fixture.satellite.mailbox_store.connection().unwrap().execute(
@@ -130,10 +128,54 @@ fn federation_m4_round_two_satellite_recovery_reaches_work_after_settled_history
           'processed','not_started','retained-'||n,'retained-'||n,'mailbox_ack','already-acknowledged'
          FROM federation_executor_operations CROSS JOIN rows WHERE operation_key=?1",
         [&operation.operation_key]).unwrap();
-    FederationExecutorRecovery::default().recover(&fixture.satellite);
+}
+
+#[test]
+fn federation_m4_round_two_satellite_recovery_reaches_work_after_settled_history() {
+    let fixture = Fixture::new();
+    seed_satellite_settled_prefix(&fixture);
+    let operation = fixture.operation();
+    // This checks page traversal, independently of the real per-pass yield budget.
+    FederationExecutorRecovery {
+        clock: EngramBudgetClock::scripted(),
+        ..Default::default()
+    }.recover(&fixture.satellite);
     assert!(fixture.queue(&fixture.satellite).iter().any(|entry|
         entry.pending_prompt.id == operation.queue_identity()),
         "a new received operation cannot wait a periodic tick per settled page");
+}
+
+#[test]
+fn federation_m4_round_two_satellite_recovery_keeps_its_cursor_when_the_pass_budget_expires() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let fixture = Fixture::new();
+    seed_satellite_settled_prefix(&fixture);
+    let operation = fixture.operation();
+    let clock = EngramBudgetClock::scripted();
+    let visited = Arc::new(AtomicUsize::new(0));
+    *fixture.satellite.federation_executor_wake_signal.lifecycle_hook.lock().unwrap() = Some({
+        let clock = clock.clone();
+        let visited = visited.clone();
+        Arc::new(move |event| {
+            if event == "receiverRecoveryRow" && visited.fetch_add(1, Ordering::SeqCst) == 99 {
+                clock.advance(Duration::from_secs(2));
+            }
+        })
+    });
+    let mut recovery = FederationExecutorRecovery { clock, ..Default::default() };
+    recovery.recover(&fixture.satellite);
+    assert_eq!(visited.load(Ordering::SeqCst), 100, "the expired pass must yield at the row boundary");
+    assert!(recovery.after.starts_with("a-history-"), "yielding must retain the settled-history cursor");
+    assert!(!fixture.queue(&fixture.satellite).iter().any(|entry|
+        entry.pending_prompt.id == operation.queue_identity()));
+
+    // A new pass resumes after that cursor; it must not rescan the first page.
+    recovery.recover(&fixture.satellite);
+    assert_eq!(visited.load(Ordering::SeqCst), 151);
+    assert!(recovery.after.is_empty());
+    assert!(fixture.queue(&fixture.satellite).iter().any(|entry|
+        entry.pending_prompt.id == operation.queue_identity()));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
