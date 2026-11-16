@@ -320,7 +320,9 @@ impl AppState {
             // image exists. This wait is private to delivery, not the lane.
             match runtime_observation_report_is_durable(&self.persistence_path, session_id, &report)
             {
-                Ok(true) => {}
+                Ok(true) => {
+                    self.release_named_selection_after_durable_capture(session_id, &report);
+                }
                 Ok(false) | Err(_) => {
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
@@ -370,6 +372,39 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id) {
             inner.sessions[index].engram.unadmitted_worker_running = false;
+        }
+    }
+
+
+    // Reuse delivery's exact persisted-row readback, before any network send.
+    fn release_named_selection_after_durable_capture(&self, session_id: &str, report: &EngramRuntimeObservationReport) {
+        let released = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let record = &mut inner.sessions[index];
+            if !record.engram.unadmitted_reports.iter().any(|current| current == report) { return; }
+            record.engram.durable_runtime_captures.insert(report.host_turn_ref.clone());
+            let retained_reports = &record.engram.unadmitted_reports;
+            record.engram.durable_runtime_captures.retain(|turn|
+                retained_reports.iter().any(|retained| &retained.host_turn_ref == turn));
+            let Some(selection) = record.engram.pending_naming_selection.as_mut() else { return; };
+            if selection.applied_in_generation.is_some() { return; }
+            let Some(member) = selection.predecessors.iter_mut()
+                .find(|member| member.turn_ref == report.host_turn_ref) else { return; };
+            if member.capture_durable { return; }
+            member.capture_durable = true;
+            true
+        };
+        if released {
+            self.dispatch_after_named_predecessor_settlement(session_id);
+        }
+    }
+
+    fn dispatch_after_named_predecessor_settlement(&self, session_id: &str) {
+        match self.dispatch_next_queued_turn_with_prompt(session_id, false) {
+            Ok(Some(started)) => { self.deliver_queued_turn_dispatch(started); }
+            Ok(None) => {}
+            Err(error) => eprintln!("runtime observation> successor dispatch remains queued: {error:#}"),
         }
     }
 
@@ -488,6 +523,9 @@ impl AppState {
                 diagnostic = Some(notice);
             }
             Ok(EngramRuntimeClosingOutcome::Report(report, source_refusal)) => {
+                if expected.scope.historical_fields.get("adopted_successor_reason").and_then(Value::as_str) == Some(ENGRAM_ADOPTED_PREDECESSOR_REASON) {
+                    diagnostic = Some(format!("Runtime-started turn {} retained as uncertain and unadmitted: {}. Its checks remain uncredited.", expected.trace.host_turn_ref, ENGRAM_ADOPTED_PREDECESSOR_REASON));
+                }
                 if !state
                     .unadmitted_reports
                     .iter()
@@ -528,7 +566,8 @@ impl AppState {
                 }
             }
         }
-        let has_diagnostic = diagnostic.is_some();
+        let predecessor_released = settle_engram_named_predecessor_locked(&mut inner, index, None);
+        let has_diagnostic = diagnostic.is_some() || predecessor_released;
         if let Some(text) = diagnostic {
             let message = Message::Text {
                 attachments: Vec::new(),
@@ -550,6 +589,9 @@ impl AppState {
         let focus_generation = inner.sessions[index].active_turn_generation;
         drop(inner);
         drop(_install);
+        if predecessor_released {
+            self.dispatch_after_named_predecessor_settlement(session_id);
+        }
         // Both fields live in the same session row: a prospective cache
         // publication must retain the old immutable report in that row too.
         // A crash must never leave only a moved cache and an unprepared job.

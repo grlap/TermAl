@@ -17,6 +17,8 @@
 /// work back to the session's workdir.
 const ENGRAM_WORK_SOURCE_ROOT_LIMIT: usize = 64;
 
+include!("engram_named_root_selection.rs");
+
 /// One work's source root, persisted so a restart keeps it. It applies to the
 /// work's claim `claim_id` only, so a new claim on the same work does not
 /// inherit an old tree. A same-root name under the live claim refreshes
@@ -1949,11 +1951,28 @@ impl AppState {
     /// Associate the exact held claim through the ordinary work-session child.
     /// Existing control debt and credentials remain historical state; naming
     /// neither replays nor replaces them and creates no turn grant.
+    #[cfg(test)]
     fn bind_fresh_engram_source_root_until(
         &self,
         target: EngramBindingTarget,
         association: &EngramRootIntentAssociation,
         deadline: std::time::Instant,
+    ) -> Result<EngramBindingTarget, ApiError> {
+        let naming = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&target.connection.session_id)
+                .ok_or_else(|| ApiError::conflict("naming session disappeared"))?;
+            EngramNamingCustody::capture(&inner.sessions[index])
+        };
+        self.bind_fresh_engram_source_root_for_naming_until(target, association, deadline, &naming)
+    }
+
+    fn bind_fresh_engram_source_root_for_naming_until(
+        &self,
+        target: EngramBindingTarget,
+        association: &EngramRootIntentAssociation,
+        deadline: std::time::Instant,
+        naming: &EngramNamingCustody,
     ) -> Result<EngramBindingTarget, ApiError> {
         let session_id = &target.connection.session_id;
         let owner = Uuid::new_v4();
@@ -1984,7 +2003,7 @@ impl AppState {
         };
         let result = (|| {
             // These reads validate the ordinary child and exact held claim
-            // before its requested association can replace the prior one.
+            // before naming or refreshing that same run's association.
             target.adapter.read_work_session(
                 &target.connection, &association.store,
                 target.rpc_timeout_until(deadline)
@@ -2034,18 +2053,30 @@ impl AppState {
                 return Err(ApiError::conflict("ordinary naming connection changed during its read"));
             }
             let index = inner.find_session_index(session_id).expect("current session");
+            let custody_unchanged = EngramNamingCustody::capture(&inner.sessions[index]) == *naming;
+            let naming_during_turn = matches!(inner.sessions[index].session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping);
+            let closing_pending = engram_naming_has_pending_scope(
+                &inner.sessions[index], &association.store, &target.connection,
+            );
             let state = &mut inner.sessions[index].engram;
             if state.source_root_bind_owner != Some(owner) || state.work_binding != prior_work {
                 return Err(ApiError::conflict("ordinary naming no longer owns its claim association"));
             }
-            // A valid association needs no rewrite. An explicit name of
-            // another held claim selects it after the same fenced reads.
-            if state.work_binding.as_ref() == Some(&association.binding) {
+            // Naming can establish or refresh an association between turns.
+            // Another held claim cannot replace a running turn's owner;
+            // acknowledged naming selects that claim at the next opening.
+            if state.work_binding.as_ref().is_some_and(|binding| {
+                binding == &association.binding
+                    || (!engram_same_recovery_run(binding, &association.binding)
+                        && (naming_during_turn || closing_pending || !custody_unchanged))
+            }) {
                 return Self::engram_source_root_target_locked(&inner, session_id)
                     .map_err(ApiError::conflict)?
                     .ok_or_else(|| ApiError::conflict("ordinary naming connection disappeared"));
             }
-            state.work_binding = Some(association.binding.clone());
+            inner.session_mut_by_index(index).expect("current session")
+                .engram.work_binding = Some(association.binding.clone());
             #[cfg(test)]
             let save_fails = TEST_ENGRAM_NAMING_BIND_SAVE_FAILS.with(std::cell::Cell::get);
             #[cfg(not(test))]
@@ -2053,7 +2084,7 @@ impl AppState {
             let saved = if save_fails {
                 Err(anyhow!("the naming bind's save failed"))
             } else {
-                self.persist_session_internal_locked(&inner, session_id)
+                self.commit_session_locked(&mut inner, session_id).map(|_| ())
             };
             if let Err(error) = saved {
                 inner.sessions[index].engram.work_binding = prior_work.clone();
@@ -2079,6 +2110,12 @@ impl AppState {
         session_id: &str,
         request: EngramSourceRootRequest,
     ) -> std::result::Result<EngramSourceRootResponse, ApiError> {
+        let naming = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("naming session disappeared"))?;
+            EngramNamingCustody::capture(&inner.sessions[index])
+        };
         let clock = self.engram_budget_clock();
         // Everything below shares one budget, within the bridge's wait.
         let deadline = clock.now() + ENGRAM_SOURCE_ROOT_NAMING_BUDGET;
@@ -2346,26 +2383,22 @@ impl AppState {
             claim.control_binding.as_ref(),
         )?;
         let target = engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
-            self.bind_fresh_engram_source_root_until(
-                target, &association, (clock.now() + budget).min(deadline),
+            self.bind_fresh_engram_source_root_for_naming_until(
+                target, &association, (clock.now() + budget).min(deadline), &naming,
             )
         })?;
-        // The current claim's lifecycle is read explicitly. A held-claims
-        // row, including its fence, cannot distinguish recovery from release.
-        // For a different held claim there is no status projection on this
-        // connection; a completed explicit name therefore mints a new event.
+        // Read the requested claim's lifecycle without changing session focus.
+        // Its exact held association was validated above; the connection can
+        // read that run even while the caller remains bound to another claim.
+        // A held row alone cannot distinguish recovery from release.
         let root_read_fence =
             EngramRootReadFence::capture(&self.inner.lock().expect("state mutex poisoned"));
-        let remote_root = if target
-            .work_binding
-            .as_ref()
-            .is_some_and(|binding| binding.claim_id == claim.claim_id)
-        {
+        let remote_root =
             engram_source_root_control_within(&clock, &mut control_left, left(), |budget| {
                 let phase_deadline = (clock.now() + budget).min(deadline);
                 self.guard_engram_root_read_for_naming_classified_until(
                     &target,
-                    target.work_binding.as_ref(),
+                    Some(&association.binding),
                     phase_deadline,
                 )
                 .map_err(|error| match error {
@@ -2382,10 +2415,7 @@ impl AppState {
                     phase_deadline,
                 )
                 .map(|read| Some(read.named_root))
-            })?
-        } else {
-            None
-        };
+            })?;
         if let Some(intent) = self.engram_orphaned_root_intent(&store, &claim.claim_id) {
             if !target
                 .work_binding
@@ -2784,7 +2814,7 @@ impl AppState {
             let (locked, owner, proof) = engram_source_root_control_within(
                 &clock, &mut control_left, left(), |budget| {
                     self.learn_engram_naming_authority_until(
-                        &target, &target, &reply.owner, &reply.proof, None, (clock.now() + budget).min(deadline),
+                        &target, &target, &association.binding, &reply.owner, &reply.proof, None, (clock.now() + budget).min(deadline),
                     )
                 },
             )?;
@@ -3016,7 +3046,7 @@ impl AppState {
             self.test_engram_authority_ack_boundary("before_kept_naming_proof");
             let proof = self.read_engram_authority_fact_until(&target, &owner.binding, deadline)?;
             let (locked, owner, _) =
-                self.learn_engram_naming_authority_until(&target, &target, &owner, &proof, Some(captured), deadline)?;
+                self.learn_engram_naming_authority_until(&target, &target, &association.binding, &owner, &proof, Some(captured), deadline)?;
             inner = locked;
             drop(inner);
             self.publish_engram_authority_until(&store, &owner, deadline)?;
@@ -3113,6 +3143,9 @@ impl AppState {
                 });
             }
         }
+        inner = self.stage_engram_named_root_selection(
+            inner, session_id, &association.store, &target.connection, &association.binding, &naming,
+        )?;
         let (root, source_basis, unmeasured) = match (&validated, basis) {
             (Some((root, _)), Some(basis)) => {
                 (Some(root.clone()), Some(basis), None)

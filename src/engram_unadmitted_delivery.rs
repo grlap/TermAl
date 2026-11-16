@@ -1,7 +1,8 @@
 // Durable observation delivery state. Owns immutable request/receipt pairs,
 // definitive-refusal settlement and exact-content read-back. Does not own
 // admission, recovery holds, prompt dispatch or runtime control. Every call
-// belongs on the observation worker, never on a turn's critical path.
+// belongs off StateInner: the observation worker or naming's acknowledgement
+// readback, never a turn's critical path.
 // New fragment beside engram_unadmitted_capture.rs.
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -139,6 +140,21 @@ fn runtime_observation_session_entry_is_durable(
     field: &str,
     expected: &Value,
 ) -> Result<bool, EngramTransportError> {
+    let row = runtime_observation_session_row(path, session_id)?;
+    Ok(runtime_observation_row_contains(row.as_ref(), field, expected))
+}
+
+fn runtime_observation_row_contains(row: Option<&Value>, field: &str, expected: &Value) -> bool {
+    row.and_then(|row| row.get(field)).and_then(Value::as_array)
+        .is_some_and(|entries| entries.contains(expected))
+}
+
+// Read one session image so every member of a naming cut is checked against
+// the same SQLite row, using the observation outbox's exact-content rule.
+fn runtime_observation_session_row(
+    path: &FsPath,
+    session_id: &str,
+) -> Result<Option<Value>, EngramTransportError> {
     let db = open_sqlite_state_read_connection(path).map_err(|error| {
         EngramTransportError::local_state(format!("runtime observation read-back failed: {error}"))
     })?;
@@ -155,13 +171,12 @@ fn runtime_observation_session_entry_is_durable(
             ))
         })?;
     let Some(raw) = raw else {
-        return Ok(false);
+        return Ok(None);
     };
     let row: Value = serde_json::from_str(&raw).map_err(|error| {
         EngramTransportError::local_state(format!("runtime observation row is invalid: {error}"))
     })?;
-    let reports = row.get(field).and_then(Value::as_array);
-    Ok(reports.is_some_and(|reports| reports.contains(expected)))
+    Ok(Some(row))
 }
 
 /// Engram's `execution_observe` refusals that record nothing for the refused

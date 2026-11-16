@@ -91,6 +91,9 @@ mod unknown_fields;
 #[path = "engram_source_root_off_rebind.rs"]
 mod off_rebind;
 
+#[path = "engram_source_root_binding.rs"]
+mod binding;
+
 #[path = "engram_named_root_stale_fence.rs"]
 mod stale_fence;
 
@@ -6563,3 +6566,6 @@ fn parked_other_root_notice(case: &str) {
     });
     assert_ordinary_observation_has_no_native_credit(&claimed, &claimed.finish());
 }
+
+#[path = "engram_source_root_canonical_focus.rs"]
+mod canonical_focus;

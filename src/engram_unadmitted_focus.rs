@@ -66,6 +66,11 @@ impl AppState {
                 .find_session_index(session)
                 .ok_or_else(|| ApiError::conflict("the observing session disappeared"))?;
             let record = &inner.sessions[index];
+            if engram_named_selection_capture_pending(record) {
+                return Err(ApiError::conflict(
+                    "prospective focus publication waits for acknowledged predecessors' durable captures or their own terminal outcomes",
+                ));
+            }
             if !matches!(
                 record.session.status,
                 SessionStatus::Idle | SessionStatus::Error
@@ -99,6 +104,7 @@ impl AppState {
                     SessionStatus::Idle | SessionStatus::Error
                 )
                 && record.engram.unadmitted_active_turn.is_none()
+                && !engram_named_selection_capture_pending(record)
                 && record.engram.source_root_bind_owner.is_none()
                 && !record.runtime_stop_in_progress
                 && !record.engram.observation_delete_requested
@@ -326,7 +332,16 @@ impl AppState {
         {
             return Ok(());
         }
-        let notice = "[TermAl] The previous turn's report is retained under its original item. No future source root was installed after the focus change. Name or confirm the focused item's root for a later turn; until then the session's source association still refers to the previous item.".to_owned();
+        let notice = if engram_named_selection_capture_pending(record) {
+            let waiting: Vec<_> = record.engram.pending_naming_selection.as_ref()
+                .expect("pending naming capture").predecessors.iter()
+                .filter(|member| !member.capture_durable && member.terminal_no_report.is_none()
+                    && engram_turn_capture_pending(record, &member.turn_ref))
+                .map(|member| member.turn_ref.as_str()).collect();
+            format!("[TermAl] Prospective focus publication is pending: acknowledged predecessor captures {} are waiting for durable report readback or their own terminal outcome. The current source association is retained. The observation worker continues its existing retries; the named root can apply at a later opening after these captures settle.", waiting.join(", "))
+        } else {
+            "[TermAl] The previous turn's report is retained under its original item. No future source root was installed after the focus change. Name or confirm the focused item's root for a later turn; until then the session's source association still refers to the previous item.".to_owned()
+        };
         inner.sessions[index]
             .engram
             .set_pending_source_root_line(notice.clone());

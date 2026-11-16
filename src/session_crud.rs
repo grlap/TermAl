@@ -167,8 +167,24 @@ fn reset_engram_session_associations_locked(
             continue;
         };
         let record = &mut inner.sessions[index];
-        let lines = EngramHost::carried_checks_association_reset_lines(record, why);
+        let mut lines = EngramHost::carried_checks_association_reset_lines(record, why);
         let old = record.engram.clone();
+        let mut closing_jobs = old.unadmitted_closing_jobs.clone();
+        if let Some(selection) = old.pending_naming_selection.as_ref() {
+            for member in &selection.predecessors {
+                if member.capture_durable || member.terminal_no_report.is_some()
+                    || old.unadmitted_reports.iter().any(|report| report.host_turn_ref == member.turn_ref)
+                {
+                    continue;
+                }
+                let turn = &member.turn_ref;
+                let diagnostic = format!("Runtime-started turn {turn}: no predecessor report: the Engram association was reset before predecessor capture. Its checks remain uncredited.");
+                if let Some(job) = closing_jobs.iter_mut().find(|job| &job.trace.host_turn_ref == turn) {
+                    job.last_error = Some(diagnostic.clone());
+                }
+                lines.push(diagnostic);
+            }
+        }
         record.engram = EngramSessionState {
             historical_control: old.historical_control.clone(),
             observation_delete_requested: old.observation_delete_requested,
@@ -178,7 +194,7 @@ fn reset_engram_session_associations_locked(
             runtime_checkpoint: old.runtime_checkpoint.clone(),
             evaluation_checkpoint: old.evaluation_checkpoint.clone(),
             unadmitted_active_turn: old.unadmitted_active_turn.clone(),
-            unadmitted_closing_jobs: old.unadmitted_closing_jobs.clone(),
+            unadmitted_closing_jobs: closing_jobs,
             unadmitted_reports: old.unadmitted_reports.clone(),
             unadmitted_worker_running: old.unadmitted_worker_running,
             runtime_closed_turn_ref: old.runtime_closed_turn_ref.clone(),

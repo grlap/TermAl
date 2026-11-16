@@ -979,7 +979,7 @@ impl AppState {
                     .flatten()
                     .is_some_and(|current| {
                         current.connection == target.connection
-                            && current.work_binding.as_ref() == Some(binding)
+                            && current.work_binding == target.work_binding
                     })
                 },
             )
@@ -2034,8 +2034,10 @@ impl AppState {
         }
     }
 
-    /// Naming alone may refresh a superseded local owner. Retain the exact
-    /// connection, runtime, binding, selection and journal, re-read the same
+    /// Naming alone may refresh a superseded local owner. The requested run
+    /// comes from the validated held claim or immutable event journal; it need
+    /// not be the caller's focus. Retain the exact caller binding, connection,
+    /// runtime, selection and journal, re-read the same
     /// canonical fact under a newly acknowledged owner, and keep the lock on
     /// success so selection installation cannot race another owner again.
     /// No producer transition is sent by this recovery.
@@ -2043,6 +2045,7 @@ impl AppState {
         &'a self,
         target: &EngramBindingTarget,
         reader: &EngramBindingTarget,
+        naming_binding: &EngramControlWorkBinding,
         owner: &EngramAuthorityTransition,
         proof: &EngramNamedRootReadResponse,
         captured: Option<EngramNamingReadContext>,
@@ -2054,10 +2057,14 @@ impl AppState {
             return Err(ApiError::conflict("naming canonical reader belongs to another authority store"));
         }
         let binding = &owner.binding;
+        if !engram_same_recovery_run(binding, naming_binding) {
+            return Err(ApiError::conflict(
+                "naming recovery requires its requested association to name the original run",
+            ));
+        }
         let live_binding = target.work_binding.as_ref()
-            .filter(|current| engram_same_recovery_run(binding, current))
             .ok_or_else(|| ApiError::conflict(
-                "naming recovery requires its captured live association to name the original run",
+                "naming recovery requires its captured live association",
             ))?;
         let EngramNamingReadContext { selection, journal } = captured.unwrap_or_else(|| {
             let inner = self.inner.lock().expect("state mutex poisoned");

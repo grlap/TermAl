@@ -4,6 +4,7 @@
 // its prospective successor refresh follows installation of the old report.
 
 include!("engram_unadmitted_focus.rs");
+include!("engram_adopted_predecessor.rs");
 
 /// The test build's diagnostic line for one closing-capture attempt: the
 /// attempt number, the capture budget, the time its source measurement took,
@@ -34,6 +35,12 @@ impl AppState {
         session_id: &str,
         job: &EngramRuntimeClosingJob,
     ) -> Result<EngramRuntimeClosingOutcome, EngramTransportError> {
+        if job.trace.source_attribution_uncertain
+            && job.scope.historical_fields.get("adopted_successor_reason").and_then(Value::as_str)
+                == Some(ENGRAM_ADOPTED_PREDECESSOR_REASON)
+        {
+            return self.capture_adopted_predecessor_unadmitted(session_id, job);
+        }
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.find_session_index(session_id).is_some_and(|index| {
