@@ -83,6 +83,7 @@ fn older_turn_in_retry(fixture: &TwoClaims) -> EngramRuntimeClosingJob {
         failed.is_err(),
         "X reaches a real transient capture refusal"
     );
+    let before_install = chrono::Utc::now();
     fixture
         .turn
         .state
@@ -98,10 +99,15 @@ fn older_turn_in_retry(fixture: &TwoClaims) -> EngramRuntimeClosingJob {
             .unwrap()
             .contains("older-X policy outage")
     );
-    assert!(!runtime_observation_retry_due(
-        &retry.retry_at,
-        chrono::Utc::now()
-    ));
+    // The failure scheduled a backoff: the retry falls well after the install
+    // began. Not "still pending now", which a slow host can outrun.
+    let retry_at = chrono::DateTime::parse_from_rfc3339(&retry.retry_at)
+        .expect("retry_at is a timestamp")
+        .with_timezone(&chrono::Utc);
+    assert!(
+        retry_at >= before_install + chrono::Duration::seconds(1),
+        "retry at {retry_at} carries no backoff from the install at {before_install}"
+    );
     // Park only the fixture's due time so the newer job wins deterministically.
     // We explicitly make X due again below; no retry budget or wait is extended.
     set_retry_due(
