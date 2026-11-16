@@ -200,6 +200,18 @@ mod source_owner;
 #[path = "test_run_native_completion.rs"]
 mod native_completion;
 
+#[path = "test_run_native_origin_diagnostics.rs"]
+mod native_origin_diagnostics;
+
+#[path = "test_run_native_completion_diagnostics.rs"]
+mod native_completion_diagnostics;
+
+#[path = "test_run_native_completion_diagnostics_recovery.rs"]
+mod native_completion_diagnostics_recovery;
+
+#[path = "test_run_native_completion_diagnostics_compaction.rs"]
+mod native_completion_diagnostics_compaction;
+
 #[path = "engram_remote_verification.rs"]
 mod remote_verification;
 
@@ -437,6 +449,8 @@ fn ambiguous_or_cut_launcher_output_never_suppresses_an_observed_execution() {
 
 #[test]
 fn committed_focused_locator_attaches_only_to_its_exact_registered_observation() {
+    use TestRunNativeCompletionFact as Fact;
+    use TestRunNativeCompletionRefusalCode as Code;
     let fixture = RunFixture::new("registration-focused-commit");
     let session = running_owner(&fixture, "registry-focused-commit-runtime");
     let command = "node scripts/test-launcher.mjs focused --input commit -- cargo test";
@@ -482,6 +496,41 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
     let original_request = fs::read(&request_path).unwrap();
     let foreign = write_run(&fixture.root.join("foreign-runs"), &run_id, request, None);
     let locator = format!("RUN {}", test_run_display_path(&directory));
+    let assert_only_diagnostic_changed =
+        |case: &str,
+         original: &TestRunCommandObservation,
+         code: Option<Code>,
+         facts: &[(Fact, bool)]| {
+            let mut actual = fixture.state.inner.lock().unwrap().test_run_observations
+                [&observed.execution_id]
+                .clone();
+            let diagnostic = actual.native_completion_refusal.take();
+            assert_eq!(
+                diagnostic.as_ref().map(|reason| reason.code),
+                code,
+                "{case}"
+            );
+            if let Some(reason) = diagnostic {
+                assert_eq!(
+                    reason.phase,
+                    TestRunNativeCompletionPhase::ArtifactAssociation,
+                    "{case}"
+                );
+                assert_eq!(
+                    reason.outcome,
+                    TestRunNativeCompletionOutcome::Refused,
+                    "{case}"
+                );
+                assert_eq!(
+                    reason.observed,
+                    facts.iter().copied().collect::<BTreeMap<_, _>>(),
+                    "{case}"
+                );
+            }
+            // This still compares every pre-existing field, including the exact
+            // artifact, runtime, request custody, evidence and original start.
+            assert_eq!(&actual, original, "{case}: no mismatched attachment");
+        };
     for case in ["tool", "command", "owner", "request", "artifact", "runtime"] {
         let mut changed: Value = serde_json::from_slice(&original_request).unwrap();
         if case == "owner" {
@@ -517,17 +566,35 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
             },
             false,
         );
-        assert_eq!(
-            fixture
-                .state
-                .inner
-                .lock()
-                .unwrap()
-                .test_run_observations
-                .get(&observed.execution_id),
-            Some(&observed),
-            "{case}: no mismatched attachment"
-        );
+        match case {
+            "tool" | "command" => assert_only_diagnostic_changed(case, &observed, None, &[]),
+            "owner" => assert_only_diagnostic_changed(
+                case,
+                &observed,
+                Some(Code::ArtifactRequestMismatch),
+                &[
+                    (Fact::RunMatches, true),
+                    (Fact::RequestOwnerMatches, false),
+                    (Fact::WorktreeMatches, true),
+                    (Fact::RequestIdentityPresent, true),
+                ],
+            ),
+            "request" => assert_only_diagnostic_changed(
+                case,
+                &observed,
+                Some(Code::ArtifactModeMismatch),
+                &[(Fact::ModeMatches, false)],
+            ),
+            // A replaced runtime cannot write even a diagnostic, so it must
+            // retain the preceding foreign-directory refusal unchanged.
+            "artifact" | "runtime" => assert_only_diagnostic_changed(
+                case,
+                &observed,
+                Some(Code::ArtifactDirectoryMismatch),
+                &[(Fact::DirectoryMatches, false)],
+            ),
+            _ => unreachable!("fixture case"),
+        }
         if let Some(runtime) = previous_runtime {
             let mut inner = fixture.state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
@@ -555,6 +622,7 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
         Some(&registration.request_identity)
     );
     assert_eq!(attached.command_fingerprint, observed.command_fingerprint);
+    assert!(attached.native_completion_refusal.is_none());
     assert!(
         attached.evidence.is_empty(),
         "attachment does not fabricate verification"
@@ -571,16 +639,7 @@ fn committed_focused_locator_attaches_only_to_its_exact_registered_observation()
         &locator,
         false,
     );
-    assert_eq!(
-        fixture
-            .state
-            .inner
-            .lock()
-            .unwrap()
-            .test_run_observations
-            .get(&observed.execution_id),
-        Some(&attached)
-    );
+    assert_only_diagnostic_changed("replacement request", &attached, None, &[]);
     fs::write(&request_path, &original_request).unwrap();
     assert_eq!(fs::read(&request_path).unwrap(), original_request);
 }

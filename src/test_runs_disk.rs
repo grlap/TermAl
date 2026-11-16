@@ -994,6 +994,7 @@ fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
         })
         .unwrap_or_default();
     Ok(TestRunDetail {
+        native_completion_refusal: None,
         stages,
         preflight,
         source_id,
