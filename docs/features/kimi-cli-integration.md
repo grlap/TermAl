@@ -172,8 +172,8 @@ settings, plus an app default for effort.
   - the session is Active, so a pending manual card suspends auto-approve;
   - no Stop is in progress;
   - the session is not a read-only delegation child;
-  - the tool is on the host's allowlist: Bash, Write, Edit, CronCreate,
-    CronDelete, or an MCP tool named `mcp__<server>__<tool>`;
+  - it is an ordinary tool permission, rather than a question or plan
+    decision; the tool's title does not restrict automatic approval;
   - the request offers exactly one `allow_once` option. That option is
     selected; `allow_always` never is.
 - **What always stays a manual card.**
@@ -181,19 +181,23 @@ settings, plus an app default for effort.
     one would answer the user's question.
   - ExitPlanMode, a plan approval.
   - Any request offering more than one `allow_once` option.
-  - Any other tool.
+- Requests without exactly one valid `allow_once` option keep their existing
+  interactive handling.
 - **A stale or stopping runtime** of an auto-approve session is answered
   `cancelled`, never approved.
 
 `CronDelete` was also observed requesting permission in Kimi Code 2.1.1.
 It cancels a scheduled job in the current Kimi session, complementing the
-already allowed `CronCreate`. Kimi's cron service removes only jobs in its
+`CronCreate`. Kimi's cron service removes only jobs in its
 own session state; an unknown id returns no job. `CronList` normally runs
-without asking and is deliberately absent from the host's allowlist. If it
-does send a permission request, that request stays manual. These cron contracts
+without asking. If it does request permission, host auto-approve answers it
+like any other ordinary tool request. These cron contracts
 are documented in the upstream
 [scheduled tools reference](https://github.com/MoonshotAI/kimi-code/blob/f409caa21e71ce7beb158d29ffca1fed76216a64/docs/en/reference/tools.md#scheduled-tasks).
 Read-only delegation children still refuse all cron permission requests.
+Their refusals are answered immediately and recorded as bounded system
+messages explaining the constraint and how to choose an appropriate session;
+they do not create an approval card or a user wait.
 
 ### Kimi's own mode: `kimiMode`
 

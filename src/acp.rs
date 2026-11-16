@@ -1404,9 +1404,9 @@ fn handle_acp_message(
         // Kimi, in this order, each fenced by the same lock as Stop: a
         // read-only delegation child is answered by its gate
         // (kimi_read_only.rs), which always wins; then a session whose TermAl
-        // policy is auto-approve may be answered for an allowlisted tool with
-        // exactly one allow-once option (kimi_approvals.rs). Everything else
-        // stays a manual approval card.
+        // policy is auto-approve answers ordinary tool asks with exactly one
+        // allow-once option, regardless of title (kimi_approvals.rs).
+        // Questions and plan decisions remain interactive.
         if agent == AcpAgent::Kimi && method == "session/request_permission" {
             if state.answer_kimi_read_only_permission(
                 message,
@@ -2044,85 +2044,6 @@ fn find_acp_permission_option(options: &[Value], kinds: &[&str]) -> Option<Strin
                 .map(str::to_owned)
         })
     })
-}
-
-/// Summarizes a permission request without losing OpenCode's structured tool
-/// context. Cursor and Gemini historically send flat `toolName` +
-/// `description` fields; ACP v1 agents such as OpenCode send a nested
-/// `toolCall` carrying the title, kind, content, and locations instead.
-fn summarize_acp_permission_request(params: &Value, agent: AcpAgent) -> (String, String) {
-    const MAX_TITLE_CHARS: usize = 1_000;
-    const MAX_TOOL_NAME_CHARS: usize = 200;
-    let tool_call = params.get("toolCall").unwrap_or(&Value::Null);
-    let raw_tool_name = params
-        .get("toolName")
-        .and_then(Value::as_str)
-        .or_else(|| tool_call.get("title").and_then(Value::as_str))
-        .or_else(|| tool_call.get("kind").and_then(Value::as_str))
-        .unwrap_or("Tool");
-    let tool_name = bounded_acp_approval_text(raw_tool_name, MAX_TOOL_NAME_CHARS, "Tool");
-    let raw_description = params
-        .get("description")
-        .and_then(Value::as_str)
-        .or_else(|| tool_call.get("title").and_then(Value::as_str))
-        .unwrap_or(&tool_name);
-    let description = bounded_acp_approval_text(raw_description, MAX_TITLE_CHARS, &tool_name);
-
-    let mut details = vec![format!(
-        "{} requested approval for `{tool_name}`.",
-        agent.label()
-    )];
-    if let Some(kind) = tool_call.get("kind").and_then(Value::as_str) {
-        let kind = bounded_acp_approval_text(kind, MAX_TOOL_NAME_CHARS, "tool");
-        if !kind.eq_ignore_ascii_case(&tool_name) {
-            details.push(format!("Kind: `{kind}`"));
-        }
-    }
-    for (label, value) in [
-        ("Content", tool_call.get("content")),
-        ("Locations", tool_call.get("locations")),
-    ] {
-        let Some(value) = value.filter(|value| !value.is_null()) else {
-            continue;
-        };
-        let rendered = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
-        details.push(format!(
-            "{label}:\n{}",
-            truncate_acp_approval_detail(&rendered)
-        ));
-    }
-
-    (
-        description,
-        truncate_acp_approval_detail(&details.join("\n\n")),
-    )
-}
-
-/// Bounds single-line approval metadata before transcript persistence.
-fn bounded_acp_approval_text(value: &str, max_chars: usize, fallback: &str) -> String {
-    let bounded = value
-        .chars()
-        .filter(|character| !character.is_control())
-        .take(max_chars)
-        .collect::<String>();
-    let bounded = bounded.trim();
-    if bounded.is_empty() {
-        fallback.to_owned()
-    } else {
-        bounded.to_owned()
-    }
-}
-
-/// Bounds agent-provided approval detail before storing it in the transcript.
-fn truncate_acp_approval_detail(value: &str) -> String {
-    const MAX_DETAIL_CHARS: usize = 8_000;
-    let mut chars = value.chars();
-    let truncated = chars.by_ref().take(MAX_DETAIL_CHARS).collect::<String>();
-    if chars.next().is_some() {
-        format!("{truncated}\n…")
-    } else {
-        truncated
-    }
 }
 
 /// Handles send ACP JSON RPC request.

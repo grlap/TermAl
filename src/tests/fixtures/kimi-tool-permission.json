@@ -1,0 +1,26 @@
+{
+  "jsonrpc": "2.0",
+  "id": 41,
+  "method": "session/request_permission",
+  "params": {
+    "sessionId": "fixture-kimi-session",
+    "options": [
+      { "optionId": "approve_once", "name": "Approve once", "kind": "allow_once" },
+      { "optionId": "approve_always", "name": "Approve for this session", "kind": "allow_always" },
+      { "optionId": "reject", "name": "Reject", "kind": "reject_once" }
+    ],
+    "toolCall": {
+      "toolCallId": "fixture-read",
+      "title": "Read",
+      "content": [
+        {
+          "content": {
+            "text": "Requesting approval to Reading C:/workspace/project/.git/worktrees/review/review-runs/run/results.json",
+            "type": "text"
+          },
+          "type": "content"
+        }
+      ]
+    }
+  }
+}

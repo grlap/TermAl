@@ -1080,7 +1080,10 @@ function ApprovalCard({
         searchQuery={searchQuery}
         searchHighlightTone={searchHighlightTone}
       />
-      <p className="support-copy">
+      <p
+        className="support-copy"
+        style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+      >
         {renderHighlightedText(
           message.detail,
           searchQuery,

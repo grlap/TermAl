@@ -1514,6 +1514,13 @@ fn kimi_user_stop_cancels_before_process_teardown() {
 fn kimi_prompt_rechecks_manual_mode_and_deactivates_on_refusal() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Kimi);
+    let (handle, _input_rx) = test_acp_runtime_handle(AcpAgent::Kimi, "kimi-mode-test");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Acp(handle);
+        inner.sessions[index].session.kimi_approval_mode = Some(KimiApprovalMode::AutoApprove);
+    }
     let runtime = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("saved-kimi".to_owned()),
         ..Default::default()
@@ -1590,6 +1597,7 @@ fn kimi_prompt_rechecks_manual_mode_and_deactivates_on_refusal() {
         )
         .unwrap();
         assert_eq!(writer.frames[before]["method"], "session/set_config_option");
+        assert_eq!(writer.frames[before]["params"]["value"], "default");
         assert_eq!(writer.frames[before + 1]["method"], "session/prompt");
         let (active, _) = lifecycle
             .1
@@ -1601,6 +1609,13 @@ fn kimi_prompt_rechecks_manual_mode_and_deactivates_on_refusal() {
             .unwrap();
         assert!(!*active, "scripted prompt must settle");
     }
+    let inner = state.inner.lock().unwrap();
+    let session = &inner.sessions[inner.find_session_index(&session_id).unwrap()].session;
+    assert_eq!(
+        session.kimi_approval_mode,
+        Some(KimiApprovalMode::AutoApprove)
+    );
+    assert_eq!(session.kimi_current_mode.as_deref(), Some("default"));
 }
 
 // The mode ACK refreshes the observed mode, so a mode Kimi reported during

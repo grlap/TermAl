@@ -42,45 +42,13 @@ fn normalize_default_kimi_effort(value: &str) -> Result<String, ApiError> {
     Ok(trimmed.to_owned())
 }
 
-/// Built-in tools whose permission requests TermAl may auto-approve.
-/// Kimi cron jobs belong to the current session, so delete complements create.
-/// CronList is excluded because Kimi normally runs it without asking permission.
-/// Contract: MoonshotAI/kimi-code f409caa21e71ce7beb158d29ffca1fed76216a64,
-/// docs/en/reference/tools.md#scheduled-tasks; see docs/features/kimi-cli-integration.md.
-const KIMI_AUTO_APPROVABLE_TOOL_TITLES: &[&str] =
-    &["Bash", "Write", "Edit", "CronCreate", "CronDelete"];
-
-/// Any other title (AskUserQuestion, ExitPlanMode, a future tool) stays a
-/// manual card: an allowlist fails safe where a denylist would not.
-/// MCP tools use their separate exact server/tool naming rule below.
-fn kimi_auto_approvable_title(title: &str) -> bool {
-    KIMI_AUTO_APPROVABLE_TOOL_TITLES.contains(&title) || kimi_is_mcp_tool_title(title)
-}
-
-/// `mcp__<server>__<tool>`, the form Kimi names MCP tools in.
-fn kimi_is_mcp_tool_title(title: &str) -> bool {
-    let Some(rest) = title.strip_prefix("mcp__") else {
-        return false;
-    };
-    let Some((server, tool)) = rest.split_once("__") else {
-        return false;
-    };
-    let word = |text: &str| {
-        !text.is_empty()
-            && text
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-    };
-    word(server) && word(tool)
-}
-
 /// The one option a request offers whose kind is exactly `allow_once`. Zero
 /// or two or more mean the request is a choice (a question's answers) or
 /// unknown, and it stays manual. `allow_always` is never selected.
 fn kimi_single_allow_once_option(options: &[Value]) -> Option<String> {
-    let mut allow_once = options.iter().filter(|option| {
-        option.get("kind").and_then(Value::as_str) == Some("allow_once")
-    });
+    let mut allow_once = options
+        .iter()
+        .filter(|option| option.get("kind").and_then(Value::as_str) == Some("allow_once"));
     let option = allow_once.next()?;
     if allow_once.next().is_some() {
         return None;
@@ -124,10 +92,6 @@ impl AppState {
         input_tx: &Sender<AcpRuntimeCommand>,
     ) -> Result<bool> {
         let params = message.get("params").unwrap_or(&Value::Null);
-        let title = params
-            .pointer("/toolCall/title")
-            .and_then(Value::as_str)
-            .unwrap_or("");
         let options = params
             .get("options")
             .and_then(Value::as_array)
@@ -151,9 +115,15 @@ impl AppState {
             );
         let outcome = if !current {
             json!({"outcome": "cancelled"})
-        } else if let Some(option_id) = kimi_auto_approvable_title(title)
-            .then(|| kimi_single_allow_once_option(&options))
-            .flatten()
+        } else if kimi_permission_is_question(params, &options)
+            || [params.pointer("/toolCall/title"), params.get("toolName")]
+                .into_iter()
+                .flatten()
+                .any(|title| title.as_str() == Some("ExitPlanMode"))
+        {
+            // These are user decisions, even if only one answer is offered.
+            return Ok(false);
+        } else if let Some(option_id) = kimi_single_allow_once_option(&options)
             .filter(|_| kimi_auto_approval_allowed_locked(&inner, session_id))
         {
             json!({"outcome": "selected", "optionId": option_id})

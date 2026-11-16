@@ -367,10 +367,16 @@ fn kimi_read_only_permission_decision(
 
     if let Some(word) = tracker_word {
         if !tracker_reads_allowed {
-            return kimi_read_only_reject(title, "the host does not admit tracker reads for this child");
+            return kimi_read_only_reject(
+                title,
+                "the host does not admit tracker reads for this child",
+            );
         }
         if !engram_mcp_tool_call_only_reads(word, &args) {
-            return kimi_read_only_reject(title, "the tracker call is not a read with known arguments");
+            return kimi_read_only_reject(
+                title,
+                "the tracker call is not a read with known arguments",
+            );
         }
         return KimiReadOnlyDecision::Allow { args };
     }
@@ -385,13 +391,12 @@ fn kimi_read_only_permission_decision(
                 serde_json::from_value::<ReviewFreezeRequest>(args.clone())
                     .is_ok_and(|request| request.validate().is_ok())
             }
-            DelegationControlPlaneCapability::ReviewIdentity => {
-                serde_json::from_value::<ReviewIdentityRequest>(args.clone()).is_ok_and(|request| {
-                    request.operation == "check"
-                        && request.root.is_none()
-                        && request.validate().is_ok()
-                })
-            }
+            DelegationControlPlaneCapability::ReviewIdentity => serde_json::from_value::<
+                ReviewIdentityRequest,
+            >(args.clone())
+            .is_ok_and(|request| {
+                request.operation == "check" && request.root.is_none() && request.validate().is_ok()
+            }),
             DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => false,
             DelegationControlPlaneCapability::ReadAcceptanceEvidence => false,
         };
@@ -410,13 +415,19 @@ fn kimi_read_only_permission_decision(
         .keys()
         .any(|key| !KIMI_BASH_ALLOWED_KEYS.contains(&key.as_str()))
     {
-        return kimi_read_only_reject(title, "the command carries an option the gate does not judge");
+        return kimi_read_only_reject(
+            title,
+            "the command carries an option the gate does not judge",
+        );
     }
     for flag in ["run_in_background", "disable_timeout"] {
         match object.get(flag) {
             None | Some(Value::Bool(false)) => {}
             Some(_) => {
-                return kimi_read_only_reject(title, "background and untimed commands are not allowed");
+                return kimi_read_only_reject(
+                    title,
+                    "background and untimed commands are not allowed",
+                );
             }
         }
     }
@@ -425,7 +436,10 @@ fn kimi_read_only_permission_decision(
             .as_str()
             .is_some_and(|cwd| kimi_path_key(cwd) == kimi_path_key(workdir));
         if !same {
-            return kimi_read_only_reject(title, "commands run only in the delegation's working directory");
+            return kimi_read_only_reject(
+                title,
+                "commands run only in the delegation's working directory",
+            );
         }
     }
     let Some(command) = object.get("command").and_then(Value::as_str) else {
@@ -464,7 +478,10 @@ fn kimi_bash_summary_matches(summary: &str, command: &str) -> bool {
 /// `/work\repo` stays a different directory from `/work/repo`.
 fn kimi_path_key(path: &str) -> String {
     if cfg!(windows) {
-        let path = path.strip_prefix(r"\\?\").unwrap_or(path).replace('\\', "/");
+        let path = path
+            .strip_prefix(r"\\?\")
+            .unwrap_or(path)
+            .replace('\\', "/");
         path.trim_end_matches('/').to_lowercase()
     } else {
         path.trim_end_matches('/').to_owned()
@@ -554,7 +571,7 @@ impl AppState {
             .cloned()
             .unwrap_or_default();
         let approved = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
             if read_only_session_delegation_block_locked(&inner, Some(session_id)).is_none() {
                 return Ok(false);
             }
@@ -569,6 +586,9 @@ impl AppState {
                         SessionStatus::Stopping | SessionStatus::Idle
                     )
             });
+            let mut refusal_reason = None;
+            let mut refusal_remedy =
+                "Use a session that permits this operation, or choose a read-only operation.";
             let (outcome, approved) = if current {
                 let workdir = record
                     .map(|record| record.session.workdir.clone())
@@ -586,19 +606,28 @@ impl AppState {
                 );
                 if let KimiReadOnlyDecision::Reject { reason } = &decision {
                     eprintln!("[termal] Kimi session {session_id}: {reason}");
+                    refusal_reason = Some(reason.clone());
                 }
-                let (selected, approved) =
-                    match (kimi_read_only_option_id(&options, &decision), decision) {
-                        (Some(option_id), KimiReadOnlyDecision::Allow { args }) => {
-                            (Some(option_id), Some(args))
-                        }
-                        // An approval with no allow-once option is refused.
-                        (None, KimiReadOnlyDecision::Allow { .. }) => (
+                let (selected, approved) = match (
+                    kimi_read_only_option_id(&options, &decision),
+                    decision,
+                ) {
+                    (Some(option_id), KimiReadOnlyDecision::Allow { args }) => {
+                        (Some(option_id), Some(args))
+                    }
+                    // An approval with no allow-once option is refused.
+                    (None, KimiReadOnlyDecision::Allow { .. }) => {
+                        refusal_reason = Some(
+                                "Kimi permission refused: this read-only delegation requires a one-time grant, but the request offers none".to_owned(),
+                            );
+                        refusal_remedy = "Retry with a one-time permission option; this read-only delegation cannot accept a persistent grant.";
+                        (
                             find_acp_permission_option(&options, &["reject_once", "reject_always"]),
                             None,
-                        ),
-                        (selected, _) => (selected, None),
-                    };
+                        )
+                    }
+                    (selected, _) => (selected, None),
+                };
                 let outcome = match selected {
                     Some(option_id) => json!({"outcome": "selected", "optionId": option_id}),
                     None => json!({"outcome": "cancelled"}),
@@ -615,6 +644,40 @@ impl AppState {
                     ),
                 ))
                 .map_err(|err| anyhow!("failed delivering Kimi permission response: {err}"))?;
+            if let Some(reason) = refusal_reason {
+                // Keep the refusal and its visible diagnostic under the same
+                // runtime/Stop fence. A Text message never creates a user wait.
+                let text = format!(
+                    "{}\n{refusal_remedy}",
+                    bounded_acp_approval_text(
+                        &reason,
+                        MAX_ACP_APPROVAL_REFUSAL_CHARS,
+                        "Kimi permission refused"
+                    ),
+                );
+                let message = Message::Text {
+                    attachments: Vec::new(),
+                    id: inner.next_message_id(),
+                    timestamp: stamp_now(),
+                    author: Author::System,
+                    text: text.clone(),
+                    expanded_text: None,
+                    source: None,
+                };
+                let index = inner
+                    .find_session_index(session_id)
+                    .expect("current permission session should exist");
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("current permission session index should be valid");
+                if record.runtime_projection_allowed() {
+                    record.session.preview = make_preview(&text);
+                }
+                let message_index = push_message_on_record(record, message);
+                let creates = message_created_delta_parts_for_indices(record, vec![message_index]);
+                let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                self.publish_message_created_delta_parts(&inner, revision, creates);
+            }
             approved
         };
         if let (Some(args), Some(tool_call_id)) = (approved, tool_call_id) {

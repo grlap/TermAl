@@ -1044,9 +1044,11 @@ fn acp_structured_permission_requests_queue_and_resolve_in_arrival_order() {
         assert_eq!(approval_messages.len(), 2);
         assert_eq!(approval_messages[0].1, "Edit first file");
         assert!(
-            approval_messages[0].2.contains("\"type\": \"diff\"")
-                && approval_messages[0].2.contains("\"path\": \"src/main.rs\""),
-            "structured content and locations should remain visible in approval detail"
+            approval_messages[0].2.contains("Before:\nold")
+                && approval_messages[0].2.contains("After:\nnew")
+                && approval_messages[0].2.contains("src/main.rs:12")
+                && !approval_messages[0].2.contains("\"type\""),
+            "the change and location should be readable without ACP JSON wrappers"
         );
         (
             approval_messages[0].0.clone(),

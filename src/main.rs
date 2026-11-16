@@ -1332,6 +1332,7 @@ include!("codex_home.rs");
 include!("claude_args.rs");
 include!("codex_bin.rs");
 include!("acp.rs");
+include!("acp_permission_summary.rs");
 include!("acp_opencode_config.rs");
 include!("codex.rs");
 include!("codex_engram_bootstrap.rs");
