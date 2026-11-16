@@ -330,6 +330,10 @@ struct MailboxRelayRequest {
     deny_unknown_fields
 )]
 enum MailboxRelayOperation {
+    /// Scheduling hint only; original authenticated completion must be pulled.
+    CausalTestCompletionReady {
+        hint: CausalTestCompletionReadyHint,
+    },
     /// Original typed request only; no observer adoption or verification credit.
     ReadCausalTestCompletion {
         selector: CausalTestCompletionSelector,

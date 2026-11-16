@@ -13,6 +13,18 @@ struct CausalTestCompletionPlan {
 
 impl MailboxStore {
     fn causal_test_completion_plans(&self) -> Result<Vec<CausalTestCompletionPlan>> {
+        self.causal_test_completion_plans_without(CAUSAL_COMPLETION_BATCH, &BTreeSet::new())
+    }
+
+    fn causal_test_completion_plans_without(
+        &self,
+        limit: usize,
+        excluded: &BTreeSet<TestRunCausalKey>,
+    ) -> Result<Vec<CausalTestCompletionPlan>> {
+        let limit = limit.min(CAUSAL_COMPLETION_BATCH);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let mut connection = self.connection()?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -69,6 +81,11 @@ impl MailboxStore {
             }
             match causal_test_completion_plan_from_row(row, intents, &local_store) {
                 Ok(CausalPendingRead::Ready(plan)) => {
+                    // Hinted keys already own this batch's targeted slots.
+                    // Do not rotate unattempted ordinary plans past them.
+                    if excluded.contains(&plan.selector.key()) {
+                        continue;
+                    }
                     note_causal_pending(
                         &transaction,
                         pending,
@@ -91,7 +108,7 @@ impl MailboxStore {
                     transaction.execute(&format!("UPDATE {table} SET test_request_pending_json=NULL,test_request_pending_order=NULL WHERE rowid=?1"), [row_id])?;
                 }
             }
-            if plans.len() == CAUSAL_COMPLETION_BATCH {
+            if plans.len() == limit {
                 break;
             }
         }
@@ -212,8 +229,18 @@ impl AppState {
                 .map_err(mailbox_api_error)
         })
         .await?;
+        self.read_causal_test_completion_plans(plans.into_iter().map(|plan| (plan, None)).collect())
+            .await
+    }
+
+    // Every scheduler shares this original read/currentness/settlement handoff.
+    // A hint can constrain run identity, never supply native facts.
+    async fn read_causal_test_completion_plans(
+        &self,
+        plans: Vec<(CausalTestCompletionPlan, Option<String>)>,
+    ) -> Result<Vec<CausalTestCompletionDelivery>, ApiError> {
         let mut deliveries = Vec::new();
-        for plan in plans {
+        for (plan, expected_run) in plans {
             if self.federation_executor_wake_signal.is_stopping() {
                 break;
             }
@@ -292,7 +319,12 @@ impl AppState {
                     .await?;
                 continue;
             };
-            let invalid = if completion.validate().is_err() {
+            let invalid = if expected_run
+                .as_ref()
+                .is_some_and(|run| *run != completion.run_id)
+            {
+                Some(CausalPendingReason::CompletionRunMismatch)
+            } else if completion.validate().is_err() {
                 Some(CausalPendingReason::CompletionValidate)
             } else if !completion.authoritative_terminal() {
                 Some(CausalPendingReason::CompletionNotTerminal)

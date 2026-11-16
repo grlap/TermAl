@@ -1243,6 +1243,7 @@ async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Re
         "homeRpcFailuresEvicted": rpc_evicted,
         "homeRpcFailuresResetOnRestart": true,
         "causalCompletionPending": causal_pending,
+        "causalCompletionReady": state.federation_executor_wake_signal.causal_ready.lock().expect("ready mutex poisoned").diagnostic(),
         "federationDurability": durability,
     })))
 }

@@ -162,6 +162,7 @@ impl AppState {
         }
         drop(projection);
         let mut native_changed = false;
+        let mut native_completed = false;
         for (run_id, completion, refusal) in native_outcomes {
             if inner.test_run_registrations.get(&run_id).is_none_or(|row| {
                 row.native_completion.is_some()
@@ -174,6 +175,10 @@ impl AppState {
                 if row.native_completion.is_none() {
                     row.native_completion = completion;
                     row.native_completion_refusal = refusal;
+                    if row.native_completion.is_some() {
+                        self.queue_causal_test_completion_notification(row);
+                        native_completed = true;
+                    }
                 }
             });
         }
@@ -208,6 +213,11 @@ impl AppState {
             if let Err(error) = self.persist_internal_locked(inner) {
                 eprintln!("native completion persistence deferred: {error:#}");
             }
+        }
+        if native_completed {
+            // Diagnostic-only updates keep their existing persistence path.
+            // Publication still requires exact durable original custody.
+            self.federation_executor_wake_signal.kick();
         }
     }
 

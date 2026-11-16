@@ -6,6 +6,7 @@ struct FederationExecutorWakeSignal {
     receives: Mutex<usize>,
     receives_done: std::sync::Condvar,
     recovery_pass: Mutex<()>,
+    causal_ready: Mutex<CausalCompletionReadyQueue>,
     activation_after: Mutex<Option<(String, String, String)>>,
     #[cfg(test)]
     lifecycle_hook: Mutex<Option<FederationExecutorLifecycleHook>>,

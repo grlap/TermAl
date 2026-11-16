@@ -70,6 +70,89 @@ struct DurableNativeTestRun {
     completion: Option<native_test_completion::Completion>,
 }
 
+// Both readers use the same exact registration and original-provider proof.
+// Compacted custody is used only for this run and its single exact execution.
+fn durable_native_test_run_from_rows(
+    expected: &TestRunRegistration,
+    registration: Option<&TestRunRegistration>,
+    compacted: Option<&TestRunCompacted>,
+    observation: Option<&TestRunCommandObservation>,
+) -> Option<DurableNativeTestRun> {
+    let run = expected.run_id.as_str();
+    let compacted = compacted.filter(|row| row.compacted && row.summary.run_id == run);
+    let stored = registration.or_else(|| compacted.and_then(|row| row.registration.as_ref()));
+    if stored != Some(expected) {
+        return None;
+    }
+    let completion = expected
+        .native_completion
+        .as_ref()
+        .filter(|retained| {
+            observation
+                .or_else(|| {
+                    compacted
+                        .filter(|row| row.registration.as_ref() == Some(expected))
+                        .and_then(|row| {
+                            let mut exact = row
+                                .observations
+                                .iter()
+                                .filter(|row| row.execution_id == retained.execution_id);
+                            exact.next().filter(|_| exact.next().is_none())
+                        })
+                })
+                .is_some_and(|row| {
+                    row.runtime_identity.is_some()
+                        && row.summary.ended_at.is_some()
+                        && row.summary.owner_session_id.as_deref()
+                            == Some(expected.owning_session_id.as_str())
+                        && row.artifact.as_ref().is_some_and(|artifact| {
+                            artifact.run_id == run
+                                && artifact.request_identity.as_deref()
+                                    == Some(expected.request_identity.as_str())
+                        })
+                })
+        })
+        .map(|retained| retained.completion.clone());
+    Some(DurableNativeTestRun { completion })
+}
+
+// The caller holds one SQLite snapshot. Read only the consumed keyed unit and
+// its object descriptor, never a collection or a legacy whole-state document.
+fn read_native_completion_unit<T: serde::de::DeserializeOwned>(
+    connection: &rusqlite::Connection,
+    field: &str,
+    key: &str,
+) -> Result<Option<T>, ApiError> {
+    let read = |key: &str| -> rusqlite::Result<Option<(String, String)>> {
+        connection.query_row(
+            "SELECT kind,value_json FROM state_metadata_units WHERE field_name=?1 AND item_key=?2",
+            rusqlite::params![field, key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()
+    };
+    let Some((kind, count)) =
+        read("").map_err(|_| ApiError::internal("native completion descriptor read failed"))?
+    else {
+        return Ok(None);
+    };
+    if kind != "object" || count.parse::<usize>().is_err() {
+        return Err(ApiError::internal(
+            "native completion descriptor is invalid",
+        ));
+    }
+    let Some((kind, encoded)) = read(&format!("/{key}"))
+        .map_err(|_| ApiError::internal("native completion unit read failed"))?
+    else {
+        return Ok(None);
+    };
+    if kind != "entry" || count.parse::<usize>().ok() == Some(0) {
+        return Err(ApiError::internal("native completion unit is invalid"));
+    }
+    serde_json::from_str(&encoded)
+        .map(Some)
+        .map_err(|_| ApiError::internal("native completion unit decode failed"))
+}
+
 impl AppState {
     // Shared by causal and observer projections. One SQLite snapshot proves
     // both the exact registration and its original provider execution, even
@@ -96,49 +179,56 @@ impl AppState {
         let Some(metadata) = metadata else {
             return Ok(None);
         };
-        let compacted = metadata
-            .test_run_compacted
-            .get(run)
-            .filter(|row| row.compacted && row.summary.run_id == run);
-        let stored = metadata
-            .test_run_registrations
-            .get(run)
-            .or_else(|| compacted.and_then(|row| row.registration.as_ref()));
-        if stored != Some(expected) {
-            return Ok(None);
+        Ok(durable_native_test_run_from_rows(
+            expected,
+            metadata.test_run_registrations.get(run),
+            metadata.test_run_compacted.get(run),
+            expected
+                .native_completion
+                .as_ref()
+                .and_then(|retained| metadata.test_run_observations.get(&retained.execution_id)),
+        ))
+    }
+
+    // Notification work has an exact original key already. Keep read-back
+    // bounded to those normalized rows, with the same proof as ordinary reads.
+    fn read_durable_native_test_run_for_notification(
+        &self,
+        expected: &TestRunRegistration,
+    ) -> Result<Option<DurableNativeTestRun>, ApiError> {
+        let mut connection = open_sqlite_state_read_connection(self.persistence_path.as_path())
+            .map_err(|_| ApiError::internal("native completion persistence is unavailable"))?;
+        let transaction = connection
+            .transaction()
+            .map_err(|_| ApiError::internal("native completion snapshot is unavailable"))?;
+        let version = persisted_metadata_storage_version(&transaction)
+            .map_err(|_| ApiError::internal("native completion reader floor is unavailable"))?;
+        if !matches!(
+            version.as_str(),
+            SQLITE_SCHEMA_VERSION | SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION
+        ) {
+            return Err(ApiError::internal(
+                "native completion reader floor is unsupported",
+            ));
         }
-        let completion = expected
-            .native_completion
-            .as_ref()
-            .filter(|retained| {
-                metadata
-                    .test_run_observations
-                    .get(&retained.execution_id)
-                    .or_else(|| {
-                        compacted
-                            .filter(|row| row.registration.as_ref() == Some(expected))
-                            .and_then(|row| {
-                                let mut exact = row
-                                    .observations
-                                    .iter()
-                                    .filter(|row| row.execution_id == retained.execution_id);
-                                exact.next().filter(|_| exact.next().is_none())
-                            })
-                    })
-                    .is_some_and(|row| {
-                        row.runtime_identity.is_some()
-                            && row.summary.ended_at.is_some()
-                            && row.summary.owner_session_id.as_deref()
-                                == Some(expected.owning_session_id.as_str())
-                            && row.artifact.as_ref().is_some_and(|artifact| {
-                                artifact.run_id == run
-                                    && artifact.request_identity.as_deref()
-                                        == Some(expected.request_identity.as_str())
-                            })
-                    })
-            })
-            .map(|retained| retained.completion.clone());
-        Ok(Some(DurableNativeTestRun { completion }))
+        let registration: Option<TestRunRegistration> =
+            read_native_completion_unit(&transaction, "testRunRegistrations", &expected.run_id)?;
+        let compacted: Option<TestRunCompacted> =
+            read_native_completion_unit(&transaction, "testRunCompacted", &expected.run_id)?;
+        let observation: Option<TestRunCommandObservation> = match &expected.native_completion {
+            Some(retained) => read_native_completion_unit(
+                &transaction,
+                "testRunObservations",
+                &retained.execution_id,
+            )?,
+            None => None,
+        };
+        Ok(durable_native_test_run_from_rows(
+            expected,
+            registration.as_ref(),
+            compacted.as_ref(),
+            observation.as_ref(),
+        ))
     }
 
     fn read_causal_test_completion(

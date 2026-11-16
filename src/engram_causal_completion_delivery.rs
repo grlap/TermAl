@@ -231,10 +231,13 @@ fn request_qualification_status(value: &Value) -> Option<&'static str> {
 struct CausalTestCompletionRecovery {
     task: Option<tokio::task::JoinHandle<()>>,
     observed_kick: u64,
+    fallback_owed: bool,
 }
 
 impl CausalTestCompletionRecovery {
     async fn tick(&mut self, app: &AppState, fallback: bool) {
+        // A periodic tick remains owed while the joined worker is busy.
+        self.fallback_owed |= fallback;
         if self.task.as_ref().is_some_and(|task| !task.is_finished()) {
             return;
         }
@@ -250,13 +253,14 @@ impl CausalTestCompletionRecovery {
             .federation_executor_wake_signal
             .generation
             .load(Ordering::SeqCst);
-        if !fallback && generation == self.observed_kick {
+        if !self.fallback_owed && generation == self.observed_kick {
             return;
         }
         self.observed_kick = generation;
+        let fallback = std::mem::take(&mut self.fallback_owed);
         let app = app.clone();
         self.task = Some(tokio::spawn(async move {
-            match app.read_causal_test_completion_batch().await {
+            match app.read_ready_causal_test_completions(fallback).await {
                 Ok(deliveries) => {
                     for delivery in deliveries {
                         if app.federation_executor_wake_signal.is_stopping() {
@@ -293,6 +297,22 @@ impl CausalTestCompletionRecovery {
                 Err(_) => eprintln!(
                     "causal completion recovery: pending_read_failed; original rows retained"
                 ),
+            }
+            // Requester hints take priority over bounded outbound retries.
+            app.notify_causal_test_completions().await;
+            // A hint arriving during this joined worker retains its key and
+            // a generation kick. More than one bounded batch needs a new kick.
+            let pending = !app
+                .federation_executor_wake_signal
+                .causal_ready
+                .lock()
+                .expect("ready mutex poisoned")
+                .pending
+                .is_empty();
+            if pending {
+                app.federation_executor_wake_signal.kick();
+            } else {
+                app.federation_executor_wake_signal.notify.notify_one();
             }
         }));
     }

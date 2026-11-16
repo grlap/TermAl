@@ -91,6 +91,31 @@ prevent retry after its completion becomes available. Restart immediately retain
 that same pending set. A one-time upgrade seeds pre-existing in-flight requests;
 public relay copies never acquire original sender authority.
 
+After durable native read-back, the runner sends a `causalTestCompletionReady`
+hint over that authenticated relay to the original requester. It contains only
+the original requester and runner principals, send key, canonical message id and
+run id. The requester resolves its own original pending row and private scope,
+then schedules that key ahead of ordinary recovery. The hint supplies no result,
+receipt or credit: the same authenticated completion read and all original
+custody, input, terminal and post-I/O checks still decide settlement. Duplicate
+hints coalesce. A wrong hinted run id refuses that read without retiring the
+original request, so a later valid hint or fallback read can recover.
+
+Ready scheduling holds at most 64 keys in memory and resets on restart. Each
+periodic recovery batch reserves room for the durable pending sweep, even with
+queued hints; a periodic tick remains owed while the joined worker is busy.
+Lost notifications, disconnects and a full ready queue therefore
+leave original retry custody intact. The supported wake-diagnostics endpoint
+also exposes `causalCompletionReady`: queued count, bounded reason counters and
+`resetOnRestart: true`, without principals, send keys, run ids or private scope.
+Outbound notification work is queued once when the original native completion
+is first retained, with at most 64 pending keys and four attempts per key.
+Delivery or exhausted attempts retire that work; reconnect and retained history
+do not recreate it. Each attempt reads only the exact registration and original
+provider rows in one durable snapshot before publication; failed persistence
+emits no hint. Restart or expiry leaves recovery to the original durable pending
+set, without scanning retained completion history.
+
 Each targeted read preserves the original custody, canonical receipt, current
 peer enrollment and authenticated lease checks, including revalidation after
 I/O. A malformed pending row stays intact with a closed diagnostic reason while

@@ -29,6 +29,7 @@ enum CausalPendingReason {
     CompletionValidate,
     CompletionNotTerminal,
     CompletionOriginMismatch,
+    CompletionRunMismatch,
     CompletionInputUnsupported,
     CompletionModeMismatch,
     PostReadRouteChanged,

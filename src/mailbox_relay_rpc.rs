@@ -232,6 +232,9 @@ impl AppState {
         authenticated_origin: &FederationHostIdentity,
     ) -> Result<Value, ApiError> {
         let value = match operation {
+            MailboxRelayOperation::CausalTestCompletionReady { hint } => serde_json::to_value(
+                self.receive_causal_test_completion_ready(hint, lease, authenticated_origin)?,
+            ),
             MailboxRelayOperation::ReadCausalTestCompletion { selector } => serde_json::to_value(
                 self.read_causal_test_completion(&selector, lease, authenticated_origin)?,
             ),

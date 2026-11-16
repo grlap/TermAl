@@ -5,6 +5,10 @@ use crate::tests::test_runs::test_run_registration::causal_completion_fixture::{
     destination, destination_with_targets, finish, producer,
 };
 
+mod completion_ready;
+mod completion_ready_notification_custody;
+mod completion_ready_recovery;
+mod completion_ready_scheduling;
 mod scan;
 
 fn source() -> Value {
