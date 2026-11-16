@@ -128,8 +128,13 @@ fn federation_mailbox_new_read_key(incarnation: &str, epoch: u64) -> String {
 
 fn federation_mailbox_read_expired() -> ApiError {
     ApiError::from_status(StatusCode::GONE,
-        "readKeyExpired; the frozen page expired or the central process restarted; start a fresh logical read")
+        "readKeyExpired; the admission offer or frozen page expired, was reclaimed, or belongs to an earlier central process; repeat the mailbox read without readKey to start a fresh logical read")
         .with_kind(ApiErrorKind::FederationMailboxReadExpired)
+}
+
+fn federation_mailbox_read_not_found() -> ApiError {
+    ApiError::not_found("mailbox not found for this participant; no page was selected; verify mailboxId against the mailbox listing before a fresh read")
+        .with_kind(ApiErrorKind::FederationMailboxReadNotFound)
 }
 
 impl AppState {
@@ -232,7 +237,16 @@ impl AppState {
                         after,
                         limit,
                         Some((&key, &scope)),
-                    )?;
+                    ).map_err(|error| {
+                        // No frozen page or receipt exists at this boundary.
+                        // Preserve this fact across the authenticated reply so
+                        // the bridge does not try to resolve a consumed offer.
+                        if error.status == StatusCode::NOT_FOUND {
+                            federation_mailbox_read_not_found()
+                        } else {
+                            error
+                        }
+                    })?;
                     page.read_key = Some(key.clone());
                     page.receipt_state = Some(
                         if issue && page.next_after_sequence.is_some() {

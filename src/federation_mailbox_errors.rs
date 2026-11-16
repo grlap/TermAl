@@ -50,6 +50,8 @@ fn federation_mailbox_error_response(
             (StatusCode::GONE, "read_key_expired", "expired"),
         Some(ApiErrorKind::FederationMailboxReadConflict) =>
             (StatusCode::CONFLICT, "read_key_conflict", "unknown"),
+        Some(ApiErrorKind::FederationMailboxReadNotFound) =>
+            (StatusCode::NOT_FOUND, "read_mailbox_not_found", "notEntered"),
         Some(ApiErrorKind::FederationMailboxWriterAdmission) =>
             (StatusCode::SERVICE_UNAVAILABLE, "writer_admission_timeout", "notCommitted"),
         Some(ApiErrorKind::FederationMailboxDirectoryFence) =>
@@ -105,6 +107,8 @@ fn federation_mailbox_verified_error(
             (StatusCode::BAD_REQUEST, "request_refused", "unknown") =>
                 Some(federation_mailbox_rpc_error(status)),
             (StatusCode::GONE, "read_key_expired", "expired") => Some(federation_mailbox_read_expired()),
+            (StatusCode::NOT_FOUND, "read_mailbox_not_found", "notEntered") =>
+                Some(federation_mailbox_read_not_found()),
             (StatusCode::CONFLICT, "read_key_conflict", "unknown") => Some(ApiError::conflict(
                 "readKey input conflict; preserve the identical original read")
                 .with_kind(ApiErrorKind::FederationMailboxReadConflict)),

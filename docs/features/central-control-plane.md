@@ -232,8 +232,18 @@ rows fit on subsequent pages. Capacity is reserved before accepting a new page;
 unresolved pages are never evicted to admit another. Unconsumed offers, issued
 pages and empty/preview entries are reclaimable at capacity, so completed reads
 cannot block later readers. Restart, expiry or a missing retained entry yields
-typed `readKeyExpired`; a fresh logical read needs a new offered key.
+typed `readKeyExpired`; repeat the mailbox read without `readKey` for a fresh
+logical read with a new offered key. A reclaimed admission offer can expire
+without any process restart or previously selected page.
 There is no durable read journal or descriptor-based reconstruction after restart.
+
+If the initial capture finds no mailbox for the current participant, it returns
+the typed `read_mailbox_not_found` refusal with `notEntered`: no page or receipt
+was selected. The bridge releases that read intent instead of resolving its
+consumed admission offer on the next call. Verify the exact mailbox id from the
+listing before a fresh read. A generic transport error or a refusal after page
+selection does not acquire this recovery permission; pending and uncertain reads
+keep their original key and inputs.
 
 Domain sends first persist a sender-local delivery intent. They return a send
 receipt only after the central append is confirmed and its outcome is retained

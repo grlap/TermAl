@@ -1039,6 +1039,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             | ApiErrorKind::FederationMailboxCentralDurability
             | ApiErrorKind::FederationMailboxReadExpired
             | ApiErrorKind::FederationMailboxReadConflict
+            | ApiErrorKind::FederationMailboxReadNotFound
             | ApiErrorKind::RemoteConnectionUnavailable
             | ApiErrorKind::FederationSshCleanupUnknown
             | ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged

@@ -3,6 +3,129 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unknown_mailbox_repeated_reads_keep_the_original_refusal_and_listed_mailbox_is_readable() {
+    let case = MailboxCase::new().await;
+    let sent = execute(&case, case.request.clone()).unwrap();
+    let target = match &case.request.operation {
+        FederationMailboxOperation::Send { target, .. } => target,
+        _ => unreachable!(),
+    };
+    let native = case
+        .pair
+        .central
+        .inner
+        .lock()
+        .unwrap()
+        .federation
+        .mailbox_directory[target]
+        .binding
+        .identity
+        .session_id
+        .clone();
+    let listed = list_mailboxes(AxumPath(native.clone()), State(case.pair.central.clone()))
+        .await
+        .unwrap()
+        .0;
+    let mailbox = listed
+        .iter()
+        .find(|row| row.id == sent["mailboxId"].as_str().unwrap())
+        .expect("the participant's mailbox is listed")
+        .id
+        .clone();
+    let missing = format!("mailbox-{}", Uuid::new_v4());
+    let mut refused = Vec::new();
+    for _ in 0..3 {
+        refused.push(
+            read_mailbox(
+                AxumPath((native.clone(), missing.clone())),
+                State(case.pair.central.clone()),
+                Json(ReadMailboxRequest {
+                    after_sequence: None,
+                    limit: 50,
+                    issue_receipt: true,
+                    read_key: None,
+                }),
+            )
+            .await
+            .unwrap_err(),
+        );
+    }
+    let page = read_mailbox(
+        AxumPath((native.clone(), mailbox.clone())),
+        State(case.pair.central.clone()),
+        Json(ReadMailboxRequest {
+            after_sequence: None,
+            limit: 50,
+            issue_receipt: true,
+            read_key: None,
+        }),
+    )
+    .await;
+    let acknowledgement = match &page {
+        Ok(page) => Some(
+            acknowledge_mailbox(
+                AxumPath((native, mailbox)),
+                State(case.pair.central.clone()),
+                Json(AcknowledgeMailboxRequest {
+                    receipt: page.0.receipt.clone(),
+                    expected_processed_through: None,
+                    processed_through: None,
+                    no_continuation: false,
+                }),
+            )
+            .await,
+        ),
+        Err(_) => None,
+    };
+    case.pair.finish().await;
+    let page = page.unwrap().0;
+    assert!(page.receipt.is_some());
+    assert!(
+        page.messages
+            .iter()
+            .any(|message| message.id == sent["messageId"].as_str().unwrap())
+    );
+    acknowledgement.unwrap().unwrap();
+    for error in refused {
+        assert_eq!(
+            error.status,
+            StatusCode::NOT_FOUND,
+            "an unknown mailbox is not an expired frozen page: {error:?}"
+        );
+        assert_eq!(
+            error.kind,
+            Some(ApiErrorKind::FederationMailboxReadNotFound)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn authenticated_initial_read_refusal_distinguishes_an_unknown_mailbox_from_an_expired_page()
+{
+    let case = MailboxCase::new().await;
+    let mut original = read_request(&case).await;
+    if let FederationMailboxOperation::Read { mailbox_id, .. } = &mut original.operation {
+        *mailbox_id = format!("mailbox-{}", Uuid::new_v4());
+    }
+    let client = case.client(case.central_port());
+    let lease = client.channel.current_lease().unwrap();
+    let error = client
+        .request::<FederationMailboxResponse>(FederationRpcRoute::Mailbox(
+            lease,
+            keyed(&case, &original, &new_key(&case), false),
+        ))
+        .await
+        .unwrap_err();
+    case.pair.finish().await;
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        error.kind,
+        Some(ApiErrorKind::FederationMailboxReadNotFound)
+    );
+    assert!(!error.message.contains("readKeyExpired"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn old_json_decoder_rejects_keyed_resolution_as_typed_upgrade_required() {
     use axum::extract::FromRequest;
     // Mirror the old request's actual serde/Axum data-rejection boundary.

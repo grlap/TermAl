@@ -190,6 +190,7 @@ impl AppState {
                 Ok(page) if page.receipt_state.as_deref() != Some("receiptPending") => { intents.remove(&slot); }
                 Ok(page) => { intents.get_mut(&slot).expect("intent checked").key = page.read_key.clone(); }
                 Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadExpired) => { intents.remove(&slot); }
+                Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadNotFound) => { intents.remove(&slot); }
                 Err(_) => {},
             }
         }

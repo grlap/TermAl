@@ -102,6 +102,8 @@ enum ApiErrorKind {
     FederationMailboxCentralDurability,
     FederationMailboxReadExpired,
     FederationMailboxReadConflict,
+    /// The initial read selected no page because the mailbox was not visible.
+    FederationMailboxReadNotFound,
     #[cfg_attr(not(unix), allow(dead_code))]
     GitDocumentBecameSymlink,
     GitDocumentInvalidUtf8,
