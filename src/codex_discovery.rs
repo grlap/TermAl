@@ -60,14 +60,8 @@ fn discover_codex_threads(
     default_workdir: &str,
     discovery_scopes: &[PathBuf],
 ) -> Result<DiscoveredCodexThreads> {
-    let source_codex_home = std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .or_else(|| std::env::var_os("USERPROFILE"))
-                .map(PathBuf::from)
-                .map(|home| home.join(".codex"))
-        })
+    let source_codex_home = resolve_source_codex_home_dir()
+        .ok()
         .or_else(|| Some(PathBuf::from(default_workdir).join(".codex")));
     let termal_codex_root = resolve_termal_codex_discovery_root(default_workdir);
     discover_codex_threads_with_subagents_from_sources(
@@ -160,11 +154,9 @@ fn push_codex_home_candidate(homes: &mut Vec<PathBuf>, seen: &mut HashSet<PathBu
     }
 }
 
-/// Resolves TermAl Codex discovery root.
+/// Resolves TermAl Codex discovery root, through the shared home owner.
 fn resolve_termal_codex_discovery_root(default_workdir: &str) -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
+    resolve_home_dir()
         .unwrap_or_else(|| PathBuf::from(default_workdir))
         .join(".termal")
         .join("codex-home")

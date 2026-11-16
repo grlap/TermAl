@@ -51,9 +51,9 @@ done
 [ -n "$engram_home" ] || exit 2
 # This fixture writes a placeholder store and marker files under --home. Every
 # TermAl test temp root lives below <user temp>/termal/tests, with the user
-# temp derived as test_temp_dir() derives it: TERMAL_TEST_USER_TEMP, else
-# std::env::temp_dir(), which is TMPDIR when set, else the confstr
-# DARWIN_USER_TEMP_DIR directory on macOS, else /tmp. Any other home is a real
+# temp derived as test_temp_dir() derives it: TERMAL_TEST_USER_TEMP, else the
+# repository's target/tmp/termal. This script runs in place from
+# src/tests/fixtures, three levels below the repository. Any other home is a real
 # Engram home (a developer's ~/.engram received one once). Refuse before any
 # write; exit 4 is used by no other exit in either fixture script. The root is
 # resolved with physical cd (including macOS's /var alias), matching the
@@ -65,12 +65,11 @@ refuse_engram_home() {
   echo "engram-control-fixture: refusing --home outside a TermAl test temp root ($test_root): $engram_home" >&2
   exit 4
 }
-user_temp=${TERMAL_TEST_USER_TEMP:-${TMPDIR:-}}
+test_root=""
+user_temp=${TERMAL_TEST_USER_TEMP:-}
 if [ -z "$user_temp" ]; then
-  case "$(uname -s 2>/dev/null || true)" in
-    Darwin) user_temp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true) ;;
-  esac
-  [ -n "$user_temp" ] || user_temp=/tmp
+  repository=$(cd "$(dirname "$0")/../../.." 2>/dev/null && pwd -P) || refuse_engram_home
+  user_temp="$repository/target/tmp/termal"
 fi
 test_root=$(cd "$user_temp" 2>/dev/null && pwd -P) || test_root=""
 [ -n "$test_root" ] || refuse_engram_home

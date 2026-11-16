@@ -518,7 +518,8 @@ fn instruction_search_does_not_read_delegation_worktrees() {
 
 #[test]
 fn the_termal_data_dir_under_test_is_never_the_users_home() {
-    let Some(home) = resolve_home_dir() else {
+    // The environment's home, before the test boundary filters a real one out.
+    let Some(home) = resolve_home_dir_from_environment() else {
         return;
     };
     // The checkout itself may sit under the home (macOS runners), so the

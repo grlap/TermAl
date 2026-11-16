@@ -1,5 +1,7 @@
 // Owns the test-only product temporary-directory boundary for direct Cargo and
-// wrapper launches. Does not own production paths or retry failed removals.
+// wrapper launches, and the rule that it lies inside the repository (this
+// checkout or its main checkout). Does not own production paths, the
+// process-wide TEMP, TMP and TMPDIR, or retry failed removals.
 // New module, extracted from the raw OS-temp lookup in TestTempRoot.
 
 fn resolve_test_temp_directory(
@@ -61,11 +63,116 @@ fn ensure_plain_test_directory(path: &FsPath) -> io::Result<()> {
     Ok(())
 }
 
+/// Lexical form of a path: `.` dropped and `..` taken back. Nothing is read
+/// from the file system, so links are not followed.
+fn lexical_test_path(path: &FsPath) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normal.pop();
+            }
+            other => normal.push(other),
+        }
+    }
+    normal
+}
+
+/// Whether `path` is `root` or lies below it, compared component by component
+/// (without case on Windows, where paths ignore it).
+fn test_path_within(path: &FsPath, root: &FsPath) -> bool {
+    let mut path = path.components();
+    root.components().all(|root_part| {
+        path.next().is_some_and(|part| {
+            if cfg!(windows) {
+                part.as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&root_part.as_os_str().to_string_lossy())
+            } else {
+                part == root_part
+            }
+        })
+    })
+}
+
+/// The folders test data may live in: the checkout this crate was built from
+/// and, when that is a linked Git worktree, its main checkout. The main
+/// checkout is read from the worktree's `.git` file and the common directory
+/// it names; Git itself is not run.
+fn test_repository_roots(manifest: &FsPath) -> Vec<PathBuf> {
+    let manifest = lexical_test_path(manifest);
+    let main = fs::read_to_string(manifest.join(".git"))
+        .ok()
+        .and_then(|text| {
+            let gitdir = text.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
+            let gitdir = manifest.join(gitdir.trim());
+            let common = fs::read_to_string(gitdir.join("commondir")).ok()?;
+            lexical_test_path(&gitdir.join(common.trim()))
+                .parent()
+                .map(FsPath::to_path_buf)
+        });
+    std::iter::once(manifest).chain(main).collect()
+}
+
+/// Whether `path` lies inside one of this crate's repository roots: an
+/// absolute path, no `..` step, and below the worktree or its main checkout.
+fn test_path_inside_repository(path: &FsPath) -> bool {
+    path.is_absolute()
+        && !path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+        && test_repository_roots(FsPath::new(env!("CARGO_MANIFEST_DIR")))
+            .iter()
+            .any(|root| test_path_within(&lexical_test_path(path), root))
+}
+
+/// Tests write only inside the repository. A user temp anywhere else (the
+/// user's home, the platform temp directory, another tree) is refused, with
+/// the path and the rule.
+fn check_test_user_temp(user_temp: &FsPath) -> Result<(), String> {
+    if test_path_inside_repository(user_temp) {
+        return Ok(());
+    }
+    let roots = test_repository_roots(FsPath::new(env!("CARGO_MANIFEST_DIR")))
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "test user temp {} is outside the repository: tests write only inside \
+         this checkout or its main checkout ({roots}); set TERMAL_TEST_USER_TEMP \
+         to a directory there, such as <repository>/target/tmp/termal",
+        user_temp.display()
+    ))
+}
+
+/// The user temp every test temporary directory lives under: the launcher's
+/// TERMAL_TEST_USER_TEMP when set, else this repository's target/tmp/termal,
+/// created on first use. The platform temp directory is never consulted, and
+/// the process-wide TEMP, TMP and TMPDIR are left as they are.
+fn test_user_temp() -> PathBuf {
+    let explicit = std::env::var_os("TERMAL_TEST_USER_TEMP").map(PathBuf::from);
+    let user_temp = explicit.clone().unwrap_or_else(|| {
+        FsPath::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("tmp")
+            .join("termal")
+    });
+    // Checked before anything is created under it.
+    if let Err(rule) = check_test_user_temp(&user_temp) {
+        panic!("{rule}");
+    }
+    if explicit.is_none() {
+        fs::create_dir_all(&user_temp)
+            .unwrap_or_else(|error| panic!("test user temp {}: {error}", user_temp.display()));
+    }
+    user_temp
+}
+
 fn test_temp_dir() -> PathBuf {
     static FIRST_USE_SWEEP: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
-    let user_temp = std::env::var_os("TERMAL_TEST_USER_TEMP")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
+    let user_temp = test_user_temp();
     let run_root = std::env::var_os("TERMAL_TEST_RUN_ROOT").map(PathBuf::from);
     let target = resolve_test_temp_directory(&user_temp, run_root.as_deref())
         .expect("valid product test temporary directory");

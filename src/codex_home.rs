@@ -60,7 +60,21 @@ fn resolve_termal_data_dir(_default_workdir: &str) -> PathBuf {
 }
 
 /// Resolves home dir.
+#[cfg(not(test))]
 fn resolve_home_dir() -> Option<PathBuf> {
+    resolve_home_dir_from_environment()
+}
+
+/// Under test the same lookup runs, but only a fixture home passes it: one
+/// inside the repository, where every test temporary tree lives. The user's
+/// real home resolves to nothing, so no test reads from or writes to it.
+#[cfg(test)]
+fn resolve_home_dir() -> Option<PathBuf> {
+    resolve_home_dir_from_environment().filter(|home| test_path_inside_repository(home))
+}
+
+/// HOME, else USERPROFILE: the production home lookup.
+fn resolve_home_dir_from_environment() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)

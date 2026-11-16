@@ -216,14 +216,13 @@ fn engram_control_fixture_accepts_both_spellings_of_a_linked_user_temp() {
 #[test]
 fn engram_control_fixture_refuses_a_home_outside_the_test_temp_root() {
     // The fixture writes a placeholder store and marker files under --home.
-    // Every TermAl test root lives below <temp>/termal/tests; a home anywhere
-    // else (the developer's real ~/.engram, once, tm-47g6) must be refused
-    // before any write, with an exit code no other fixture exit uses.
-    // The containment wrapper redirects TEMP into the run root, so a home
-    // under std::env::temp_dir() would carry the marker; use the crate's
-    // default target/ directory instead (git-ignored, and a harmless landing
-    // spot if the guard ever regressed; with CARGO_TARGET_DIR set elsewhere it
-    // is simply an empty ignored directory).
+    // Every TermAl test root lives below <user temp>/termal/tests; a home
+    // anywhere else (the developer's real ~/.engram, once, tm-47g6) must be
+    // refused before any write, with an exit code no other fixture exit uses.
+    // The outside home is in the crate's target/ directory, beside the user
+    // temp rather than under it (git-ignored, and a harmless landing spot if
+    // the guard ever regressed; with CARGO_TARGET_DIR set elsewhere it is
+    // simply an empty ignored directory).
     let outside = OutsideHome(
         FsPath::new(env!("CARGO_MANIFEST_DIR"))
             .join("target")
@@ -242,9 +241,7 @@ fn engram_control_fixture_refuses_a_home_outside_the_test_temp_root() {
     // accept it. The fixture derives the root from the same environment as
     // test_temp_dir(), so the sibling is placed beside the real root and is
     // never created here: it must not exist afterwards either.
-    let user_temp = std::env::var_os("TERMAL_TEST_USER_TEMP")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
+    let user_temp = test_user_temp();
     let sibling = OutsideHome(
         user_temp
             .join("termal")

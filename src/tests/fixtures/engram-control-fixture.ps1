@@ -28,9 +28,8 @@ if (-not $projectFile -or -not $engramHome) {
 # This fixture writes a placeholder store and marker files under --home. Every
 # TermAl test temp root lives below <user temp>\termal\tests, with the user
 # temp derived as test_temp_dir() derives it: TERMAL_TEST_USER_TEMP, else the
-# platform temp directory (GetTempPath here, GetTempPath2 in Rust; the two
-# differ only for a SYSTEM-account process, where only the launcher's
-# TERMAL_TEST_USER_TEMP keeps them aligned). Any other home is a real Engram
+# repository's target\tmp\termal. This script runs in place from
+# src\tests\fixtures, three levels below the repository. Any other home is a real Engram
 # home (a developer's ~/.engram received one once). Refuse before any write; exit 4
 # is used by no other exit in either fixture script. Containment is checked on
 # the normalised absolute path at a component boundary, and any `..` segment is
@@ -38,7 +37,7 @@ if (-not $projectFile -or -not $engramHome) {
 # comparison is deliberate: this script only runs on Windows. A \\?\-prefixed
 # home is refused too (GetFullPath leaves it unnormalised; TestTempRoot never
 # produces one).
-$userTemp = if ($env:TERMAL_TEST_USER_TEMP) { $env:TERMAL_TEST_USER_TEMP } else { [System.IO.Path]::GetTempPath() }
+$userTemp = if ($env:TERMAL_TEST_USER_TEMP) { $env:TERMAL_TEST_USER_TEMP } else { [System.IO.Path]::Combine($PSScriptRoot, '..', '..', '..', 'target', 'tmp', 'termal') }
 $testRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($userTemp, 'termal', 'tests'))
 $resolvedHome = [System.IO.Path]::GetFullPath($engramHome)
 $homeContained = (

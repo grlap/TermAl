@@ -176,6 +176,7 @@ mod read_only_orientation;
 mod review_freeze;
 mod review_identity;
 mod runtime_fixture_processes;
+mod test_repository_boundary;
 mod test_temp_paths;
 mod work_memories;
 pub use orchestrator::{

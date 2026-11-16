@@ -19,11 +19,11 @@
 //
 // New file, not split from another; included from main.rs under cfg(test).
 
-/// The user temp the test process uses, as test_temp_dir() derives it: the
-/// launcher's TERMAL_TEST_USER_TEMP, else the platform temp directory.
+/// The user temp the test process uses, the one test_temp_dir() lives under:
+/// the launcher's TERMAL_TEST_USER_TEMP, else the repository's
+/// target/tmp/termal.
 fn engram_test_user_temp() -> std::ffi::OsString {
-    std::env::var_os("TERMAL_TEST_USER_TEMP")
-        .unwrap_or_else(|| std::env::temp_dir().into_os_string())
+    test_user_temp().into_os_string()
 }
 
 /// The environment a test's Engram fixture child gets so that its temporary
