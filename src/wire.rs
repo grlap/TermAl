@@ -1165,11 +1165,14 @@ impl ClaudeApprovalMode {
     /// Claude CLI at spawn time, or `None` to let the CLI choose its
     /// default. Read-only delegates explicitly select default so inherited
     /// acceptEdits/bypass/auto modes cannot replace host permission admission.
+    /// Auto-approve selects default too, the mode a runtime switch selects,
+    /// so an inherited mode such as dontAsk cannot refuse a tool before the
+    /// CLI asks TermAl, which grants it. Ask keeps the user's own mode.
     fn initial_cli_permission_mode(self) -> Option<&'static str> {
         match self {
             Self::Plan => Some("plan"),
-            Self::ReadOnlyAutoApprove => Some("default"),
-            Self::Ask | Self::AutoApprove => None,
+            Self::ReadOnlyAutoApprove | Self::AutoApprove => Some("default"),
+            Self::Ask => None,
         }
     }
 

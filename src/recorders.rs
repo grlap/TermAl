@@ -182,6 +182,14 @@ trait TurnRecorder {
         let _ = key;
         Ok(())
     }
+    /// The runtime refused a started command before running it. It is
+    /// abandoned beside test checks, never finished, and the transcript
+    /// ends it with `reason` as its output. A recorder that forwards to
+    /// another must forward this too.
+    fn command_refused(&mut self, key: &str, command: &str, reason: &str) -> Result<()> {
+        let _ = (command, reason);
+        self.command_abandoned(key)
+    }
     /// Upserts a parallel-agent progress message keyed by `key` so follow-up
     /// progress events (agent completions, status changes) mutate the same
     /// group message instead of appending duplicates.
@@ -941,6 +949,34 @@ fn recorder_command_started<R: SessionRecorderAccess>(
     Ok(())
 }
 
+// Ends the command message keyed by `key` as an error whose output is the
+// runtime's refusal. The command never ran, so beside test checks it is
+// abandoned rather than finished: no exit is reported for it.
+fn recorder_command_refused<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    key: &str,
+    command: &str,
+    reason: &str,
+) -> Result<()> {
+    recorder.observe(EngramRecorderObservation::CommandAbandoned { key });
+    let state = recorder.state().clone();
+    let session_id = recorder.session_id().to_owned();
+    let state_for_entry = state.clone();
+    let message_id = recorder
+        .recorder_state_mut()
+        .command_messages
+        .entry(key.to_owned())
+        .or_insert_with(|| state_for_entry.allocate_message_id())
+        .clone();
+    state.upsert_command_message(
+        &session_id,
+        &message_id,
+        command,
+        reason,
+        CommandStatus::Error,
+    )
+}
+
 // Upserts the same command message keyed by `key` with its captured
 // output + terminal status. If `command_started` was never called (e.g. a
 // tool emits only a single completion event), this allocates the message
@@ -1357,6 +1393,10 @@ impl TurnRecorder for SessionRecorder {
         Ok(())
     }
 
+    fn command_refused(&mut self, key: &str, command: &str, reason: &str) -> Result<()> {
+        recorder_command_refused(self, key, command, reason)
+    }
+
     /// Upserts parallel agents.
     fn upsert_parallel_agents(
         &mut self,
@@ -1510,6 +1550,10 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
         self.observe(EngramRecorderObservation::CommandAbandoned { key });
         Ok(())
+    }
+
+    fn command_refused(&mut self, key: &str, command: &str, reason: &str) -> Result<()> {
+        recorder_command_refused(self, key, command, reason)
     }
 
     /// Upserts parallel agents.

@@ -24,7 +24,6 @@ struct ClaudeTurnState {
     parallel_agent_group_key: Option<String>,
     parallel_agent_order: Vec<String>,
     parallel_agents: HashMap<String, ParallelAgentProgress>,
-    permission_denied_this_turn: bool,
     pending_tools: HashMap<String, ClaudeToolUse>,
     /// Whether this attempt emitted transcript content, reached a tool /
     /// approval boundary, or produced a protocol event not explicitly proven
@@ -2085,7 +2084,6 @@ fn clear_claude_turn_state(state: &mut ClaudeTurnState) {
     state.parallel_agent_group_key = None;
     state.parallel_agent_order.clear();
     state.parallel_agents.clear();
-    state.permission_denied_this_turn = false;
     state.pending_tools.clear();
     state.replay_became_unsafe = false;
     state.streamed_assistant_text.clear();
@@ -2198,18 +2196,16 @@ fn handle_claude_event(
 
             match stream_type {
                 "content_block_delta" => {
-                    if !state.permission_denied_this_turn {
-                        if let Some(text) = message
-                            .pointer("/event/delta/text")
-                            .or_else(|| message.pointer("/event/delta/text_delta"))
-                            .and_then(Value::as_str)
-                        {
-                            record_claude_assistant_text_delta(state, recorder, text)?;
-                        } else {
-                            // Thinking, tool-input, and future delta shapes are
-                            // not proven safe to replay.
-                            state.replay_became_unsafe = true;
-                        }
+                    if let Some(text) = message
+                        .pointer("/event/delta/text")
+                        .or_else(|| message.pointer("/event/delta/text_delta"))
+                        .and_then(Value::as_str)
+                    {
+                        record_claude_assistant_text_delta(state, recorder, text)?;
+                    } else {
+                        // Thinking, tool-input, and future delta shapes are
+                        // not proven safe to replay.
+                        state.replay_became_unsafe = true;
                     }
                 }
                 "message_stop" => {
@@ -2235,9 +2231,6 @@ fn handle_claude_event(
                     match content_type {
                         "text" => {
                             if let Some(text) = content.get("text").and_then(Value::as_str) {
-                                if state.permission_denied_this_turn {
-                                    continue;
-                                }
                                 record_claude_completed_assistant_text(state, recorder, text)?;
                             }
                         }
@@ -2424,7 +2417,6 @@ fn handle_claude_tool_result(
                 message.get("tool_use_result"),
                 &detail,
                 is_error,
-                state,
                 recorder,
             )?,
             "Task" => handle_claude_task_result(
@@ -2440,7 +2432,6 @@ fn handle_claude_tool_result(
                 message.get("tool_use_result"),
                 &detail,
                 is_error,
-                state,
                 recorder,
             )?,
             "AskUserQuestion" => {
@@ -2584,20 +2575,17 @@ fn handle_claude_bash_result(
     tool_use_result: Option<&Value>,
     detail: &str,
     is_error: bool,
-    state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
     if is_error && is_permission_denial(detail) {
-        state.permission_denied_this_turn = true;
-        recorder.command_abandoned(tool_use_id)?;
-        record_claude_approval(
-            state,
-            recorder,
-            "Claude needs approval",
+        // The Claude CLI refused the command itself and never ran it. No
+        // permission request is live, so nothing can be approved: the
+        // command ends with the refusal as its reason.
+        return recorder.command_refused(
+            tool_use_id,
             tool_use.command.as_deref().unwrap_or("Bash"),
-            detail,
-        )?;
-        return Ok(());
+            &bounded_claude_refusal(detail),
+        );
     }
 
     let stdout = tool_use_result
@@ -2674,19 +2662,13 @@ fn handle_claude_file_result(
     tool_use_result: Option<&Value>,
     detail: &str,
     is_error: bool,
-    state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
     if is_error {
+        // A refusal by the Claude CLI itself has no live permission request
+        // behind it; it is reported like any other failed file tool.
         if is_permission_denial(detail) {
-            state.permission_denied_this_turn = true;
-            record_claude_approval(
-                state,
-                recorder,
-                "Claude needs approval",
-                &describe_claude_tool_action(tool_use),
-                detail,
-            )?;
+            recorder.error(&bounded_claude_refusal(detail))?;
         } else {
             recorder.error(detail)?;
         }
@@ -2804,38 +2786,18 @@ fn is_expected_claude_ask_user_question_denial(detail: &str) -> bool {
         || detail.contains(CLAUDE_USER_DECLINED_QUESTION_MESSAGE)
 }
 
-/// Records Claude approval.
-fn record_claude_approval(
-    state: &mut ClaudeTurnState,
-    recorder: &mut dyn TurnRecorder,
-    title: &str,
-    command: &str,
-    detail: &str,
-) -> Result<()> {
-    let key = format!("{title}\n{command}\n{detail}");
-    if state.approval_keys_this_turn.insert(key) {
-        recorder.push_approval(title, command, detail)?;
-    }
+/// Longest Claude CLI refusal kept on the session; the path or command it
+/// names can be arbitrarily long.
+const CLAUDE_REFUSAL_MAX_CHARS: usize = 2_000;
 
-    Ok(())
+/// The Claude CLI's own refusal text, bounded for the transcript.
+fn bounded_claude_refusal(detail: &str) -> String {
+    truncate_chars(detail.trim(), CLAUDE_REFUSAL_MAX_CHARS)
 }
 
 /// Describes Claude tool request.
 fn describe_claude_tool_request(request: &ClaudeToolPermissionRequest) -> String {
     describe_claude_tool_action_from_parts(&request.tool_name, &request.tool_input)
-}
-
-/// Describes Claude tool action.
-fn describe_claude_tool_action(tool_use: &ClaudeToolUse) -> String {
-    match (
-        tool_use.name.as_str(),
-        tool_use.file_path.as_deref(),
-        tool_use.command.as_deref(),
-    ) {
-        ("Write" | "Edit", Some(file_path), _) => format!("{} {}", tool_use.name, file_path),
-        (_, _, Some(command)) => command.to_owned(),
-        _ => tool_use.name.clone(),
-    }
 }
 
 /// Describes Claude tool action from parts.

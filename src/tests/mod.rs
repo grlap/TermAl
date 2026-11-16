@@ -34,6 +34,7 @@ mod bounded_read_retained;
 mod claude;
 mod claude_compact_hook;
 mod claude_frame_router;
+mod claude_native_denial;
 mod claude_permission_boundary;
 mod claude_turn_ownership;
 mod cli;

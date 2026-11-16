@@ -653,7 +653,6 @@ fn a_subagents_text_tools_and_results_never_touch_the_root_parser_state() {
         "delta": {"text": "Root text before the task."}}}),
     );
     reader.feed(assistant_tool_use("toolu-task", "Task"));
-    reader.frames.root.permission_denied_this_turn = true;
     reader
         .frames
         .root
@@ -694,7 +693,6 @@ fn a_subagents_text_tools_and_results_never_touch_the_root_parser_state() {
     );
     assert_eq!(root.streamed_assistant_text, root_text);
     assert_eq!(root.saw_text_delta, root_saw_delta);
-    assert!(root.permission_denied_this_turn);
     assert!(root.approval_keys_this_turn.contains("root-approval"));
     assert_eq!(
         reader.record(assistant_texts),
@@ -944,7 +942,6 @@ fn a_subagents_cards_and_diffs_leave_the_root_text_one_message_through_its_compl
                 .cloned()
                 .collect::<Vec<_>>();
             let root_keys = reader.frames.root.approval_keys_this_turn.clone();
-            let root_denied = reader.frames.root.permission_denied_this_turn;
             for frame in frames {
                 reader.feed(frame);
             }
@@ -983,10 +980,6 @@ fn a_subagents_cards_and_diffs_leave_the_root_text_one_message_through_its_compl
             );
             assert_eq!(
                 reader.frames.root.approval_keys_this_turn, root_keys,
-                "{case}"
-            );
-            assert_eq!(
-                reader.frames.root.permission_denied_this_turn, root_denied,
                 "{case}"
             );
             assert!(

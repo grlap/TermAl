@@ -168,6 +168,10 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.command_abandoned(key)
     }
 
+    fn command_refused(&mut self, key: &str, command: &str, reason: &str) -> Result<()> {
+        self.inner.command_refused(key, command, reason)
+    }
+
     /// Upserts parallel agents.
     fn upsert_parallel_agents(
         &mut self,

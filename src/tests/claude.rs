@@ -2272,8 +2272,7 @@ fn claude_read_only_auto_approve_denies_mutating_git_find_and_sed_shapes() {
 
 // Pins `clear_claude_turn_state` zeroing every field of `ClaudeTurnState` —
 // approval keys, parallel agent group key and order, pending tools, the
-// streamed text buffer, the `saw_text_delta` flag, and
-// `permission_denied_this_turn`. Guards against leaking per-turn state
+// streamed text buffer and the `saw_text_delta` flag. Guards against leaking per-turn state
 // (stale pending tools, phantom parallel agents, already-seen approvals)
 // into the next Claude turn, which would corrupt the next transcript.
 #[test]
@@ -2293,7 +2292,6 @@ fn clear_claude_turn_state_resets_all_fields() {
                 title: "Agent 1".to_owned(),
             },
         )]),
-        permission_denied_this_turn: true,
         pending_tools: HashMap::from([(
             "tool-1".to_owned(),
             ClaudeToolUse {
@@ -2317,7 +2315,6 @@ fn clear_claude_turn_state_resets_all_fields() {
     assert_eq!(state.parallel_agent_group_key, None);
     assert!(state.parallel_agent_order.is_empty());
     assert!(state.parallel_agents.is_empty());
-    assert!(!state.permission_denied_this_turn);
     assert!(state.pending_tools.is_empty());
     assert!(!state.replay_became_unsafe);
     assert!(state.streamed_assistant_text.is_empty());
@@ -2347,7 +2344,6 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
                 title: "Agent 1".to_owned(),
             },
         )]),
-        permission_denied_this_turn: true,
         pending_tools: HashMap::from([(
             "tool-1".to_owned(),
             ClaudeToolUse {
@@ -2376,7 +2372,6 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
     assert_eq!(state.parallel_agent_group_key, None);
     assert!(state.parallel_agent_order.is_empty());
     assert!(state.parallel_agents.is_empty());
-    assert!(!state.permission_denied_this_turn);
     assert!(state.pending_tools.is_empty());
     assert!(!state.replay_became_unsafe);
     assert!(state.streamed_assistant_text.is_empty());
