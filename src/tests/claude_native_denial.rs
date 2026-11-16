@@ -1,9 +1,9 @@
 // Owns how an auto-approve Claude session meets a tool the Claude CLI refuses
 // on its own: the launch keeps the CLI asking TermAl, and a refusal the CLI
-// still makes (a deny rule, its sandbox, managed policy) ends as a readable
-// error instead of an approval card nothing can answer. Does not own the live
-// can_use_tool decisions (claude.rs) or the read-only spawn overlay
-// (claude_permission_boundary.rs).
+// still makes ends as a readable error instead of an approval card nothing
+// can answer. Does not own which results count as refusals
+// (claude_refusal_signal.rs), the live can_use_tool decisions (claude.rs) or
+// the read-only spawn overlay (claude_permission_boundary.rs).
 use super::*;
 
 #[test]

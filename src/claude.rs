@@ -2409,6 +2409,7 @@ fn handle_claude_tool_result(
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let detail = extract_claude_tool_result_text(message, content);
+        let refused = is_error && claude_tool_call_refused(message, tool_use_id, &detail);
 
         match tool_use.name.as_str() {
             "Bash" => handle_claude_bash_result(
@@ -2417,6 +2418,7 @@ fn handle_claude_tool_result(
                 message.get("tool_use_result"),
                 &detail,
                 is_error,
+                refused,
                 recorder,
             )?,
             "Task" => handle_claude_task_result(
@@ -2432,6 +2434,7 @@ fn handle_claude_tool_result(
                 message.get("tool_use_result"),
                 &detail,
                 is_error,
+                refused,
                 recorder,
             )?,
             "AskUserQuestion" => {
@@ -2445,7 +2448,9 @@ fn handle_claude_tool_result(
                 }
             }
             _ => {
-                if is_error {
+                if refused {
+                    recorder.error(&bounded_claude_refusal(&detail))?;
+                } else if is_error {
                     recorder.error(&detail)?;
                 }
             }
@@ -2575,9 +2580,10 @@ fn handle_claude_bash_result(
     tool_use_result: Option<&Value>,
     detail: &str,
     is_error: bool,
+    refused: bool,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    if is_error && is_permission_denial(detail) {
+    if refused {
         // The Claude CLI refused the command itself and never ran it. No
         // permission request is live, so nothing can be approved: the
         // command ends with the refusal as its reason.
@@ -2662,12 +2668,13 @@ fn handle_claude_file_result(
     tool_use_result: Option<&Value>,
     detail: &str,
     is_error: bool,
+    refused: bool,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
     if is_error {
         // A refusal by the Claude CLI itself has no live permission request
         // behind it; it is reported like any other failed file tool.
-        if is_permission_denial(detail) {
+        if refused {
             recorder.error(&bounded_claude_refusal(detail))?;
         } else {
             recorder.error(detail)?;
@@ -2772,9 +2779,58 @@ fn extract_claude_tool_result_text(message: &Value, content: &Value) -> String {
 
     "Claude tool call failed.".to_owned()
 }
-/// Returns whether permission denial.
+/// `non_execution_kind` values with which the Claude CLI marks a tool call it
+/// refused rather than ran. `interrupted` and `cancelled` are stops, which
+/// keep their own path; any other value is read as not a refusal.
+const CLAUDE_REFUSAL_KINDS: &[&str] = &[
+    "user-rejected",
+    "permission-rule",
+    "automode-blocked",
+    "automode-unavailable",
+    "automode-parsing-error",
+];
+
+/// The Claude CLI's own refusal wording, for a result that carries no
+/// `non_execution_kind`: older builds send none, and a subagent's entry may
+/// carry only its permission decision. Each entry is the start of the
+/// refusal and, where its wording has one, a phrase it must also contain.
+const CLAUDE_REFUSAL_WORDING: &[(&str, Option<&str>)] = &[
+    ("Claude requested permissions to ", None),
+    ("Permission to ", Some(" has been denied")),
+    ("Permission for this ", Some(" denied")),
+];
+
+/// Whether the Claude CLI refused the tool call `tool_use_id` instead of
+/// running it. The CLI says so in the user frame's `tool_result_meta`; its
+/// wording decides only when it says nothing about whether the call ran.
+fn claude_tool_call_refused(message: &Value, tool_use_id: &str, detail: &str) -> bool {
+    let kind = message
+        .get("tool_result_meta")
+        .and_then(Value::as_array)
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry.get("id").and_then(Value::as_str) == Some(tool_use_id))
+        })
+        .and_then(|entry| entry.get("non_execution_kind"))
+        .and_then(Value::as_str);
+    match kind {
+        Some(kind) => CLAUDE_REFUSAL_KINDS.contains(&kind),
+        None => is_permission_denial(detail),
+    }
+}
+
+/// Whether `detail` is worded as a Claude CLI refusal.
 fn is_permission_denial(detail: &str) -> bool {
+    let detail = detail.trim_start();
+    let detail = detail.strip_prefix("<tool_use_error>").unwrap_or(detail);
+    // Kept from the earlier matcher: a refusal that names the requested
+    // permissions without the CLI's current opening (such as "The user
+    // denied the requested permissions") is still a refusal.
     detail.contains("requested permissions")
+        || CLAUDE_REFUSAL_WORDING.iter().any(|(start, phrase)| {
+            detail.starts_with(start) && phrase.is_none_or(|phrase| detail.contains(phrase))
+        })
 }
 
 /// Returns whether an AskUserQuestion error is the expected result of a
