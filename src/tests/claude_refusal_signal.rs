@@ -205,10 +205,41 @@ fn refused_tool_reason(tool: &str, input: Value, refusal_start: &str) -> (usize,
         .iter()
         .find_map(|message| match message {
             Message::Text { text, .. } if text.contains(refusal_start) => Some(text.clone()),
+            Message::SubagentResult { summary, .. } if summary.contains(refusal_start) => {
+                Some(summary.clone())
+            }
             _ => None,
         })
         .expect("the refusal says why on the session");
     (detail.chars().count(), reason)
+}
+
+#[test]
+fn a_refused_task_keeps_a_bounded_reason_on_the_session() {
+    let (refusal, reason) = refused_tool_reason(
+        "Task",
+        json!({"description": "Survey the repository", "subagent_type": "general-purpose"}),
+        "Permission to use Task with ",
+    );
+    assert!(
+        reason.chars().count() < refusal / 4,
+        "a {refusal}-character refusal is stored at {} characters",
+        reason.chars().count()
+    );
+}
+
+#[test]
+fn a_refused_question_keeps_a_bounded_reason_on_the_session() {
+    let (refusal, reason) = refused_tool_reason(
+        "AskUserQuestion",
+        json!({"questions": []}),
+        "Permission to use AskUserQuestion with ",
+    );
+    assert!(
+        reason.chars().count() < refusal / 4,
+        "a {refusal}-character refusal is stored at {} characters",
+        reason.chars().count()
+    );
 }
 
 #[test]

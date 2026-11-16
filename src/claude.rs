@@ -2410,6 +2410,13 @@ fn handle_claude_tool_result(
             .unwrap_or(false);
         let detail = extract_claude_tool_result_text(message, content);
         let refused = is_error && claude_tool_call_refused(message, tool_use_id, &detail);
+        // A refusal can echo an arbitrarily long input. Bound it once here so
+        // every tool's handler keeps only a bounded reason on the session.
+        let detail = if refused {
+            bounded_claude_refusal(&detail)
+        } else {
+            detail
+        };
 
         match tool_use.name.as_str() {
             "Bash" => handle_claude_bash_result(
@@ -2434,7 +2441,6 @@ fn handle_claude_tool_result(
                 message.get("tool_use_result"),
                 &detail,
                 is_error,
-                refused,
                 recorder,
             )?,
             "AskUserQuestion" => {
@@ -2448,9 +2454,7 @@ fn handle_claude_tool_result(
                 }
             }
             _ => {
-                if refused {
-                    recorder.error(&bounded_claude_refusal(&detail))?;
-                } else if is_error {
+                if is_error {
                     recorder.error(&detail)?;
                 }
             }
@@ -2590,7 +2594,7 @@ fn handle_claude_bash_result(
         return recorder.command_refused(
             tool_use_id,
             tool_use.command.as_deref().unwrap_or("Bash"),
-            &bounded_claude_refusal(detail),
+            detail,
         );
     }
 
@@ -2668,17 +2672,13 @@ fn handle_claude_file_result(
     tool_use_result: Option<&Value>,
     detail: &str,
     is_error: bool,
-    refused: bool,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
     if is_error {
         // A refusal by the Claude CLI itself has no live permission request
-        // behind it; it is reported like any other failed file tool.
-        if refused {
-            recorder.error(&bounded_claude_refusal(detail))?;
-        } else {
-            recorder.error(detail)?;
-        }
+        // behind it; it is reported, already bounded, like any other failed
+        // file tool.
+        recorder.error(detail)?;
         return Ok(());
     }
 
