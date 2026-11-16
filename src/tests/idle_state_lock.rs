@@ -79,6 +79,7 @@ fn registered_history(count: usize) -> RunFixture {
                 run_id: disk.run_id.clone(),
                 native_origin: None,
                 native_completion: None,
+                native_completion_refusal: None,
                 source_owner: None,
                 project_id: Some(fixture.project_id.clone()),
                 run_directory: test_run_display_path(&disk.run_dir),

@@ -18,7 +18,56 @@ fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) 
     row.summary.exit_code = None;
 }
 
+fn test_run_artifact_observation_matches_snapshot(
+    actual: &TestRunCommandObservation,
+    expected: &TestRunCommandObservation,
+) -> bool {
+    let mut identity = actual.clone();
+    identity.native_completion_refusal = expected.native_completion_refusal.clone();
+    &identity == expected
+}
+
 impl AppState {
+    fn retain_test_command_artifact_refusal(
+        &self,
+        expected: &TestRunCommandObservation,
+        code: TestRunNativeCompletionRefusalCode,
+        facts: &[(TestRunNativeCompletionFact, bool)],
+    ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(current) = inner.test_run_observations.get(&expected.execution_id) else {
+            return;
+        };
+        // A later diagnostic is not a replacement identity. All other fields
+        // retain the original snapshot guard; stale events never attach data.
+        let refusal = if test_run_artifact_observation_matches_snapshot(current, expected) {
+            TestRunNativeCompletionRefusal::new(
+                TestRunNativeCompletionPhase::ArtifactAssociation,
+                code,
+                facts,
+            )
+        } else {
+            TestRunNativeCompletionRefusal::new(
+                TestRunNativeCompletionPhase::ArtifactAssociation,
+                TestRunNativeCompletionRefusalCode::ArtifactObservationChanged,
+                &[(TestRunNativeCompletionFact::ObservationUnchanged, false)],
+            )
+        };
+        if current.native_completion_refusal.as_ref() == Some(&refusal) {
+            return;
+        }
+        let Some(updated) = inner
+            .test_run_observations
+            .update(&expected.execution_id, |row| {
+                row.native_completion_refusal = Some(refusal);
+                row.clone()
+            })
+        else {
+            return;
+        };
+        self.persist_test_command_observation_locked(&mut inner, updated);
+    }
+
     // Retain factual terminal results before artifacts can disappear. Use the
     // same positive association as API/SSE alias suppression, with no I/O or
     // evidence settlement here. A native terminal proof is never rewritten.
@@ -28,7 +77,7 @@ impl AppState {
         // but only unfinished same-run candidates reach exact matching.
         let projection = TestRunProjection::new(inner);
         let mut terminal = Vec::new();
-        let mut native_completions = Vec::new();
+        let mut native_outcomes = Vec::new();
         for entry in &inner.test_runs.entries {
             if !entry.disk.is_terminal()
                 || !matches!(
@@ -38,20 +87,52 @@ impl AppState {
             {
                 continue;
             }
-            if let Some(registration) = test_run_matching_registration(inner, &entry.disk)
-                .filter(|row| row.native_origin.is_some() && row.native_completion.is_none())
+            // An exact existing run id is enough to diagnose a refusal, never
+            // enough to retain completion. The helper still applies every
+            // original registration/provider/artifact predicate below.
+            if let Some(registration) = inner
+                .test_run_registrations
+                .get(&entry.summary.run_id)
+                .filter(|row| row.native_completion.is_none())
             {
-                let mut candidates = projection.observations(&entry.summary.run_id)
-                    .iter().copied().filter_map(|row| {
-                        test_run_native_completion_from_settlement(inner, registration, row, entry)
-                    });
-                if let Some(completion) = candidates.next() {
-                    // Two provider executions are ambiguous, even when they
-                    // repeat the same locator. Never choose the nearby one.
-                    if candidates.next().is_none() {
-                        native_completions.push((registration.run_id.clone(), completion));
+                let mut completion = None;
+                let mut refusal = None;
+                for row in projection.observations(&entry.summary.run_id) {
+                    match test_run_native_completion_from_settlement(
+                        inner,
+                        registration,
+                        Some(row),
+                        entry,
+                    ) {
+                        Ok(candidate) if completion.is_none() => completion = Some(candidate),
+                        Ok(_) => {
+                            // Preserve original ambiguity semantics: only
+                            // qualifying provider executions count here.
+                            completion = None;
+                            refusal = Some(TestRunNativeCompletionRefusal::new(
+                                TestRunNativeCompletionPhase::NativeCompletion,
+                                TestRunNativeCompletionRefusalCode::ProviderExecutionAmbiguous,
+                                &[(TestRunNativeCompletionFact::SingleProviderExecution, false)],
+                            ));
+                            break;
+                        }
+                        Err(reason) if refusal.is_none() => refusal = Some(reason),
+                        Err(_) => {}
                     }
                 }
+                if completion.is_some() {
+                    refusal = None;
+                }
+                if completion.is_none() && refusal.is_none() {
+                    refusal = test_run_native_completion_from_settlement(
+                        inner,
+                        registration,
+                        None,
+                        entry,
+                    )
+                    .err();
+                }
+                native_outcomes.push((registration.run_id.clone(), completion, refusal));
             }
             let Some(digest) = entry
                 .summary
@@ -83,11 +164,19 @@ impl AppState {
             }
         }
         drop(projection);
-        let native_changed = !native_completions.is_empty();
-        for (run_id, completion) in native_completions {
+        let mut native_changed = false;
+        for (run_id, completion, refusal) in native_outcomes {
+            if inner.test_run_registrations.get(&run_id).is_none_or(|row| {
+                row.native_completion.is_some()
+                    || row.native_completion_refusal == refusal && completion.is_none()
+            }) {
+                continue;
+            }
+            native_changed = true;
             inner.test_run_registrations.update(&run_id, |row| {
                 if row.native_completion.is_none() {
-                    row.native_completion = Some(completion);
+                    row.native_completion = completion;
+                    row.native_completion_refusal = refusal;
                 }
             });
         }
@@ -168,7 +257,13 @@ impl AppState {
         // Native runs already own their original reservation and artifact.
         // Console locators, previews and persisted-output metadata cannot
         // replace that association.
-        if row.declared_native.is_some() { return; }
+        if row.declared_native.is_some() {
+            return;
+        }
+        use TestRunNativeCompletionFact::*;
+        use TestRunNativeCompletionRefusalCode::*;
+        let refuse =
+            |code, facts: &[_]| self.retain_test_command_artifact_refusal(&row, code, facts);
         let mut locators = std::collections::BTreeSet::new();
         for line in output.lines() {
             let line = line.trim();
@@ -193,45 +288,74 @@ impl AppState {
                 || directory.to_string_lossy().len() > TEST_RUN_PATH_MAX_BYTES
                 || engram_network_path(&directory.to_string_lossy())
             {
+                refuse(
+                    ArtifactLocatorInvalid,
+                    &[
+                        (LocatorAbsolute, directory.is_absolute()),
+                        (
+                            LocatorWithinBound,
+                            directory.to_string_lossy().len() <= TEST_RUN_PATH_MAX_BYTES,
+                        ),
+                        (
+                            LocatorLocal,
+                            !engram_network_path(&directory.to_string_lossy()),
+                        ),
+                    ],
+                );
                 return;
             }
             locators.insert(directory);
             if locators.len() > 1 {
+                refuse(ArtifactLocatorAmbiguous, &[(SingleLocator, false)]);
                 return;
             }
         }
         let Some(directory) = locators.into_iter().next() else {
+            // No explicit locator was offered for association. In particular,
+            // a non-locator frame cannot rewrite an original observation.
             return;
         };
         let Some(run_id) = directory.file_name().and_then(|name| name.to_str()) else {
+            refuse(ArtifactRunIdInvalid, &[(RunIdValid, false)]);
             return;
         };
         let Some(uuid) = run_id
             .strip_prefix("test-")
             .and_then(|id| Uuid::parse_str(id).ok())
         else {
+            refuse(ArtifactRunIdInvalid, &[(RunIdValid, false)]);
             return;
         };
         if run_id != format!("test-{uuid}") {
+            refuse(ArtifactRunIdInvalid, &[(RunIdValid, false)]);
             return;
         }
         // All filesystem work remains off the global lock. A copied or linked
         // foreign directory cannot substitute for this worktree's exact run.
+        if row.summary.worktree.is_empty() {
+            refuse(ArtifactWorktreeUnavailable, &[(WorktreePresent, false)]);
+            return;
+        }
         let Some(expected_parent) =
             EngramHost::run_artifact_directory(FsPath::new(&row.summary.worktree))
         else {
+            refuse(ArtifactRootUnavailable, &[(ArtifactRootAvailable, false)]);
             return;
         };
         let Ok(expected_parent) = fs::canonicalize(expected_parent) else {
+            refuse(ArtifactRootUnavailable, &[(ArtifactRootResolved, false)]);
             return;
         };
         let Ok(canonical) = fs::canonicalize(&directory) else {
+            refuse(ArtifactDirectoryUnavailable, &[(DirectoryResolved, false)]);
             return;
         };
         if canonical != expected_parent.join(run_id) {
+            refuse(ArtifactDirectoryMismatch, &[(DirectoryMatches, false)]);
             return;
         }
         let Some(disk) = TestRunDisk::read(&canonical, None) else {
+            refuse(ArtifactRequestUnavailable, &[(RequestReadable, false)]);
             return;
         };
         if disk.run_id != run_id
@@ -239,10 +363,27 @@ impl AppState {
             || test_run_path_key(&disk.worktree) != test_run_path_key(&row.summary.worktree)
             || disk.request_identity.is_none()
         {
+            refuse(
+                ArtifactRequestMismatch,
+                &[
+                    (RunMatches, disk.run_id == run_id),
+                    (
+                        RequestOwnerMatches,
+                        disk.owner.as_deref() == Some(session_id),
+                    ),
+                    (
+                        WorktreeMatches,
+                        test_run_path_key(&disk.worktree)
+                            == test_run_path_key(&row.summary.worktree),
+                    ),
+                    (RequestIdentityPresent, disk.request_identity.is_some()),
+                ],
+            );
             return;
         }
         let mode = EngramHost::launcher_arguments(&command).and_then(|words| words.get(2).cloned());
         if (disk.preset == TestRunPreset::Full) != (mode.as_deref() == Some("full")) {
+            refuse(ArtifactModeMismatch, &[(ModeMatches, false)]);
             return;
         }
         // The locator is explicit; this interval is only an anti-replay guard,
@@ -253,6 +394,10 @@ impl AppState {
             .as_deref()
             .and_then(EngramHost::check_timestamp)
         else {
+            refuse(
+                ArtifactObservationTimeUnavailable,
+                &[(ObservationTimeAvailable, false)],
+            );
             return;
         };
         let Some(requested) = disk
@@ -260,14 +405,20 @@ impl AppState {
             .as_deref()
             .and_then(EngramHost::check_timestamp)
         else {
+            refuse(
+                ArtifactRequestTimeUnavailable,
+                &[(RequestTimeAvailable, false)],
+            );
             return;
         };
         let Some(floor) = observed.checked_sub_signed(chrono::TimeDelta::seconds(
             ENGRAM_CARRIED_LAUNCH_SLACK_SECONDS,
         )) else {
+            refuse(ArtifactLaunchWindowInvalid, &[(TimeFloorAvailable, false)]);
             return;
         };
         if requested < floor || requested > chrono::Utc::now() {
+            refuse(ArtifactLaunchWindowInvalid, &[(WithinLaunchWindow, false)]);
             return;
         }
         let artifact = TestRunObservedArtifact {
@@ -277,18 +428,27 @@ impl AppState {
             terminal_digest: None,
         };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if inner.test_run_observations.get(&row.execution_id) != Some(&row) {
+        if inner
+            .test_run_observations
+            .get(&row.execution_id)
+            .is_none_or(|current| !test_run_artifact_observation_matches_snapshot(current, &row))
+        {
+            drop(inner);
+            refuse(ArtifactObservationChanged, &[(ObservationUnchanged, false)]);
             return;
         }
-        let mut updated = row;
+        let mut updated = row.clone();
         if updated
             .artifact
             .as_ref()
             .is_some_and(|earlier| earlier != &artifact)
         {
+            drop(inner);
+            refuse(ArtifactAlreadyAssociated, &[(ArtifactUnchanged, false)]);
             return;
         }
         updated.artifact = Some(artifact);
+        updated.native_completion_refusal = None;
         inner
             .test_run_observations
             .insert(updated.execution_id.clone(), updated.clone());
