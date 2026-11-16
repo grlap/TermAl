@@ -203,11 +203,19 @@ fn engram_root_recovery_readers<'a>(
 ) -> Vec<&'a str> {
     let mut seen = HashSet::new();
     let mut candidates = readers.iter()
-        .filter(|(_, current)| *current == store)
+        .filter(|(_, current)| {
+            #[cfg(test)]
+            engram_root_reclamation_planning_boundary("recovery_candidate", &[]);
+            *current == store
+        })
         .map(|(session, _)| session.id.as_str())
         .filter(|session| seen.insert(*session))
         .collect::<Vec<_>>();
-    if let Some(index) = candidates.iter().position(|session| Some(*session) == namer) {
+    if let Some(index) = candidates.iter().position(|session| {
+        #[cfg(test)]
+        engram_root_reclamation_planning_boundary("recovery_preference", &[]);
+        Some(*session) == namer
+    }) {
         let preferred = candidates.remove(index);
         candidates.insert(0, preferred);
     }
@@ -1139,6 +1147,10 @@ impl AppState {
                 .map(|root| root.named_by_session.clone());
             let pending = if settle_abandoned_writes {
                 inner.engram_named_root_journal.iter()
+                    .inspect(|_| {
+                        #[cfg(test)]
+                        engram_root_reclamation_planning_boundary("recovery_pending_journal", &[]);
+                    })
                     .filter(|journal| &journal.store == store
                         && journal.read_binding.as_ref().is_some_and(|binding| {
                             runs.iter().any(|run| engram_same_recovery_run(run, binding))
@@ -1225,6 +1237,10 @@ impl AppState {
                     inner
                         .engram_named_root_journal
                         .iter()
+                        .inspect(|_| {
+                            #[cfg(test)]
+                            engram_root_reclamation_planning_boundary("recovery_snapshot_journal", &[]);
+                        })
                         .filter(|journal| {
                             &journal.store == store
                                 && journal.read_binding.as_ref().is_some_and(|retained| {
@@ -1295,6 +1311,10 @@ impl AppState {
             let journal_current = inner
                 .engram_named_root_journal
                 .iter()
+                .inspect(|_| {
+                    #[cfg(test)]
+                    engram_root_reclamation_planning_boundary("recovery_current_journal", &[]);
+                })
                 .filter(|journal| {
                     &journal.store == store
                         && journal
@@ -1441,6 +1461,10 @@ impl AppState {
                     for journal in inner
                         .engram_named_root_journal
                         .iter_mut()
+                        .inspect(|_| {
+                            #[cfg(test)]
+                            engram_root_reclamation_planning_boundary("recovery_settle_journal", &[]);
+                        })
                         .filter(|journal| {
                             &journal.store == store
                                 && journal.read_binding.as_ref().is_some_and(|retained| {

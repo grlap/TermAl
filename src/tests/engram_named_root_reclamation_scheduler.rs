@@ -109,7 +109,9 @@ fn named_root_reclamation_scheduler_plans_with_state_lock_available() {
     let _probe = PlanningProbe::install(move |phase, _| {
         // Checking this exact mutex's owner is deterministic even if another
         // fixture thread briefly holds it. Do not panic under the old guard.
-        if phase != "selected" {
+        // Row-work probes share this hook; this witness owns the two
+        // scheduler planning boundaries, not the inventory capture phase.
+        if matches!(phase, "canonical" | "disposition") {
             observed.borrow_mut().push((
                 phase.to_owned(), state.inner.is_not_held_by_current_thread_for_test(),
             ));

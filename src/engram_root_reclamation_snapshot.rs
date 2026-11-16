@@ -61,6 +61,10 @@ impl EngramRootReaderSnapshot {
             sessions: inner
                 .sessions
                 .iter()
+                .inspect(|_| {
+                    #[cfg(test)]
+                    engram_root_reclamation_planning_boundary("reader_capture_session", &[]);
+                })
                 .map(|record| EngramReclamationSession {
                     id: record.session.id.clone(),
                     project_id: record.session.project_id.clone(),
@@ -81,6 +85,10 @@ impl EngramRootReaderSnapshot {
             projects: inner
                 .projects
                 .iter()
+                .inspect(|_| {
+                    #[cfg(test)]
+                    engram_root_reclamation_planning_boundary("reader_capture_project", &[]);
+                })
                 .map(|project| EngramReclamationProject {
                     id: project.id.clone(),
                     eligible: !inner.engram_project_resets.contains(&project.id)
@@ -100,6 +108,8 @@ impl EngramRootReaderSnapshot {
                 .delegations
                 .iter()
                 .map(|delegation| {
+                    #[cfg(test)]
+                    engram_root_reclamation_planning_boundary("reader_capture_parent", &[]);
                     (
                         delegation.child_session_id.clone(),
                         delegation.parent_session_id.clone(),
@@ -153,19 +163,29 @@ impl EngramRootReaderSnapshot {
         }
         let mut sessions = HashMap::new();
         for session in &self.sessions {
+            #[cfg(test)]
+            engram_root_reclamation_planning_boundary("reader_index_session", &[]);
             sessions.entry(session.id.as_str()).or_insert(session);
         }
         let mut parents = HashMap::new();
         for (child, parent) in &self.parents {
+            #[cfg(test)]
+            engram_root_reclamation_planning_boundary("reader_index_parent", &[]);
             parents.entry(child.as_str()).or_insert(parent.as_str());
         }
         let mut projects = HashMap::new();
         for project in &self.projects {
+            #[cfg(test)]
+            engram_root_reclamation_planning_boundary("reader_index_project", &[]);
             projects.entry(project.id.as_str()).or_insert(project);
         }
         self.sessions
             .iter()
-            .filter_map(|session| sessions.get(session.id.as_str()).copied())
+            .filter_map(|session| {
+                #[cfg(test)]
+                engram_root_reclamation_planning_boundary("reader_select_session", &[]);
+                sessions.get(session.id.as_str()).copied()
+            })
             .filter_map(|session| {
                 self.reader_project(session, &sessions, &parents, &projects)
                     .and_then(|project| project.store.as_ref())

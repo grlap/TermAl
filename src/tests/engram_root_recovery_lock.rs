@@ -1,54 +1,92 @@
-// Owns recovery-batch lock-hold scaling witnesses using the existing root
-// fixtures and StateMutex reporter. Does not read a live store or measure
-// canonical transport latency. Split beside the reclamation regressions.
+// Count actual recovery row visits and lock ownership using the existing root
+// fixtures and planning probe. CPU scheduling cannot change the work bound.
 use super::*;
 
-const RECOVERY_HOLD_SAMPLES: usize = 100;
-// The bound applies to the median of each call's worst hold. Before reader
-// selection moved off the state lock, a scan of the session table made every
-// call slow, so the median sees it. A thread can also sleep while it holds the
-// lock in a process running hundreds of other test threads, which slows only
-// some calls, and the median leaves those out. Known weakness: this does not
-// catch a scan that stays under the bound, or one that slows half the calls or fewer.
-const RECOVERY_HOLD_BOUND: Duration = Duration::from_millis(50);
-// Longer than the bound, so one such hold is over it on any host.
-const RECOVERY_FORCED_PAUSE: Duration = Duration::from_millis(60);
-
-/// One call's worst hold, and where it was taken.
-type RecoveryHold = (Duration, &'static str, u32);
-
-#[derive(Debug)]
-struct RecoveryHoldMeasure {
-    median: RecoveryHold,
-    second_worst: Duration,
-    maximum: Duration,
+#[derive(Debug, Default)]
+struct RecoveryWorkMeasure {
+    rows: BTreeMap<String, usize>,
+    planning_rows_under_state: usize,
 }
 
-impl RecoveryHoldMeasure {
-    fn of(mut worst_per_call: Vec<RecoveryHold>) -> Self {
-        worst_per_call.sort_unstable();
-        let calls = worst_per_call.len();
-        Self {
-            median: worst_per_call[(calls - 1) / 2],
-            second_worst: worst_per_call[calls - 2].0,
-            maximum: worst_per_call[calls - 1].0,
+#[derive(Debug, PartialEq)]
+enum RecoveryWorkViolation {
+    PlanningUnderState,
+    RowVisits(String, usize, usize),
+    MissingObservation,
+}
+
+impl RecoveryWorkMeasure {
+    fn count(&self, phase: &str) -> usize {
+        self.rows.get(phase).copied().unwrap_or_default()
+    }
+
+    fn check(
+        &self,
+        sessions: usize,
+        projects: usize,
+        parents: usize,
+        journals: usize,
+        active: bool,
+    ) -> Result<(), RecoveryWorkViolation> {
+        if self.planning_rows_under_state != 0 {
+            return Err(RecoveryWorkViolation::PlanningUnderState);
         }
+        // A batch with one retained run captures each inventory once. Its
+        // journal passes are linear, never one session scan per journal.
+        // Current-reader validation still runs under the real authority cut.
+        for (phase, inventory) in [
+            ("reader_capture_session", sessions),
+            ("reader_capture_project", projects),
+            ("reader_capture_parent", parents),
+            ("reader_index_session", sessions),
+            ("reader_index_project", projects),
+            ("reader_index_parent", parents),
+            ("reader_select_session", sessions),
+            ("recovery_pending_journal", journals),
+            ("recovery_snapshot_journal", journals),
+            ("recovery_current_journal", journals),
+            ("recovery_settle_journal", journals),
+        ] {
+            let expected = if active { inventory } else { 0 };
+            let actual = self.count(phase);
+            if actual > expected {
+                return Err(RecoveryWorkViolation::RowVisits(
+                    phase.to_owned(), expected, actual,
+                ));
+            }
+        }
+        for phase in ["recovery_candidate", "recovery_preference"] {
+            let actual = self.count(phase);
+            let expected = usize::from(active);
+            if actual > expected {
+                return Err(RecoveryWorkViolation::RowVisits(
+                    phase.to_owned(), expected, actual,
+                ));
+            }
+        }
+        if active
+            && [
+                "reader_capture_session", "reader_index_session",
+                "reader_select_session", "recovery_candidate",
+            ].iter().any(|phase| self.count(phase) == 0)
+        {
+            return Err(RecoveryWorkViolation::MissingObservation);
+        }
+        Ok(())
     }
 }
 
-struct RecoveryHoldFixture {
+struct RecoveryWorkFixture {
     claimed: EOCheckedTurn,
     store: EngramAuthorityStoreKey,
     owner: EngramAuthorityTransition,
-    holds: Arc<Mutex<Vec<RecoveryHold>>>,
-    pause_next_hold: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl RecoveryHoldFixture {
+impl RecoveryWorkFixture {
     fn new(sessions: usize, journals: usize) -> Self {
         assert!(sessions >= 2);
         assert!((1..=ENGRAM_NAMED_ROOT_JOURNAL_LIMIT).contains(&journals));
-        let (mut claimed, root) = settled_root("recovery-lock-scaling", "completed");
+        let (claimed, root) = settled_root("recovery-lock-scaling", "completed");
         claimed.wait_for_snapshots();
         let store = root.store.clone();
         let owner = {
@@ -110,154 +148,120 @@ impl RecoveryHoldFixture {
             }
             owner
         };
-        let holds = Arc::new(Mutex::new(Vec::new()));
-        let seen = holds.clone();
-        let pause_next_hold = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let pause = pause_next_hold.clone();
-        let measured_thread = std::thread::current().id();
-        // The control-only wrapper owns a Weak pointer to this mutex. Even
-        // after capture workers settle, that pointer prevents Arc::get_mut.
-        // Drop only the wrapper while installing the reporter, then restore
-        // the same control fixture before any recovery call is measured.
-        claimed.state.install_test_engram_transport(claimed.transport.clone());
-        let mutex = Arc::get_mut(&mut claimed.state.inner)
-            .expect("the settled fixture exclusively owns its state mutex");
-        mutex.warn_after = Duration::ZERO;
-        mutex.diagnostic_reporter = Arc::new(move |diagnostic| {
-            if std::thread::current().id() != measured_thread {
+        Self { claimed, store, owner }
+    }
+
+    fn observe(&self, action: impl FnOnce()) -> RecoveryWorkMeasure {
+        let measured = std::rc::Rc::new(std::cell::RefCell::new(RecoveryWorkMeasure::default()));
+        let observed = measured.clone();
+        let state = self.claimed.state.clone();
+        let probe = super::scheduler::PlanningProbe::install(move |phase, _| {
+            if !(phase.starts_with("reader_") || phase.starts_with("recovery_"))
+                || phase == "recovery_selected"
+            {
                 return;
             }
-            match diagnostic {
-                StateMutexDiagnostic::Held { held, file, line, .. } => {
-                    seen.lock().unwrap().push((held, file, line));
-                }
-                // With warn_after zero this runs on every acquisition, after
-                // the hold's clock started and with the lock held: a real
-                // sleep under the lock. The file test skips the test-only
-                // clock lock, so the sleep lands in the batch's first real hold.
-                StateMutexDiagnostic::Waited { file, .. }
-                    if file.ends_with("engram_root_authority.rs")
-                        && pause.swap(false, std::sync::atomic::Ordering::SeqCst) =>
-                {
-                    std::thread::sleep(RECOVERY_FORCED_PAUSE);
-                }
-                _ => {}
+            let mut work = observed.borrow_mut();
+            *work.rows.entry(phase.to_owned()).or_default() += 1;
+            if (phase.starts_with("reader_index_") || phase == "reader_select_session"
+                || phase == "recovery_candidate" || phase == "recovery_preference")
+                && !state.inner.is_not_held_by_current_thread_for_test()
+            {
+                work.planning_rows_under_state += 1;
             }
         });
-        install_control_only_transport(&claimed.state, claimed.transport.clone());
-        Self { claimed, store, owner, holds, pause_next_hold }
+        action();
+        drop(probe);
+        std::rc::Rc::try_unwrap(measured).unwrap().into_inner()
     }
 
-    fn measure(&self, unresolved: bool) -> RecoveryHoldMeasure {
-        self.measure_calls(unresolved, RECOVERY_HOLD_SAMPLES, |_| false)
-    }
-
-    /// Runs `calls` batches, sleeping under the lock in those `paused` selects.
-    fn measure_calls(
-        &self,
-        unresolved: bool,
-        calls: usize,
-        paused: impl Fn(usize) -> bool,
-    ) -> RecoveryHoldMeasure {
+    fn measure(&self, unresolved: bool) -> RecoveryWorkMeasure {
         let requests_before = self.claimed.transport.requests().len();
         let journals_before = self.claimed.state.inner.lock().unwrap()
             .engram_named_root_journal.clone();
-        let mut worst_per_call = Vec::new();
-        for call in 0..calls {
-            {
-                let mut inner = self.claimed.state.inner.lock().unwrap();
-                let history = inner.engram_work_naming_history.iter_mut()
-                    .find(|history| history.work_id == self.owner.binding.work_id).unwrap();
-                history.unresolved_runs.clear();
-                if unresolved {
-                    history.unresolved_runs.push(self.owner.binding.clone());
-                }
+        {
+            let mut inner = self.claimed.state.inner.lock().unwrap();
+            let history = inner.engram_work_naming_history.iter_mut()
+                .find(|history| history.work_id == self.owner.binding.work_id).unwrap();
+            history.unresolved_runs.clear();
+            if unresolved {
+                history.unresolved_runs.push(self.owner.binding.clone());
             }
-            let clock = self.claimed.state.engram_budget_clock();
-            // Exclude fixture preparation; capture every foreground lock in
-            // the actual batch, including reader validation and settlement.
-            self.holds.lock().unwrap().clear();
-            self.pause_next_hold.store(paused(call), std::sync::atomic::Ordering::SeqCst);
+        }
+        let clock = self.claimed.state.engram_budget_clock();
+        // Exclude fixture preparation; count actual row visits in the
+        // foreground batch, including its journal settlement passes.
+        let work = self.observe(|| {
             self.claimed.state.recover_engram_authority_batch_until(
                 &self.store, &self.owner, clock.now() + DEADLOCK_GUARD, true, None,
             ).unwrap();
-            let observed = std::mem::take(&mut *self.holds.lock().unwrap());
-            worst_per_call.push(*observed.iter().max().expect("the batch took a state lock"));
-            let inner = self.claimed.state.inner.lock().unwrap();
-            assert_eq!(inner.engram_named_root_journal, journals_before,
-                "candidate scans must not settle unrelated or executable intents");
-            let history = inner.engram_work_naming_history.iter()
-                .find(|history| history.work_id == self.owner.binding.work_id).unwrap();
-            assert!(history.unresolved_runs.is_empty(), "the exact completed run was read");
-            assert_eq!(history.transition.as_ref().unwrap(), &self.owner);
-        }
+        });
+        let inner = self.claimed.state.inner.lock().unwrap();
+        assert_eq!(inner.engram_named_root_journal, journals_before,
+            "candidate scans must not settle unrelated or executable intents");
+        let history = inner.engram_work_naming_history.iter()
+            .find(|history| history.work_id == self.owner.binding.work_id).unwrap();
+        assert!(history.unresolved_runs.is_empty(), "the exact completed run was read");
+        assert_eq!(history.transition.as_ref().unwrap(), &self.owner);
+        drop(inner);
         assert_eq!(self.claimed.transport.requests().len() - requests_before,
-            if unresolved { calls } else { 0 },
+            usize::from(unresolved),
             "one canonical read per retained run, none for an empty batch");
-        RecoveryHoldMeasure::of(worst_per_call)
+        work
     }
 }
 
 #[test]
 fn root_recovery_empty_batch_does_not_hold_state_for_retained_inventory() {
-    let fixture = RecoveryHoldFixture::new(4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT);
+    let fixture = RecoveryWorkFixture::new(4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT);
     let measure = fixture.measure(false);
-    eprintln!("root_recovery_hold empty=true sessions=4096 journals={} samples=100 median_us={} second_worst_us={} max_us={}",
-        ENGRAM_NAMED_ROOT_JOURNAL_LIMIT, measure.median.0.as_micros(), measure.second_worst.as_micros(), measure.maximum.as_micros());
-    assert!(measure.median.0 < RECOVERY_HOLD_BOUND,
-        "empty recovery batch exceeds {RECOVERY_HOLD_BOUND:?}: {measure:?}");
+    assert_eq!(measure.check(4096, 1, 0, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT, false), Ok(()),
+        "empty recovery must not visit retained inventories: {measure:?}");
 }
 
 #[test]
 fn root_recovery_active_batch_holds_stay_bounded_as_sessions_and_journals_grow() {
-    let mut measurements = Vec::new();
     for (sessions, journals) in [(64, 1), (1024, 1), (4096, 1), (4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT)] {
-        let fixture = RecoveryHoldFixture::new(sessions, journals);
+        let fixture = RecoveryWorkFixture::new(sessions, journals);
         let measure = fixture.measure(true);
-        eprintln!("root_recovery_hold empty=false sessions={sessions} journals={journals} samples=100 median_us={} second_worst_us={} max_us={}",
-            measure.median.0.as_micros(), measure.second_worst.as_micros(), measure.maximum.as_micros());
-        measurements.push((sessions, journals, measure));
+        let inner = fixture.claimed.state.inner.lock().unwrap();
+        assert_eq!(measure.check(sessions, inner.projects.len(), inner.delegations.len(), journals, true), Ok(()),
+            "recovery work must stay linear at {sessions} sessions and {journals} journals: {measure:?}");
     }
-    assert!(measurements.iter().all(|(_, _, measure)| measure.median.0 < RECOVERY_HOLD_BOUND),
-        "the median of recovery batch calls' worst holds must stay below {RECOVERY_HOLD_BOUND:?}: {measurements:?}");
-}
-
-// The oracle's exact boundary, with no timing in it: of 21 calls the median is
-// the 11th slowest, so 10 slow calls leave it fast and 11 don't.
-#[test]
-fn root_recovery_hold_median_is_decided_by_over_half_the_calls() {
-    let with_slow_calls = |slow: usize| {
-        RecoveryHoldMeasure::of((0..21).map(|call| {
-            let held = if call < slow { RECOVERY_FORCED_PAUSE } else { Duration::from_millis(1) };
-            (held, "test", 0)
-        }).collect())
-    };
-    assert!(with_slow_calls(10).median.0 < RECOVERY_HOLD_BOUND);
-    assert!(with_slow_calls(11).median.0 >= RECOVERY_HOLD_BOUND);
-}
-
-// Real sleeps under the lock. Ten paused calls of a hundred leave room for other
-// calls to stall as well, so this doesn't need a quiet host.
-#[test]
-fn root_recovery_hold_median_passes_when_a_thread_sleeps_in_under_half_the_calls() {
-    let fixture = RecoveryHoldFixture::new(64, 1);
-    let measure = fixture.measure_calls(true, RECOVERY_HOLD_SAMPLES, |call| call < 10);
-    assert!(measure.maximum >= RECOVERY_HOLD_BOUND, "the sleep is a hold: {measure:?}");
-    assert!(measure.second_worst >= RECOVERY_HOLD_BOUND, "{measure:?}");
-    assert!(measure.median.0 < RECOVERY_HOLD_BOUND, "{measure:?}");
 }
 
 #[test]
-fn root_recovery_hold_median_fails_when_over_half_the_calls_are_slow() {
-    let fixture = RecoveryHoldFixture::new(64, 1);
-    let measure = fixture.measure_calls(true, 21, |call| call < 11);
-    assert!(measure.median.0 >= RECOVERY_HOLD_BOUND, "{measure:?}");
+fn root_recovery_work_oracle_rejects_reader_planning_under_state_lock() {
+    let fixture = RecoveryWorkFixture::new(64, 1);
+    // This retained reference path really indexes and selects readers under
+    // StateInner, reproducing the lock-scope regression without a pause.
+    let measure = fixture.observe(|| {
+        let inner = fixture.claimed.state.inner.lock().unwrap();
+        assert!(engram_root_recovery_reader_target_locked(
+            &inner, &fixture.store, Some(&fixture.claimed.session_id)).is_some());
+    });
+    assert!(measure.count("reader_index_session") >= 64);
+    assert_eq!(measure.check(64, 1, 0, 1, true), Err(RecoveryWorkViolation::PlanningUnderState));
+}
+
+#[test]
+fn root_recovery_work_oracle_rejects_repeated_inventory_capture() {
+    let fixture = RecoveryWorkFixture::new(64, 1);
+    let measure = fixture.observe(|| {
+        let inner = fixture.claimed.state.inner.lock().unwrap();
+        for _ in 0..2 {
+            let snapshot = EngramRootReaderSnapshot::capture(&inner);
+            assert_eq!(snapshot.sessions.len(), 64);
+        }
+    });
+    assert_eq!(measure.check(64, 1, 0, 1, true),
+        Err(RecoveryWorkViolation::RowVisits("reader_capture_session".to_owned(), 64, 128)));
 }
 
 #[test]
 fn root_recovery_revalidates_owner_and_reader_after_unlocked_selection() {
     for replace_owner in [true, false] {
-        let fixture = RecoveryHoldFixture::new(64, 1);
+        let fixture = RecoveryWorkFixture::new(64, 1);
         {
             let mut inner = fixture.claimed.state.inner.lock().unwrap();
             inner.engram_work_naming_history.iter_mut()
@@ -307,7 +311,7 @@ fn root_recovery_revalidates_owner_and_reader_after_unlocked_selection() {
 
 #[test]
 fn root_recovery_revalidates_abandoned_reporter_after_unlocked_selection() {
-    let fixture = RecoveryHoldFixture::new(64, 1);
+    let fixture = RecoveryWorkFixture::new(64, 1);
     let missing = "session-returning-recovery-reporter";
     let journals = {
         let mut inner = fixture.claimed.state.inner.lock().unwrap();
@@ -341,7 +345,7 @@ fn root_recovery_revalidates_abandoned_reporter_after_unlocked_selection() {
 #[test]
 fn root_recovery_skips_projectless_readers_without_reactivating_historical_exclusions() {
     for (preferred, all_excluded) in [(true, false), (false, false), (true, true), (false, true)] {
-        let fixture = RecoveryHoldFixture::new(2, 1);
+        let fixture = RecoveryWorkFixture::new(2, 1);
         let excluded = fixture.claimed.session_id.clone();
         let healthy = "session-healthy-root-reader".to_owned();
         let (ledger, binding) = {
