@@ -385,6 +385,8 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
             "mailbox_messages",
             "mailbox_relay_intents",
             "mailbox_messages_topic_key_sender",
+            "mailbox_messages_causal_pending",
+            "mailbox_relay_intents_causal_pending",
             "remote_prompt_intents",
             "remote_prompt_receives",
             "remote_prompt_intents_identity_immutable",
@@ -405,8 +407,8 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
         let current = columns(&reopened, table);
         assert_eq!(
             current.len(),
-            old.len() + 3,
-            "exactly three nullable custody columns are added to {table}"
+            old.len() + 5,
+            "exactly five nullable custody/scheduling columns are added to {table}"
         );
         assert_eq!(
             &current[..old.len()],
@@ -429,6 +431,16 @@ fn delegation_review_custody_index_upgrades_step_six_and_bounds_orphan_lookup() 
                 (
                     String::from("test_request_settlement_json"),
                     String::from("TEXT"),
+                    0_i64
+                ),
+                (
+                    String::from("test_request_pending_json"),
+                    String::from("TEXT"),
+                    0_i64
+                ),
+                (
+                    String::from("test_request_pending_order"),
+                    String::from("INTEGER"),
                     0_i64
                 ),
             ]

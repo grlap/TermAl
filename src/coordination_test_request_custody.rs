@@ -32,19 +32,36 @@ fn remove_empty_test_request_custody_columns_for_test(connection: &rusqlite::Con
 }
 
 fn validate_coordination_test_request_custody(connection: &rusqlite::Connection) -> Result<()> {
+    validate_coordination_test_request_custody_rows(connection, false)
+}
+
+fn validate_coordination_test_request_custody_with_legacy_quarantine(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
+    validate_coordination_test_request_custody_rows(connection, true)
+}
+
+fn validate_coordination_test_request_custody_rows(
+    connection: &rusqlite::Connection,
+    allow_legacy_quarantine: bool,
+) -> Result<()> {
     for table in ["mailbox_messages", "mailbox_relay_intents"] {
+        let quarantined = if allow_legacy_quarantine {
+            causal_pending_legacy_quarantine(connection, table == "mailbox_relay_intents")?
+        } else {
+            BTreeSet::new()
+        };
         let mut statement = connection.prepare(&format!(
-            "SELECT test_request_json,test_request_scope_json FROM {table}
+            "SELECT test_request_json,test_request_scope_json,rowid FROM {table}
              WHERE test_request_json IS NOT NULL OR test_request_scope_json IS NOT NULL"
         ))?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, Option<String>>(1)?,
-            ))
-        })?;
-        for row in rows {
-            let (encoded, scope) = row?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            if quarantined.contains(&row.get::<_, i64>(2)?) {
+                continue;
+            }
+            let encoded: Option<String> = row.get(0)?;
+            let scope: Option<String> = row.get(1)?;
             let encoded =
                 encoded.ok_or_else(|| anyhow!("sender scope has no retained test request"))?;
             if encoded.len() > MAILBOX_TEST_REQUEST_MAX_BYTES {

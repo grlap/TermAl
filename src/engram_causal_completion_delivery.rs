@@ -229,8 +229,7 @@ fn request_qualification_status(value: &Value) -> Option<&'static str> {
 
 #[derive(Default)]
 struct CausalTestCompletionRecovery {
-    task: Option<tokio::task::JoinHandle<CausalTestCompletionCursor>>,
-    cursor: CausalTestCompletionCursor,
+    task: Option<tokio::task::JoinHandle<()>>,
     observed_kick: u64,
 }
 
@@ -240,8 +239,8 @@ impl CausalTestCompletionRecovery {
             return;
         }
         if let Some(task) = self.task.take() {
-            if let Ok(cursor) = task.await {
-                self.cursor = cursor;
+            if task.await.is_err() {
+                eprintln!("causal completion recovery: worker_join_failed; pending rows retained");
             }
         }
         if app.federation_executor_wake_signal.is_stopping() {
@@ -255,26 +254,46 @@ impl CausalTestCompletionRecovery {
             return;
         }
         self.observed_kick = generation;
-        let mut cursor = self.cursor.clone();
         let app = app.clone();
         self.task = Some(tokio::spawn(async move {
-            if let Ok(deliveries) = app.read_causal_test_completion_batch(&mut cursor).await {
-                for delivery in deliveries {
-                    if app.federation_executor_wake_signal.is_stopping() {
-                        break;
-                    }
-                    let worker = app.clone();
-                    let _ = run_blocking_api(move || {
-                        worker
-                            .settle_causal_test_completion(&delivery)
-                            .map_err(|_| {
+            match app.read_causal_test_completion_batch().await {
+                Ok(deliveries) => {
+                    for delivery in deliveries {
+                        if app.federation_executor_wake_signal.is_stopping() {
+                            break;
+                        }
+                        let worker = app.clone();
+                        let result = run_blocking_api(move || {
+                            let result = worker.settle_causal_test_completion(&delivery);
+                            let reason = if result.is_err() {
+                                CausalPendingReason::AdmissionFailed
+                            } else {
+                                CausalPendingReason::AdmissionPending
+                            };
+                            worker
+                                .mailbox_store
+                                .note_causal_pending_for_selector(
+                                    &delivery.selector,
+                                    delivery.pending.intents,
+                                    reason,
+                                )
+                                .map_err(mailbox_api_error)?;
+                            result.map_err(|_| {
                                 ApiError::conflict("causal remote admission remains pending")
                             })
-                    })
-                    .await;
+                        })
+                        .await;
+                        if result.is_err() {
+                            eprintln!(
+                                "causal completion recovery: admission_failed; inspect durable pending diagnostics"
+                            );
+                        }
+                    }
                 }
+                Err(_) => eprintln!(
+                    "causal completion recovery: pending_read_failed; original rows retained"
+                ),
             }
-            cursor
         }));
     }
 

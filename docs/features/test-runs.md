@@ -52,23 +52,42 @@ The operation returns the retained SourceId completion unchanged, including
 failed/interrupted results and unavailable or changed endpoints; destination
 qualification remains Engram's decision.
 
-The transport batch derives work from original local message and sender-intent
-rows. It scans a bounded keyset page before filtering typed custody, rechecks
-the original receipt and authenticated route after I/O, and leaves disconnected
-or unsupported peers pending for another pass. An original send whose receipt
-is still unconfirmed remains with its existing send owner; the reader never
-guesses a canonical message id. Reads create no run, send intent, delivered bit
-or local completion ledger. Private sender mappings remain local.
+The requester records durable pending membership on its original local message
+or sender-intent row in the same transaction that admits the typed send. An
+unconfirmed send remains with its existing send owner until its actual canonical
+receipt exists; the reader never guesses a message id. Recovery selects only
+these explicit pending keys through partial indexes. It does not scan ordinary
+mail or maintain a history cursor. Bounded batches rotate attempted keys behind
+other pending work, so unrelated mailbox history cannot delay a new request or
+prevent retry after its completion becomes available. Restart immediately retains
+that same pending set. A one-time upgrade seeds pre-existing in-flight requests;
+public relay copies never acquire original sender authority.
 
-A malformed historical custody row is retained and skipped, so healthy rows
-on that page and later pages can still settle. SQL or connection failures
-remain page failures. `GET /api/diagnostics/mailbox-relay-wakes` exposes
-`causalCompletionScanSkips`: at most 64 process-local table/row-id records with
-closed decode/validation reason codes, attempt counts and timestamps. The
-eviction counter reports records displaced by the bound; these diagnostics
-reset on restart. They contain no request, private scope or peer payload and
-do not imply a completion or receipt. Report the row identity and reason for
-custody diagnosis; do not edit the live store.
+Each targeted read preserves the original custody, canonical receipt, current
+peer enrollment and authenticated lease checks, including revalidation after
+I/O. A malformed pending row stays intact with a closed diagnostic reason while
+healthy pending keys continue. SQL and connection errors still fail the batch.
+A final validated settlement removes pending membership in the same transaction
+that saves its actual receipt or refusal. Reads create no local run or completion
+ledger, and private sender mappings remain local.
+
+`GET /api/diagnostics/mailbox-relay-wakes` exposes `causalCompletionPending`:
+`records` (at most 64 table/row-id records), `total`, `limited`,
+`resetOnRestart: false`, `disposition` and `remedy`. Each record's `state` contains
+a closed reason, attempt count, first-pending and last-attempt UTC timestamps,
+and whether it came from the one-time migration. Custody changes, unavailable
+runner/lease, route changes, origin timeout/read failure, absent or invalid
+completion and admission failures remain distinguishable. These records live on
+the original rows, survive restart, and expose no send key, payload, private
+scope or peer data. The bounded projection does not evict durable pending state.
+Report table, rowId and reason for diagnosis; do not edit the live store.
+Undecodable scheduling metadata reports `pending_metadata_decode`; unavailable
+state fields are `null`, rather than inferred counters or timestamps. Recovery
+preserves malformed metadata bytes and original custody while rotating retry
+order. A malformed retry position is derived data and may be replaced without
+admitting that key in the repairing tick. Strict boot validation still refuses
+malformed current metadata; runtime isolation is no boot exemption.
+See also [native mailbox relay diagnostics](native-mailbox-relay.md).
 
 The joined federation supervisor drives this batch and sends
 `remote_verification_record` on the original requester's ordinary Engram
@@ -88,7 +107,18 @@ without rereading the origin. Missing capability stays unsent and pending.
 Settlement adds one nullable `test_request_settlement_json` column to each of
 `mailbox_messages` and `mailbox_relay_intents`, through the existing atomic
 coordination migration. The reader floor becomes
-`8-direct-prompt-1-test-request-custody-1-remote-verification-1`.
+`8-direct-prompt-1-test-request-custody-1-remote-verification-1-causal-pending-1`.
+The pending extension additionally appends nullable `test_request_pending_json`
+(TEXT) and `test_request_pending_order` (INTEGER) columns to both original tables,
+with a partial retry-order index covering each explicit pending set. Its exact
+predecessor is the settlement floor ending in `-remote-verification-1`. Columns,
+indexes, one-time seed, header and readback commit atomically; injected failures
+roll back the complete upgrade. Malformed historical causal fields are retained
+with a durable migration reason, never accepted as completion evidence. Only the
+exact failed legacy custody bytes and matching closed migration reason qualify
+for that quarantine. Current pending membership never exempts a row from strict
+boot custody/settlement validation. The private quarantine digest is not exposed
+in diagnostics; repaired originals resume strict validation.
 The original payload and private scope remain immutable, and no settlement or
 private mapping enters public mail, relay wire or Debug output. This floor is
 one way: an older TermAl binary refuses the migrated `coordination.sqlite`.

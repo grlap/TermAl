@@ -38,7 +38,7 @@ async fn large_multi_target_settlement_reopens_and_retries_every_original_operat
         source.clone(),
         source,
     );
-    let delivery = completion(&fixture.central, &mut CausalTestCompletionCursor::default()).await;
+    let delivery = completion(&fixture.central).await;
     let prepared = CausalTestSettlement::new(&delivery);
     assert_eq!(prepared.admissions.len(), MAILBOX_TEST_REQUEST_MAX_TARGETS);
     for admission in &prepared.admissions {
@@ -93,7 +93,7 @@ async fn large_multi_target_settlement_reopens_and_retries_every_original_operat
             Ok(accepted.clone()),
             true,
         );
-        let retry = completion(&reopened, &mut CausalTestCompletionCursor::default()).await;
+        let retry = completion(&reopened).await;
         assert_eq!(retry.completion, delivery.completion);
         assert_eq!(retry.selector, selector);
         reopened.settle_causal_test_completion(&retry).unwrap();
@@ -256,12 +256,9 @@ async fn original(
     )
 }
 
-async fn completion(
-    app: &AppState,
-    cursor: &mut CausalTestCompletionCursor,
-) -> CausalTestCompletionDelivery {
+async fn completion(app: &AppState) -> CausalTestCompletionDelivery {
     for _ in 0..8 {
-        let mut results = app.read_causal_test_completion_batch(cursor).await.unwrap();
+        let mut results = app.read_causal_test_completion_batch().await.unwrap();
         if !results.is_empty() {
             return results.remove(0);
         }
@@ -295,7 +292,7 @@ async fn supervisor_delivers_original_once_and_settled_receipts_stop_federation_
     for _ in 0..8 {
         recovery.tick(&fixture.central, true).await;
         let task = recovery.task.take().unwrap();
-        recovery.cursor = task.await.unwrap();
+        task.await.unwrap();
         if fixture
             .central
             .mailbox_store
@@ -357,12 +354,11 @@ async fn supervisor_delivers_original_once_and_settled_receipts_stop_federation_
         .unwrap()
         .clear();
     // Final receipt is consulted before a disconnected origin could be read.
-    let mut cursor = CausalTestCompletionCursor::default();
     for _ in 0..8 {
         assert!(
             fixture
                 .central
-                .read_causal_test_completion_batch(&mut cursor)
+                .read_causal_test_completion_batch()
                 .await
                 .unwrap()
                 .is_empty()
@@ -379,6 +375,9 @@ async fn supervisor_delivers_original_once_and_settled_receipts_stop_federation_
         selector: selector.clone(),
         scope: Some(scope.clone()),
         completion: saved.completion.clone(),
+        pending: CausalPendingRow { intents: true, row_id: fixture.central.mailbox_store.connection().unwrap().query_row(
+            "SELECT rowid FROM mailbox_relay_intents WHERE owner_session_id=?1 AND idempotency_key=?2",
+            rusqlite::params![fixture.native,selector.payload.request_send_key], |row| row.get(0)).unwrap() },
     };
     fixture
         .central
@@ -438,13 +437,12 @@ async fn unknown_write_recovers_same_bytes_after_reopen_and_reordered_newer_deli
         source(),
         source(),
     );
-    let mut cursor = CausalTestCompletionCursor::default();
     let mut deliveries = Vec::new();
     for _ in 0..8 {
         deliveries.extend(
             fixture
                 .central
-                .read_causal_test_completion_batch(&mut cursor)
+                .read_causal_test_completion_batch()
                 .await
                 .unwrap(),
         );
@@ -503,7 +501,7 @@ async fn unknown_write_recovers_same_bytes_after_reopen_and_reordered_newer_deli
         Ok(original_receipt.clone()),
         true,
     );
-    let retry = completion(&reopened, &mut CausalTestCompletionCursor::default()).await;
+    let retry = completion(&reopened).await;
     assert_eq!(retry.selector, first);
     reopened.settle_causal_test_completion(&retry).unwrap();
     let requests = writes(&transport);
@@ -569,8 +567,7 @@ async fn missing_capability_never_writes_and_recorded_uncredited_reasons_are_fin
             source(),
             source(),
         );
-        let delivery =
-            completion(&fixture.central, &mut CausalTestCompletionCursor::default()).await;
+        let delivery = completion(&fixture.central).await;
         assert_eq!(delivery.selector, selector);
         let count = writes(&transport).len();
         script(&transport, &scope, &fixture.native, Ok(Value::Null), false);

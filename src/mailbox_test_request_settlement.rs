@@ -313,8 +313,11 @@ impl MailboxStore {
         }
         let text = serde_json::to_string(after)?;
         let count = transaction.execute(&format!(
-            "UPDATE {table} SET test_request_settlement_json=?1 WHERE {owner}=?2 AND idempotency_key=?3"
-        ), rusqlite::params![text, selector.payload.requester.native_session_id, key])?;
+            "UPDATE {table} SET test_request_settlement_json=?1,
+             test_request_pending_json=CASE WHEN ?4 THEN NULL ELSE test_request_pending_json END,
+             test_request_pending_order=CASE WHEN ?4 THEN NULL ELSE test_request_pending_order END
+             WHERE {owner}=?2 AND idempotency_key=?3"
+        ), rusqlite::params![text, selector.payload.requester.native_session_id, key, after.complete()])?;
         if count != 1 {
             bail!("original send disappeared before settlement");
         }

@@ -225,6 +225,14 @@ as `homeRpcFailuresResetOnRestart` states. It contains no message bodies or
 private error text. These observations do not change the reply to the peer,
 prove whether an operation committed, or authorize a retry or a new identity.
 
+The endpoint also exposes `causalCompletionPending`, the bounded projection of
+outstanding typed test requests recorded durably on their original send rows.
+It includes total/limited counts and closed pending reasons with attempt counts
+and timestamps; it survives restart and contains no request payload or private
+scope. See [causal completion recovery](test-runs.md#reading-an-original-causal-completion)
+for fields and the one-way migration. Report the table, rowId and reason; do not
+edit the live store.
+
 `federationDurability` on that endpoint is a separate 64-record metadata
 history. It records the initial value, actual false/true transitions with
 fixed `site` labels, and refused central-authority (409) and channel-authority

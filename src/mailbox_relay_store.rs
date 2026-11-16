@@ -370,6 +370,9 @@ impl MailboxStore {
                  VALUES(?1,?2,?3,1,?4,?5,?6,?7,?8,?9,?10)",
                 rusqlite::params![sender,relay.sender.native_session_id,relay.idempotency_key,digest,serde_json::to_string(&relay.conversation)?,serde_json::to_string(peer)?,stamp_now(),relay.requested_target,relay.test_request.as_ref().map(serde_json::to_string).transpose()?,scope.map(serde_json::to_string).transpose()?],
             )?;
+            if relay.test_request.is_some() {
+                create_causal_pending(&transaction, true, &relay.sender.native_session_id, &relay.idempotency_key)?;
+            }
             None
         };
         let _authority = authorize()?;

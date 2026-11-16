@@ -1227,7 +1227,8 @@ async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Re
     .await?;
     let (refused, untracked) = state.mailbox_store.relay_home_wake_refusals.snapshot();
     let (rpc_failures, rpc_evicted) = state.mailbox_store.relay_home_rpc_failures.snapshot();
-    let (scan_skips, scan_evicted) = state.mailbox_store.causal_completion_scan_skips.snapshot();
+    let store = state.mailbox_store.clone();
+    let causal_pending = run_blocking_api(move || store.causal_pending_diagnostics().map_err(mailbox_api_error)).await?;
     let durability = match state.inner.try_lock_now() {
         Some(inner) => inner.federation_durability_diagnostics.snapshot(),
         None =>
@@ -1241,11 +1242,7 @@ async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Re
         "homeRpcFailures": rpc_failures,
         "homeRpcFailuresEvicted": rpc_evicted,
         "homeRpcFailuresResetOnRestart": true,
-        "causalCompletionScanSkips": scan_skips,
-        "causalCompletionScanSkipsEvicted": scan_evicted,
-        "causalCompletionScanSkipsResetOnRestart": true,
-        "causalCompletionScanSkipDisposition": "row retained; sweep continues; no completion or receipt inferred",
-        "causalCompletionScanSkipRemedy": "report table, rowId and reason to the coordinator for custody diagnosis; do not edit the live store",
+        "causalCompletionPending": causal_pending,
         "federationDurability": durability,
     })))
 }

@@ -103,7 +103,7 @@ fn remote_settlement_floor_preserves_original_rows_and_refuses_the_old_reader() 
             .into_iter()
             .map(|mut row| {
                 if matches!(table.as_str(), "mailbox_messages" | "mailbox_relay_intents") {
-                    row.push(rusqlite::types::Value::Null);
+                    row.extend(std::iter::repeat_n(rusqlite::types::Value::Null, 3));
                 }
                 row
             })
@@ -133,8 +133,12 @@ fn remote_settlement_floor_preserves_original_rows_and_refuses_the_old_reader() 
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         assert_eq!(
-            columns.last().unwrap(),
-            &("test_request_settlement_json".into(), "TEXT".into(), 0)
+            &columns[columns.len() - 3..],
+            &[
+                ("test_request_settlement_json".into(), "TEXT".into(), 0),
+                ("test_request_pending_json".into(), "TEXT".into(), 0),
+                ("test_request_pending_order".into(), "INTEGER".into(), 0)
+            ]
         );
     }
     connection.execute_batch("PRAGMA query_only=ON").unwrap();
@@ -183,3 +187,6 @@ fn malformed_or_orphan_settlement_is_refused_without_discarding_the_row() {
         "{}"
     );
 }
+
+#[path = "mailbox_test_request_settlement/pending.rs"]
+mod pending;

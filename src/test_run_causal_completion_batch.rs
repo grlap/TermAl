@@ -1,14 +1,6 @@
-// Derived work only. Original requests, native facts and Engram receipts keep
-// their existing durable owners; this cursor is disposable scheduling state.
-const CAUSAL_COMPLETION_SCAN_ROWS: usize = 32;
+// Bounded work over explicit durable pending membership, never mailbox history.
+const CAUSAL_COMPLETION_PENDING_ROWS: usize = 32;
 const CAUSAL_COMPLETION_BATCH: usize = 4;
-
-#[derive(Clone, Default)]
-struct CausalTestCompletionCursor {
-    messages_after: i64,
-    intents_after: i64,
-    intents: bool,
-}
 
 #[derive(Clone)]
 struct CausalTestCompletionPlan {
@@ -16,6 +8,96 @@ struct CausalTestCompletionPlan {
     scope: Option<MailboxTestSenderScope>,
     peer: Option<FederationPeerSnapshot>,
     settlement: Option<CausalTestSettlement>,
+    pending: CausalPendingRow,
+}
+
+impl MailboxStore {
+    fn causal_test_completion_plans(&self) -> Result<Vec<CausalTestCompletionPlan>> {
+        let mut connection = self.connection()?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let local_store = mailbox_relay_store_id(&transaction)?;
+        // Each branch uses the explicit-membership partial index. The merge and
+        // original-row reads are bounded even when all historical mail is huge.
+        let mut candidates = Vec::new();
+        for intents in [false, true] {
+            let table = CausalPendingRow { intents, row_id: 0 }.table();
+            let mut statement = transaction.prepare(&format!(
+                "SELECT rowid,test_request_pending_order FROM {table} WHERE test_request_pending_json IS NOT NULL ORDER BY test_request_pending_order LIMIT ?1"))?;
+            let rows = statement.query_map([CAUSAL_COMPLETION_PENDING_ROWS as i64], |row| {
+                Ok((
+                    causal_pending_order(row, 1)?,
+                    intents,
+                    row.get::<_, i64>(0)?,
+                ))
+            })?;
+            candidates.extend(rows.collect::<rusqlite::Result<Vec<_>>>()?);
+        }
+        candidates.sort_unstable();
+        let mut plans = Vec::new();
+        for (order, intents, row_id) in candidates.into_iter().take(CAUSAL_COMPLETION_PENDING_ROWS)
+        {
+            let pending = CausalPendingRow { intents, row_id };
+            if order.is_none() {
+                // Retry order is derived scheduling data. Repair only that
+                // position, leaving all original bytes and metadata untouched;
+                // this tick performs no origin read or admission for the key.
+                rotate_causal_pending(&transaction, pending)?;
+                continue;
+            }
+            let table = pending.table();
+            let owner = if intents {
+                "owner_session_id"
+            } else {
+                "sender_session_id"
+            };
+            let canonical = if intents { "receipt_json" } else { "id" };
+            let peer = if intents { "peer_json" } else { "NULL" };
+            let mut statement = transaction.prepare(&format!(
+                "SELECT rowid,{owner},idempotency_key,test_request_json,test_request_scope_json,{canonical},{peer},test_request_settlement_json,test_request_pending_json FROM {table} WHERE rowid=?1"))?;
+            let mut rows = statement.query([row_id])?;
+            let row = rows
+                .next()?
+                .ok_or_else(|| anyhow!("pending original row disappeared"))?;
+            match CausalPendingMetadata::from_column(row, 8)? {
+                CausalPendingMetadata::Readable(_) => {}
+                CausalPendingMetadata::Retired => continue,
+                CausalPendingMetadata::Malformed => {
+                    rotate_causal_pending(&transaction, pending)?;
+                    continue;
+                }
+            }
+            match causal_test_completion_plan_from_row(row, intents, &local_store) {
+                Ok(CausalPendingRead::Ready(plan)) => {
+                    note_causal_pending(
+                        &transaction,
+                        pending,
+                        CausalPendingReason::AwaitingCompletion,
+                    )?;
+                    plans.push(plan);
+                }
+                Ok(CausalPendingRead::Waiting(reason)) | Err(reason) => {
+                    note_causal_pending(&transaction, pending, reason)?;
+                }
+                Ok(CausalPendingRead::NotOriginal) => {
+                    note_causal_pending(
+                        &transaction,
+                        pending,
+                        CausalPendingReason::OriginalCustodyChanged,
+                    )?;
+                }
+                Ok(CausalPendingRead::Retired) => {
+                    // A validated original final settlement is the only retirement.
+                    transaction.execute(&format!("UPDATE {table} SET test_request_pending_json=NULL,test_request_pending_order=NULL WHERE rowid=?1"), [row_id])?;
+                }
+            }
+            if plans.len() == CAUSAL_COMPLETION_BATCH {
+                break;
+            }
+        }
+        transaction.commit()?;
+        Ok(plans)
+    }
 }
 
 // A private handoff, never a wire or persisted projection.
@@ -23,64 +105,25 @@ struct CausalTestCompletionDelivery {
     selector: CausalTestCompletionSelector,
     scope: Option<MailboxTestSenderScope>,
     completion: native_test_completion::Completion,
-}
-
-impl MailboxStore {
-    fn causal_test_completion_plans(
-        &self,
-        cursor: &mut CausalTestCompletionCursor,
-    ) -> Result<Vec<CausalTestCompletionPlan>> {
-        let connection = self.connection()?;
-        let local_store = mailbox_relay_store_id(&connection)?;
-        // LIMIT applies BEFORE custody filtering: even a long ordinary-mail
-        // history costs at most this many rows. No unindexed IS NOT NULL scan.
-        let (query, after) = if cursor.intents {
-            ("SELECT rowid,owner_session_id,idempotency_key,test_request_json,test_request_scope_json,receipt_json,peer_json
-              ,test_request_settlement_json FROM mailbox_relay_intents WHERE rowid>?1 ORDER BY rowid LIMIT ?2", cursor.intents_after)
-        } else {
-            ("SELECT rowid,sender_session_id,idempotency_key,test_request_json,test_request_scope_json,id,NULL
-              ,test_request_settlement_json FROM mailbox_messages WHERE rowid>?1 ORDER BY rowid LIMIT ?2", cursor.messages_after)
-        };
-        let mut statement = connection.prepare(query)?;
-        let mut rows =
-            statement.query(rusqlite::params![after, CAUSAL_COMPLETION_SCAN_ROWS as i64])?;
-        let mut plans = Vec::new();
-        let mut visited = 0;
-        let mut last = after;
-        while let Some(row) = rows.next()? {
-            visited += 1;
-            last = row.get(0)?;
-            match causal_test_completion_plan_from_row(row, cursor.intents, &local_store) {
-                Ok(Some(plan)) => plans.push(plan),
-                Ok(None) => continue,
-                Err(failure) => {
-                    self.causal_completion_scan_skips
-                        .note(cursor.intents, last, failure);
-                    continue;
-                }
-            }
-            if plans.len() == CAUSAL_COMPLETION_BATCH {
-                break;
-            }
-        }
-        // A short page may have stopped on the result limit, rather than EOF.
-        let next = if visited < CAUSAL_COMPLETION_SCAN_ROWS && plans.len() < CAUSAL_COMPLETION_BATCH
-        {
-            0
-        } else {
-            last
-        };
-        if cursor.intents {
-            cursor.intents_after = next;
-        } else {
-            cursor.messages_after = next;
-        }
-        cursor.intents = !cursor.intents;
-        Ok(plans)
-    }
+    pending: CausalPendingRow,
 }
 
 impl AppState {
+    async fn defer_causal_pending(
+        &self,
+        plan: &CausalTestCompletionPlan,
+        reason: CausalPendingReason,
+    ) -> Result<(), ApiError> {
+        let store = self.mailbox_store.clone();
+        let selector = plan.selector.clone();
+        let intents = plan.pending.intents;
+        run_blocking_api(move || {
+            store
+                .note_causal_pending_for_selector(&selector, intents, reason)
+                .map_err(mailbox_api_error)
+        })
+        .await
+    }
     fn causal_test_completion_plan_current(
         &self,
         plan: &CausalTestCompletionPlan,
@@ -160,19 +203,15 @@ impl AppState {
     // pending operations recover without another origin read or live claim.
     async fn read_causal_test_completion_batch(
         &self,
-        cursor: &mut CausalTestCompletionCursor,
     ) -> Result<Vec<CausalTestCompletionDelivery>, ApiError> {
         let worker = self.clone();
-        let mut next = cursor.clone();
-        let (next, plans) = run_blocking_api(move || {
-            let plans = worker
+        let plans = run_blocking_api(move || {
+            worker
                 .mailbox_store
-                .causal_test_completion_plans(&mut next)
-                .map_err(mailbox_api_error)?;
-            Ok((next, plans))
+                .causal_test_completion_plans()
+                .map_err(mailbox_api_error)
         })
         .await?;
-        *cursor = next;
         let mut deliveries = Vec::new();
         for plan in plans {
             if self.federation_executor_wake_signal.is_stopping() {
@@ -183,6 +222,7 @@ impl AppState {
                     selector: plan.selector,
                     scope: plan.scope,
                     completion: saved.completion.clone(),
+                    pending: plan.pending,
                 });
                 continue;
             }
@@ -192,13 +232,19 @@ impl AppState {
                 .await
                 .is_err()
             {
+                self.defer_causal_pending(&plan, CausalPendingReason::CurrentnessCheckFailed)
+                    .await?;
                 continue;
             }
             let runner = plan.selector.runner()?.clone();
             let Some(handle) = self.federation_peer_handle(&runner.host.host_id) else {
+                self.defer_causal_pending(&plan, CausalPendingReason::RunnerUnavailable)
+                    .await?;
                 continue;
             };
             let Ok(lease) = handle.channel.current_lease() else {
+                self.defer_causal_pending(&plan, CausalPendingReason::LeaseUnavailable)
+                    .await?;
                 continue;
             };
             if lease
@@ -217,36 +263,59 @@ impl AppState {
                 })
                 .is_err()
             {
+                self.defer_causal_pending(&plan, CausalPendingReason::RouteChanged)
+                    .await?;
                 continue;
             }
             let operation = MailboxRelayOperation::ReadCausalTestCompletion {
                 selector: plan.selector.clone(),
             };
-            let Ok(Ok(reply)) = tokio::time::timeout(
+            let reply = match tokio::time::timeout(
                 Duration::from_secs(5),
                 self.request_mailbox_relay::<CausalTestCompletionReply>(&handle, &lease, operation),
             )
             .await
-            else {
-                continue;
+            {
+                Ok(Ok(reply)) => reply,
+                other => {
+                    let reason = if other.is_err() {
+                        CausalPendingReason::OriginTimeout
+                    } else {
+                        CausalPendingReason::OriginReadFailed
+                    };
+                    self.defer_causal_pending(&plan, reason).await?;
+                    continue;
+                }
             };
             let Some(completion) = reply.completion else {
+                self.defer_causal_pending(&plan, CausalPendingReason::AwaitingCompletion)
+                    .await?;
                 continue;
             };
-            if completion.validate().is_err()
-                || !completion.authoritative_terminal()
-                || completion.origin.host_id != runner.host.host_id
+            let invalid = if completion.validate().is_err() {
+                Some(CausalPendingReason::CompletionValidate)
+            } else if !completion.authoritative_terminal() {
+                Some(CausalPendingReason::CompletionNotTerminal)
+            } else if completion.origin.host_id != runner.host.host_id
                 || completion.origin.runner_session_id != runner.native_session_id
-                || !matches!(completion.input, native_test_completion::Input::SourceId(_))
-                || !matches!(
-                    (plan.selector.payload.mode, completion.mode),
-                    (MailboxTestMode::Full, native_test_completion::Mode::Full)
-                        | (
-                            MailboxTestMode::Focused,
-                            native_test_completion::Mode::Focused
-                        )
-                )
             {
+                Some(CausalPendingReason::CompletionOriginMismatch)
+            } else if !matches!(completion.input, native_test_completion::Input::SourceId(_)) {
+                Some(CausalPendingReason::CompletionInputUnsupported)
+            } else if !matches!(
+                (plan.selector.payload.mode, completion.mode),
+                (MailboxTestMode::Full, native_test_completion::Mode::Full)
+                    | (
+                        MailboxTestMode::Focused,
+                        native_test_completion::Mode::Focused
+                    )
+            ) {
+                Some(CausalPendingReason::CompletionModeMismatch)
+            } else {
+                None
+            };
+            if let Some(reason) = invalid {
+                self.defer_causal_pending(&plan, reason).await?;
                 continue;
             }
             // Fresh route and original custody are checked again after I/O.
@@ -266,6 +335,8 @@ impl AppState {
                 })
                 .is_err()
             {
+                self.defer_causal_pending(&plan, CausalPendingReason::PostReadRouteChanged)
+                    .await?;
                 continue;
             }
             let worker = self.clone();
@@ -274,12 +345,18 @@ impl AppState {
                 .await
                 .is_err()
             {
+                self.defer_causal_pending(
+                    &plan,
+                    CausalPendingReason::PostReadCurrentnessCheckFailed,
+                )
+                .await?;
                 continue;
             }
             deliveries.push(CausalTestCompletionDelivery {
                 selector: plan.selector,
                 scope: plan.scope,
                 completion,
+                pending: plan.pending,
             });
         }
         Ok(deliveries)

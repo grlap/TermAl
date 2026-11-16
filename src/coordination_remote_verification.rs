@@ -6,15 +6,36 @@ const MAILBOX_TEST_REQUEST_SETTLEMENT_SCHEMA_SQL: &str = "
 ";
 
 fn validate_coordination_test_request_settlement(connection: &rusqlite::Connection) -> Result<()> {
+    validate_coordination_test_request_settlement_rows(connection, false)
+}
+
+fn validate_coordination_test_request_settlement_with_legacy_quarantine(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
+    validate_coordination_test_request_settlement_rows(connection, true)
+}
+
+fn validate_coordination_test_request_settlement_rows(
+    connection: &rusqlite::Connection,
+    allow_legacy_quarantine: bool,
+) -> Result<()> {
     for (table, canonical) in [
         ("mailbox_messages", "id"),
         ("mailbox_relay_intents", "receipt_json"),
     ] {
+        let quarantined = if allow_legacy_quarantine {
+            causal_pending_legacy_quarantine(connection, table == "mailbox_relay_intents")?
+        } else {
+            BTreeSet::new()
+        };
         let mut statement = connection.prepare(&format!(
-            "SELECT test_request_json,test_request_scope_json,test_request_settlement_json,{canonical} FROM {table}
+            "SELECT test_request_json,test_request_scope_json,test_request_settlement_json,{canonical},rowid FROM {table}
              WHERE test_request_settlement_json IS NOT NULL"))?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
+            if quarantined.contains(&row.get::<_, i64>(4)?) {
+                continue;
+            }
             let payload = mailbox_test_payload_from_row(row, 0)?
                 .ok_or_else(|| anyhow!("causal settlement without original test request"))?;
             let scope = mailbox_test_scope_from_row(row, 1)?;
@@ -37,6 +58,7 @@ fn validate_coordination_test_request_settlement(connection: &rusqlite::Connecti
 
 #[cfg(test)]
 fn remove_empty_test_request_settlement_columns_for_test(connection: &rusqlite::Connection) {
+    remove_empty_causal_pending_columns_for_test(connection);
     for table in ["mailbox_messages", "mailbox_relay_intents"] {
         let columns = connection
             .prepare(&format!("PRAGMA table_info({table})"))

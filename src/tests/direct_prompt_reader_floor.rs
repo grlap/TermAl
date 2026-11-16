@@ -482,7 +482,17 @@ fn direct_prompt_coordination_upgrade_preserves_old_rows_and_adds_no_work() {
             expected_columns.extend([
                 ("test_request_json".to_owned(), "TEXT".to_owned(), 0),
                 ("test_request_scope_json".to_owned(), "TEXT".to_owned(), 0),
-                ("test_request_settlement_json".to_owned(), "TEXT".to_owned(), 0),
+                (
+                    "test_request_settlement_json".to_owned(),
+                    "TEXT".to_owned(),
+                    0,
+                ),
+                ("test_request_pending_json".to_owned(), "TEXT".to_owned(), 0),
+                (
+                    "test_request_pending_order".to_owned(),
+                    "INTEGER".to_owned(),
+                    0,
+                ),
             ]);
             assert_eq!(
                 columns(table),
@@ -493,7 +503,7 @@ fn direct_prompt_coordination_upgrade_preserves_old_rows_and_adds_no_work() {
                 .iter()
                 .map(|row| {
                     let mut row = row.clone();
-                    row.extend([rusqlite::types::Value::Null, rusqlite::types::Value::Null, rusqlite::types::Value::Null]);
+                    row.extend(std::iter::repeat_n(rusqlite::types::Value::Null, 5));
                     row
                 })
                 .collect::<Vec<_>>();

@@ -18,11 +18,16 @@ fn resolve_coordination_persistence_path(persistence_path: &FsPath) -> PathBuf {
 
 const COORDINATION_DIRECT_PROMPT_PREDECESSOR: &str = "7-review-custody-index-1";
 const COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR: &str = "8-direct-prompt-1";
-const COORDINATION_REMOTE_VERIFICATION_PREDECESSOR: &str = "8-direct-prompt-1-test-request-custody-1";
-const COORDINATION_SQLITE_SCHEMA_VERSION: &str = "8-direct-prompt-1-test-request-custody-1-remote-verification-1";
+const COORDINATION_REMOTE_VERIFICATION_PREDECESSOR: &str =
+    "8-direct-prompt-1-test-request-custody-1";
+const COORDINATION_CAUSAL_PENDING_PREDECESSOR: &str =
+    "8-direct-prompt-1-test-request-custody-1-remote-verification-1";
+const COORDINATION_SQLITE_SCHEMA_VERSION: &str =
+    "8-direct-prompt-1-test-request-custody-1-remote-verification-1-causal-pending-1";
 
 include!("coordination_test_request_custody.rs");
 include!("coordination_remote_verification.rs");
+include!("coordination_causal_pending.rs");
 
 // Built only by boot-time schema admission, before the mailbox connection mutex
 // exists. The covering key range keeps orphaned archive reads off message bodies.
@@ -235,7 +240,8 @@ fn expected_coordination_schema_objects_for_version(
         | "6-executor-outcomes-1"
         | COORDINATION_DIRECT_PROMPT_PREDECESSOR
         | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
-            | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+        | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+        | COORDINATION_CAUSAL_PENDING_PREDECESSOR
         | COORDINATION_SQLITE_SCHEMA_VERSION => {}
         _ => {
             return Err(reject_unsupported_coordination_schema(format!(
@@ -260,6 +266,7 @@ fn expected_coordination_schema_objects_for_version(
             | COORDINATION_DIRECT_PROMPT_PREDECESSOR
             | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
             | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
             | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         connection.execute_batch(FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL)?;
@@ -273,6 +280,7 @@ fn expected_coordination_schema_objects_for_version(
             | COORDINATION_DIRECT_PROMPT_PREDECESSOR
             | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
             | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
             | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         connection.execute_batch(FEDERATION_EXECUTOR_SCHEMA_SQL)?;
@@ -284,6 +292,7 @@ fn expected_coordination_schema_objects_for_version(
             | COORDINATION_DIRECT_PROMPT_PREDECESSOR
             | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
             | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
             | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         connection.execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL)?;
@@ -295,6 +304,7 @@ fn expected_coordination_schema_objects_for_version(
             | COORDINATION_DIRECT_PROMPT_PREDECESSOR
             | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
             | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
             | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         connection.execute_batch(MAILBOX_RELAY_SCHEMA_SQL)?;
@@ -305,6 +315,7 @@ fn expected_coordination_schema_objects_for_version(
             | COORDINATION_DIRECT_PROMPT_PREDECESSOR
             | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
             | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
             | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         connection.execute_batch(FEDERATION_EXECUTOR_OUTCOMES_SCHEMA_SQL)?;
@@ -314,21 +325,36 @@ fn expected_coordination_schema_objects_for_version(
         COORDINATION_DIRECT_PROMPT_PREDECESSOR
             | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
             | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
             | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         connection.execute_batch(MAILBOX_REVIEW_CUSTODY_INDEX_SCHEMA_SQL)?;
     }
     if matches!(
         version,
-        COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION
+        COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         connection.execute_batch(&remote_prompt_storage_schema_sql())?;
     }
-    if matches!(version, COORDINATION_REMOTE_VERIFICATION_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if matches!(
+        version,
+        COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL)?;
     }
-    if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+    if matches!(
+        version,
+        COORDINATION_CAUSAL_PENDING_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION
+    ) {
         connection.execute_batch(MAILBOX_TEST_REQUEST_SETTLEMENT_SCHEMA_SQL)?;
+    }
+    if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+        connection.execute_batch(MAILBOX_CAUSAL_PENDING_SCHEMA_SQL)?;
     }
     coordination_schema_objects(&connection)
 }
@@ -351,6 +377,7 @@ fn initialize_current_coordination_schema(transaction: &rusqlite::Transaction<'_
     transaction.execute_batch(&remote_prompt_storage_schema_sql())?;
     transaction.execute_batch(MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL)?;
     transaction.execute_batch(MAILBOX_TEST_REQUEST_SETTLEMENT_SCHEMA_SQL)?;
+    transaction.execute_batch(MAILBOX_CAUSAL_PENDING_SCHEMA_SQL)?;
     transaction
         .execute(
             "INSERT INTO meta(key, value) VALUES('coordination_schema_version', ?1)",
@@ -374,6 +401,14 @@ fn validate_current_coordination_schema(connection: &rusqlite::Connection) -> Re
 fn validate_coordination_schema_version(
     connection: &rusqlite::Connection,
     version: &str,
+) -> Result<()> {
+    validate_coordination_schema_version_inner(connection, version, false)
+}
+
+fn validate_coordination_schema_version_inner(
+    connection: &rusqlite::Connection,
+    version: &str,
+    migrate_damaged_causal_rows: bool,
 ) -> Result<()> {
     let expected_schema = if version == COORDINATION_SQLITE_SCHEMA_VERSION {
         expected_coordination_schema_objects()?
@@ -429,20 +464,33 @@ fn validate_coordination_schema_version(
             | COORDINATION_DIRECT_PROMPT_PREDECESSOR
             | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
             | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
             | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         validate_mailbox_relay_records(connection)?;
     }
     if matches!(
         version,
-        COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION
+        COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+            | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+            | COORDINATION_CAUSAL_PENDING_PREDECESSOR
+            | COORDINATION_SQLITE_SCHEMA_VERSION
     ) {
         validate_remote_prompt_journals(connection)?;
     }
-    if matches!(version, COORDINATION_REMOTE_VERIFICATION_PREDECESSOR | COORDINATION_SQLITE_SCHEMA_VERSION) {
+    if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+        validate_coordination_causal_pending(connection)?;
+        validate_coordination_test_request_custody_with_legacy_quarantine(connection)?;
+        validate_coordination_test_request_settlement_with_legacy_quarantine(connection)?;
+    } else if !migrate_damaged_causal_rows
+        && matches!(
+            version,
+            COORDINATION_REMOTE_VERIFICATION_PREDECESSOR | COORDINATION_CAUSAL_PENDING_PREDECESSOR
+        )
+    {
         validate_coordination_test_request_custody(connection)?;
     }
-    if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+    if version == COORDINATION_CAUSAL_PENDING_PREDECESSOR && !migrate_damaged_causal_rows {
         validate_coordination_test_request_settlement(connection)?;
     }
     Ok(())
@@ -460,6 +508,7 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
         COORDINATION_DIRECT_PROMPT_PREDECESSOR,
         COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR,
         COORDINATION_REMOTE_VERIFICATION_PREDECESSOR,
+        COORDINATION_CAUSAL_PENDING_PREDECESSOR,
     ]
     .into_iter()
     .map(|version| {
@@ -482,7 +531,14 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
             .find(|(_, expected)| expected == &schema)
             .map(|(version, _)| *version);
         if let Some(version) = version {
-            validate_coordination_schema_version(&inspection, version)?;
+            // Exact predecessor inventory/header remain mandatory. Damaged
+            // causal fields are retained and diagnosed by the one-time seed,
+            // never adopted as a completion or silently discarded.
+            validate_coordination_schema_version_inner(
+                &inspection,
+                version,
+                version == COORDINATION_CAUSAL_PENDING_PREDECESSOR,
+            )?;
         } else if !schema.is_empty() {
             validate_current_coordination_schema(&inspection)?;
         }
@@ -512,7 +568,11 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
                 // Validate metadata only after acquiring the transaction:
                 // concurrent upgrade may have changed it since the first read.
                 // Unreadable metadata remains an operational error, not reset guidance.
-                validate_coordination_schema_version(&transaction, old_version)?;
+                validate_coordination_schema_version_inner(
+                    &transaction,
+                    old_version,
+                    *old_version == COORDINATION_CAUSAL_PENDING_PREDECESSOR,
+                )?;
                 if *old_version == "1" {
                     transaction.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)?;
                 }
@@ -528,7 +588,8 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
                         | "6-executor-outcomes-1"
                         | COORDINATION_DIRECT_PROMPT_PREDECESSOR
                         | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
-            | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+                        | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+                        | COORDINATION_CAUSAL_PENDING_PREDECESSOR
                 ) {
                     transaction.execute_batch(MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL)?;
                 }
@@ -539,7 +600,8 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
                         | "6-executor-outcomes-1"
                         | COORDINATION_DIRECT_PROMPT_PREDECESSOR
                         | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
-            | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+                        | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+                        | COORDINATION_CAUSAL_PENDING_PREDECESSOR
                 ) {
                     initialize_mailbox_relay_schema(&transaction)?;
                 }
@@ -548,21 +610,37 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
                     "6-executor-outcomes-1"
                         | COORDINATION_DIRECT_PROMPT_PREDECESSOR
                         | COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
-            | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+                        | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+                        | COORDINATION_CAUSAL_PENDING_PREDECESSOR
                 ) {
                     transaction.execute_batch(FEDERATION_EXECUTOR_OUTCOMES_SCHEMA_SQL)?;
                 }
                 transaction.execute_batch(MAILBOX_REVIEW_CUSTODY_INDEX_SCHEMA_SQL)?;
-                if !matches!(*old_version, COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR) {
+                if !matches!(
+                    *old_version,
+                    COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR
+                        | COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+                        | COORDINATION_CAUSAL_PENDING_PREDECESSOR
+                ) {
                     transaction.execute_batch(&remote_prompt_storage_schema_sql())?;
                 }
                 test_request_custody_floor_fault("coord_validated")?;
-                if *old_version != COORDINATION_REMOTE_VERIFICATION_PREDECESSOR {
+                if !matches!(
+                    *old_version,
+                    COORDINATION_REMOTE_VERIFICATION_PREDECESSOR
+                        | COORDINATION_CAUSAL_PENDING_PREDECESSOR
+                ) {
                     transaction.execute_batch(MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL)?;
                 }
                 test_request_custody_floor_fault("coord_columns")?;
-                transaction.execute_batch(MAILBOX_TEST_REQUEST_SETTLEMENT_SCHEMA_SQL)?;
+                if *old_version != COORDINATION_CAUSAL_PENDING_PREDECESSOR {
+                    transaction.execute_batch(MAILBOX_TEST_REQUEST_SETTLEMENT_SCHEMA_SQL)?;
+                }
                 test_request_custody_floor_fault("coord_settlement_columns")?;
+                transaction.execute_batch(MAILBOX_CAUSAL_PENDING_SCHEMA_SQL)?;
+                test_request_custody_floor_fault("coord_pending_columns")?;
+                seed_causal_pending(&transaction)?;
+                test_request_custody_floor_fault("coord_pending_seed")?;
                 let changed = transaction.execute(
                     "UPDATE meta SET value = ?1 WHERE key = 'coordination_schema_version' AND value = ?2",
                     rusqlite::params![COORDINATION_SQLITE_SCHEMA_VERSION, old_version],

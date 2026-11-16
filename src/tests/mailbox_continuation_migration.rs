@@ -34,10 +34,10 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
                 .prepare(&format!("SELECT * FROM {table} ORDER BY 1,2"))
                 .unwrap();
             let columns = statement.column_count();
-            let has_custody = *table == "mailbox_messages" && matches!(columns, 18 | 19);
+            let has_custody = *table == "mailbox_messages" && matches!(columns, 18 | 19 | 21);
             if *table == "mailbox_messages" {
                 assert!(
-                    matches!(columns, 16 | 18 | 19),
+                    matches!(columns, 16 | 18 | 19 | 21),
                     "unexpected mailbox snapshot shape"
                 );
                 if has_custody {
@@ -47,9 +47,22 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
                         "test_request_scope_json"
                     );
                 }
-                if columns == 19 {
-                    assert_eq!(statement.column_name(18).unwrap(), "test_request_settlement_json");
+                if columns >= 19 {
+                    assert_eq!(
+                        statement.column_name(18).unwrap(),
+                        "test_request_settlement_json"
+                    );
                 }
+            }
+            if *table == "mailbox_messages" && columns == 21 {
+                assert_eq!(
+                    statement.column_name(19).unwrap(),
+                    "test_request_pending_json"
+                );
+                assert_eq!(
+                    statement.column_name(20).unwrap(),
+                    "test_request_pending_order"
+                );
             }
             let mut rows = statement
                 .query_map([], |row| {
@@ -67,7 +80,13 @@ fn retained_rows(connection: &rusqlite::Connection) -> Vec<Vec<Vec<rusqlite::typ
                 for row in &mut rows {
                     assert_eq!(row[16], rusqlite::types::Value::Null);
                     assert_eq!(row[17], rusqlite::types::Value::Null);
-                    if columns == 19 { assert_eq!(row[18], rusqlite::types::Value::Null); }
+                    if columns >= 19 {
+                        assert_eq!(row[18], rusqlite::types::Value::Null);
+                    }
+                    if columns == 21 {
+                        assert_eq!(row[19], rusqlite::types::Value::Null);
+                        assert_eq!(row[20], rusqlite::types::Value::Null);
+                    }
                     row.truncate(16);
                 }
             }

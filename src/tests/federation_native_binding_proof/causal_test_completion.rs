@@ -241,14 +241,10 @@ async fn causal_completion_reads_original_request_pending_then_truthful_terminal
                 .completion
                 .is_none()
         );
-        let mut cursor = CausalTestCompletionCursor {
-            intents: true,
-            ..Default::default()
-        };
         assert!(
             fixture
                 .central
-                .read_causal_test_completion_batch(&mut cursor)
+                .read_causal_test_completion_batch()
                 .await
                 .unwrap()
                 .is_empty()
@@ -275,19 +271,34 @@ async fn causal_completion_reads_original_request_pending_then_truthful_terminal
             serde_json::to_value(&original).unwrap()["input"],
             json!({"kind":"source_id","source_id_before":null,"source_id_after":null})
         );
-        // A pending read must not consume the original. Reuse the same
-        // cursor across both sources after native completion becomes available.
+        // A pending read must not consume the original. Every pending-only
+        // tick returns that same original, without an alternating history scan.
         let mut recovered = Vec::new();
         for _ in 0..2 {
-            recovered.extend(
-                fixture
-                    .central
-                    .read_causal_test_completion_batch(&mut cursor)
-                    .await
-                    .unwrap(),
+            let batch = fixture
+                .central
+                .read_causal_test_completion_batch()
+                .await
+                .unwrap();
+            assert_eq!(
+                batch.len(),
+                1,
+                "each pending-only tick returns this original exactly once"
             );
+            assert_eq!(batch[0].completion, original);
+            assert_eq!(
+                batch[0].selector.canonical_message_id,
+                selector.canonical_message_id
+            );
+            recovered.extend(batch);
         }
-        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered.len(), 2);
+        assert!(
+            recovered
+                .iter()
+                .all(|delivery| delivery.completion == original
+                    && delivery.selector.canonical_message_id == selector.canonical_message_id)
+        );
         assert_eq!(recovered[0].completion, original);
         assert_eq!(
             recovered[0].selector.canonical_message_id,
@@ -311,16 +322,12 @@ async fn causal_completion_reads_original_request_pending_then_truthful_terminal
             wire(&fixture, selector.clone()).await.unwrap().completion,
             Some(original.clone())
         );
-        // A fresh process cursor needs no retained delivered bit. Repeated
+        // Durable pending membership needs no retained delivered bit. Repeated
         // reads return the same original, without a local run or observer row.
         for _ in 0..2 {
-            let mut cursor = CausalTestCompletionCursor {
-                intents: true,
-                ..Default::default()
-            };
             let deliveries = fixture
                 .central
-                .read_causal_test_completion_batch(&mut cursor)
+                .read_causal_test_completion_batch()
                 .await
                 .unwrap();
             assert_eq!(deliveries.len(), 1);
@@ -608,8 +615,8 @@ async fn causal_completion_does_not_promote_legacy_native_input_to_a_new_source_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn causal_batch_pages_past_ordinary_history_and_recovers_disconnected_reads_without_new_intents()
- {
+async fn causal_pending_skips_ordinary_history_and_recovers_disconnected_reads_without_new_intents()
+{
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::production_shape().await;
     let (mut server, handles) = connect(&fixture).await;
@@ -632,7 +639,7 @@ async fn causal_batch_pages_past_ordinary_history_and_recovers_disconnected_read
                 FROM mailbox_relay_intents WHERE idempotency_key='causal-bounded-batch'",
                 [format!("ordinary-{number}")]).unwrap();
         }
-        // Rowid is only the traversal position, never an authority field.
+        // Historical rowid placement must not affect explicit pending membership.
         connection.execute("UPDATE mailbox_relay_intents SET rowid=1000 WHERE idempotency_key='causal-bounded-batch'", []).unwrap();
     }
     let before: u64 = fixture
@@ -644,19 +651,17 @@ async fn causal_batch_pages_past_ordinary_history_and_recovers_disconnected_read
             row.get(0)
         })
         .unwrap();
-    let mut cursor = CausalTestCompletionCursor {
-        intents: true,
-        ..Default::default()
-    };
-    assert!(
-        fixture
-            .central
-            .read_causal_test_completion_batch(&mut cursor)
-            .await
-            .unwrap()
-            .is_empty(),
-        "ordinary history is paged before typed filtering, not scanned without a bound"
+    let immediate = fixture
+        .central
+        .read_causal_test_completion_batch()
+        .await
+        .unwrap();
+    assert_eq!(
+        immediate.len(),
+        1,
+        "ordinary history cannot postpone the explicit pending key"
     );
+    assert_eq!(immediate[0].completion.run_id, run);
     fixture
         .central
         .federation_peer_handles
@@ -667,12 +672,21 @@ async fn causal_batch_pages_past_ordinary_history_and_recovers_disconnected_read
         assert!(
             fixture
                 .central
-                .read_causal_test_completion_batch(&mut cursor)
+                .read_causal_test_completion_batch()
                 .await
                 .unwrap()
                 .is_empty()
         );
     }
+    let diagnostics = fixture
+        .central
+        .mailbox_store
+        .causal_pending_diagnostics()
+        .unwrap();
+    let pending = diagnostics["records"].as_array().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0]["state"]["reason"], "runner_unavailable");
+    assert!(pending[0]["state"]["attempts"].as_u64().unwrap() >= 6);
     fixture
         .central
         .federation_peer_handles
@@ -690,7 +704,7 @@ async fn causal_batch_pages_past_ordinary_history_and_recovers_disconnected_read
         recovered.extend(
             fixture
                 .central
-                .read_causal_test_completion_batch(&mut cursor)
+                .read_causal_test_completion_batch()
                 .await
                 .unwrap(),
         );

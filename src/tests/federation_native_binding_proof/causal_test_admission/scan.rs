@@ -2,6 +2,10 @@
 // owner. Only disposable historical rows are damaged; replies are scripted.
 use super::*;
 
+mod latency;
+mod pending_metadata;
+mod pending_metadata_edges;
+
 const HISTORY_ROWS: i64 = 256;
 const BAD_ROW: i64 = 129;
 const NEIGHBOR_ROW: i64 = 130;
@@ -11,9 +15,7 @@ const RECOVERY_TICKS: usize = 64;
 #[derive(Debug)]
 struct ScanOutcome {
     ticks: usize,
-    page_advances: usize,
-    repeated_cursor: usize,
-    passed_bad_row: bool,
+    failed_key_retained: bool,
     neighbor_planned: bool,
     valid_requests_settled: bool,
     writes: usize,
@@ -50,7 +52,13 @@ fn local_request(fixture: &Fixture, input: &MailboxTestRequest, key: &str) -> St
 }
 
 fn history(fixture: &Fixture, template: &str, intent_template: &str) {
+    history_with_rows(fixture, template, intent_template, HISTORY_ROWS);
+}
+
+fn history_with_rows(fixture: &Fixture, template: &str, intent_template: &str, rows: i64) {
     let connection = fixture.central.mailbox_store.connection().unwrap();
+    let transaction = connection.unchecked_transaction().unwrap();
+    let connection = &transaction;
     // Traversal positions are fixture scheduling data, never custody authority.
     // Keep the genuine messages/receipts and their original identities intact.
     connection
@@ -59,7 +67,7 @@ fn history(fixture: &Fixture, template: &str, intent_template: &str) {
     connection
         .execute("UPDATE mailbox_relay_intents SET rowid=rowid+1000000", [])
         .unwrap();
-    for row in 1..=HISTORY_ROWS {
+    for row in 1..=rows {
         if [BAD_ROW, NEIGHBOR_ROW, TAIL_ROW].contains(&row) {
             continue;
         }
@@ -107,6 +115,7 @@ fn history(fixture: &Fixture, template: &str, intent_template: &str) {
             "the control must traverse substantial {table} history"
         );
     }
+    transaction.commit().unwrap();
 }
 
 fn place(fixture: &Fixture, table: &str, key: &str, row: i64) {
@@ -135,6 +144,52 @@ fn damage(fixture: &Fixture, table: &str, fault: &str) -> (String, String) {
                 [BAD_ROW],
             )
             .unwrap();
+    }
+    if fault == "many-payload" {
+        let connection = fixture.central.mailbox_store.connection().unwrap();
+        let transaction = connection.unchecked_transaction().unwrap();
+        let owner = if table == "mailbox_messages" {
+            "sender_session_id"
+        } else {
+            "owner_session_id"
+        };
+        let keys = transaction
+            .prepare(&format!(
+                "SELECT {owner},idempotency_key FROM {table} WHERE rowid<?1"
+            ))
+            .unwrap()
+            .query_map([BAD_ROW], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        for (owner, key) in keys {
+            create_causal_pending(&transaction, table == "mailbox_relay_intents", &owner, &key)
+                .unwrap();
+        }
+        transaction.commit().unwrap();
+    }
+    if fault == "selector" {
+        assert_eq!(table, "mailbox_relay_intents");
+        let connection = fixture.central.mailbox_store.connection().unwrap();
+        let encoded: String = connection
+            .query_row(
+                "SELECT receipt_json FROM mailbox_relay_intents WHERE idempotency_key='scan-bad'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut receipt: Value = serde_json::from_str(&encoded).unwrap();
+        receipt["messageId"] = json!("non-canonical-message");
+        let encoded = serde_json::to_string(&receipt).unwrap();
+        connection
+            .execute(
+                "UPDATE mailbox_relay_intents SET receipt_json=?1 WHERE idempotency_key='scan-bad'",
+                [&encoded],
+            )
+            .unwrap();
+        return ("receipt_json".into(), encoded);
     }
     if fault == "invalid-payload" {
         let connection = fixture.central.mailbox_store.connection().unwrap();
@@ -190,7 +245,7 @@ async fn exercise_history(table: &str, fault: Option<&str>) -> ScanOutcome {
         .await
         .unwrap()
         .0;
-    assert_eq!(initial["causalCompletionScanSkips"], json!([]));
+    assert_eq!(initial["causalCompletionPending"]["records"], json!([]));
     let (mut server, handles) = super::super::causal_test_completion::connect(&fixture).await;
     let (input, transport, scope) = destination(fixture.central.clone(), &fixture.native);
 
@@ -206,7 +261,7 @@ async fn exercise_history(table: &str, fault: Option<&str>) -> ScanOutcome {
         source(),
         source(),
     );
-    let settled_delivery = completion(&fixture.central, &mut Default::default()).await;
+    let settled_delivery = completion(&fixture.central).await;
     let old_receipt = receipt(None);
     script(&transport, &scope, &fixture.native, Ok(old_receipt), true);
     fixture
@@ -260,17 +315,10 @@ async fn exercise_history(table: &str, fault: Option<&str>) -> ScanOutcome {
     place(&fixture, "mailbox_relay_intents", "scan-tail", TAIL_ROW);
     let damaged = fault.map(|fault| damage(&fixture, table, fault));
 
-    // Ask the real planner about precisely the page containing both the bad
-    // original and its healthy neighbor. A page error must not lose the latter.
-    let mut page_cursor = CausalTestCompletionCursor {
-        messages_after: BAD_ROW - 1,
-        intents_after: BAD_ROW - 1,
-        intents: table == "mailbox_relay_intents",
-    };
-    let planned = fixture
-        .central
-        .mailbox_store
-        .causal_test_completion_plans(&mut page_cursor);
+    // The same bounded pending selection includes the healthy neighbor even
+    // when a damaged original cannot yield a plan. Ordinary rowids do not
+    // participate in scheduling.
+    let planned = fixture.central.mailbox_store.causal_test_completion_plans();
     let neighbor_planned = planned.as_ref().is_ok_and(|plans| {
         plans
             .iter()
@@ -287,42 +335,25 @@ async fn exercise_history(table: &str, fault: Option<&str>) -> ScanOutcome {
     let mut recovery = CausalTestCompletionRecovery::default();
     let mut outcome = ScanOutcome {
         ticks: 0,
-        page_advances: 0,
-        repeated_cursor: 0,
-        passed_bad_row: false,
+        failed_key_retained: fault.is_none(),
         neighbor_planned,
         valid_requests_settled: false,
         writes: 0,
     };
     for _ in 0..RECOVERY_TICKS {
-        let before = (
-            recovery.cursor.messages_after,
-            recovery.cursor.intents_after,
-            recovery.cursor.intents,
-        );
         recovery.tick(&fixture.central, true).await;
-        recovery.cursor = recovery
+        recovery
             .task
             .take()
             .expect("one bounded recovery task")
             .await
             .expect("recovery task joined");
         outcome.ticks += 1;
-        let after = (
-            recovery.cursor.messages_after,
-            recovery.cursor.intents_after,
-            recovery.cursor.intents,
-        );
-        if before == after {
-            outcome.repeated_cursor += 1;
-        } else {
-            outcome.page_advances += 1;
+        if fault.is_some() {
+            let connection = fixture.central.mailbox_store.connection().unwrap();
+            outcome.failed_key_retained = connection.query_row(&format!(
+                "SELECT test_request_pending_json IS NOT NULL FROM {table} WHERE idempotency_key='scan-bad'"), [], |row| row.get(0)).unwrap();
         }
-        outcome.passed_bad_row |= if table == "mailbox_messages" {
-            recovery.cursor.messages_after > BAD_ROW
-        } else {
-            recovery.cursor.intents_after > BAD_ROW
-        };
         outcome.valid_requests_settled = expected.iter().all(|selector| {
             fixture
                 .central
@@ -331,7 +362,7 @@ async fn exercise_history(table: &str, fault: Option<&str>) -> ScanOutcome {
                 .unwrap()
                 .is_some_and(|saved| saved.complete())
         });
-        if outcome.valid_requests_settled {
+        if outcome.valid_requests_settled && outcome.ticks >= 8 {
             break;
         }
     }
@@ -378,57 +409,58 @@ async fn exercise_history(table: &str, fault: Option<&str>) -> ScanOutcome {
         .await
         .unwrap()
         .0;
-    let skips = diagnostic["causalCompletionScanSkips"].as_array().unwrap();
+    let pending = &diagnostic["causalCompletionPending"];
+    let records = pending["records"].as_array().unwrap();
     if let Some(fault) = fault {
-        let record = skips
+        let record = records
             .iter()
-            .find(|row| row["table"] == table && row["rowId"] == BAD_ROW)
-            .expect("the skipped original row is readable through the supported diagnostic");
+            .find(|row| row["table"] == table && row["rowId"] == BAD_ROW);
+        let state = if fault == "many-payload" {
+            // A bounded projection need not contain every failing key. Its
+            // durable original-row reason remains independently readable.
+            let encoded: String = fixture
+                .central
+                .mailbox_store
+                .connection()
+                .unwrap()
+                .query_row(
+                    &format!("SELECT test_request_pending_json FROM {table} WHERE rowid=?1"),
+                    [BAD_ROW],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            serde_json::to_value(CausalPendingState::decode(&encoded).unwrap()).unwrap()
+        } else {
+            record.expect("the damaged original has supported durable diagnostics")["state"].clone()
+        };
         let expected_reason = match fault {
             "payload" | "invalid-payload" | "many-payload" => "test_request_decode",
             "scope" => "scope_decode",
             "receipt" => "receipt_decode",
+            "selector" => "selector_validate",
             "peer" => "peer_decode",
             "settlement" | "invalid-settlement" => "settlement_decode_or_validate",
             _ => panic!("unknown diagnostic fault"),
         };
-        assert_eq!(record["reason"], expected_reason);
+        assert_eq!(state["reason"], expected_reason);
+        assert!(state["attempts"].as_u64().unwrap() >= 2);
         assert!(
-            record["attempts"].as_u64().unwrap() >= if fault == "many-payload" { 1 } else { 2 },
-            "repeated rows update one record unless the fixed capacity evicted it"
+            chrono::DateTime::parse_from_rfc3339(state["firstPendingAt"].as_str().unwrap()).is_ok()
         );
         assert!(
-            chrono::DateTime::parse_from_rfc3339(record["firstSkippedAt"].as_str().unwrap())
-                .is_ok()
-        );
-        assert!(
-            chrono::DateTime::parse_from_rfc3339(record["lastSkippedAt"].as_str().unwrap()).is_ok()
+            chrono::DateTime::parse_from_rfc3339(state["lastAttemptAt"].as_str().unwrap()).is_ok()
         );
         assert!(
             !diagnostic.to_string().contains("scan-bad"),
-            "diagnostics expose no send key or custody"
+            "no send key or custody is projected"
         );
         if fault == "many-payload" {
-            assert_eq!(skips.len(), 64);
-            assert!(
-                diagnostic["causalCompletionScanSkipsEvicted"]
-                    .as_u64()
-                    .unwrap()
-                    > 0
-            );
-            assert!(
-                skips
-                    .iter()
-                    .all(|row| row["table"] == table && row["reason"] == expected_reason)
-            );
-        } else {
-            assert_eq!(skips.len(), 1);
-            assert_eq!(diagnostic["causalCompletionScanSkipsEvicted"], 0);
+            assert_eq!(records.len(), CAUSAL_PENDING_DIAGNOSTICS);
+            assert!(pending["limited"].as_bool().unwrap());
+            assert!(pending["total"].as_u64().unwrap() > CAUSAL_PENDING_DIAGNOSTICS as u64);
         }
-    } else {
-        assert!(skips.is_empty());
     }
-    assert_eq!(diagnostic["causalCompletionScanSkipsResetOnRestart"], true);
+    assert_eq!(pending["resetOnRestart"], false);
     drop(handles);
     server.finish().await;
     fixture.finish().await;
@@ -439,7 +471,7 @@ async fn exercise_history(table: &str, fault: Option<&str>) -> ScanOutcome {
 async fn causal_scan_large_history_control_settles_the_real_request() {
     let outcome = exercise_history("mailbox_messages", None).await;
     assert!(
-        outcome.neighbor_planned && outcome.passed_bad_row && outcome.valid_requests_settled,
+        outcome.neighbor_planned && outcome.failed_key_retained && outcome.valid_requests_settled,
         "healthy history control: {outcome:?}"
     );
     assert_eq!(outcome.writes, 2, "one old receipt and one new admission");
@@ -450,7 +482,9 @@ async fn causal_scan_bad_message_keeps_same_page_plan_and_later_admission() {
     for fault in ["payload", "scope", "settlement"] {
         let outcome = exercise_history("mailbox_messages", Some(fault)).await;
         assert!(
-            outcome.neighbor_planned && outcome.passed_bad_row && outcome.valid_requests_settled,
+            outcome.neighbor_planned
+                && outcome.failed_key_retained
+                && outcome.valid_requests_settled,
             "valid request must settle past damaged message ({fault}): {outcome:?}"
         );
         assert_eq!(outcome.writes, 2);
@@ -459,10 +493,19 @@ async fn causal_scan_bad_message_keeps_same_page_plan_and_later_admission() {
 
 #[tokio::test]
 async fn causal_scan_bad_intent_keeps_same_page_plan_and_later_admission() {
-    for fault in ["payload", "scope", "receipt", "peer", "settlement"] {
+    for fault in [
+        "payload",
+        "scope",
+        "receipt",
+        "selector",
+        "peer",
+        "settlement",
+    ] {
         let outcome = exercise_history("mailbox_relay_intents", Some(fault)).await;
         assert!(
-            outcome.neighbor_planned && outcome.passed_bad_row && outcome.valid_requests_settled,
+            outcome.neighbor_planned
+                && outcome.failed_key_retained
+                && outcome.valid_requests_settled,
             "valid request must settle past damaged intent ({fault}): {outcome:?}"
         );
         assert_eq!(outcome.writes, 3);
@@ -478,8 +521,10 @@ async fn causal_scan_validation_refusals_and_bounded_diagnostics_preserve_recove
     ] {
         let outcome = exercise_history(table, Some(fault)).await;
         assert!(
-            outcome.neighbor_planned && outcome.passed_bad_row && outcome.valid_requests_settled,
-            "valid request must settle after validation refusal or bounded diagnostic eviction ({fault}): {outcome:?}"
+            outcome.neighbor_planned
+                && outcome.failed_key_retained
+                && outcome.valid_requests_settled,
+            "valid request must settle after validation refusal or bounded diagnostic projection ({fault}): {outcome:?}"
         );
         assert_eq!(
             outcome.writes,
