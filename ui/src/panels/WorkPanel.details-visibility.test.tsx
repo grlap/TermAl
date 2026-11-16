@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Profiler } from "react";
 import type { Project } from "../types";
 import { readProjectWork, readWorkDetail, type WorkDetailResponse } from "../work-visualizer-api";
 import { WorkPanel } from "./WorkPanel";
@@ -35,6 +36,30 @@ describe("expanded Work details visibility", () => {
     });
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it("focuses a selection made before the list commit's passive effects", async () => {
+    const response = deferred<WorkDetailResponse>();
+    vi.mocked(readWorkDetail).mockReturnValue(response.promise);
+    let selected = false;
+    const panels = new Set<HTMLElement>();
+    // The first loaded row is committed before its parent's passive effects.
+    // Select at that boundary instead of depending on scheduler/load timing.
+    await act(async () => {
+      render(<Profiler id="work-list" onRender={() => {
+        const panel = screen.queryByRole<HTMLElement>("complementary", { name: "Work item details" });
+        if (panel) panels.add(panel);
+        const row = screen.queryByRole("button", { name: "example — Example item" });
+        if (row && !selected) { selected = true; row.click(); }
+      }}><WorkPanel projects={projects} focusedProjectId="project" /></Profiler>);
+    });
+    expect(selected).toBe(true);
+    const panel = screen.getByRole("complementary", { name: "Work item details" });
+    expect(panels).toEqual(new Set([panel]));
+    expect(panel).toHaveFocus();
+    await act(async () => response.resolve(detail()));
+    expect(screen.getByRole("complementary", { name: "Work item details" })).toBe(panel);
+    expect(panel).toHaveFocus();
+  });
 
   it.each(["Dependencies", "Labels", "Table", "Urgent"])("reveals the loaded details body in %s", async view => {
     const response = deferred<WorkDetailResponse>();

@@ -101,7 +101,9 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
   const [selection, setSelection] = useState<(WorkSelection & { view: WorkView }) | null>(null);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const focusNewSelection = useRef(false);
-  useEffect(() => { focusNewSelection.current = false; });
+  // Consume the rendered request before another selection can arrive. A
+  // previous commit's passive effect could erase the new request first.
+  useLayoutEffect(() => { focusNewSelection.current = false; });
   const listContainer = useRef<HTMLDivElement | null>(null);
   const scrollPosition = useRef(0);
   // A replaced query has no viewport yet. Discard its saved offset before
