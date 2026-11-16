@@ -44,6 +44,19 @@ through the ordinary runtime environment path.
 | AutoEdit | `agy acp --mode accept-edits` |
 | Plan | `agy acp --mode plan` |
 
+Yolo also answers ordinary incoming ACP permission requests without a manual
+card when they offer exactly one valid `allow_once` option. The original opaque
+option id is returned; `allow_always` is never selected automatically. Multiple
+one-time choices and requests without a valid one-time option stay manual.
+Default, AutoEdit and Plan leave incoming execution asks on the manual path;
+the native mode continues deciding which operations need a request.
+
+Stop or a replaced runtime cancels its request without creating a card. A
+read-only delegation refuses a permission grant with a bounded reason and next
+step. A newly selected Yolo mode that still requires a runtime restart cannot
+grant a current-turn request: the refusal explains how to apply the new mode.
+No new credentials, native configuration, or sandbox permissions are installed.
+
 The runtime continues handling permission requests through advertised ACP
 options. It does not invent option ids or automatically execute a login
 command. Cached sign-in normally needs no `authenticate` request. If an

@@ -119,22 +119,22 @@ fn manual_cards(state: &AppState, id: &str) -> usize {
 #[test]
 fn exactly_one_allow_once_option_is_required() {
     assert_eq!(
-        kimi_single_allow_once_option(tool_options().as_array().unwrap()).as_deref(),
+        acp_single_allow_once_option(tool_options().as_array().unwrap()).as_deref(),
         Some("approve_once")
     );
     assert_eq!(
-        kimi_single_allow_once_option(question_options().as_array().unwrap()),
+        acp_single_allow_once_option(question_options().as_array().unwrap()),
         None,
         "two answers are a choice, never approved"
     );
     let only_always = json!([{ "optionId": "a", "kind": "allow_always" }]);
     assert_eq!(
-        kimi_single_allow_once_option(only_always.as_array().unwrap()),
+        acp_single_allow_once_option(only_always.as_array().unwrap()),
         None
     );
     let empty_id = json!([{ "optionId": "", "kind": "allow_once" }]);
     assert_eq!(
-        kimi_single_allow_once_option(empty_id.as_array().unwrap()),
+        acp_single_allow_once_option(empty_id.as_array().unwrap()),
         None
     );
 }

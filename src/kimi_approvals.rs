@@ -42,24 +42,6 @@ fn normalize_default_kimi_effort(value: &str) -> Result<String, ApiError> {
     Ok(trimmed.to_owned())
 }
 
-/// The one option a request offers whose kind is exactly `allow_once`. Zero
-/// or two or more mean the request is a choice (a question's answers) or
-/// unknown, and it stays manual. `allow_always` is never selected.
-fn kimi_single_allow_once_option(options: &[Value]) -> Option<String> {
-    let mut allow_once = options
-        .iter()
-        .filter(|option| option.get("kind").and_then(Value::as_str) == Some("allow_once"));
-    let option = allow_once.next()?;
-    if allow_once.next().is_some() {
-        return None;
-    }
-    option
-        .get("optionId")
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned)
-}
-
 /// Whether TermAl may answer a Kimi request itself right now. Mirrors
 /// `opencode_auto_approval_allowed_locked`: the session is Active (so a
 /// pending manual card, which moves it to Approval, suspends auto-approve),
@@ -123,7 +105,7 @@ impl AppState {
         {
             // These are user decisions, even if only one answer is offered.
             return Ok(false);
-        } else if let Some(option_id) = kimi_single_allow_once_option(&options)
+        } else if let Some(option_id) = acp_single_allow_once_option(&options)
             .filter(|_| kimi_auto_approval_allowed_locked(&inner, session_id))
         {
             json!({"outcome": "selected", "optionId": option_id})

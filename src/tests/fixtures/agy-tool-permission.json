@@ -1,0 +1,38 @@
+{
+  "jsonrpc": "2.0",
+  "method": "session/request_permission",
+  "params": {
+    "sessionId": "agy-fixture-session",
+    "toolCall": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "agy-fixture-tool",
+      "name": "run_command",
+      "args": {
+        "CommandLine": "echo TERMAL_ACP_SMOKE",
+        "WaitMsBeforeAsync": 5000,
+        "toolSummary": "Run smoke test echo command"
+      },
+      "status": "pending",
+      "kind": "execute",
+      "title": "echo TERMAL_ACP_SMOKE",
+      "rawInput": {
+        "CommandLine": "echo TERMAL_ACP_SMOKE",
+        "WaitMsBeforeAsync": 5000,
+        "toolSummary": "Run smoke test echo command"
+      }
+    },
+    "options": [
+      {
+        "optionId": "allow",
+        "name": "Allow",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "deny",
+        "name": "Deny",
+        "kind": "reject_once"
+      }
+    ]
+  },
+  "id": "agy-request-opaque"
+}

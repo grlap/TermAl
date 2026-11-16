@@ -953,3 +953,6 @@ fn gemini_readiness_and_auth_do_not_consume_legacy_settings_or_dotenv() {
         },
     );
 }
+
+#[path = "acp_gemini/permissions.rs"]
+mod permissions;

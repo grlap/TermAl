@@ -1362,30 +1362,64 @@ fn handle_acp_message(
     };
 
     if message.get("id").is_some() {
-        if agent == AcpAgent::OpenCode && method == "session/request_permission" {
+        if matches!(agent, AcpAgent::OpenCode | AcpAgent::Gemini)
+            && method == "session/request_permission"
+        {
             // Admission uses the same lock as Stop ownership and runtime replacement.
             // This is an unbounded std::mpsc send, not an IO/backpressure wait: keep
             // validation and enqueue indivisible so Stop cannot intervene between them.
-            let inner = state.inner.lock().expect("state mutex poisoned");
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
             let current = inner.find_session_index(session_id).is_some_and(|index| {
                 let record = &inner.sessions[index];
-                record.runtime.matches_runtime_token(runtime_token)
+                record.session.agent == agent.agent()
+                    && record.runtime.matches_runtime_token(runtime_token)
                     && !record.runtime_stop_in_progress
                     && !matches!(
                         record.session.status,
                         SessionStatus::Stopping | SessionStatus::Idle
                     )
             });
-            let outcome = if !current {
-                Some(json!({"outcome": "cancelled"}))
-            } else if opencode_auto_approval_allowed_locked(&inner, session_id) {
-                message
-                    .pointer("/params/options")
-                    .and_then(Value::as_array)
-                    .and_then(|options| find_acp_permission_option(options, &["allow_once"]))
-                    .map(|option_id| json!({"outcome": "selected", "optionId": option_id}))
+            let refusal = if current && agent == AcpAgent::Gemini {
+                if read_only_session_delegation_block_locked(&inner, Some(session_id)).is_some() {
+                    Some(
+                        "Gemini's read-only delegation refused a tool permission grant. Continue with operations allowed by Plan mode, or use a writable session for this operation.",
+                    )
+                } else {
+                    inner.find_session_index(session_id).and_then(|index| {
+                        let record = &inner.sessions[index];
+                        (record.session.gemini_approval_mode == Some(GeminiApprovalMode::Yolo)
+                            && record.runtime_reset_required)
+                            .then_some("Gemini's selected Yolo mode is pending a runtime restart and cannot grant this turn's permission. Stop and start a new turn to apply the selected mode.")
+                    })
+                }
             } else {
                 None
+            };
+            let options = message.pointer("/params/options").and_then(Value::as_array);
+            let outcome = if !current {
+                Some(json!({"outcome": "cancelled"}))
+            } else if refusal.is_some() {
+                Some(
+                    options
+                        .and_then(|options| find_acp_permission_option(options, &["reject_once"]))
+                        .map(|option_id| json!({"outcome":"selected", "optionId":option_id}))
+                        .unwrap_or_else(|| json!({"outcome":"cancelled"})),
+                )
+            } else {
+                let option_id = match agent {
+                    AcpAgent::OpenCode
+                        if opencode_auto_approval_allowed_locked(&inner, session_id) =>
+                    {
+                        options.and_then(|options| {
+                            find_acp_permission_option(options, &["allow_once"])
+                        })
+                    }
+                    AcpAgent::Gemini if gemini_auto_approval_allowed_locked(&inner, session_id) => {
+                        options.and_then(|options| acp_single_allow_once_option(options))
+                    }
+                    _ => None,
+                };
+                option_id.map(|option_id| json!({"outcome":"selected", "optionId":option_id}))
             };
             if let Some(outcome) = outcome {
                 input_tx
@@ -1396,8 +1430,15 @@ fn handle_acp_message(
                         ),
                     ))
                     .map_err(|err| {
-                        anyhow!("failed delivering OpenCode permission response: {err}")
+                        anyhow!(
+                            "failed delivering {} permission response: {err}",
+                            agent.label()
+                        )
                     })?;
+                // A failed handoff returns before any notice is fabricated.
+                if let Some(reason) = refusal {
+                    note_acp_permission_refusal_locked(state, &mut inner, session_id, reason)?;
+                }
                 return Ok(());
             }
         }
@@ -1506,9 +1547,10 @@ fn handle_acp_request(
                 request_id,
             };
 
-            // OpenCode automatic replies are admitted only by handle_acp_message,
-            // with its runtime token and Stop fence. A fallback here stays manual.
-            let automatic_option = if agent == AcpAgent::OpenCode {
+            // Gemini and OpenCode automatic replies are admitted only by
+            // handle_acp_message with its runtime token and Stop fence.
+            // A direct or fallback request stays manual.
+            let automatic_option = if matches!(agent, AcpAgent::OpenCode | AcpAgent::Gemini) {
                 None
             } else {
                 acp_permission_response_option_id(agent, state, session_id, &approval)?
@@ -1588,6 +1630,54 @@ fn acp_permission_response_option_id(
         }
         AcpAgent::Gemini | AcpAgent::Kimi => Ok(None),
     }
+}
+
+// Gemini's native approval mode is consumed at process launch. A settings
+// change marks the existing reset owner; a future Yolo mode is not authority
+// for the current process. No additional runtime policy snapshot is needed.
+fn gemini_auto_approval_allowed_locked(inner: &StateInner, session_id: &str) -> bool {
+    inner.find_session_index(session_id).is_some_and(|index| {
+        let record = &inner.sessions[index];
+        record.session.agent == Agent::Gemini
+            && record.session.status == SessionStatus::Active
+            && !record.runtime_stop_in_progress
+            && !record.runtime_reset_required
+            && record.session.gemini_approval_mode == Some(GeminiApprovalMode::Yolo)
+            && read_only_session_delegation_block_locked(inner, Some(session_id)).is_none()
+    })
+}
+
+// Reasons are bounded static policy text. Identity and Stop remain locked
+// through answer handoff and the existing id/stamp/commit/delta owners.
+fn note_acp_permission_refusal_locked(
+    state: &AppState,
+    inner: &mut StateInner,
+    session_id: &str,
+    reason: &'static str,
+) -> Result<()> {
+    let index = inner
+        .find_session_index(session_id)
+        .expect("current ACP session");
+    let message = Message::Text {
+        attachments: Vec::new(),
+        id: inner.next_message_id(),
+        timestamp: stamp_now(),
+        author: Author::System,
+        text: reason.to_owned(),
+        expanded_text: None,
+        source: None,
+    };
+    let record = inner
+        .session_mut_by_index(index)
+        .expect("current ACP session");
+    if record.runtime_projection_allowed() {
+        record.session.preview = make_preview(reason);
+    }
+    let message_index = push_message_on_record(record, message);
+    let creates = message_created_delta_parts_for_indices(record, vec![message_index]);
+    let revision = state.commit_persisted_delta_locked(inner)?;
+    state.publish_message_created_delta_parts(inner, revision, creates);
+    Ok(())
 }
 
 fn opencode_auto_approval_allowed_locked(inner: &StateInner, session_id: &str) -> bool {
@@ -2027,6 +2117,24 @@ fn acp_cursor_mode(update: &Value) -> Option<CursorMode> {
                 .map(str::to_owned)
         })
         .and_then(|value| parse_cursor_mode_acp_value(&value))
+}
+
+/// The one option a request offers whose kind is exactly `allow_once`. Zero
+/// or two or more mean the request is a choice (a question's answers) or
+/// unknown, and it stays manual. `allow_always` is never selected.
+fn acp_single_allow_once_option(options: &[Value]) -> Option<String> {
+    let mut allow_once = options
+        .iter()
+        .filter(|option| option.get("kind").and_then(Value::as_str) == Some("allow_once"));
+    let option = allow_once.next()?;
+    if allow_once.next().is_some() {
+        return None;
+    }
+    option
+        .get("optionId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
 }
 
 /// Selects an exact ACP v1 kind and returns its opaque optionId unchanged.
