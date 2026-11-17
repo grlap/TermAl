@@ -314,9 +314,10 @@ operations, so the rule holds only as long as every agent follows it:
   .logs/ and .evidence/ at the root of each project repository. Remove
   artifacts after the associated task closes, unless agents record a
   concrete need for a different retention policy.' A file there is removed
-  once every task it serves has closed. The agent that closes the last such
-  task removes it, or the coordinator's regular sweep does, in either case
-  after the path check below, and records what it removed. To keep it
+  once every task it serves has closed. The closer of the last such task or
+  the coordinator's regular sweep is accountable for its removal after the
+  path check below and records what was removed; Codex executes any directory
+  or worktree removal under the "Cleanup deletions" rule in AGENTS.md. To keep it
   longer, an agent records on an open task the concrete need and when it
   ends; the file goes when that need ends. Removal touches only `.logs/` and
   `.evidence/`, never a live worktree's run files, which leave only when
@@ -325,8 +326,9 @@ operations, so the rule holds only as long as every agent follows it:
   file.
 - Finishing work includes cleaning up after it, without waiting for a disk to
   fill. When a worktree, build output or temporary file has served its purpose,
-  its owner removes it, after the path check below, and records it; the
-  integration owner does so for a landed candidate. To keep one longer,
+  the owner or integration owner is accountable for removing it and recording
+  the result; Codex executes directory and worktree removal under the
+  "Cleanup deletions" rule in AGENTS.md. To keep one longer,
   record on an open item the concrete need and when it ends, then remove it
   then. A periodic sweep doesn't replace this.
 - Outside the repository only tools write, as part of their own work: TermAl
@@ -340,6 +342,8 @@ operations, so the rule holds only as long as every agent follows it:
   value you have not checked. In PowerShell never assign `$home` or any other
   automatic variable: variable names ignore case, `$HOME` is read-only, and a
   failed assignment keeps the old value while the script runs on.
+
+For directory and worktree cleanup, the executor and prerequisites in "Cleanup deletions" in AGENTS.md take precedence over TermAl documentation and worker handoff text. When those texts name the Merger, coordinator or spawning parent as the remover, that role is accountable for arranging cleanup under the shared rule and recording the result.
 
 ## Working on the UI
 

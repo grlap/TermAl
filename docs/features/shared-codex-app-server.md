@@ -257,6 +257,62 @@ running Codex turn. No live sessions are switched automatically by this change.
 Pending requests and their runtime do not survive a host restart; recovering
 requests from an older host process is outside this live-transition path.
 
+### Cleanup commands refused before an approval request
+
+Codex owns command-safety classification. Its built-in fallback marks forced
+`rm` forms (for example, `-f`, `-rf`, `--force`) and PowerShell deletion cmdlets with
+`-Force` as dangerous. With native approval policy `never`, that fallback
+forbids them even with a full-access sandbox. It can report
+`rm -f style commands are not permitted. Use a safer approach` or
+`blocked by policy`. An explicit command rule or another safety mechanism can
+also refuse a command, so the generic message alone does not identify its cause.
+
+The inspected upstream baseline is Codex commit
+`58627e6feac9f69cbbb405d85f4f7343eca75a35` (2026-11-17):
+`codex-rs/shell-command/src/command_safety/is_dangerous_command.rs:142-214`,
+`windows_dangerous_commands.rs:291-354` in the same directory, and
+`codex-rs/core/src/exec_policy.rs:868-912,1205-1235`. This identifies the
+mechanism in that source version; it does not establish the version or settings
+of a historical refusal whose original evidence is unavailable.
+
+For an already-authorized cleanup, Codex follows the separate cleanup-deletion
+rule in AGENTS.md. Before the initial attempt, resolve the
+exact owned targets, check repository containment and links, and establish that
+their retention need has ended and no live work or shared resource uses them.
+Choose a non-forced initial form appropriate to the target:
+
+- POSIX: plain `rm -r` for an owned directory, without `-f` or `--force`.
+- PowerShell: `Remove-Item -LiteralPath` without `-Force`; use `-Recurse` for an
+  owned directory and `-Confirm:$false` for non-interactive execution.
+- Git worktrees: `git worktree remove` without `--force`.
+
+Not matching the forced-deletion classifier is not a permission or success
+guarantee: command rules, other safety checks and filesystem permissions still
+apply. These are initial cleanup choices, not alternatives to try after a
+denial. If a policy refuses the command, stop and report it to the coordinator;
+do not retry the denied removal through another form, tool, interpreter or
+session. If a non-forced command fails operationally, such as a read-only file
+on Windows, stop and report that too. A command requesting input also requires
+stopping and reporting. A forced case needs Greg's recorded word for
+that case as well as a permitted native execution route; task authority alone
+does not override Codex's refusal. Keep the exact targets and remaining cleanup
+owner recorded until removal is confirmed.
+
+TermAl answers real `item/commandExecution/requestApproval` requests with their
+native request identity, subject to its existing ownership and sandbox guards.
+A terminal refusal is not a pending request and receives no invented approval
+card or Accept action. Changing a next-turn setting does not approve an
+already-refused action. New sessions start from the saved default approval
+policy unless the create request or delegation mode sets a policy; the code's
+environment fallback is `never`, so changing particular existing
+sessions does not establish the policy of later sessions. This cleanup route
+changes no default policy, command rule or executor authority.
+
+Official references:
+[approval policy and sandbox](https://learn.chatgpt.com/docs/agent-approvals-security#run-without-approval-prompts),
+[command rules](https://learn.chatgpt.com/docs/agent-configuration/rules#understand-rule-fields),
+and [auto-review denials](https://learn.chatgpt.com/docs/sandboxing/auto-review#denials-and-failure-behavior).
+
 ## Two identities: process vs attachment
 
 There are two different "who is this?" questions, and conflating them is the classic
