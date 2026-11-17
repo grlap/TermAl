@@ -2167,6 +2167,69 @@ fn workspace_watcher_observes_repositories_below_ignored_directory_names() {
 }
 
 #[test]
+fn workspace_watcher_keeps_queued_removal_of_a_selected_nested_root() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for rename in [false, true] {
+        let state = test_app_state();
+        let outer = normalize_user_facing_path(
+            &fs::canonicalize(state.test_temp_root.as_ref().unwrap().path()).unwrap(),
+        );
+        let nested = outer.join("target").join("project");
+        fs::create_dir_all(&nested).unwrap();
+        run_git_test_command_output(&outer, &["init"]);
+        run_git_test_command_output(&nested, &["init"]);
+        {
+            let mut inner = state.inner.lock().unwrap();
+            for root in [&outer, &nested] {
+                inner.create_session(
+                    Agent::Codex,
+                    None,
+                    root.to_string_lossy().into_owned(),
+                    None,
+                    None,
+                );
+            }
+        }
+        let scopes = collect_workspace_file_watch_scopes(&state);
+        assert!(scopes.iter().any(|scope| scope.root_path == nested));
+        let kind = if rename {
+            NotifyEventKind::Modify(notify::event::ModifyKind::Name(
+                notify::event::RenameMode::From,
+            ))
+        } else {
+            NotifyEventKind::Remove(notify::event::RemoveKind::Folder)
+        };
+        let mut pending = WorkspacePendingChanges::default();
+        pending.watch_roots = scopes.iter().map(|scope| scope.root_path.clone()).collect();
+        pending.ingest(
+            Ok(NotifyEvent::new(kind).add_path(nested.clone())),
+            EngramHost::watcher_arrival_now(),
+            std::time::Instant::now(),
+        );
+        let batch = pending.take();
+        assert_eq!(batch.len(), 1, "ingress retains the selected root");
+        assert_eq!(batch[0].1.kind, WorkspaceFileChangeKind::Subtree);
+        if rename {
+            fs::rename(&nested, outer.join("moved-project")).unwrap();
+        } else {
+            fs::remove_dir_all(&nested).unwrap();
+        }
+        assert!(
+            !nested.exists(),
+            "the selected root disappears before drain"
+        );
+        let publication = state.process_workspace_dirty_batch(batch);
+        assert!(
+            publication.iter().any(|change| {
+                change.path == nested.to_string_lossy()
+                    && change.kind == WorkspaceFileChangeKind::Subtree
+            }),
+            "queued selected-root removal must survive drain (rename={rename}): {publication:?}"
+        );
+    }
+}
+
+#[test]
 fn workspace_watcher_ignores_internal_beads_and_collaboration_metadata() {
     let root = FsPath::new("/tmp/termal-workspace");
     for path in [
