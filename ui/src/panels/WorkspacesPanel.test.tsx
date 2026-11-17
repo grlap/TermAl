@@ -444,13 +444,13 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     expect(input.onDeleteWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-alpha");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
@@ -468,14 +468,14 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     await act(async () => {});
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     await act(async () => {});
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
@@ -500,7 +500,7 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     expect(input.onDeleteWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-alpha");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
 
     shouldThrow = false;
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
@@ -526,13 +526,13 @@ describe("WorkspacesPanel", () => {
       await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
       await user.click(screen.getByRole("button", { name: "Confirm delete" }));
       await user.click(screen.getByRole("button", { name: "Cancel" }));
-      expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
       await act(async () => {
         deferred.reject(new Error("async delete failed"));
       });
       expect(rejected).toEqual([]);
       await user.click(screen.getByRole("button", { name: "Cancel" }));
-      expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
     } finally {
       window.removeEventListener("unhandledrejection", onUnhandled);
     }
@@ -552,12 +552,12 @@ describe("WorkspacesPanel", () => {
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     expect(input.onDeleteWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-alpha");
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
     await act(async () => {
       deferred.resolve();
     });
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
   });
 
   it("does not let a late first-delete completion unlock a newer same-id pending delete", async () => {
@@ -585,12 +585,12 @@ describe("WorkspacesPanel", () => {
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     expect(input.onDeleteWorkspace).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
     await act(async () => {
       second.resolve();
     });
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
   });
 
   it("requires delete confirmation before calling the handler", () => {
@@ -598,7 +598,7 @@ describe("WorkspacesPanel", () => {
     render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(input.onDeleteWorkspace).not.toHaveBeenCalled();
 
@@ -608,7 +608,7 @@ describe("WorkspacesPanel", () => {
     expect(input.onDeleteWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-alpha");
   });
 
-  it("describes the selected inline delete confirmation with instance-safe references", async () => {
+  it("describes the selected delete popup with instance-safe references", async () => {
     const input = props();
     input.summaries = [
       ...input.summaries,
@@ -624,30 +624,34 @@ describe("WorkspacesPanel", () => {
     const alphaOverflows = screen.getAllByRole("button", { name: "Actions for workspace Alpha" });
     await user.click(alphaOverflows[0]);
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
-    const alphaConfirm = screen.getByRole("group", { name: "Delete workspace workspace-alpha" });
-    expect(alphaConfirm).toHaveAccessibleDescription("Delete Alpha? This removes the saved layout.");
+    const alphaConfirm = screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" });
+    expect(alphaConfirm).toHaveAccessibleDescription("Delete Alpha? Only the saved layout is removed. Files are not deleted.");
     expect(screen.getAllByRole("button", { name: "Beta" })).toHaveLength(2);
 
     const betaOverflows = screen.getAllByRole("button", { name: "Actions for workspace Beta" });
-    await user.click(betaOverflows[1]);
-    await user.click(screen.getByRole("menuitem", { name: "Delete workspace Beta" }));
-    const betaConfirm = screen.getByRole("group", { name: "Delete workspace workspace-beta" });
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toHaveAccessibleDescription(
-      "Delete Alpha? This removes the saved layout.",
+    // Keyboard activation keeps both nonmodal instances open; an outside
+    // pointer deliberately dismisses the earlier idle confirmation.
+    betaOverflows[1].focus();
+    await user.keyboard("{Enter}");
+    screen.getByRole("menuitem", { name: "Delete workspace Beta" }).focus();
+    await user.keyboard("{Enter}");
+    const betaConfirm = screen.getByRole("dialog", { name: "Delete workspace workspace-beta" });
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" })).toHaveAccessibleDescription(
+      "Delete Alpha? Only the saved layout is removed. Files are not deleted.",
     );
-    expect(betaConfirm).toHaveAccessibleDescription("Delete Beta? This removes the saved layout.");
+    expect(betaConfirm).toHaveAccessibleDescription("Delete Beta? Only the saved layout is removed. Files are not deleted.");
     const describedBy = [
-      screen.getByRole("group", { name: "Delete workspace workspace-alpha" }).getAttribute("aria-describedby"),
+      screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" }).getAttribute("aria-describedby"),
       betaConfirm.getAttribute("aria-describedby"),
     ];
     expect(describedBy[0]).toBeTruthy();
     expect(describedBy[1]).toBeTruthy();
     expect(describedBy[0]).not.toBe(describedBy[1]);
     expect(document.getElementById(describedBy[0]!)).toHaveTextContent(
-      "Delete Alpha? This removes the saved layout.",
+      "Delete Alpha? Only the saved layout is removed. Files are not deleted.",
     );
     expect(document.getElementById(describedBy[1]!)).toHaveTextContent(
-      "Delete Beta? This removes the saved layout.",
+      "Delete Beta? Only the saved layout is removed. Files are not deleted.",
     );
   });
 
@@ -667,7 +671,7 @@ describe("WorkspacesPanel", () => {
     const reviewOverflows = screen.getAllByRole("button", { name: "Actions for workspace Review" });
     fireEvent.click(reviewOverflows[0]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace Review" }));
-    const confirm = screen.getByRole("group", { name: "Delete workspace review" });
+    const confirm = screen.getByRole("dialog", { name: "Delete workspace review" });
     const confirmId = confirm.getAttribute("aria-describedby");
     const rowIds = screen.getAllByRole("button", { name: "Confirm review" }).map((button) =>
       button.getAttribute("aria-describedby"),
@@ -678,7 +682,7 @@ describe("WorkspacesPanel", () => {
     expect(confirmId).not.toBe(rowIds[1]);
     expect(rowIds[0]).not.toBe(rowIds[1]);
     expect(document.getElementById(confirmId!)).toHaveTextContent(
-      "Delete Review? This removes the saved layout.",
+      "Delete Review? Only the saved layout is removed. Files are not deleted.",
     );
     expect(document.getElementById(rowIds[0]!)).toHaveTextContent("confirm-review");
     expect(document.getElementById(rowIds[1]!)).toHaveTextContent("confirm-review");
@@ -716,7 +720,7 @@ describe("WorkspacesPanel", () => {
     );
   });
 
-  it("confirms and cancels the inline delete group from the keyboard", async () => {
+  it("confirms and cancels the delete popup from the keyboard", async () => {
     const input = props();
     const user = userEvent.setup();
     render(<WorkspacesPanelHarness {...input} />);
@@ -724,13 +728,13 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
     expect(input.onDeleteWorkspace).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
     expect(input.onDeleteWorkspace).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
@@ -968,7 +972,7 @@ describe("WorkspacesPanel", () => {
     view.rerender(
       <WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />,
     );
-    expect(within(screen.getByRole("group", { name: /Delete workspace/ })).getByRole("button", { name: "Deleting" })).toHaveFocus();
+    expect(within(screen.getByRole("dialog", { name: /Delete workspace/ })).getByRole("button", { name: "Deleting" })).toHaveFocus();
     view.rerender(
       <WorkspacesPanelHarness
         {...input}
@@ -1015,12 +1019,12 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
-    expect(screen.getByRole("group", { name: /Delete workspace/ })).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: /Delete workspace/ })).getByRole("button", { name: "Deleting" })).toHaveFocus();
+    expect(screen.getByRole("dialog", { name: /Delete workspace/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog", { name: /Delete workspace/ })).getByRole("button", { name: "Deleting" })).toHaveFocus();
     view.rerender(
       <WorkspacesPanelHarness {...input} deletingWorkspaceIds={[]} error="Delete failed." />,
     );
-    expect(screen.getByRole("group", { name: /Delete workspace/ })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: /Delete workspace/ })).toBeInTheDocument();
     const search = screen.getByRole("searchbox", { name: "Search workspaces" });
     await user.click(search);
     expect(search).toHaveFocus();
@@ -1212,7 +1216,7 @@ describe("WorkspacesPanel", () => {
     view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Beta" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Beta" }));
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
     view.rerender(
       <WorkspacesPanelHarness
         {...input}
@@ -1220,7 +1224,7 @@ describe("WorkspacesPanel", () => {
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
       />,
     );
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Beta" })).toBeInTheDocument();
   });
 
@@ -1243,7 +1247,7 @@ describe("WorkspacesPanel", () => {
     view.rerender(
       <WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha", "workspace-beta"]} />,
     );
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
     view.rerender(
       <WorkspacesPanelHarness
         {...input}
@@ -1251,7 +1255,7 @@ describe("WorkspacesPanel", () => {
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
       />,
     );
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
     view.rerender(
       <WorkspacesPanelHarness
         {...input}
@@ -1260,7 +1264,7 @@ describe("WorkspacesPanel", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
     });
   });
 
@@ -1301,7 +1305,7 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
-    const dialog = screen.getByRole("group", { name: "Delete workspace workspace-alpha" });
+    const dialog = screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" });
     const pending = within(dialog).getByRole("button", { name: "Deleting" });
     expect(pending).toHaveAttribute("aria-disabled", "true");
     expect(pending).not.toBeDisabled();
@@ -1422,7 +1426,7 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     expect(screen.queryByRole("form", { name: "Label workspace workspace-zulu" })).not.toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
   });
 
   it("replaces a failed rename when Rename is used on another row", async () => {
@@ -1487,7 +1491,7 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     expect(screen.queryByRole("form", { name: "Label workspace workspace-alpha" })).not.toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
   });
 
   it("restores overflow after cancelling delete without consuming pending rename restore intent", async () => {
@@ -1507,7 +1511,7 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
-    const confirm = screen.getByRole("group", { name: "Delete workspace workspace-alpha" });
+    const confirm = screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" });
     await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("button", { name: "Actions for workspace Alpha" })).toHaveFocus();
     expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
@@ -1530,13 +1534,13 @@ describe("WorkspacesPanel", () => {
     await user.click(screen.getByRole("button", { name: "Save label" }));
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
-    const confirm = screen.getByRole("group", { name: "Delete workspace workspace-alpha" });
+    const confirm = screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" });
     expect(confirm).toBeInTheDocument();
     expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
     expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("group", { name: "Delete workspace workspace-alpha" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Delete workspace workspace-alpha" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
     await user.keyboard("{Escape}");
@@ -1728,14 +1732,14 @@ describe("WorkspacesPanel", () => {
     const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
-    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
     view.rerender(
       <WorkspacesPanelHarness
         {...input}
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
       />,
     );
-    expect(screen.queryByRole("group", { name: /Delete workspace/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Delete workspace/ })).not.toBeInTheDocument();
     const search = screen.getByRole("searchbox", { name: "Search workspaces" });
     search.focus();
     fireEvent.keyDown(search, { key: "Escape" });

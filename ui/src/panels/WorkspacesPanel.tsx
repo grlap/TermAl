@@ -47,6 +47,7 @@ import type { WorkspaceLayoutSummary } from "../api";
 import type { WorkspaceDeleteRequest } from "../workspace-delete-request";
 import { useOwnedWorkspaceDeletes } from "./use-owned-workspace-deletes";
 import type { WorkspaceRenameEditor } from "./use-workspace-rename-editor";
+import { WorkspaceDeletePopover } from "./WorkspaceDeletePopover";
 import {
   isIgnorableEscape,
   WorkspaceRowOverflowMenu,
@@ -271,19 +272,17 @@ export function WorkspacesPanel({
     deletingWorkspaceIds,
     onDeleteWorkspace,
     onOwnedDeletesSettled: (workspaceIds) => {
-      let restoreAfterOwnedSuccess = false;
       for (const workspaceId of workspaceIds) {
         const stillPresent = visibleSummaries.some((summary) => summary.id === workspaceId);
         if (stillPresent) {
           continue;
         }
         if (confirmingDeleteId === workspaceId) {
+          if (shouldRestoreLostFocus() || confirmDialogRef.current?.contains(document.activeElement)) {
+            pendingRestoreDeleteFocusIdRef.current = workspaceId;
+          }
           setConfirmingDeleteId(null);
-          restoreAfterOwnedSuccess = true;
         }
-      }
-      if (restoreAfterOwnedSuccess && shouldRestoreLostFocus()) {
-        focusSurvivingOverflow();
       }
     },
   });
@@ -359,13 +358,6 @@ export function WorkspacesPanel({
     // Pending saves disable the field, so this is a no-op then.
     labelInputRef.current?.focus();
   }, [editingWorkspaceId]);
-
-  useEffect(() => {
-    if (!confirmingDeleteId) {
-      return;
-    }
-    confirmCancelRef.current?.focus();
-  }, [confirmingDeleteId]);
 
   useEffect(() => {
     if (!confirmingDeleteId) {
@@ -475,6 +467,9 @@ export function WorkspacesPanel({
     ) {
       return;
     }
+    if (shouldRestoreLostFocus() || confirmDialogRef.current?.contains(document.activeElement)) {
+      pendingRestoreDeleteFocusIdRef.current = confirmingDeleteId;
+    }
     setConfirmingDeleteId(null);
     retainedConfirmingSummaryRef.current = null;
   }, [confirmingDeleteId, deletingWorkspaceIdSet, isOwnedDeletePending, visibleSummaries]);
@@ -504,10 +499,11 @@ export function WorkspacesPanel({
 
   function cancelDeleteConfirmation(workspaceId: string) {
     if (isOwnedDeletePending(workspaceId) || deletingWorkspaceIdSet.has(workspaceId)) {
-      return;
+      return false;
     }
     pendingRestoreDeleteFocusIdRef.current = workspaceId;
     setConfirmingDeleteId((current) => (current === workspaceId ? null : current));
+    return true;
   }
 
   function handlePanelKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
@@ -631,44 +627,6 @@ export function WorkspacesPanel({
         </form>
       ) : null}
 
-      {confirmingSummary && confirmDescriptionId ? (
-        <div
-          ref={confirmDialogRef}
-          className="workspaces-panel-confirm"
-          role="group"
-          tabIndex={-1}
-          aria-label={`Delete workspace ${confirmingSummary.id}`}
-          aria-describedby={confirmDescriptionId}
-        >
-          <p id={confirmDescriptionId}>
-            Delete {workspaceDisplayName(confirmingSummary)}? This removes the saved layout.
-          </p>
-          <div className="workspaces-panel-form-actions">
-            <button
-              className="ghost-button workspaces-panel-confirm-delete"
-              type="button"
-              aria-disabled={deletingWorkspaceIdSet.has(confirmingSummary.id)}
-              onClick={() => {
-                confirmOwnedDelete(confirmingSummary.id);
-              }}
-            >
-              {deletingWorkspaceIdSet.has(confirmingSummary.id) ? "Deleting" : "Confirm delete"}
-            </button>
-            <button
-              ref={confirmCancelRef}
-              className="ghost-button"
-              type="button"
-              aria-disabled={deletingWorkspaceIdSet.has(confirmingSummary.id)}
-              onClick={() => {
-                cancelDeleteConfirmation(confirmingSummary.id);
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       <div className="workspaces-panel-list" role="list">
         {filteredSummaries.map((summary) => {
           const isCurrent = summary.id === currentWorkspaceId;
@@ -743,6 +701,46 @@ export function WorkspacesPanel({
           );
         })}
       </div>
+
+      {/* Keep the portal after row refs attach, before its layout measurement. */}
+      {confirmingSummary && confirmDescriptionId ? (
+        <WorkspaceDeletePopover
+          key={confirmingSummary.id}
+          getAnchor={() => overflowButtonRefs.current.get(confirmingSummary.id) ?? null}
+          dialogRef={confirmDialogRef}
+          initialFocusRef={confirmCancelRef}
+          workspaceId={confirmingSummary.id}
+          descriptionId={confirmDescriptionId}
+          onCancel={() => cancelDeleteConfirmation(confirmingSummary.id)}
+        >
+          <p id={confirmDescriptionId}>
+            Delete {workspaceDisplayName(confirmingSummary)}? Only the saved layout is removed. Files are not deleted.
+          </p>
+          <div className="session-kill-popover-actions">
+            <button
+              className="send-button session-kill-popover-confirm workspaces-panel-confirm-delete"
+              type="button"
+              aria-disabled={deletingWorkspaceIdSet.has(confirmingSummary.id)}
+              onClick={() => {
+                confirmOwnedDelete(confirmingSummary.id);
+              }}
+            >
+              {deletingWorkspaceIdSet.has(confirmingSummary.id) ? "Deleting" : "Confirm delete"}
+            </button>
+            <button
+              ref={confirmCancelRef}
+              className="ghost-button session-kill-popover-cancel"
+              type="button"
+              aria-disabled={deletingWorkspaceIdSet.has(confirmingSummary.id)}
+              onClick={() => {
+                cancelDeleteConfirmation(confirmingSummary.id);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </WorkspaceDeletePopover>
+      ) : null}
 
       {normalizedQuery && filteredSummaries.length === 0 ? (
         <p className="workspaces-panel-status">No workspaces match that search.</p>
