@@ -93,6 +93,7 @@ fn a_generic_denial_without_a_mark_is_recognised_by_its_wording() {
         "Permission to use Bash has been denied.",
         "Permission to use Bash with cargo test:* has been denied.",
         "Permission to use Bash with cargo test:* has been denied \u{2014} a listed rule denies it.",
+        "Permission to use REPL has been denied: it runs code as Bash does, and a rule denies Bash.",
         "Permission to edit /repo/src/main.rs has been denied.",
         "Permission to read /repo/.env has been denied.",
         "Permission to use Bash denied by plugin guard: test runs are not allowed here",
