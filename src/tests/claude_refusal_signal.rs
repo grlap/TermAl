@@ -91,8 +91,17 @@ fn a_generic_denial_without_a_mark_is_recognised_by_its_wording() {
     for detail in [
         "Permission to use Bash with command cargo test has been denied.",
         "Permission to use Bash has been denied.",
+        "Permission to use Bash with cargo test:* has been denied.",
+        "Permission to use Bash with cargo test:* has been denied \u{2014} a listed rule denies it.",
+        "Permission to edit /repo/src/main.rs has been denied.",
+        "Permission to read /repo/.env has been denied.",
+        "Permission to use Bash denied by plugin guard: test runs are not allowed here",
         "Permission for this tool use was denied: it requires interactive approval",
         "Permission for this command was denied by a built-in Claude Code safety check",
+        "Permission for this action was denied by the Claude Code auto mode classifier. \
+         Reason: the command deletes files outside the task",
+        "Permission for this action has been denied. Reason: blocked by managed policy",
+        "<tool_use_error>Permission to use Bash has been denied.</tool_use_error>",
     ] {
         let recorder = bash_result("unmarked", "cargo test", detail, None);
         assert!(
@@ -134,6 +143,33 @@ fn a_command_that_ran_and_hit_an_os_permission_error_is_still_a_run() {
         None,
     );
     assert!(ran(&recorder, "os-denied"), "{}", trace(&recorder));
+}
+
+#[test]
+fn a_command_the_cli_sandbox_blocked_is_still_a_run() {
+    // The sandbox does not refuse the call: the command runs, the OS refuses
+    // what it tried, and the CLI appends a `<sandbox_violations>` block to
+    // its output.
+    for (command, detail) in [
+        (
+            "touch /etc/termal",
+            "Exit code 1\ntouch: cannot touch '/etc/termal': Read-only file system\n\
+             <sandbox_violations>\ndeny file-write-create /etc/termal\n</sandbox_violations>",
+        ),
+        (
+            "curl https://example.com",
+            "Exit code 7\ncurl: (7) Failed to connect: Operation not permitted\n\
+             <sandbox_violations>\ndeny network-outbound example.com:443 (not allowed)\n\
+             </sandbox_violations>",
+        ),
+    ] {
+        let recorder = bash_result("sandboxed", command, detail, None);
+        assert!(
+            ran(&recorder, "sandboxed"),
+            "{command}: {}",
+            trace(&recorder)
+        );
+    }
 }
 
 #[test]

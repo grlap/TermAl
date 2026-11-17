@@ -2796,7 +2796,7 @@ const CLAUDE_REFUSAL_KINDS: &[&str] = &[
 /// refusal and, where its wording has one, a phrase it must also contain.
 const CLAUDE_REFUSAL_WORDING: &[(&str, Option<&str>)] = &[
     ("Claude requested permissions to ", None),
-    ("Permission to ", Some(" has been denied")),
+    ("Permission to ", Some(" denied")),
     ("Permission for this ", Some(" denied")),
 ];
 
