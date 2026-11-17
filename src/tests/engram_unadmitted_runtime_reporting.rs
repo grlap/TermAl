@@ -277,6 +277,8 @@ fn install_reporting_source_capture(state: &AppState) {
 /// The restarted host holds the old host's guarded root, as every one of its
 /// clones then does: it opens its stores inside that root, so the root is
 /// removed only after the last clone of either host is gone.
+/// It also preserves the fixture's provider-spawning policy: post-listen
+/// recovery must not launch an installed provider behind a scripted reader.
 /// It is built before listening, the fixture's inline source capture is
 /// installed, and only then does its post-listen recovery run: that recovery
 /// resumes a retained closing job at once, and a capture started before the
@@ -302,10 +304,13 @@ fn restart_reporting_state(
         TEST_ENGRAM_BOOT_TRANSPORT.with(|slot| slot.replace(previous_transport));
         state.unwrap()
     };
-    let state = match old.test_temp_root.clone() {
+    let mut state = match old.test_temp_root.clone() {
         Some(shared) => boot_on_test_temp_root(&shared, construct),
         None => construct(),
     };
+    // Production boot enables providers. Keep this fixture's explicit policy
+    // before automatic restart prompts can race its manual next adoption.
+    state.agent_runtime_spawning_enabled = old.agent_runtime_spawning_enabled;
     install_reporting_source_capture(&state);
     state.inner.lock().unwrap().test_observation_source_owner = old
         .inner
