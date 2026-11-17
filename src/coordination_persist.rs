@@ -59,6 +59,10 @@ thread_local! {
     static TEST_COORDINATION_UPGRADE_BEFORE_COMMIT: std::cell::RefCell<Option<CoordinationUpgradeCommitHook>> = const { std::cell::RefCell::new(None) };
 }
 
+#[cfg(test)]
+#[path = "coordination_schema_work_tests.rs"]
+mod coordination_schema_work_tests;
+
 // Version 2 adds durable read receipts without rewriting any mailbox cursor or
 // message. Unacknowledged reads from version 1 must be repeated after upgrade.
 const MAILBOX_READ_PAGES_SCHEMA_SQL: &str = "
@@ -230,6 +234,8 @@ fn expected_coordination_schema_objects() -> Result<Vec<CoordinationSchemaObject
 fn expected_coordination_schema_objects_for_version(
     version: &str,
 ) -> Result<Vec<CoordinationSchemaObject>> {
+    #[cfg(test)]
+    let _canonical = coordination_schema_work_tests::span("canonical", Some(version));
     match version {
         "1"
         | "2"
@@ -415,7 +421,11 @@ fn validate_coordination_schema_version_inner(
     } else {
         expected_coordination_schema_objects_for_version(version)?
     };
-    let actual_schema = coordination_schema_objects(connection)?;
+    let actual_schema = {
+        #[cfg(test)]
+        let _inspection = coordination_schema_work_tests::span("inspection.validation", None);
+        coordination_schema_objects(connection)?
+    };
     let expected_inventory = expected_schema
         .iter()
         .map(|object| format!("{} `{}`", object.object_type, object.name))
@@ -441,6 +451,17 @@ fn validate_coordination_schema_version_inner(
         )));
     }
 
+    validate_coordination_schema_contents(connection, version, migrate_damaged_causal_rows)
+}
+
+// Called only after the complete stored schema matches its canonical version.
+fn validate_coordination_schema_contents(
+    connection: &rusqlite::Connection,
+    version: &str,
+    migrate_damaged_causal_rows: bool,
+) -> Result<()> {
+    #[cfg(test)]
+    let _contents = coordination_schema_work_tests::span("inspection.contents", None);
     let stored_schema_version = connection
         .query_row(
             "SELECT value FROM meta WHERE key = 'coordination_schema_version'",
@@ -497,6 +518,33 @@ fn validate_coordination_schema_version_inner(
 }
 
 fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Result<()> {
+    #[cfg(test)]
+    let _ensure = coordination_schema_work_tests::span("ensure", None);
+    // Current stores need only the current canonical layout. Keep the complete
+    // layout and marker/record checks in one snapshot; a matching marker alone
+    // never authorizes an open. Historical admission below remains unchanged.
+    {
+        let inspection = rusqlite::Transaction::new_unchecked(
+            connection,
+            rusqlite::TransactionBehavior::Deferred,
+        )?;
+        let current_schema = expected_coordination_schema_objects()?;
+        let actual_schema = {
+            #[cfg(test)]
+            let _inspection = coordination_schema_work_tests::span("inspection.snapshot", None);
+            coordination_schema_objects(&inspection)?
+        };
+        if actual_schema == current_schema {
+            validate_coordination_schema_contents(
+                &inspection,
+                COORDINATION_SQLITE_SCHEMA_VERSION,
+                false,
+            )?;
+            inspection.commit()?;
+            return Ok(());
+        }
+        inspection.commit()?;
+    }
     let historical = [
         "1",
         "2",
@@ -525,7 +573,11 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
             connection,
             rusqlite::TransactionBehavior::Deferred,
         )?;
-        let schema = coordination_schema_objects(&inspection)?;
+        let schema = {
+            #[cfg(test)]
+            let _inspection = coordination_schema_work_tests::span("inspection.snapshot", None);
+            coordination_schema_objects(&inspection)?
+        };
         let version = historical
             .iter()
             .find(|(_, expected)| expected == &schema)
@@ -560,7 +612,11 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
                 rusqlite::TransactionBehavior::Immediate,
             )?;
             // Another process may have upgraded while we waited for SQLite.
-            let locked_schema = coordination_schema_objects(&transaction)?;
+            let locked_schema = {
+                #[cfg(test)]
+                let _inspection = coordination_schema_work_tests::span("inspection.locked", None);
+                coordination_schema_objects(&transaction)?
+            };
             if let Some((old_version, _)) = historical
                 .iter()
                 .find(|(_, schema)| schema == &locked_schema)
@@ -680,8 +736,16 @@ fn ensure_sqlite_coordination_schema_for_path(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<()> {
-    let write_lock = sqlite_state_write_lock(path);
-    let _write_guard = lock_sqlite_state_writer(&write_lock);
+    let write_lock = {
+        #[cfg(test)]
+        let _domain = coordination_schema_work_tests::span("writer.domain", None);
+        sqlite_state_write_lock(path)
+    };
+    let _write_guard = {
+        #[cfg(test)]
+        let _admission = coordination_schema_work_tests::span("writer.admission", None);
+        lock_sqlite_state_writer(&write_lock)
+    };
     // This connection-local setting must precede the initialization transaction.
     // Persistent PRAGMAs still wait until the current-schema guard succeeds.
     let setup = (|| {
