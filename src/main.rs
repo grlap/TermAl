@@ -1383,6 +1383,7 @@ include!("delegations.rs");
 include!("delegation_inventory.rs");
 include!("delegation_worker.rs");
 include!("delegation_worker_handoff.rs");
+include!("delegation_worktree_location.rs");
 include!("delegation_attempt_state.rs");
 include!("delegation_followup_admission.rs");
 include!("delegation_result_parser.rs");

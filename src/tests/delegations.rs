@@ -1635,10 +1635,11 @@ async fn opencode_delegation_normalizes_a_valid_model_on_the_child_record() {
     let repo_root = test_temp_dir().join(format!("termal-opencode-model-{unique}"));
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    fs::write(repo_root.join(".gitignore"), ".worktrees/\n").expect("ignore file should write");
     run_git_test_command(&repo_root, &["init"]);
     run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
     run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
-    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["add", "README.md", ".gitignore"]);
     run_git_test_command(&repo_root, &["commit", "-m", "init"]);
 
     let parent_session_id = {
@@ -2219,13 +2220,14 @@ fn isolated_worktree_delegation_materializes_dirty_state_and_uses_workspace_writ
         test_app_state_with_delegation_codex_runtime("isolated-delegation-runtime");
     let unique = Uuid::new_v4();
     let repo_root = test_temp_dir().join(format!("termal-isolated-source-{unique}"));
-    let worktree_root = test_temp_dir().join(format!("termal-isolated-child-{unique}"));
+    let worktree_root = repo_root.join(".worktrees").join("child");
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    fs::write(repo_root.join(".gitignore"), ".worktrees/\n").expect("ignore file should write");
     run_git_test_command(&repo_root, &["init"]);
     run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
     run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
-    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["add", "README.md", ".gitignore"]);
     run_git_test_command(&repo_root, &["commit", "-m", "init"]);
     fs::write(repo_root.join("README.md"), "staged\n").expect("staged content should write");
     run_git_test_command(&repo_root, &["add", "README.md"]);
@@ -2322,10 +2324,11 @@ async fn isolated_worktree_delegation_route_generates_termal_owned_path_when_omi
     let repo_root = test_temp_dir().join(format!("termal-isolated-auto-source-{unique}"));
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    fs::write(repo_root.join(".gitignore"), ".worktrees/\n").expect("ignore file should write");
     run_git_test_command(&repo_root, &["init"]);
     run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
     run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
-    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["add", "README.md", ".gitignore"]);
     run_git_test_command(&repo_root, &["commit", "-m", "init"]);
     fs::write(repo_root.join("README.md"), "changed\n").expect("changed file should write");
 
@@ -2380,7 +2383,16 @@ async fn isolated_worktree_delegation_route_generates_termal_owned_path_when_omi
     let worktree_path = worktree_path
         .as_ref()
         .expect("generated worktree path should be stored");
-    assert!(worktree_path.contains(&created.delegation.id));
+    // The generated worktree lives in the source repository's ignored
+    // `.worktrees/` directory.
+    assert!(
+        FsPath::new(worktree_path).parent().is_some_and(|parent| {
+            normalize_path_best_effort(parent)
+                == normalize_path_best_effort(&repo_root.join(".worktrees"))
+        }),
+        "{worktree_path} is not in {}",
+        repo_root.join(".worktrees").display()
+    );
     assert_eq!(
         fs::read_to_string(FsPath::new(worktree_path).join("README.md"))
             .unwrap()
@@ -2582,13 +2594,14 @@ fn isolated_worktree_rejects_untracked_files_without_leaving_worktree() {
         test_app_state_with_delegation_codex_runtime("isolated-untracked-rollback-runtime");
     let unique = Uuid::new_v4();
     let repo_root = test_temp_dir().join(format!("termal-isolated-untracked-source-{unique}"));
-    let worktree_root = test_temp_dir().join(format!("termal-isolated-untracked-child-{unique}"));
+    let worktree_root = repo_root.join(".worktrees").join("child");
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
+    fs::write(repo_root.join(".gitignore"), ".worktrees/\n").expect("ignore file should write");
     run_git_test_command(&repo_root, &["init"]);
     run_git_test_command(&repo_root, &["config", "user.email", "termal@example.com"]);
     run_git_test_command(&repo_root, &["config", "user.name", "TermAl"]);
-    run_git_test_command(&repo_root, &["add", "README.md"]);
+    run_git_test_command(&repo_root, &["add", "README.md", ".gitignore"]);
     run_git_test_command(&repo_root, &["commit", "-m", "init"]);
     fs::write(repo_root.join("new-file.txt"), "untracked\n").expect("untracked file should write");
 

@@ -258,7 +258,17 @@ fn should_skip_instruction_directory(path: &FsPath) -> bool {
 fn should_skip_instruction_directory_name(name: &str) -> bool {
     matches!(
         name,
-        ".git" | ".idea" | ".termal" | "node_modules" | "target" | "dist" | "build" | ".next"
+        ".git"
+            | ".idea"
+            | ".termal"
+            // Delegation worktrees: each holds a full copy of the repository's
+            // instructions, which are not this workdir's own.
+            | ".worktrees"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
     )
 }
 

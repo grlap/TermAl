@@ -45,9 +45,18 @@ fn resolve_source_codex_home_dir() -> Result<PathBuf> {
 }
 
 /// Resolves TermAl data dir.
+#[cfg(not(test))]
 fn resolve_termal_data_dir(default_workdir: &str) -> PathBuf {
     let base = resolve_home_dir().unwrap_or_else(|| PathBuf::from(default_workdir));
     base.join(".termal")
+}
+
+/// Under test the production data dir is never used: whatever a test reaches
+/// through this owner (codex homes, stores, settings) lands in the test's own
+/// temporary tree instead of the user's real `~/.termal`.
+#[cfg(test)]
+fn resolve_termal_data_dir(_default_workdir: &str) -> PathBuf {
+    test_temp_dir().join("termal-data")
 }
 
 /// Resolves home dir.

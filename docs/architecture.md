@@ -187,9 +187,14 @@ unimplemented and return `501 Not Implemented` so clients can treat them as
 feature-gated rather than malformed input. While a read-only delegation is
 running, local TermAl-mediated writes are blocked for the delegated
 project/workdir scope from any session, not just from the child session, so
-parent/sibling `sessionId` routing cannot bypass the read-only policy.
-`isolatedWorktree` requests may omit `worktreePath`; the backend generates a
-TermAl-owned path before persisting the delegation record.
+parent/sibling `sessionId` routing cannot bypass the read-only policy. A Git
+tree of its own nested in that scope, such as an isolated delegation's
+worktree, is not part of it.
+`isolatedWorktree` requests may omit `worktreePath`; the backend then uses
+`<source repository>/.worktrees/d-<first twelve hex digits of the id>`. Any worktree path must lie
+inside the source repository in a Git-ignored directory; after the delegation
+ends the worktree stays there until the spawning parent removes it (see
+[delegation worktrees](features/delegation-worktrees.md)).
 OpenCode is an explicit exception to the `readOnly` agent matrix: the backend
 rejects OpenCode + `readOnly` before child/runtime creation because OpenCode
 cannot currently enforce the shared-worktree read-only contract. OpenCode

@@ -642,7 +642,6 @@ impl AppState {
                 let prepared = prepare_isolated_delegation_worktree(
                     &source_cwd,
                     worktree_path.as_deref(),
-                    &self.default_workdir,
                     &delegation_id,
                     (mode == DelegationMode::Worker).then_some(base.as_deref().unwrap_or("HEAD")),
                 )?;
@@ -4621,7 +4620,6 @@ fn delegation_codex_sandbox_mode(write_policy: &DelegationWritePolicy) -> CodexS
 fn prepare_isolated_delegation_worktree(
     source_cwd: &str,
     requested_worktree_path: Option<&str>,
-    default_workdir: &str,
     delegation_id: &str,
     worker_base: Option<&str>,
 ) -> Result<PreparedIsolatedWorktree, ApiError> {
@@ -4658,16 +4656,7 @@ fn prepare_isolated_delegation_worktree(
         .to_path_buf();
 
     let worktree_root =
-        resolve_isolated_worktree_root(requested_worktree_path, default_workdir, delegation_id)?;
-    let source_repo_root_text = source_repo_root.to_string_lossy();
-    let worktree_root_text = worktree_root.to_string_lossy();
-    if path_contains(source_repo_root_text.as_ref(), &worktree_root)
-        || path_contains(worktree_root_text.as_ref(), &source_repo_root)
-    {
-        return Err(ApiError::bad_request(
-            "isolated worktree path must be outside the source repository",
-        ));
-    }
+        resolve_isolated_worktree_root(requested_worktree_path, &source_repo_root, delegation_id)?;
 
     ensure_isolated_worktree_target_available(&worktree_root)?;
     if let Some(base) = worker_base {
@@ -4725,19 +4714,27 @@ fn prepare_isolated_delegation_worktree(
     })
 }
 
+/// Where an isolated delegation's worktree goes: by default
+/// `<source repo>/.worktrees/d-<first twelve hex digits of the id>`, otherwise
+/// the requested path. Either way it lies strictly inside the source
+/// repository, outside its `.git`, in a directory Git ignores, so the parent's
+/// status and dirty-state capture never see it
+/// (delegation_worktree_location.rs).
 fn resolve_isolated_worktree_root(
     path: Option<&str>,
-    default_workdir: &str,
+    source_repo_root: &FsPath,
     delegation_id: &str,
 ) -> Result<PathBuf, ApiError> {
     let requested_path = match path.map(str::trim).filter(|value| !value.is_empty()) {
         Some(path) => resolve_requested_path(path)?,
-        None => resolve_termal_data_dir(default_workdir)
-            .join("delegations")
-            .join(delegation_id)
-            .join("worktree"),
+        None => source_repo_root
+            .join(DELEGATION_WORKTREES_DIR)
+            .join(delegation_worktree_folder_name(delegation_id)),
     };
-    canonicalize_path_with_existing_ancestor(&requested_path)
+    let worktree_root = canonicalize_path_with_existing_ancestor(&requested_path)?;
+    let relative = isolated_worktree_relative_path(source_repo_root, &worktree_root)?;
+    ensure_isolated_worktree_ignored(source_repo_root, &relative)?;
+    Ok(worktree_root)
 }
 
 fn ensure_isolated_worktree_target_available(worktree_root: &FsPath) -> Result<(), ApiError> {
@@ -4774,6 +4771,7 @@ fn create_detached_git_worktree(
     worktree_root: &FsPath,
     revision: &str,
 ) -> Result<(), ApiError> {
+    refuse_worktree_beyond_git_path_limit(source_repo_root, worktree_root)?;
     let parent = worktree_root.parent().ok_or_else(|| {
         ApiError::bad_request(format!(
             "isolated worktree path `{}` is invalid",
@@ -5089,10 +5087,15 @@ fn append_local_project_write_targets(
         let Some(workdir) = target.workdir.as_deref() else {
             continue;
         };
-        for project in local_projects
-            .iter()
-            .filter(|project| path_contains(&project.root_path, FsPath::new(workdir)))
-        {
+        // A workdir in a Git tree of its own nested in the project, such as an
+        // isolated delegation worktree under `.worktrees/`, is not the project.
+        for project in local_projects.iter().filter(|project| {
+            path_contains(&project.root_path, FsPath::new(workdir))
+                && !nested_independent_git_tree(
+                    FsPath::new(&project.root_path),
+                    FsPath::new(workdir),
+                )
+        }) {
             inferred_targets.push(DelegationWriteTarget {
                 project_id: Some(project.project_id.clone()),
                 workdir: Some(project.root_path.clone()),
@@ -5148,9 +5151,54 @@ fn delegation_write_scope_matches(
     workdir.is_some_and(|workdir| {
         // Match both directions: callers writing inside the delegated tree and
         // callers targeting a broader ancestor of the delegated tree are blocked.
-        path_contains(scope_workdir, FsPath::new(workdir))
+        // A Git tree of its own nested in the delegated tree is not part of it.
+        (path_contains(scope_workdir, FsPath::new(workdir))
+            && !nested_independent_git_tree(FsPath::new(scope_workdir), FsPath::new(workdir)))
             || path_contains(workdir, FsPath::new(scope_workdir))
     })
+}
+
+/// Whether `inner` lies in a Git tree of its own nested under `outer`, such as
+/// an isolated delegation worktree in the repository's `.worktrees/`: the
+/// nearest directory from `inner` up to, but not including, `outer` that holds
+/// a `.git` marker is a valid Git boundary. Files there are not part of
+/// `outer`'s tree. Anything that cannot be confirmed counts as part of it.
+/// Inspects the filesystem, so callers hold no state lock.
+fn nested_independent_git_tree(outer: &FsPath, inner: &FsPath) -> bool {
+    let outer = normalize_path_best_effort(outer);
+    let inner = normalize_path_best_effort(inner);
+    if inner == outer || !inner.starts_with(&outer) {
+        return false;
+    }
+    for directory in inner
+        .ancestors()
+        .take_while(|path| *path != outer.as_path())
+    {
+        // Only a directory holds a Git marker: a file target, or a path not
+        // created yet, is judged by the directories that contain it.
+        if !directory.is_dir() {
+            continue;
+        }
+        match fs::metadata(directory.join(".git")) {
+            // Only a linked worktree is a tree of its own. A submodule or a
+            // nested repository is part of the tree that contains it.
+            Ok(metadata) if metadata.is_file() => {
+                return delegation_git_boundary::is_valid(directory, false).unwrap_or(false)
+                    && linked_worktree_git_dir(directory)
+                        .is_some_and(|git_dir| git_dir.join("commondir").is_file());
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// The Git directory a `.git` file in `directory` names.
+fn linked_worktree_git_dir(directory: &FsPath) -> Option<PathBuf> {
+    let text = fs::read_to_string(directory.join(".git")).ok()?;
+    let path = text.lines().next()?.strip_prefix("gitdir:")?.trim();
+    Some(directory.join(path))
 }
 
 fn delegation_approval_scope_matches(scope: &DelegationWriteScope, workdir: Option<&str>) -> bool {
@@ -5161,7 +5209,9 @@ fn delegation_approval_scope_matches(scope: &DelegationWriteScope, workdir: Opti
     let reviewed = normalize_path_best_effort(FsPath::new(scope_workdir));
     let target = normalize_path_best_effort(FsPath::new(workdir));
     if target.starts_with(&reviewed) {
-        return true;
+        // A Git tree of its own nested in the reviewed one, such as an
+        // isolated delegation worktree, is not under review.
+        return !nested_independent_git_tree(&reviewed, &target);
     }
     if !reviewed.starts_with(&target) {
         return false;

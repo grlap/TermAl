@@ -21,7 +21,7 @@ impl WorkerFixture {
         let _placement = TestTempRootDirectoryScope::repository_local();
         let root = TestTempRoot::create("delegation-worker");
         let source = root.path().join("source");
-        let worktree = root.path().join("child");
+        let worktree = source.join(".worktrees").join("child");
         fs::create_dir_all(&source).expect("source directory");
         run_git_test_command(&source, &["init"]);
         run_git_test_command(&source, &["config", "user.name", "Worker fixture"]);
@@ -29,7 +29,8 @@ impl WorkerFixture {
         run_git_test_command(&source, &["config", "core.autocrlf", "false"]);
         run_git_test_command(&source, &["config", "commit.gpgsign", "false"]);
         fs::write(source.join("README.md"), "base\n").expect("base content");
-        run_git_test_command(&source, &["add", "README.md"]);
+        fs::write(source.join(".gitignore"), ".worktrees/\n").expect("ignore file");
+        run_git_test_command(&source, &["add", "README.md", ".gitignore"]);
         run_git_test_command(&source, &["commit", "-m", "base"]);
         let base = run_git_test_command_output(&source, &["rev-parse", "HEAD"]);
         run_git_test_command(&source, &["branch", "worker-base"]);
