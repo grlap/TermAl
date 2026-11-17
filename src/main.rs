@@ -1340,6 +1340,7 @@ include!("acp_opencode_config.rs");
 include!("codex.rs");
 include!("codex_engram_bootstrap.rs");
 include!("codex_thread_recovery.rs");
+include!("codex_approval_sandbox.rs");
 include!("codex_events.rs");
 include!("codex_launcher_output.rs");
 include!("codex_terminal_ownership.rs");

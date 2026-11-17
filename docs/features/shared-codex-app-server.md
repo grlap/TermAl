@@ -168,17 +168,34 @@ is introduced.
 ## Approval policy ownership
 
 Codex's approval setting and TermAl's host approval policy are separate.
-Host `auto-approve` is persisted and displayed as its own setting, and sends
-native `on-request` at `thread/start`, `thread/resume` and `turn/start`. Codex
-still requests permission; TermAl decides and answers it. Native `never` is not
-the implementation of host AutoApprove: it can deny an action rather than
-offering the host an approval decision. Its existing behavior is unchanged.
+Host `auto-approve` is persisted and displayed as its own setting. With a
+read-only or workspace-write sandbox it sends a native granular policy at
+`thread/start`, `thread/resume` and `turn/start`. Native sandbox escalation is
+disabled; command-rule, extra-permission, skill and MCP approval prompts remain
+enabled for the existing host handler. Codex executes within the sandbox without
+waiting for permission to escape it.
+Full access retains native `on-request`, with TermAl answering ordinary requests.
 
-Command, file and permissions approvals, including sandbox-escalation requests,
-continue to receive the host's existing decisions. The new behavior is that
-tagged routine MCP permissions are also answered, not that sandbox permissions
-are suppressed or widened. The shared event router handles these methods under
-the current host policy:
+The host also handles explicit requests from an already-running turn, including
+after a mid-turn switch to AutoApprove. These answers respect that turn's active
+sandbox, even if a different sandbox has been selected for the next turn.
+Explicit network access and additional write grants are refused under a
+restricted cap. Even a path spelled inside the workspace may follow a symlink,
+junction or automount; the host does not look up provider-supplied permission
+paths. This also refuses explicit inside-workspace write grants, whose safe
+extent cannot be established without such a lookup. Ordinary writes performed
+inside the running native sandbox do not need an additional host grant.
+A refusal creates a bounded session message explaining the active sandbox,
+requested access and the setting to change for a later turn; it creates no
+approval card or wait. The requested write path is displayed with a bounded,
+control-filtered preview; it is never resolved. Runtime/turn/cap ownership is
+rechecked before the reply. Shell text is never used as proof of access. Tagged
+routine MCP permissions keep their separate host policy.
+Plain command or file asks without extra-access metadata are answered inside
+the native cap when that running turn began with restricted AutoApprove.
+An older `on-request` turn switched to host AutoApprove mid-turn still needs
+explicit access metadata, since its native policy can request escalation.
+The shared event router handles:
 
 - `item/commandExecution/requestApproval`
 - `item/fileChange/requestApproval`
@@ -198,7 +215,8 @@ mid-turn enables automatic answers immediately; switching back to `on-request`
 or `never` stops them immediately. Native parameters already sent at `turn/start`
 are not changed: their next-turn contract remains intact. No pending approval
 or transcript card is created for an
-automatic response. Genuine user input, form/URL elicitation and generic
+automatic response. A native `humanCommand` checkpoint requires its explicit
+human decision. Genuine user input, form/URL elicitation and generic
 app-server requests continue through their interactive handlers. The REPL uses
 the same routine-tool classifier.
 

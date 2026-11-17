@@ -171,12 +171,33 @@ fn try_auto_respond_codex_approval_request(
     shared_terminal_identity_unresolved: bool,
     input_tx: &Sender<CodexRuntimeCommand>,
 ) -> Result<bool> {
+    if method == "item/commandExecution/requestApproval"
+        && message.pointer("/params/kind").and_then(Value::as_str) == Some("humanCommand")
+    {
+        return Ok(false);
+    }
     let described = parse_codex_approval_request(method, message)?;
     let mcp = parse_codex_mcp_tool_approval(method, message);
     if described.is_none() && mcp.is_none() {
         return Ok(false);
     }
-    let inner = state.inner.lock().expect("state mutex poisoned");
+    let sandbox = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_visible_session_index(session_id) else {
+            return Ok(false);
+        };
+        let record = &inner.sessions[index];
+        if record.codex_approval_policy != CodexApprovalPolicy::AutoApprove {
+            return Ok(false);
+        }
+        CodexApprovalSandbox::capture(record)
+    };
+    // Classify the request without filesystem I/O. Before handing the response to
+    // the runtime, compare the exact turn/cap/workdir used for this decision.
+    let sandbox_refusal = described
+        .as_ref()
+        .and_then(|_| sandbox.refusal(method, &message["params"]));
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
     let Some(index) = inner.find_visible_session_index(session_id) else {
         return Ok(false);
     };
@@ -188,6 +209,7 @@ fn try_auto_respond_codex_approval_request(
         read_only_session_delegation_block_locked(&inner, Some(session_id)).is_some();
     let unavailable = codex_approval_ownership_held(record)
         || shared_terminal_identity_unresolved
+        || (described.is_some() && CodexApprovalSandbox::capture(record) != sandbox)
         || expected_runtime_id.is_some_and(|id| {
             !record
                 .runtime
@@ -201,7 +223,7 @@ fn try_auto_respond_codex_approval_request(
                     record.session.status,
                     SessionStatus::Active | SessionStatus::Approval
                 )));
-    let decision = if read_only_delegation || unavailable {
+    let decision = if read_only_delegation || unavailable || sandbox_refusal.is_some() {
         ApprovalDecision::Rejected
     } else {
         ApprovalDecision::Accepted
@@ -227,7 +249,7 @@ fn try_auto_respond_codex_approval_request(
         session_id,
         method,
         request_id,
-        if read_only_delegation || unavailable {
+        if decision == ApprovalDecision::Rejected {
             "declined"
         } else {
             "accepted"
@@ -241,6 +263,11 @@ fn try_auto_respond_codex_approval_request(
             },
         })
         .map_err(|err| anyhow!("failed to deliver Codex AutoApprove response: {err}"))?;
+    if !read_only_delegation && !unavailable {
+        if let Some(requested) = sandbox_refusal {
+            note_codex_sandbox_refusal_locked(state, &mut inner, index, &requested)?;
+        }
+    }
     Ok(true)
 }
 

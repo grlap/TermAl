@@ -118,6 +118,8 @@ fn codex_root_policy_crossing_regenerates_bound_thread_approvals_on_next_dispatc
                 record.attach_to_shared_codex_profile(SharedCodexProfile::Default);
                 record.codex_approval_policy = before;
                 record.session.approval_policy = Some(before);
+                record.codex_sandbox_mode = CodexSandboxMode::WorkspaceWrite;
+                record.session.sandbox_mode = Some(CodexSandboxMode::WorkspaceWrite);
                 record.session.status = SessionStatus::Idle;
                 set_record_external_session_id(record, Some("bound-thread".to_owned()));
             }
@@ -238,7 +240,17 @@ fn codex_root_policy_crossing_regenerates_bound_thread_approvals_on_next_dispatc
             let request: Value = serde_json::from_slice(&writer).unwrap();
             assert_eq!(request["method"], "thread/resume");
             assert_eq!(request["params"]["threadId"], "bound-thread");
-            assert_eq!(request["params"]["approvalPolicy"], after.as_cli_value());
+            let expected_native_policy = match after {
+                CodexApprovalPolicy::AutoApprove => {
+                    json!({"granular": {"sandbox_approval": false, "rules": true, "mcp_elicitations": true, "request_permissions": true, "skill_approval": true}})
+                }
+                CodexApprovalPolicy::Never => json!("never"),
+                CodexApprovalPolicy::OnRequest => json!("on-request"),
+                CodexApprovalPolicy::Untrusted => json!("untrusted"),
+                CodexApprovalPolicy::OnFailure => json!("on-failure"),
+            };
+            assert_eq!(request["params"]["sandbox"], "workspace-write");
+            assert_eq!(request["params"]["approvalPolicy"], expected_native_policy);
             let server = &request["params"]["config"]["mcp_servers"]["termal-delegation"];
             assert_eq!(
                 server.get("tools").is_some(),
@@ -407,14 +419,18 @@ fn codex_coordination_approval_exceptions_do_not_expand_other_policies_or_childr
     let home = TestTempRoot::create("codex-root-mcp-policy-isolation");
     fs::write(home.path().join("config.toml"), "").unwrap();
     for thread in [None, Some("existing")] {
-        for policy in [
-            CodexApprovalPolicy::AutoApprove,
-            CodexApprovalPolicy::OnRequest,
-            CodexApprovalPolicy::Untrusted,
-            CodexApprovalPolicy::OnFailure,
+        for (policy, expected_native_policy) in [
+            (
+                CodexApprovalPolicy::AutoApprove,
+                json!({"granular": {"sandbox_approval": false, "rules": true, "mcp_elicitations": true, "request_permissions": true, "skill_approval": true}}),
+            ),
+            (CodexApprovalPolicy::OnRequest, json!("on-request")),
+            (CodexApprovalPolicy::Untrusted, json!("untrusted")),
+            (CodexApprovalPolicy::OnFailure, json!("on-failure")),
         ] {
             let request = setup(home.path(), thread, policy, false);
-            assert_eq!(request["params"]["approvalPolicy"], policy.as_cli_value());
+            assert_eq!(request["params"]["sandbox"], "workspace-write");
+            assert_eq!(request["params"]["approvalPolicy"], expected_native_policy);
             assert!(
                 request["params"]["config"]["mcp_servers"]["termal-delegation"]
                     .get("tools")

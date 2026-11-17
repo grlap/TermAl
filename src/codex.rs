@@ -1411,7 +1411,7 @@ fn start_shared_codex_thread_setup_request(
                 "model": setup_request.model,
                 "serviceTier": setup_request.service_tier,
                 "sandbox": setup_request.sandbox_mode.as_cli_value(),
-                "approvalPolicy": setup_request.approval_policy.as_cli_value(),
+                "approvalPolicy": codex_native_approval_policy(setup_request.approval_policy, setup_request.sandbox_mode),
                 "config": mcp_config,
             }),
         ),
@@ -1422,7 +1422,7 @@ fn start_shared_codex_thread_setup_request(
                 "model": setup_request.model,
                 "serviceTier": setup_request.service_tier,
                 "sandbox": setup_request.sandbox_mode.as_cli_value(),
-                "approvalPolicy": setup_request.approval_policy.as_cli_value(),
+                "approvalPolicy": codex_native_approval_policy(setup_request.approval_policy, setup_request.sandbox_mode),
                 "personality": "pragmatic",
                 "config": mcp_config,
             }),
@@ -2214,7 +2214,7 @@ fn handle_shared_codex_start_turn_inner(
         json!({
             "threadId": thread_id,
             "cwd": command.cwd,
-            "approvalPolicy": command.approval_policy.as_cli_value(),
+            "approvalPolicy": codex_native_approval_policy(command.approval_policy, command.sandbox_mode),
             "effort": command.reasoning_effort.as_api_value(),
             "model": command.model,
             // Explicit null clears any sticky thread tier when the session

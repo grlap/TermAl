@@ -434,8 +434,10 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
     );
     assert_eq!(
         resume_request.pointer("/params/approvalPolicy"),
-        Some(&json!("on-request")),
-        "TermAl AutoApprove must keep native Codex approval requests enabled on resume"
+        Some(
+            &json!({"granular": {"sandbox_approval": false, "rules": true, "mcp_elicitations": true, "request_permissions": true, "skill_approval": true}})
+        ),
+        "restricted AutoApprove resumes inside its sandbox without native approval waits"
     );
     assert_eq!(
         resume_request.pointer("/params/serviceTier"),
@@ -934,8 +936,10 @@ fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
     );
     assert_eq!(
         request.pointer("/params/approvalPolicy"),
-        Some(&json!("on-request")),
-        "TermAl AutoApprove must keep native Codex approval requests enabled per turn"
+        Some(
+            &json!({"granular": {"sandbox_approval": false, "rules": true, "mcp_elicitations": true, "request_permissions": true, "skill_approval": true}})
+        ),
+        "restricted AutoApprove turns execute inside their sandbox without native approval waits"
     );
 
     let (_request_id, sender) = take_pending_codex_request(&pending_requests);
@@ -1525,8 +1529,10 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
     );
     assert_eq!(
         start_request.pointer("/params/approvalPolicy"),
-        Some(&json!("on-request")),
-        "TermAl AutoApprove must keep native Codex approval requests enabled at thread start"
+        Some(
+            &json!({"granular": {"sandbox_approval": false, "rules": true, "mcp_elicitations": true, "request_permissions": true, "skill_approval": true}})
+        ),
+        "restricted AutoApprove starts inside its sandbox without native approval waits"
     );
     let shell_env = start_request
         .pointer("/params/config/shell_environment_policy/set")

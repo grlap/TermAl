@@ -1,0 +1,52 @@
+{
+  "permissions": {
+    "id": "opaque-permission-7",
+    "method": "item/permissions/requestApproval",
+    "params": {
+      "threadId": "sandbox-thread",
+      "turnId": "sandbox-turn",
+      "itemId": "permission-item",
+      "startedAtMs": 1794800000000,
+      "cwd": "/workspace/project",
+      "permissions": { "network": { "enabled": true } },
+      "reason": "Fetch a dependency"
+    }
+  },
+  "command": {
+    "id": "opaque-command-9",
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "sandbox-thread",
+      "turnId": "sandbox-turn",
+      "itemId": "command-item",
+      "startedAtMs": 1794800000000,
+      "command": "fetch-dependency",
+      "cwd": "/workspace/project",
+      "additionalPermissions": { "network": { "enabled": true } },
+      "reason": "Fetch a dependency"
+    }
+  },
+  "network": {
+    "id": "opaque-network-11",
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "sandbox-thread",
+      "turnId": "sandbox-turn",
+      "itemId": "network-item",
+      "startedAtMs": 1794800000000,
+      "networkApprovalContext": { "host": "example.org", "protocol": "https" }
+    }
+  },
+  "file": {
+    "id": "opaque-file-13",
+    "method": "item/fileChange/requestApproval",
+    "params": {
+      "threadId": "sandbox-thread",
+      "turnId": "sandbox-turn",
+      "itemId": "file-item",
+      "startedAtMs": 1794800000000,
+      "grantRoot": "/outside-workspace",
+      "reason": "Apply a requested change"
+    }
+  }
+}

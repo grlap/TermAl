@@ -4068,6 +4068,9 @@ fn exercise_codex_auto_approve_mcp_route(read_only: bool, guard: Option<&str>) {
         record.active_codex_approval_policy = Some(CodexApprovalPolicy::AutoApprove);
         record.codex_approval_policy = CodexApprovalPolicy::AutoApprove;
         record.session.approval_policy = Some(CodexApprovalPolicy::AutoApprove);
+        // This fixture bypasses turn/start, whose owner normally records the
+        // active cap. Its ordinary request vector includes network and writes.
+        record.active_codex_sandbox_mode = Some(CodexSandboxMode::DangerFullAccess);
         record.runtime_reset_required = matches!(
             guard,
             Some("next-turn-reset" | "reset-stop" | "reset-unresolved" | "shared-unresolved")
@@ -4401,6 +4404,12 @@ fn codex_auto_approve_accepts_all_approval_kinds_without_pending_cards() {
         CodexApprovalPolicy::OnRequest,
         CodexApprovalPolicy::AutoApprove,
     );
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        // These cases intentionally grant network and unrestricted writes.
+        inner.sessions[index].active_codex_sandbox_mode = Some(CodexSandboxMode::DangerFullAccess);
+    }
     let (input_tx, input_rx) = mpsc::channel();
 
     for (method, request, expected_request_id, expected_result) in codex_auto_approval_requests() {

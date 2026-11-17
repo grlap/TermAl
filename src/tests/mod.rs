@@ -51,6 +51,7 @@ mod codex_read_only_profile;
 mod codex_read_only_tracker;
 mod codex_reviewer_mcp_startup;
 mod codex_root_mcp_approvals;
+mod codex_sandbox_approvals;
 mod commit_hidden_retain_cost;
 mod output_encoding_routes;
 pub(crate) use codex_reviewer_mcp_startup::run_settlement_gap_hook;

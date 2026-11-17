@@ -1075,9 +1075,9 @@ impl CodexApprovalPolicy {
             Self::Untrusted => "untrusted",
             Self::OnFailure => "on-failure",
             Self::OnRequest => "on-request",
-            // AutoApprove is a TermAl policy. Codex must still emit approval
-            // requests so TermAl can accept them (or reject them for an active
-            // read-only delegation) with the correct response shape.
+            // AutoApprove is a TermAl policy. Full access keeps native asks
+            // for host answers. The app-server request builder selects a native
+            // granular policy when the current command has a restricted cap.
             Self::AutoApprove => "on-request",
             Self::Never => "never",
         }
