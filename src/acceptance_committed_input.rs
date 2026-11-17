@@ -476,6 +476,12 @@ fn acceptance_committed_input_record_acknowledged(
         Some(TestRunVerificationAck::Rejected { detail }) => {
             return Err(unacknowledged(format!("rejected: {detail}")));
         }
+        Some(TestRunVerificationAck::LocalUnclassified { .. }) => {
+            return Err(AcceptanceCommittedInputRefusal::UnclassifiedStages {
+                run_id: run_id.to_owned(),
+                commit: commit.to_owned(),
+            });
+        }
         None => {
             let request = test_run_read_json(&run_dir.join("request.json"));
             let results = test_run_read_json(&run_dir.join("results.json"));

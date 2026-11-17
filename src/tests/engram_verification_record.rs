@@ -19,6 +19,9 @@ mod receipt_record_ids;
 #[path = "engram_verification_refusals.rs"]
 mod refusals;
 
+#[path = "engram_verification_unclassified.rs"]
+mod unclassified;
+
 #[path = "engram_verification_declared.rs"]
 mod declared;
 
@@ -1482,7 +1485,7 @@ fn the_real_fingerprint_tests_argv_is_a_test_fingerprinted_as_it_ran() {
 }
 
 #[test]
-fn a_stage_that_is_neither_test_nor_build_keeps_the_run_pending_by_name() {
+fn unclassified_preparation_names_the_stage_without_building_a_body() {
     let fixture = RunFixture::new("verification-record-unclassified");
     // A stage no rule, nor the sender's own stage table, names.
     let mut results = commit_results();

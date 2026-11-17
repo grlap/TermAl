@@ -50,7 +50,8 @@ fn registered_closing_clean_input(registration: &TestRunRegistration, disk: &Tes
     };
     match &registration.verification_record {
         None => true,
-        Some(TestRunVerificationAck::Rejected { .. }) => false,
+        Some(TestRunVerificationAck::Rejected { .. }
+            | TestRunVerificationAck::LocalUnclassified { .. }) => false,
         Some(ack) => {
             ack.body_digest() == Some(engram_verification_record_body_digest(&body).as_str())
         }

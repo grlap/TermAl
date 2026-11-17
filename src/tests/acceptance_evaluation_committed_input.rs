@@ -1048,6 +1048,7 @@ fn an_unclassified_renamed_link_check_cannot_acknowledge_and_does_not_offer_a_wa
         "after sender",
         "progress removed",
         "stale progress",
+        "after final local refusal",
     ] {
         match phase {
             "after sender" => {
@@ -1059,6 +1060,13 @@ fn an_unclassified_renamed_link_check_cannot_acknowledge_and_does_not_offer_a_wa
                         reason: pending.clone()
                     })
                 );
+            }
+            "after final local refusal" => {
+                state.engram_verification_records_tick();
+                assert!(matches!(
+                    current_registration(&state).verification_record,
+                    Some(TestRunVerificationAck::LocalUnclassified { .. })
+                ));
             }
             "progress removed" => fs::remove_file(&progress_path).unwrap(),
             "stale progress" => fs::write(
@@ -1119,7 +1127,14 @@ fn an_unclassified_renamed_link_check_cannot_acknowledge_and_does_not_offer_a_wa
                 .join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)
                 .exists()
         );
-        assert!(current_registration(&state).verification_record.is_none());
+        if phase == "after final local refusal" {
+            assert!(matches!(
+                current_registration(&state).verification_record,
+                Some(TestRunVerificationAck::LocalUnclassified { .. })
+            ));
+        } else {
+            assert!(current_registration(&state).verification_record.is_none());
+        }
         if phase == "before sender" {
             assert!(
                 !progress_path.exists(),

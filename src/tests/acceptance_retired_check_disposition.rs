@@ -196,7 +196,6 @@ fn an_acknowledged_retired_check_disposition_spawns_and_discloses_the_original_o
             DISPOSITION_REASON,
             DISPOSITION_RECORD,
             fixture.parent.as_str(),
-            fixture.original_root.as_str(),
         ] {
             assert!(
                 record.prompt.contains(required),
@@ -204,6 +203,25 @@ fn an_acknowledged_retired_check_disposition_spawns_and_discloses_the_original_o
                 record.prompt
             );
         }
+        // Paths in the disclosure are JSON strings, including escaped
+        // backslashes on Windows. Compare the disclosed value itself.
+        let disclosures: Vec<Value> = serde_json::from_str(
+            record
+                .prompt
+                .split_once("Host-recorded retired check dispositions (context only, no verification credit):\n")
+                .expect("the evaluator receives the recorded disposition")
+                .1
+                .lines()
+                .next()
+                .expect("the disclosure has a JSON body"),
+        )
+        .expect("the evaluator receives valid disclosure JSON");
+        assert_eq!(disclosures.len(), 1);
+        assert_eq!(
+            disclosures[0]["checkedRoot"]["workspaceId"].as_str(),
+            Some(fixture.original_root.as_str()),
+            "the original checked root is disclosed exactly"
+        );
         let target = record.acceptance_evaluation.unwrap();
         assert_eq!(target.source_root.unwrap().root, fixture.current_root);
         assert_original_check_unchanged(&fixture, &body);

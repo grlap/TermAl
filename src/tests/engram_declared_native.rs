@@ -3,6 +3,9 @@
 use super::*;
 use crate::tests::engram_declared_source_fixture::NativeSourceOwner;
 
+#[path = "engram_verification_unclassified_declared.rs"]
+mod unclassified_refusal;
+
 #[path = "engram_declared_task_artifacts.rs"]
 mod task_artifacts;
 

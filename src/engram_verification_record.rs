@@ -328,8 +328,10 @@ enum EngramVerificationRecordPending {
     NoConnection,
     /// Historical progress only; current routing does not emit this reason.
     AwaitingNamingBinding,
-    /// A stage is neither a test, build nor admitted lint check; the record
-    /// is not built until someone decides how it is recorded.
+    /// A stage is neither a test, build nor admitted lint check. Preparation
+    /// names it without building a body; the tick rejects a completed generic
+    /// run locally. Declared-native runs await their original end as Waiting,
+    /// before classification; their exclusion from local rejection is defensive.
     UnclassifiedStages { stages: Vec<String> },
     /// The run's checkout was not clean after it. The producer admits only a
     /// clean post-run input today, so nothing is sent.
@@ -416,6 +418,9 @@ enum TestRunVerificationAck {
     /// retired an unsent legacy input. The detail distinguishes these cases;
     /// local retirement says nothing about an earlier producer outcome.
     Rejected { detail: String },
+    /// Final local refusal before any producer send. Its presentation can be
+    /// repaired after restart without reopening delivery or granting credit.
+    LocalUnclassified { detail: String },
 }
 
 impl TestRunVerificationAck {
@@ -423,7 +428,7 @@ impl TestRunVerificationAck {
     fn body_digest(&self) -> Option<&str> {
         match self {
             Self::Received { body_digest, .. } | Self::Settled { body_digest, .. } => Some(body_digest),
-            Self::Rejected { .. } => None,
+            Self::Rejected { .. } | Self::LocalUnclassified { .. } => None,
         }
     }
 }
@@ -668,9 +673,9 @@ fn engram_verification_record_is_build(argv: &[String]) -> bool {
 /// `engram-live` stage, as `engram_check_showed_passing_tests` counts it), or
 /// the sender's own launcher stage table
 /// (`ENGRAM_VERIFICATION_RECORD_LAUNCHER_TEST_STAGES`), makes it a Test. A stage none of these takes has no kind: the record is
-/// not built, and the run stays pending naming it
-/// (`EngramVerificationRecordPending::UnclassifiedStages`), never silently
-/// without it.
+/// not built. Preparation names it with `UnclassifiedStages`; the tick makes
+/// that a final local refusal for completed generic runs, without inventing
+/// a test classification or an Engram receipt.
 fn engram_verification_record_check_kind(
     mode: EngramVerificationRecordMode,
     stage: &str,
@@ -1416,7 +1421,7 @@ fn engram_verification_record_is_host_body(
 /// answers that validated body (`engram_verification_record_receipt_check`).
 /// The record's own progress is read first, from what the host observed and
 /// kept on `registration` (`TestRunVerificationAck`), never from the state
-/// file beside the run: a finished run is never read or hashed again, and a
+/// file beside the run: a finished run's producer body is never rebuilt, and a
 /// file that claims a receipt, a settlement or a rejection the host never
 /// observed neither holds nor stops the send.
 fn engram_verification_record_prepare(registration: &TestRunRegistration) -> EngramVerificationRecordPrepared {
@@ -1434,7 +1439,8 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
         Prepared::Pending(reason)
     };
     let held = match &registration.verification_record {
-        Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. }) => {
+        Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. }
+            | TestRunVerificationAck::LocalUnclassified { .. }) => {
             return Prepared::Finished;
         }
         Some(TestRunVerificationAck::Received { receipt, body_digest }) => {
@@ -1748,6 +1754,9 @@ fn engram_verification_record_producers(
 struct EngramVerificationRecordCursor {
     last: Option<String>,
     backoff: HashMap<String, EngramVerificationRecordBackoff>,
+    // Presentation repaired once per unchanged registration in this process.
+    // A fresh process retries from the authoritative local disposition.
+    local_refusals: HashMap<String, EngramLocalRefusalPresentation>,
 }
 
 #[derive(Debug)]
@@ -1779,6 +1788,7 @@ impl EngramVerificationRecordCursor {
     fn retain(&mut self, selected: &[TestRunRegistration]) {
         let runs: HashSet<&str> = selected.iter().map(|registration| registration.run_id.as_str()).collect();
         self.backoff.retain(|run_id, _| runs.contains(run_id.as_str()));
+        self.local_refusals.retain(|run_id, _| runs.contains(run_id.as_str()));
     }
 
     fn order(&self, mut registrations: Vec<TestRunRegistration>) -> Vec<TestRunRegistration> {
@@ -1838,8 +1848,8 @@ impl AppState {
     ) -> usize {
         let clock = self.engram_budget_clock();
         let deadline = clock.now() + budget;
-        // A settled or rejected run is finished: it is not selected, so
-        // none of its files is read again.
+        // Producer outcomes are finished. Local refusals also retain bounded
+        // presentation repair work until this process has completed it.
         let registrations: Vec<TestRunRegistration> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -1862,6 +1872,10 @@ impl AppState {
             if stopping() || clock.now() >= deadline {
                 break;
             }
+            if cursor.local_refusals.get(&registration.run_id).is_some_and(|presentation|
+                presentation.registration == registration && presentation.finished()) {
+                continue;
+            }
             // A run in its backoff is neither read nor routed.
             if cursor.waits(&registration, clock.now()) {
                 continue;
@@ -1871,40 +1885,58 @@ impl AppState {
             let settled = |settlement: EngramVerificationRecordSettlement| {
                 settlement == EngramVerificationRecordSettlement::Settled
             };
-            let done = match engram_verification_record_prepare(&registration) {
-                EngramVerificationRecordPrepared::Ready(frozen) => {
-                    let step = if let Some(retired) = engram_verification_record_retire_legacy(&frozen) {
-                        retired
-                    } else {
-                        let route = self.engram_verification_record_route_until(&registration, deadline);
-                        engram_verification_record_send(
-                            frozen,
-                            route.as_ref().map(EngramVerificationRecordRoute::link).map_err(Clone::clone),
-                        )
-                    };
-                    self.note_engram_verification_record_step(&registration, &step);
-                    match step {
-                        EngramVerificationRecordStep::Received { body, receipt } => settled(
-                            self.complete_engram_verification_record_until(&registration, &body, &receipt, deadline),
-                        ),
-                        EngramVerificationRecordStep::Rejected(_) => true,
-                        EngramVerificationRecordStep::Pending(_) => false,
+            let mut attempted = registration.clone();
+            let done = if matches!(registration.verification_record,
+                Some(TestRunVerificationAck::LocalUnclassified { .. })) {
+                cursor.repair_local_refusal(self, &registration)
+            } else {
+                match engram_verification_record_prepare(&registration) {
+                    EngramVerificationRecordPrepared::Ready(frozen) => {
+                        let step = if let Some(retired) = engram_verification_record_retire_legacy(&frozen) {
+                            retired
+                        } else {
+                            let route = self.engram_verification_record_route_until(&registration, deadline);
+                            engram_verification_record_send(
+                                frozen,
+                                route.as_ref().map(EngramVerificationRecordRoute::link).map_err(Clone::clone),
+                            )
+                        };
+                        self.note_engram_verification_record_step(&registration, &step);
+                        match step {
+                            EngramVerificationRecordStep::Received { body, receipt } => settled(
+                                self.complete_engram_verification_record_until(&registration, &body, &receipt, deadline),
+                            ),
+                            EngramVerificationRecordStep::Rejected(_) => true,
+                            EngramVerificationRecordStep::Pending(_) => false,
+                        }
                     }
+                    EngramVerificationRecordPrepared::ReceiptHeld { frozen, receipt } => settled(
+                        self.complete_engram_verification_record_until(&registration, &frozen.body, &receipt, deadline),
+                    ),
+                    EngramVerificationRecordPrepared::Pending(
+                        EngramVerificationRecordPending::UnclassifiedStages { stages },
+                    ) if registration.declared_native.is_none() => {
+                        if self.reject_unclassified_verification_record(&registration, &stages) {
+                            attempted.verification_record = Some(TestRunVerificationAck::LocalUnclassified {
+                                detail: unclassified_verification_detail(&stages),
+                            });
+                            cursor.repair_local_refusal(self, &attempted)
+                        } else {
+                            false
+                        }
+                    }
+                    EngramVerificationRecordPrepared::Pending(_) => false,
+                    EngramVerificationRecordPrepared::NotEligible
+                    | EngramVerificationRecordPrepared::Waiting
+                    | EngramVerificationRecordPrepared::Finished => true,
                 }
-                EngramVerificationRecordPrepared::ReceiptHeld { frozen, receipt } => settled(
-                    self.complete_engram_verification_record_until(&registration, &frozen.body, &receipt, deadline),
-                ),
-                EngramVerificationRecordPrepared::Pending(_) => false,
-                EngramVerificationRecordPrepared::NotEligible
-                | EngramVerificationRecordPrepared::Waiting
-                | EngramVerificationRecordPrepared::Finished => true,
             };
             // Left pending, or with its receipt unsettled: looked at again
             // only after its backoff, unless its acknowledgment changes first.
             if done {
                 cursor.backoff.remove(&registration.run_id);
             } else {
-                cursor.back_off(&registration, clock.now());
+                cursor.back_off(&attempted, clock.now());
             }
         }
         looked
@@ -2086,7 +2118,8 @@ impl AppState {
                 && !(matches!(ack, TestRunVerificationAck::Received { .. })
                     && matches!(
                         row.verification_record,
-                        Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. })
+                        Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. }
+                            | TestRunVerificationAck::LocalUnclassified { .. })
                     ))
                 // A receipt held for one body is never rebound to another.
                 && !row

@@ -1255,13 +1255,26 @@ a criterion bound to Test verification, and requesting evaluation does not
 create an acknowledgement.
 
 A successful arbitrary command, such as `node scripts/check-doc-links-renamed.mjs`,
-can therefore leave a registered run at `pending: unclassified_stages`.
-TermAl builds no verification record for that run: waiting or repeating an
-evaluation request cannot make Engram acknowledge it. Evaluation refuses
+has no native classification. Once its registered generic run is terminal
+and has no frozen verification body or held receipt,
+the sender retains a distinct local-unclassified disposition on its original
+registration and mirrors it as `rejected` with reason `unclassified_stages`
+beside the run, and
+queues a bounded notice for the original requester. `summary RUN_DIRECTORY`
+shows the refusal and the recognized-command or declared-native remedy.
+If writing that mirror fails, the sender retries with its existing bounded
+backoff. Notice publication is tracked separately, so a mirror-only retry
+does not queue duplicate notices. An absent run directory or deleted requester
+ends that presentation work. After reload the sender repairs surviving run
+artifacts and queues the original requester's notice at most once per process;
+this presentation work never reopens producer delivery.
+TermAl builds and sends no verification record for that run: waiting or
+repeating an evaluation request cannot make Engram acknowledge it. Evaluation refuses
 with `verification_record_unclassified_stages` and names the unsupported
 classification instead of asking the holder to wait for receipt. This
-decision reads the run's request and terminal results directly, including
-before the sender first examines it or if its progress file is missing;
+decision uses the host's retained local disposition, or reads the run's
+request and terminal results directly before the sender first examines it;
+it does not depend on the progress file being present. In either case,
 requesting evaluation does not prepare or send a record.
 
 Other documentation checkers have no classification merely because they read

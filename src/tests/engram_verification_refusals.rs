@@ -2,7 +2,7 @@
 // scripted and use disposable fixture files, never a live store or a replay.
 use super::*;
 
-fn summary(run_dir: &FsPath) -> String {
+pub(super) fn summary(run_dir: &FsPath) -> String {
     let output = crate::host_command::Command::new("node")
         .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/test-launcher.mjs"))
         .arg("summary")

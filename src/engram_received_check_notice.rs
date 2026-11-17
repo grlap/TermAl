@@ -57,7 +57,8 @@ impl ReceivedCheckNotice {
             TestRunVerificationAck::Settled { receipt, body_digest } => (receipt, body_digest),
             // Receipt custody precedes the association fence. A held receipt
             // cannot bypass settlement through a closing or companion read.
-            TestRunVerificationAck::Received { .. } | TestRunVerificationAck::Rejected { .. } => return None,
+            TestRunVerificationAck::Received { .. } | TestRunVerificationAck::Rejected { .. }
+                | TestRunVerificationAck::LocalUnclassified { .. } => return None,
         };
         let directory = FsPath::new(&registration.run_directory);
         let frozen = engram_verification_record_frozen(directory, &registration.run_id)?;
