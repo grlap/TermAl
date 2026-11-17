@@ -163,10 +163,14 @@ impl SessionRecord {
 
 impl StateInner {
     fn finish_body_sequence_commits(&mut self) {
-        for record in &mut self.sessions {
-            if record.is_local_session() {
-                record.body_sequence.finish_commit();
-            }
+        // Decide on the shared row before requesting mutable access: an
+        // ordinary metadata commit must not detach every retained session.
+        for (_, record) in self.sessions.matching_mut(|record| {
+            record.is_local_session()
+                && (record.body_sequence.replacement_pending
+                    || !record.body_sequence.unrepresented_messages.is_empty())
+        }) {
+            record.body_sequence.finish_commit();
         }
     }
 }

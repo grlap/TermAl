@@ -647,7 +647,7 @@ impl PersistedState {
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: self.workspace_layouts.into(),
-            sessions,
+            sessions: sessions.into(),
             quarantined_persisted_session_ids: self.quarantined_persisted_session_ids,
             quarantined_persisted_delegation_ids: self.quarantined_persisted_delegation_ids,
             // Mutation stamps are in-memory only — start at `0` on each

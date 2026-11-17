@@ -386,7 +386,7 @@ fn root_recovery_skips_projectless_readers_without_reactivating_historical_exclu
             let mut successor = original.clone();
             successor.session.id = healthy.clone();
             successor.engram.historical_control.insert("engramRoutingToken".into(), json!("healthy-historical-token"));
-            inner.sessions = vec![original, successor];
+            inner.sessions = vec![original, successor].into();
             assert_eq!(inner.sessions[0].session.id, excluded);
             inner.engram_work_source_roots.iter_mut().find(|root| {
                 root.store == fixture.store && root.claim_id == fixture.owner.binding.claim_id

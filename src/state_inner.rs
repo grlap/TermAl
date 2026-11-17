@@ -310,7 +310,7 @@ impl StateInner {
 
     fn repair_delegation_child_session_links_with(&mut self, mut links: BTreeMap<String, String>) {
 
-        for record in &mut self.sessions {
+        for record in &self.sessions {
             if links.contains_key(&record.session.id) {
                 continue;
             }

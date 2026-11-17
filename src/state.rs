@@ -1864,7 +1864,7 @@ struct StateInner {
     /// Tracks focused bounded-tail materialization per remote session.
     remote_session_transcript_applied_revisions: HashMap<String, HashMap<String, u64>>,
     /// Session records carry the serializable session plus runtime-only state.
-    sessions: Vec<SessionRecord>,
+    sessions: SessionSequence,
     /// Durable session rows isolated during startup validation.
     ///
     /// These records are deliberately absent from `sessions` so corrupted
@@ -2033,7 +2033,7 @@ impl StateInner {
             remote_applied_revisions: HashMap::new(),
             remote_snapshot_applied_revisions: HashMap::new(),
             remote_session_transcript_applied_revisions: HashMap::new(),
-            sessions: Vec::new(),
+            sessions: SessionSequence::default(),
             quarantined_persisted_session_ids: BTreeSet::new(),
             orchestrator_instances: PersistTracked::default(),
             delegations: Vec::new(),

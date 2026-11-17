@@ -106,7 +106,7 @@ fn remote_delta_session_transcript_metadata(
 
 struct RemoteSyncRollback {
     next_session_number: usize,
-    sessions: Vec<SessionRecord>,
+    sessions: SessionSequence,
     orchestrator_instances: Vec<OrchestratorInstance>,
     removed_session_ids: Vec<String>,
 }

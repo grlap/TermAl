@@ -264,6 +264,7 @@ mod session_actions;
 mod session_body_sequence;
 mod session_history_snapshot;
 mod session_lifecycle;
+mod session_row_snapshot;
 mod session_settings;
 mod session_stamp_delta;
 mod session_stop;
