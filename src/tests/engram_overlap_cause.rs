@@ -102,7 +102,8 @@ fn a_lone_launch_beside_a_reading_read_only_child_is_carried() {
     // A build's output under target/ never reaches the check: the watcher
     // drops it before it reports a change.
     assert!(is_ignored_workspace_file_event_path(
-        &canonical.join("target").join("debug").join("termal.d")
+        &canonical.join("target").join("debug").join("termal.d"),
+        &canonical
     ));
     // The worktree's own scratch directory reaches it and fences nothing.
     turn.state

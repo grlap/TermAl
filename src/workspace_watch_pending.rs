@@ -28,6 +28,9 @@ fn workspace_subtree_contains(path: &str, root: &FsPath) -> bool {
 #[derive(Clone, Copy)]
 struct WorkspaceDirtyFact {
     kind: WorkspaceFileChangeKind,
+    // Preserve coverage selected at ingress even if deletion or rename makes
+    // the root impossible to canonicalize before this fact is drained.
+    covers_watched_root: bool,
     first: EngramWatcherArrival,
     last: EngramWatcherArrival,
     raw_kind: Option<NotifyEventKind>,
@@ -37,6 +40,7 @@ struct WorkspaceDirtyFact {
 impl WorkspaceDirtyFact {
     fn merge(&mut self, other: Self) {
         self.kind = merge_workspace_file_change_kind(self.kind, other.kind);
+        self.covers_watched_root |= other.covers_watched_root;
         if self.raw_kind != other.raw_kind {
             self.raw_kind = None;
         }
@@ -206,6 +210,7 @@ impl WorkspaceDirtyNode {
 #[derive(Default)]
 struct WorkspacePendingChanges {
     root: WorkspaceDirtyNode,
+    watch_roots: Vec<PathBuf>,
     oldest: Option<std::time::Instant>,
     newest: Option<std::time::Instant>,
     last_error_log: Option<std::time::Instant>,
@@ -244,12 +249,16 @@ impl WorkspacePendingChanges {
                     }
                     for path in &event.paths {
                         if path.as_os_str().len() > WORKSPACE_PENDING_PATH_BYTES
-                            || !is_ignored_workspace_file_event_path(path)
+                            || !workspace_file_event_is_ignored(path, &self.watch_roots)
                         {
                             self.insert(
                                 path,
                                 WorkspaceDirtyFact {
                                     kind,
+                                    covers_watched_root: kind == WorkspaceFileChangeKind::Subtree
+                                        && self.watch_roots.iter().any(|root| {
+                                            root.starts_with(normalize_user_facing_path(path))
+                                        }),
                                     first: arrival,
                                     last: arrival,
                                     raw_kind: Some(event.kind),
@@ -265,6 +274,7 @@ impl WorkspacePendingChanges {
                 FsPath::new(""),
                 WorkspaceDirtyFact {
                     kind: WorkspaceFileChangeKind::Subtree,
+                    covers_watched_root: false,
                     first: arrival,
                     last: arrival,
                     raw_kind: None,
@@ -358,11 +368,83 @@ mod workspace_pending_tests {
         };
         WorkspaceDirtyFact {
             kind: WorkspaceFileChangeKind::Modified,
+            covers_watched_root: false,
             first: arrival,
             last: arrival,
             raw_kind: None,
             observation: None,
         }
+    }
+
+    #[test]
+    fn ingress_ignores_only_descendants_of_the_deepest_known_root() {
+        let base = PathBuf::from(if cfg!(windows) { "C:/watch-fixture" } else { "/watch-fixture" });
+        let now = std::time::Instant::now();
+        for ancestor in ["target", "dist", "node_modules"] {
+            let root = base.join(ancestor).join("project");
+            let mut pending = WorkspacePendingChanges {
+                watch_roots: vec![root.clone()],
+                ..WorkspacePendingChanges::default()
+            };
+            let source = root.join("src/main.rs");
+            pending.ingest(
+                Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                    .add_path(source.clone())),
+                fact(1).first,
+                now,
+            );
+            let batch = pending.take();
+            assert_eq!(batch.len(), 1);
+            assert_eq!(batch[0].0, source);
+            for child in ["target", "dist", "node_modules", ".git"] {
+                pending.ingest(
+                    Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                        .add_path(root.join(child).join("generated"))),
+                    fact(2).first,
+                    now,
+                );
+            }
+            assert!(pending.take().is_empty());
+
+            let nested = root.join("target/nested-project");
+            pending.watch_roots.push(nested.clone());
+            let nested_source = nested.join("src/main.rs");
+            pending.ingest(
+                Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                    .add_path(nested_source.clone())),
+                fact(3).first,
+                now,
+            );
+            let batch = pending.take();
+            assert_eq!(batch.len(), 1);
+            assert_eq!(batch[0].0, nested_source);
+            pending.ingest(
+                Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::Folder))
+                    .add_path(root.join("target"))),
+                fact(4).first,
+                now,
+            );
+            let batch = pending.take();
+            assert_eq!(batch.len(), 1, "retain coverage of the separately watched repository");
+            assert_eq!(batch[0].0, root.join("target"));
+            assert_eq!(batch[0].1.kind, WorkspaceFileChangeKind::Subtree);
+        }
+    }
+
+    #[test]
+    fn ingress_keeps_unknown_roots_until_scope_refresh() {
+        let root = PathBuf::from(if cfg!(windows) { "C:/watch-fixture" } else { "/watch-fixture" });
+        let path = root.join("target/new-project/source.rs");
+        let mut pending = WorkspacePendingChanges::default();
+        pending.ingest(
+            Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                .add_path(path.clone())),
+            fact(1).first,
+            std::time::Instant::now(),
+        );
+        let batch = pending.take();
+        assert_eq!(batch.len(), 1, "unknown scope is not evidence to drop a source event");
+        assert_eq!(batch[0].0, path);
     }
 
     #[test]
