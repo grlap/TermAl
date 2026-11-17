@@ -52,6 +52,8 @@ fn federation_mailbox_error_response(
             (StatusCode::CONFLICT, "read_key_conflict", "unknown"),
         Some(ApiErrorKind::FederationMailboxReadNotFound) =>
             (StatusCode::NOT_FOUND, "read_mailbox_not_found", "notEntered"),
+        Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page }) =>
+            (StatusCode::CONFLICT, "participant_retired_during_read", if before_page { "notEntered" } else { "unknown" }),
         Some(ApiErrorKind::FederationMailboxWriterAdmission) =>
             (StatusCode::SERVICE_UNAVAILABLE, "writer_admission_timeout", "notCommitted"),
         Some(ApiErrorKind::FederationMailboxDirectoryFence) =>
@@ -109,6 +111,8 @@ fn federation_mailbox_verified_error(
             (StatusCode::GONE, "read_key_expired", "expired") => Some(federation_mailbox_read_expired()),
             (StatusCode::NOT_FOUND, "read_mailbox_not_found", "notEntered") =>
                 Some(federation_mailbox_read_not_found()),
+            (StatusCode::CONFLICT, "participant_retired_during_read", "notEntered" | "unknown") =>
+                Some(mailbox_participant_retired_during_read(body.effect == "notEntered")),
             (StatusCode::CONFLICT, "read_key_conflict", "unknown") => Some(ApiError::conflict(
                 "readKey input conflict; preserve the identical original read")
                 .with_kind(ApiErrorKind::FederationMailboxReadConflict)),

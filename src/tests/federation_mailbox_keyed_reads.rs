@@ -319,6 +319,9 @@ async fn frozen_key_capacity_and_expiry_refuse_without_evicting_live_keys() {
 #[path = "federation_mailbox_read_regressions.rs"]
 mod review_regressions;
 
+#[path = "federation_mailbox_retired_reads.rs"]
+mod retired_participants;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn concurrent_same_key_callers_share_one_frozen_page() {
     let case = MailboxCase::with_writer_timeout(Duration::from_millis(100)).await;

@@ -926,10 +926,12 @@ fn git_diff_document_enrichment_note_uses_structured_error_kind() {
 }
 
 #[test]
-fn git_diff_document_enrichment_note_suppresses_session_lookup_recovery_kinds() {
+fn git_diff_document_enrichment_note_suppresses_non_document_recovery_kinds() {
     for kind in [
         ApiErrorKind::LocalSessionMissing,
         ApiErrorKind::RemoteConnectionUnavailable,
+        ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page: true },
+        ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page: false },
     ] {
         let error = ApiError::bad_gateway("recoverable remote hydration").with_kind(kind);
         assert_eq!(git_diff_document_enrichment_note(&error), None);

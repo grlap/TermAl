@@ -93,7 +93,7 @@ impl MailboxStore {
             .ok_or_else(|| {
                 mailbox_store_error(MailboxStoreErrorKind::NotFound, "mailbox message not found")
             })?;
-        require_mailbox_participant(&read, &message.mailbox_id, actor)?;
+        require_mailbox_read_participant(&read, &message.mailbox_id, actor)?;
         attach_mailbox_message_current_status(&read, &mut message)?;
         let _authority = authority.lock()?;
         Ok(message)

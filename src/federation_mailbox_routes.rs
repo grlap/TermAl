@@ -191,6 +191,7 @@ impl AppState {
                 Ok(page) => { intents.get_mut(&slot).expect("intent checked").key = page.read_key.clone(); }
                 Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadExpired) => { intents.remove(&slot); }
                 Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadNotFound) => { intents.remove(&slot); }
+                Err(error) if error.kind == Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page: true }) => { intents.remove(&slot); }
                 Err(_) => {},
             }
         }

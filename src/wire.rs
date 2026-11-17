@@ -104,6 +104,9 @@ enum ApiErrorKind {
     FederationMailboxReadConflict,
     /// The initial read selected no page because the mailbox was not visible.
     FederationMailboxReadNotFound,
+    /// Retirement is observed, not inferred from a missing row. Only the
+    /// initial capture boundary can certify that no page was selected.
+    MailboxParticipantRetiredDuringRead { before_page: bool },
     #[cfg_attr(not(unix), allow(dead_code))]
     GitDocumentBecameSymlink,
     GitDocumentInvalidUtf8,
@@ -300,6 +303,13 @@ impl IntoResponse for ApiError {
                 })),
             )
                 .into_response();
+        }
+        if let Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page }) = self.kind {
+            return (self.status, Json(json!({
+                "error": self.message,
+                "code": "participant_retired_during_read",
+                "effect": if before_page { "notEntered" } else { "unknown" },
+            }))).into_response();
         }
         if let Some(deadline) = self.durability_deadline
             && let Some(operation) = deadline.operation

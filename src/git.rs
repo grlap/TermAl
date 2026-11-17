@@ -1040,6 +1040,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             | ApiErrorKind::FederationMailboxReadExpired
             | ApiErrorKind::FederationMailboxReadConflict
             | ApiErrorKind::FederationMailboxReadNotFound
+            | ApiErrorKind::MailboxParticipantRetiredDuringRead { .. }
             | ApiErrorKind::RemoteConnectionUnavailable
             | ApiErrorKind::FederationSshCleanupUnknown
             | ApiErrorKind::AcceptanceEvaluationFirstBriefUnacknowledged

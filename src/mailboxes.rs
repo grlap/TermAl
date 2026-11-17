@@ -248,6 +248,7 @@ enum MailboxStoreErrorKind {
     Validation,
     Conflict,
     NotFound,
+    ParticipantRetiredDuringRead,
     Retryable,
     Capacity,
 }
@@ -2070,6 +2071,9 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
             }
             MailboxStoreErrorKind::Conflict => ApiError::conflict(mailbox_error.message.clone()),
             MailboxStoreErrorKind::NotFound => ApiError::not_found(mailbox_error.message.clone()),
+            MailboxStoreErrorKind::ParticipantRetiredDuringRead => {
+                mailbox_participant_retired_during_read(false)
+            }
             MailboxStoreErrorKind::Retryable => ApiError::from_status(
                 StatusCode::SERVICE_UNAVAILABLE,
                 mailbox_error.message.clone(),
@@ -3416,7 +3420,7 @@ impl MailboxStore {
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
                 .context("failed to begin mailbox preview snapshot")?
         };
-        require_mailbox_participant(&transaction, mailbox_id, session_id)?;
+        require_mailbox_read_participant(&transaction, mailbox_id, session_id)?;
         let processed_through = mailbox_processed_through(&transaction, mailbox_id, session_id)?;
         let after_sequence = after_sequence.unwrap_or(processed_through);
         let mut statement = transaction
@@ -3523,7 +3527,7 @@ impl MailboxStore {
                 ),
                 other => anyhow!(other),
             })?;
-        require_mailbox_participant(&read, &message.mailbox_id, session_id)?;
+        require_mailbox_read_participant(&read, &message.mailbox_id, session_id)?;
         attach_mailbox_message_current_status(&read, &mut message)?;
         Ok(message)
     }
@@ -4069,6 +4073,45 @@ fn mailbox_participants(
         .context("failed to query mailbox participants")?;
     rows.map(|row| row.context("failed to decode mailbox participant"))
         .collect()
+}
+
+fn mailbox_participant_retired_during_read(before_page: bool) -> ApiError {
+    ApiError::conflict(
+        "participant_retired_during_read; this mailbox participant is marked as departed; verify current session membership before repeating the identical read",
+    )
+    .with_kind(ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page })
+}
+
+fn require_mailbox_read_participant(
+    connection: &rusqlite::Connection,
+    mailbox_id: &str,
+    session_id: &str,
+) -> Result<()> {
+    if let Err(error) = require_mailbox_participant(connection, mailbox_id, session_id) {
+        // Only an existing row for this exact reader distinguishes retirement
+        // from an unknown mailbox. The caller owns the same read transaction.
+        if error
+            .downcast_ref::<MailboxStoreError>()
+            .is_some_and(|error| error.kind == MailboxStoreErrorKind::NotFound)
+        {
+            let retired: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM mailbox_participants
+                 WHERE mailbox_id=?1 AND session_id=?2 AND left_at IS NOT NULL)",
+                    rusqlite::params![mailbox_id, session_id],
+                    |row| row.get(0),
+                )
+                .context("failed to inspect retired mailbox reader")?;
+            if retired {
+                return Err(mailbox_store_error(
+                    MailboxStoreErrorKind::ParticipantRetiredDuringRead,
+                    "mailbox participant is marked as departed during this read",
+                ));
+            }
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn require_mailbox_participant(

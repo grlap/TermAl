@@ -241,7 +241,9 @@ impl AppState {
                         // No frozen page or receipt exists at this boundary.
                         // Preserve this fact across the authenticated reply so
                         // the bridge does not try to resolve a consumed offer.
-                        if error.status == StatusCode::NOT_FOUND {
+                        if matches!(error.kind, Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { .. })) {
+                            mailbox_participant_retired_during_read(true)
+                        } else if error.status == StatusCode::NOT_FOUND {
                             federation_mailbox_read_not_found()
                         } else {
                             error
@@ -322,7 +324,7 @@ impl AppState {
             let mut connection = open_sqlite_state_read_connection(&self.mailbox_store.path)?;
             connection.busy_timeout(Duration::ZERO)?;
             let transaction = connection.transaction()?;
-            require_mailbox_participant(&transaction, mailbox, &authority.actor.participant_key())?;
+            require_mailbox_read_participant(&transaction, mailbox, &authority.actor.participant_key())?;
             let _current = authority.lock()?;
             transaction.commit()?;
             Ok(())
@@ -350,7 +352,7 @@ impl AppState {
             let transaction =
                 connection.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
             let reader = authority.actor.participant_key();
-            require_mailbox_participant(&transaction, mailbox, &reader)?;
+            require_mailbox_read_participant(&transaction, mailbox, &reader)?;
             let processed = mailbox_processed_through(&transaction, mailbox, &reader)?;
             // Historical diagnostics own their scan cursor/window. Refreshing
             // the live cache from this snapshot could erase newer obligations.
@@ -518,7 +520,7 @@ impl AppState {
             let transaction =
                 begin_mailbox_write(connection, "recording frozen mailbox page issuance")?;
             let reader = authority.actor.participant_key();
-            require_mailbox_participant(&transaction, mailbox, &reader)?;
+            require_mailbox_read_participant(&transaction, mailbox, &reader)?;
             let through = page
                 .next_after_sequence
                 .expect("only nonempty pages are issued");
@@ -580,6 +582,7 @@ impl AppState {
                         matches!(
                             error.kind,
                             MailboxStoreErrorKind::Conflict | MailboxStoreErrorKind::NotFound
+                                | MailboxStoreErrorKind::ParticipantRetiredDuringRead
                         )
                     }) =>
             {
