@@ -82,10 +82,13 @@ fn take_workspace_watch_diagnostics() -> Vec<String> {
 impl AppState {
     fn process_workspace_dirty_batch(&self, batch: Vec<(PathBuf, WorkspaceDirtyFact)>) -> Vec<WorkspaceFileChangeEvent> {
         if batch.is_empty() { return Vec::new(); }
+        let roots = collect_workspace_file_watch_scopes(self).into_iter()
+            .map(|scope| scope.root_path).collect::<Vec<_>>();
         let processed = engram_interference_tick();
         let started_at = std::time::Instant::now();
         let mut publication = Vec::new();
         for (path, fact) in batch {
+            if workspace_file_event_is_ignored(&path, &roots) { continue; }
             if fact.kind != WorkspaceFileChangeKind::Subtree
                 && fact
                     .raw_kind
@@ -145,9 +148,10 @@ impl AppState {
         event: &notify::Event,
         observation: &WorkspaceWatchObservation,
         arrival: EngramWatcherArrival,
-        _scopes: &[WorkspaceFileWatchScope],
+        scopes: &[WorkspaceFileWatchScope],
     ) -> Vec<WorkspaceFileChangeEvent> {
         let mut pending = WorkspacePendingChanges::default();
+        pending.watch_roots = scopes.iter().map(|scope| scope.root_path.clone()).collect();
         pending.ingest_observed(Ok(event.clone()), arrival, std::time::Instant::now(), Some(*observation));
         self.process_workspace_dirty_batch(pending.take())
     }

@@ -2078,6 +2078,95 @@ fn active_turn_file_changes_are_summarized_on_record() {
 }
 
 #[test]
+fn workspace_watcher_observes_repositories_below_ignored_directory_names() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    for ancestor in ["target", "dist", "node_modules"] {
+        let state = test_app_state();
+        let root = state
+            .test_temp_root
+            .as_ref()
+            .unwrap()
+            .path()
+            .join(ancestor)
+            .join("project");
+        fs::create_dir_all(root.join("src")).unwrap();
+        run_git_test_command_output(&root, &["init"]);
+        let root = normalize_user_facing_path(&fs::canonicalize(root).unwrap());
+        let session_id = {
+            let mut inner = state.inner.lock().unwrap();
+            let session = inner.create_session(
+                Agent::Codex,
+                None,
+                root.to_string_lossy().into_owned(),
+                None,
+                None,
+            );
+            let record = inner.sessions.last_mut().unwrap();
+            record.active_turn_generation = 1;
+            record.active_turn_start_message_count = Some(record.session.messages.len());
+            session.session.id
+        };
+        let path = root.join("src").join("main.rs");
+        fs::write(&path, "source fixture\n").unwrap();
+        let event = NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+            .add_path(path.clone());
+        let scopes = collect_workspace_file_watch_scopes(&state);
+        assert_eq!(
+            workspace_file_changes_from_notify_event(&event, &scopes).len(),
+            1,
+            "a {ancestor} ancestor is outside the watched repository"
+        );
+        let mut pending = WorkspacePendingChanges::default();
+        pending.ingest(
+            Ok(event),
+            EngramHost::watcher_arrival_now(),
+            std::time::Instant::now(),
+        );
+        let batch = pending.take();
+        assert_eq!(
+            batch.len(),
+            1,
+            "retain the source notification under {ancestor}"
+        );
+        assert_eq!(batch[0].0, path);
+        let publication = state.process_workspace_dirty_batch(batch);
+        assert_eq!(publication.len(), 1, "publish the source under {ancestor}");
+        assert_eq!(publication[0].path, path.to_string_lossy());
+
+        for child in ["target", "dist", "node_modules", ".git"] {
+            let ignored = root.join(child).join("generated.txt");
+            fs::create_dir_all(ignored.parent().unwrap()).unwrap();
+            fs::write(&ignored, "build or metadata fixture\n").unwrap();
+            let event = NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                .add_path(ignored);
+            assert!(workspace_file_changes_from_notify_event(&event, &scopes).is_empty());
+            let publication = state.process_workspace_watch_event(
+                &event,
+                &WorkspaceWatchObservation::capture(&event),
+                EngramHost::watcher_arrival_now(),
+                &scopes,
+            );
+            assert!(
+                publication.is_empty(),
+                "ignore {child} below the watched root"
+            );
+        }
+        let inner = state.inner.lock().unwrap();
+        let record = inner
+            .sessions
+            .iter()
+            .find(|r| r.session.id == session_id)
+            .unwrap();
+        assert_eq!(record.active_turn_file_changes.len(), 1);
+        assert!(
+            record
+                .active_turn_file_changes
+                .contains_key(path.to_str().unwrap())
+        );
+    }
+}
+
+#[test]
 fn workspace_watcher_ignores_internal_beads_and_collaboration_metadata() {
     let root = FsPath::new("/tmp/termal-workspace");
     for path in [
@@ -2086,13 +2175,13 @@ fn workspace_watcher_ignores_internal_beads_and_collaboration_metadata() {
         root.join(".BEADS").join("last-touched"),
     ] {
         assert!(
-            is_ignored_workspace_file_event_path(&path),
+            is_ignored_workspace_file_event_path(&path, root),
             "internal coordination metadata should not be attributed to an agent turn: {}",
             path.display()
         );
     }
     assert!(
-        !is_ignored_workspace_file_event_path(&root.join("src").join("main.rs")),
+        !is_ignored_workspace_file_event_path(&root.join("src").join("main.rs"), root),
         "ordinary project source must remain visible to turn file tracking"
     );
 }

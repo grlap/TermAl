@@ -123,6 +123,7 @@ fn run_workspace_file_watcher(state: AppState) {
                 &mut watcher,
                 &mut watched_roots,
                 &mut watch_scopes,
+                &pending,
             );
             next_root_refresh_at = now + WORKSPACE_FILE_WATCH_ROOT_REFRESH_MS;
         }
@@ -151,8 +152,12 @@ fn reconcile_workspace_file_watch_roots(
     watcher: &mut RecommendedWatcher,
     watched_roots: &mut BTreeSet<PathBuf>,
     watch_scopes: &mut Vec<WorkspaceFileWatchScope>,
+    pending: &Mutex<WorkspacePendingChanges>,
 ) {
     let next_scopes = collect_workspace_file_watch_scopes(state);
+    pending.lock().expect("workspace pending mutex poisoned").watch_roots = next_scopes
+        .iter().map(|scope| scope.root_path.clone()).collect::<BTreeSet<_>>()
+        .into_iter().collect();
     let next_roots = prune_nested_workspace_file_watch_roots(
         next_scopes
             .iter()
@@ -220,6 +225,9 @@ fn collect_workspace_file_watch_scopes(state: &AppState) -> Vec<WorkspaceFileWat
                     record.session.workdir.clone(),
                     Some(record.session.id.clone()),
                 ));
+                if let Some(source) = record.engram.observed_source_root() {
+                    roots.push((source.root.clone(), Some(record.session.id.clone())));
+                }
             }
         }
         roots
@@ -277,11 +285,12 @@ fn workspace_file_changes_from_notify_event(
     let Some(kind) = workspace_file_change_kind(&event.kind) else {
         return Vec::new();
     };
+    let roots = watch_scopes.iter().map(|scope| scope.root_path.clone()).collect::<Vec<_>>();
 
     event
         .paths
         .iter()
-        .filter(|path| !is_ignored_workspace_file_event_path(path))
+        .filter(|path| !workspace_file_event_is_ignored(path, &roots))
         .filter(|path| !workspace_directory_metadata_hint(&event.kind, path))
         .flat_map(|path| workspace_file_changes_from_path(path, kind, watch_scopes))
         .collect()
@@ -429,7 +438,7 @@ fn workspace_file_change_event_key(change: &WorkspaceFileChangeEvent) -> String 
 }
 
 #[cfg_attr(test, allow(dead_code))]
-fn is_ignored_workspace_file_event_path(path: &FsPath) -> bool {
+fn is_ignored_workspace_file_event_path(path: &FsPath, root: &FsPath) -> bool {
     const IGNORED_COMPONENTS: &[&str] = &[
         ".beads",
         ".collab",
@@ -445,10 +454,23 @@ fn is_ignored_workspace_file_event_path(path: &FsPath) -> bool {
         "target",
     ];
 
-    path.components().any(|component| {
+    let Ok(relative) = path.strip_prefix(root) else { return false; };
+    relative.components().any(|component| {
         let value = component.as_os_str().to_string_lossy();
         IGNORED_COMPONENTS
             .iter()
             .any(|ignored| value.eq_ignore_ascii_case(ignored))
     })
+}
+
+fn workspace_file_event_is_ignored(path: &FsPath, roots: &[PathBuf]) -> bool {
+    let path = normalize_user_facing_path(path);
+    // A covering notification can include a separately watched repository
+    // below a parent's build directory. Keep that root's coverage intact.
+    if roots.iter().any(|root| root.starts_with(&path)) { return false; }
+    // Unknown roots remain observable until the next scope refresh. The
+    // drain rechecks against current state before notifying any consumer.
+    roots.iter().filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .is_some_and(|root| is_ignored_workspace_file_event_path(&path, root))
 }
