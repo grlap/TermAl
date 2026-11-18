@@ -664,13 +664,23 @@ export async function createRun({
   // The registration wait for a store in repair; tests shorten its pauses.
   registrationWait,
 }, env = process.env) {
+  let plainInputReason = runInput === "plain" ? "explicit --input plain" : undefined;
+  // A committed-input launch (explicit, or automatic until it selects plain)
+  // refused before it has a run directory has no summary, so the refusal
+  // itself names the correction. Usage errors keep their own fix.
+  const refusedBeforeRegistration = (error) => (
+    runInput === "commit" || (automaticInput && runInput === undefined && plainInputReason === undefined)
+      ? new Error(`${error.message}; ${registrationCorrection}`, { cause: error })
+      : error);
   if (requestMessageId !== undefined) {
     validateRequestMessageId(requestMessageId);
     if (scope !== undefined || liveEngram !== undefined) {
       throw new Error("selected test requests support only full or focused mode");
     }
-    if (!hasTermalContext(env)) throw new Error("selected test requests require their native TermAl host");
-    validateRegistrationContext(env);
+    try {
+      if (!hasTermalContext(env)) throw new Error("selected test requests require their native TermAl host");
+      validateRegistrationContext(env);
+    } catch (error) { throw refusedBeforeRegistration(error); }
   }
   if (runInput !== undefined && !["commit", "plain"].includes(runInput)) {
     throw new Error(`unsupported run input: ${runInput}`);
@@ -684,18 +694,23 @@ export async function createRun({
       : validateNotification({ notifyTo, owner: env.TERMAL_SESSION_ID, root: normalizedRoot }, env);
   } catch (error) {
     // A partial host identity is a registration refusal even when detached
-    // notification validation notices it first. Valid contexts keep the
-    // notification's existing diagnostic.
-    validateRegistrationContext(env);
+    // notification validation notices it first, and so is no host at all: a
+    // notification needs one, and so does credit. A valid host context keeps
+    // the notification's own diagnostic, a usage error (docs/test.md).
+    try { validateRegistrationContext(env); } catch (refusal) { throw refusedBeforeRegistration(refusal); }
+    if (!hasTermalContext(env)) throw refusedBeforeRegistration(error);
     throw error;
   }
-  const sourceOwner = await sourceOwnerMetadata(env);
-  const sourceBinary = sourceOwner?.binaryPath ?? sourceBinaryPath(env);
+  let sourceOwner;
+  let sourceBinary;
+  try {
+    sourceOwner = await sourceOwnerMetadata(env);
+    sourceBinary = sourceOwner?.binaryPath ?? sourceBinaryPath(env);
+  } catch (error) { throw refusedBeforeRegistration(error); }
   const sourceEnv = { ...env, ENGRAM_SOURCE_BINARY: sourceBinary };
   const captureInput = () => commitInputStatus(normalizedRoot, sourceEnv, { pin: sourceOwner });
   let commitInput;
   let inputFailure;
-  let plainInputReason = runInput === "plain" ? "explicit --input plain" : undefined;
   if (automaticInput && runInput === undefined) {
     try {
       const observed = await captureInput();
@@ -711,10 +726,12 @@ export async function createRun({
       plainInputReason = boundedInputReason(`committed-input admission unavailable: ${error.message}`);
     }
   }
-  const runDirectory = gitRunDirectory(normalizedRoot, gitEnv);
   const runId = `test-${randomUUID()}`;
-  const runDir = join(runDirectory, runId);
-  mkdirSync(runDir, { recursive: true });
+  let runDir;
+  try {
+    runDir = join(gitRunDirectory(normalizedRoot, gitEnv), runId);
+    mkdirSync(runDir, { recursive: true });
+  } catch (error) { throw refusedBeforeRegistration(error); }
   const request = {
     runId,
     root: normalizedRoot,
@@ -741,44 +758,62 @@ export async function createRun({
     owner: notification?.owner ?? env.TERMAL_SESSION_ID ?? null,
     started: new Date().toISOString(),
   };
-  save(join(runDir, "request.json"), request);
-  save(join(runDir, "results.json"), {
-    runId,
-    state: "running",
-    started: request.started,
-    // The admitted source value is measured below, before any stage.
-    source: unknownSource("not_yet_measured"),
-    sourceIdBefore: null,
-    sourceIdAfter: null,
-    ...(plainInputReason ? { inputSelection: { kind: "plain", reason: plainInputReason } } : {}),
-    preflight: [],
-    ...(scope ? { scope } : {}),
-    stages: (stages ?? []).map(({ name, liveTests }) => ({
-      name,
-      state: "unrun",
-      ...(liveTests?.length ? { liveTests: [...liveTests] } : {}),
-    })),
-  });
+  // Until both first records are written the run has no usable summary.
+  try {
+    save(join(runDir, "request.json"), request);
+    save(join(runDir, "results.json"), {
+      runId,
+      state: "running",
+      started: request.started,
+      // The admitted source value is measured below, before any stage.
+      source: unknownSource("not_yet_measured"),
+      sourceIdBefore: null,
+      sourceIdAfter: null,
+      ...(plainInputReason ? { inputSelection: { kind: "plain", reason: plainInputReason } } : {}),
+      preflight: [],
+      ...(scope ? { scope } : {}),
+      stages: (stages ?? []).map(({ name, liveTests }) => ({
+        name,
+        state: "unrun",
+        ...(liveTests?.length ? { liveTests: [...liveTests] } : {}),
+      })),
+    });
+  } catch (error) { throw refusedBeforeRegistration(error); }
   onRunCreated?.(runDir);
   try {
     request.registration = await registerTestRun(request, runDir, env, registrationWait);
     save(join(runDir, "request.json"), request);
   } catch (error) {
-    const result = readJson(join(runDir, "results.json"));
     const pending = error.durabilityPending;
     const stateLock = boundedStateLockEvidence(error.stateLock);
     // A store in repair names its own cause and fix; the claim is not at fault.
-    const message = request.input === "commit" && !error.storeTransient
-      ? `${error.message}; if the named claim lapsed or changed, renew the claim or name the source root again; use --input plain for a run without verification credit`
-      : error.message;
-    Object.assign(result, {
-      state: "failed", exitCode: 1, ended: new Date().toISOString(),
-      error: message,
-      registration: { state: pending ? "pending" : "failed", reason: error.message,
-        ...(pending ? { pending } : {}), ...(stateLock ? { stateLock } : {}) },
-    });
-    save(join(runDir, "results.json"), result);
-    const failure = new Error(`${message}; run directory: ${runDir}`, { cause: error });
+    // Either way a committed-input refusal ends with the correction for credit,
+    // after the run directory in the CLI refusal.
+    const committed = request.input === "commit";
+    const cause = !committed || error.storeTransient ? error.message
+      : `${error.message}; if the named claim lapsed or changed, renew the claim or name the source root again; use --input plain for a run without verification credit`;
+    const correction = error.storeTransient ? registrationCorrection : `for credit, ${registrationCorrection}`;
+    const message = !committed ? cause
+      : error.storeTransient ? `${cause}; ${correction}` : `${cause}, or ${correction}`;
+    // The refusal and its correction reach the caller even when the run's
+    // failure result cannot be written; the write failure is named beside them.
+    let unsaved = "";
+    try {
+      const result = readJson(join(runDir, "results.json"));
+      Object.assign(result, {
+        state: "failed", exitCode: 1, ended: new Date().toISOString(),
+        error: message,
+        registration: { state: pending ? "pending" : "failed", reason: error.message,
+          ...(pending ? { pending } : {}), ...(stateLock ? { stateLock } : {}),
+          ...(error.storeTransient ? { storeTransient: true } : {}) },
+      });
+      save(join(runDir, "results.json"), result);
+    } catch (artifactError) {
+      unsaved = ` (its failure result could not be saved: ${artifactError.message})`;
+    }
+    const failure = new Error(committed
+      ? `${cause}; run directory: ${runDir}${unsaved}; ${correction}`
+      : `${message}; run directory: ${runDir}${unsaved}`, { cause: error });
     if (pending) failure.durabilityPending = pending;
     if (stateLock) failure.stateLock = stateLock;
     throw failure;
@@ -1160,6 +1195,16 @@ function validateNotification(request, env) {
 }
 
 function validateInitialRequest(runDir, request, env) {
+  validateRequestRecord(runDir, request);
+  if (request.requestMessageId !== undefined && !hasTermalContext(env)) {
+    throw new Error("invalid selected worker mode or native host context");
+  }
+  if (request.notifyTo !== undefined) validateNotification(request, env);
+}
+
+// The checks a worker request passes on its own records, without the
+// environment that launched it.
+function validateRequestRecord(runDir, request) {
   if (!request || typeof request !== "object" || request.runId !== basename(runDir) ||
       !isAbsolute(request.root)) {
     throw new Error("invalid worker request identity or repository root");
@@ -1185,15 +1230,15 @@ function validateInitialRequest(runDir, request, env) {
   }
   if (request.requestMessageId !== undefined) {
     validateRequestMessageId(request.requestMessageId);
-    if (typeof request.full !== "boolean" || request.scope !== undefined || request.liveEngram !== undefined
-        || !hasTermalContext(env)) throw new Error("invalid selected worker mode or native host context");
+    if (typeof request.full !== "boolean" || request.scope !== undefined || request.liveEngram !== undefined) {
+      throw new Error("invalid selected worker mode or native host context");
+    }
   }
   if (typeof request.sourceBinary !== "string" || !isAbsolute(request.sourceBinary)
       || (request.sourceOwner !== undefined && (!sourceOwnerPinValid(request.sourceOwner)
         || request.sourceBinary !== request.sourceOwner.binaryPath))) {
     throw new Error("worker request has no matching absolute source owner");
   }
-  if (request.notifyTo !== undefined) validateNotification(request, env);
 }
 
 // Whether a committed-input status (captureCommitInputStatus) is clean: no
@@ -1300,7 +1345,16 @@ function validateInitialResult(request, result) {
   }
 }
 
-function startupFailureResult(runDir, request, result, error, notificationEligible) {
+// How a committed-input run earns credit: it is told to every run that will
+// not, in its summary or, when refused before it has one, in the refusal.
+const registrationCorrection = "register at start with --input commit in the claim's named root";
+
+// Names a run whose worker stopped before readiness: no stage ran. A
+// committed-input run's error carries the correction right after it.
+const workerStartupFailure = "worker startup failed before readiness";
+const committedStartupFailure = `${workerStartupFailure}: no tests ran; ${registrationCorrection}`;
+
+function startupFailureResult(runDir, request, result, error, notificationEligible, requestValid) {
   const stages = Array.isArray(request?.stages)
     ? request.stages
       .filter((stage) => stage && typeof stage.name === "string")
@@ -1317,6 +1371,16 @@ function startupFailureResult(runDir, request, result, error, notificationEligib
     }
   }
   if (!source || typeof source !== "object") source = unknownSource("source_unrecoverable");
+  // A committed-input run names the correction in the error itself, so the
+  // summary says it even without a readable request. Its kind is the input its
+  // creation recorded (a committed input, or a plain selection); only when
+  // those records hold no input evidence does the request decide, and only a
+  // request that passed validation.
+  let created;
+  try { created = result ?? readJson(join(runDir, "results.json")); } catch { created = undefined; }
+  const recordedKind = created?.input?.kind === "commit" ? true
+    : created?.input?.kind !== undefined || created?.inputSelection?.kind === "plain" ? false : undefined;
+  const committed = recordedKind ?? (requestValid === true && request?.input === "commit");
   const failed = {
     runId: basename(runDir),
     state: "failed",
@@ -1324,12 +1388,12 @@ function startupFailureResult(runDir, request, result, error, notificationEligib
       ? result.started
       : typeof request?.started === "string" ? request.started : new Date().toISOString(),
     source,
-    ...(result?.inputSelection ? { inputSelection: result.inputSelection } : {}),
+    ...(created?.inputSelection ? { inputSelection: created.inputSelection } : {}),
     stages,
     preflight: [],
     exitCode: 1,
     ended: new Date().toISOString(),
-    error: `worker startup failed before readiness: ${error.message}`,
+    error: `${committed ? `${committedStartupFailure};` : `${workerStartupFailure}:`} ${error.message}`,
     notificationEligible,
   };
   attachFailureInvestigation(failed, runDir);
@@ -1357,9 +1421,11 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
   let request;
   let result;
   let requestTrusted = false;
+  let requestValid = false;
   try {
     request = readJson(join(runDir, "request.json"));
     validateInitialRequest(runDir, request, env);
+    requestValid = true;
     await validateRunRegistration(request, env, runDir);
     requestTrusted = true;
     result = readJson(resultPath);
@@ -1371,8 +1437,19 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       result,
       error,
       requestTrusted && request.notifyTo !== undefined,
+      requestValid,
     );
-    save(resultPath, failed);
+    // The cause and a committed run's correction reach the caller even when
+    // the failure result cannot be written; the write failure is named
+    // beside them, as at a refused registration.
+    try {
+      save(resultPath, failed);
+    } catch (artifactError) {
+      const unsaved = ` (its failure result could not be saved: ${artifactError.message})`;
+      throw new Error(failed.error.startsWith(committedStartupFailure)
+        ? `${workerStartupFailure}: no tests ran: ${error.message}; run directory: ${runDir}${unsaved}; ${registrationCorrection}`
+        : `${workerStartupFailure}: ${error.message}; run directory: ${runDir}${unsaved}`, { cause: error });
+    }
     return failed;
   }
   if (result.state === "failed") {
@@ -1826,8 +1903,77 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
   return result;
 }
 
+// Why a committed-input run earns no verification credit from its start;
+// nothing when it was registered and bound, or when the host's answer is
+// unknown. Credit rests on the host tracking the run from its start, so no
+// later step registers a finished run: the correction is a new run
+// registered that way. A plain-input run already says why on its
+// `input: plain` line.
+export function unregisteredCreditLine(request, result) {
+  // The worker checks the request and registration again before readiness; a
+  // committed-input run it stopped there ran nothing, whatever the launcher
+  // saw at creation. Its error marks it so even when the request is unreadable.
+  if (typeof result?.error === "string" && result.error.startsWith(committedStartupFailure)) {
+    return `verification: none; no tests ran: the run's worker could not confirm its request or registration before readiness; ${registrationCorrection}`;
+  }
+  if (request?.input !== "commit" || result?.inputSelection?.kind === "plain") return undefined;
+  const registration = request.registration;
+  if (["failed", "pending"].includes(result?.registration?.state)) {
+    // A store in repair is the cause; the claim and root are not at fault.
+    if (result.registration.storeTransient) {
+      return `verification: none; no tests ran: the project's Engram store stayed in repair; once it is ready, ${registrationCorrection}`;
+    }
+    // The host may hold the registration even though it was not confirmed;
+    // what is certain is that no stage ran. A pending registration is not
+    // resumed by this run: credit needs a new run.
+    if (result.registration.state === "pending") {
+      return `verification: none; no tests ran: the registration was not confirmed and the host may still hold it; for credit, start a new run: ${registrationCorrection}`;
+    }
+    return `verification: none; no tests ran: the registration was refused or could not be confirmed; ${registrationCorrection}`;
+  }
+  let cause;
+  if (registration?.state === "untracked") {
+    cause = "it had no TermAl host or session";
+  } else if (registration?.state === "registered" && registration.bound === false) {
+    cause = "it was not bound to a claim: the host bound it to no claim the session holds";
+  } else if (registration === undefined && result?.registration === undefined) {
+    // A launch stopped or killed while registering records no outcome, and
+    // a stage runs only after its registration is recorded. Whether the host
+    // still holds it is unknown.
+    return `verification: none; no tests ran: its registration was never recorded as complete (the launch stopped while registering, or is still registering); ${registrationCorrection}`;
+  } else {
+    return undefined;
+  }
+  return `verification: none; not registered at start for credit: ${cause}; ${registrationCorrection}`;
+}
+
+// A launch killed between its two first records leaves only its request. A
+// committed request that passes its own checks still says no tests ran and
+// how to get credit; anything else has no summary.
+function requestOnlySummary(runDir) {
+  let request;
+  try {
+    request = readJson(join(runDir, "request.json"));
+    validateRequestRecord(runDir, request);
+  } catch { return undefined; }
+  if (request.input !== "commit") return undefined;
+  const creditLine = unregisteredCreditLine(request, undefined);
+  return creditLine && `${[
+    `UNKNOWN (no terminal result; running or interrupted) ${request.runId} exit=unknown`,
+    `results: ${join(runDir, "results.json")} (never written)`,
+    creditLine,
+  ].join("\n")}\n`;
+}
+
 export async function summarize(runDir) {
-  const result = readJson(join(runDir, "results.json"));
+  let result;
+  try {
+    result = readJson(join(runDir, "results.json"));
+  } catch (error) {
+    const requestOnly = error.code === "ENOENT" ? requestOnlySummary(runDir) : undefined;
+    if (requestOnly) return requestOnly;
+    throw error;
+  }
   const terminal = isTerminal(result);
   const lines = [
     `${terminal ? result.state === "passed" ? "PASS" : "FAIL" : "UNKNOWN (no terminal result; running or interrupted)"} ${result.runId} exit=${terminal ? result.exitCode : "unknown"}`,
@@ -1860,6 +2006,10 @@ export async function summarize(runDir) {
   } catch (error) {
     if (error.code !== "ENOENT") lines.push("verification: status unreadable");
   }
+  let creditRequest;
+  try { creditRequest = readJson(join(runDir, "request.json")); } catch { /* Unknown registration names no cause. */ }
+  const creditLine = unregisteredCreditLine(creditRequest, result);
+  if (creditLine) lines.push(creditLine);
   const gateLine = commitInputGateSummaryLine(result);
   if (gateLine) lines.push(gateLine);
   const liveTests = result.stages?.find((stage) => stage.liveTests?.length)?.liveTests;
@@ -2237,8 +2387,16 @@ function closedBeforeReadyError(log, code, signal) {
   } catch {
     // The close status still identifies the failed admission.
   }
+  // The run's own credit line, read from its records, so a long log tail
+  // cannot push it out of the refusal.
+  const runDir = dirname(log);
+  let request;
+  let result;
+  try { request = readJson(join(runDir, "request.json")); } catch { /* An unreadable request names no input. */ }
+  try { result = readJson(join(runDir, "results.json")); } catch { /* Unreadable results name no cause. */ }
+  const credit = unregisteredCreditLine(request, result);
   return new Error(
-    `detached worker closed before readiness (exit=${code ?? "unknown"}, signal=${signal ?? "none"})${detail ? `: ${detail}` : ""}`,
+    `detached worker closed before readiness (exit=${code ?? "unknown"}, signal=${signal ?? "none"})${detail ? `: ${detail}` : ""}${credit ? `; ${credit}` : ""}`,
   );
 }
 

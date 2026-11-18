@@ -378,6 +378,7 @@ async function queryRegisteredRun(request, runDirectory, configuration, deadline
           : run.trackingDurability !== "durable" ? "durability_unconfirmed" : "identity_mismatch";
       throw responseFailure(category, "host query does not confirm this exact durable run");
     }
+    return run;
   } catch (error) {
     throw diagnostics.failure(error, controller.signal);
   } finally { clearTimeout(timeout); }
@@ -475,13 +476,17 @@ async function registerTestRunWithin(request, runDirectory, env) {
       definitiveRefusal = true;
       diagnostics.enter("post_validation");
       validateAcknowledgement(acknowledgement, request.runId);
-      await queryRegisteredRun(request, runDirectory, configuration, deadline, diagnostics);
+      const run = await queryRegisteredRun(request, runDirectory, configuration, deadline, diagnostics);
       diagnostics.enter("post_immutable");
       if (requestIdentity(request) !== identity) throw new Error("registration error: immutable request changed during acknowledgement");
       diagnostics.success();
       console.log(`TRACKED ${request.runId}`);
+      // Whether the host bound the run to a held claim, as its registration
+      // view says; absent when the host does not report it (a host built
+      // before the view carried it). Advisory for the summary only.
+      const bound = typeof run.bound === "boolean" ? { bound: run.bound } : {};
       return { state: "registered", contract, version, runId: request.runId, registered: true, initiatingSessionId: session,
-        hostOrigin: configuration.base.origin, runDirectory, requestIdentity: identity };
+        hostOrigin: configuration.base.origin, runDirectory, requestIdentity: identity, ...bound };
     } catch (error) {
       if (error.durabilityPending) {
         pendingFailure = error;

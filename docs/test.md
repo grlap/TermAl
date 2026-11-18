@@ -1132,6 +1132,59 @@ transiently or without a definite answer, it stays pending and the same
 frozen record is sent once the route is back, under the same key. A definite
 refusal is final, as below.
 
+A committed-input run that was not registered for credit at its start gets
+none, and its `summary` says why with the correction, register at start with
+`--input commit` in the claim's named root. It had no TermAl host or session,
+or the host bound it to no claim the session holds (`verification: none; not
+registered at start for credit:`; the host's registration view, `GET
+/api/test-runs/RUN_ID?view=registration`, reports `bound`, whether the
+registration it serves, live or retained, bound the run to work, never which
+work; a host built before it reports nothing, and the line is then not
+printed), or its registration was refused or could not be confirmed, in which
+case no tests ran (`verification: none; no tests ran:`); one whose durability
+was still pending was not confirmed and the host may still hold it, so credit
+needs a new run. When the cause was a project
+Engram store that stayed in repair through the registration wait, that line
+names the store instead and gives the same correction for once it is ready. A
+run whose worker could not confirm its request or registration before
+readiness says that no tests ran, with the same correction; its error begins
+with that correction, so the summary says it even when the request or results
+can no longer be read, and a detached launch's refusal ends with the line.
+A launch stopped or killed while it was registering records no outcome; its
+`summary` says that no tests ran and that its registration was never recorded
+as complete, with the same correction, and does not claim the host refused it.
+A committed launch killed between its two first records leaves only its
+request; when that request passes its own checks, its `summary` says the same.
+A plain request left alone has no summary.
+Whether the run took committed input comes from its own creation records,
+then from a request that passed validation, never from one that failed it.
+The run directory lives under Git metadata and only the launcher writes it, so
+a deliberate rewrite of the run's own files during startup is outside the
+launcher's trust boundary and deliberately unchanged: it can only change which
+explanation is printed, never grant credit. When the worker cannot save its
+failure result, its error names the cause, the run directory, the failed save
+and, for committed input, the correction. A
+committed-input launch (explicit, or automatic until it selects plain input)
+refused before it has a run directory and its first records has no `summary`,
+so the refusal itself ends with the correction: a selected request with no
+host, a malformed or partial host identity, unavailable, refused or malformed
+source-owner metadata, an unusable Engram source binary setting, no Git run
+directory, a failure to write the run's first records, or a `--notify` launch
+with no TermAl host at all. A refusal at
+registration ends with it too, and names the run directory; when the run's
+failure result could not be saved, the refusal says so, since its `summary`
+then cannot. A hostless run on a remote runner shows the first line by
+design: it was never meant to earn host credit. A plain-input run says why on
+its `input: plain` line instead. Usage errors keep their own diagnostic and
+are deliberately unchanged, since no run was attempted and the fix is to the
+command line, not to registration: a `--notify` misuse in a valid host context
+(self-send, a session other than the inherited one, a missing or relative
+`TERMAL_CLI`), an unsupported input, and a selected request outside full or
+focused mode. A `category` launch whose catalog, `ui/test-categories.ts`,
+cannot be read or parsed keeps its own diagnostic too: it is refused before
+any run is attempted, as on earlier launchers, and the fix is to the
+repository's catalog, not to registration.
+
 A terminal verification refusal is stored beside the run in
 `engram-verification-record-state.json`. The launcher `summary` shows that
 refusal separately from the native test verdict, as `verification: rejected:`

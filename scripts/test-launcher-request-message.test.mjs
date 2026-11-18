@@ -2,12 +2,12 @@
 // fixtures. No live host, native verification credit or product gate is minted.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { execFileSync, spawn } from "node:child_process";
-import { createRun, executeRun, startDetachedRun } from "./test-launcher.mjs";
+import { createRun, executeRun, startDetachedRun, summarize } from "./test-launcher.mjs";
 import { registerTestRun, validateRunRegistration, validateRequestMessageId } from "./test-run-registration.mjs";
 import { registrationHost } from "./test-launcher-registration-fixtures.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
@@ -252,6 +252,11 @@ test("a store still in repair at the wait bound ends with a named refusal and no
   assert.equal(result.registration.state, "failed");
   assert.match(result.error, /stayed in repair/u);
   assert.ok(result.stages.every(stage => stage.state === "unrun"));
+  // The summary names the store as the cause and the correction for credit,
+  // without blaming the claim or the root.
+  const summary = await summarize(runDir);
+  assert.match(summary, /verification: none; no tests ran: the project's Engram store stayed in repair; once it is ready, register at start with --input commit in the claim's named root/u);
+  assert.doesNotMatch(summary, /refused or could not be confirmed|not registered at start/u);
 });
 
 for (const [label, status, body] of [
@@ -291,4 +296,296 @@ test("a lost selected-request ACK replays the same selector and original registr
     await validateRunRegistration({ ...f.request, registration: receipt }, env(host), f.runDirectory);
     assert.equal(host.requests.length, 2, "confirmation does not replace the logical request");
   }, { autoAcknowledge: true, loseFirstReply: true });
+});
+
+// A passing focused run with committed input whose verification credit the
+// summary explains. Credit rests on registration at START, so the summary
+// names why a run earned none and that only a new run registered that way can.
+async function creditRun(t, runEnv, input = "commit") {
+  const f = fixture(t);
+  initializeRepository(f.root);
+  const runDir = await createRun({ root: f.root, input,
+    stages: [{ name: "focused", command: process.execPath, args: ["-e", "process.exit(0)"] }] }, runEnv);
+  assert.equal((await executeRun(runDir, runEnv)).state, "passed");
+  return await summarize(runDir);
+}
+const correction = "register at start with --input commit in the claim's named root";
+
+const hostlessEnv = () => {
+  const hostless = { ...process.env };
+  for (const name of ["TERMAL_BASE_URL", "TERMAL_SESSION_ID", "TERMAL_CLI"]) delete hostless[name];
+  return hostless;
+};
+
+test("a hostless passing run says why it earned no credit and how to get it", async (t) => {
+  const summary = await creditRun(t, hostlessEnv());
+  assert.match(summary, /verification: none; not registered at start for credit: it had no TermAl host or session/u);
+  assert.ok(summary.includes(correction), summary);
+});
+
+test("a hostless plain-input run keeps only its input: plain explanation", async (t) => {
+  const summary = await creditRun(t, hostlessEnv(), "plain");
+  assert.match(summary, /^input: plain; no committed-input verification: /mu);
+  assert.doesNotMatch(summary, /verification: none;/u);
+});
+
+test("a registered run the host bound to no claim says so; a bound one, or one the host did not report, names no cause", async (t) => {
+  // The host's registration view reports `bound` (src/test_run_registration_query.rs);
+  // a host built before it did reports nothing.
+  const withoutBound = (run) => {
+    const { bound, ...rest } = run;
+    return rest;
+  };
+  for (const [label, transform, expected] of [
+    ["unbound", (run) => ({ ...run, bound: false }), true],
+    ["bound", (run) => ({ ...run, bound: true }), false],
+    ["not reported", withoutBound, false],
+  ]) {
+    await registrationHost(async (host) => {
+      const summary = await creditRun(t, env(host));
+      assert.equal(summary.includes("it was not bound to a claim"), expected, `${label}: ${summary}`);
+      assert.equal(summary.includes("verification: none;"), expected, `${label}: ${summary}`);
+    }, { autoAcknowledge: true, queryTransform: (run) => run && transform(run) });
+  }
+});
+
+// Every way a committed-input launch stops before its first stage because it
+// was not registered for credit, each named with the correction. Refused
+// before it has a run directory, the launch has no summary and its refusal
+// names the correction; refused at or after registration, the refusal and
+// the run's summary both do. The host may hold a registration it acknowledged
+// but could not confirm, so such a summary says only that no tests ran, never
+// that the run was not registered. A plain-input launch keeps its own
+// explanation. Hostless and unbound runs that ran are covered above. A write
+// failure of the first records, just after the run directory is made, takes
+// the same refusal path as the directory itself and cannot be induced here
+// without replacing the file system.
+const unregisteredSummary = /verification: none; no tests ran: the registration was refused or could not be confirmed/u;
+// A registration whose durability stays pending through its one identical
+// replay: the host may still hold it, so its summary says only that no tests
+// ran and that credit needs a new run. The host answers with the typed
+// pending reply for the immutable request it read from the run directory.
+function pendingRefusal() {
+  let created;
+  const fields = ["runId", "root", "stages", "notifyTo", "full", "scope", "detached",
+    "creatorPid", "owner", "started", "requiredBinaryEnv", "prerequisiteFiles", "needsCargo", "liveEngram"];
+  const ordered = (value) => Array.isArray(value) ? value.map(ordered)
+    : value && typeof value === "object"
+      ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, ordered(value[key])])) : value;
+  const pending = () => {
+    const request = JSON.parse(readFileSync(join(created, "request.json"), "utf8"));
+    const immutable = Object.fromEntries(fields.map((key) => [key, request[key] ?? null]));
+    if (request.input !== undefined) immutable.input = request.input;
+    if (request.sourceOwner !== undefined) immutable.sourceOwner = request.sourceOwner;
+    return {
+      error: "Durability is pending; retry the unchanged original request.",
+      contract: "termal-durability-pending", version: 1, code: "durability_pending", outcome: "pending",
+      operation: "test_run_registration",
+      identity: { runId: request.runId, ownerSessionId: request.owner,
+        requestDigest: createHash("sha256").update(JSON.stringify(ordered(immutable))).digest("hex") },
+      retry: { mode: "same_request" },
+    };
+  };
+  return {
+    label: "a registration whose durability stays pending",
+    afterCreated: (directory) => { created = directory; },
+    registration: { status: 503, acknowledgement: pending },
+    refusal: /durability is pending/iu,
+    summary: /verification: none; no tests ran: the registration was not confirmed and the host may still hold it; for credit, start a new run: /u,
+  };
+}
+const launchRefusals = [
+  { label: "a selected request with no host", options: { requestMessageId: selector },
+    refusal: /selected test requests require their native TermAl host/u },
+  { label: "a malformed session id", env: { TERMAL_SESSION_ID: "bad session" },
+    refusal: /registration error: missing or malformed TERMAL_SESSION_ID/u },
+  { label: "a malformed host URL", env: { TERMAL_SESSION_ID: "fixture-owner", TERMAL_BASE_URL: "not a url" },
+    refusal: /registration error: missing or malformed TERMAL_BASE_URL/u },
+  { label: "a host URL with credentials", env: { TERMAL_SESSION_ID: "fixture-owner", TERMAL_BASE_URL: "http://user:pw@127.0.0.1:9/" },
+    refusal: /registration error: unsupported TermAl host URL/u },
+  { label: "a partial host identity under --notify", env: { TERMAL_SESSION_ID: "fixture-owner" }, options: { notifyTo: "coordinator" },
+    refusal: /registration error: missing or malformed TERMAL_BASE_URL/u },
+  // No host at all: a notification needs one, and so does credit.
+  { label: "a hostless launch under --notify", options: { notifyTo: "coordinator" },
+    refusal: /notification sender/u },
+  { label: "an unreachable host", host: "down",
+    refusal: /source owner metadata unavailable \(transport_failure; ECONNREFUSED\); no tests started/u },
+  { label: "an unreachable host under automatic input", host: "down", options: { input: undefined, automaticInput: true },
+    refusal: /source owner metadata unavailable/u },
+  { label: "a host refusing source-owner metadata", host: async () => new Response("{}", { status: 503 }),
+    refusal: /source owner metadata refused \(503\); no tests started/u },
+  { label: "malformed source-owner metadata", host: async () => new Response("{}", { status: 200 }),
+    refusal: /source owner metadata is malformed or unsupported; no tests started/u },
+  { label: "a relative Engram source binary", env: { ENGRAM_SOURCE_BINARY: "engram" },
+    refusal: /ENGRAM_SOURCE_BINARY must name an absolute engram executable/u },
+  { label: "no Git for the run directory", git: false, refusal: /cannot locate Git run directory/u },
+  { label: "a refused registration", registration: { status: 409, acceptRegistration: false, errorReason: "fixture refusal" },
+    refusal: /registration error:.*renew the claim or name the source root again/su, summary: unregisteredSummary },
+  { label: "a claim or fence refusal", registration: { status: 409, acceptRegistration: false,
+    errorReason: "named run's claim fence changed; name the source root again" },
+    refusal: /claim fence changed/u, summary: unregisteredSummary },
+  { label: "an acknowledged registration whose confirmation fails", registration: { queryStatus: 500, errorReason: "fixture query failure" },
+    refusal: /registration error:/u, summary: unregisteredSummary },
+  { label: "a store in repair through the registration wait",
+    registration: { status: 503, acknowledgement: () => inRepair }, wait: { boundMs: 70_000, pause: async () => {} },
+    refusal: /no tests started; rerun once the store is ready/u,
+    summary: /verification: none; no tests ran: the project's Engram store stayed in repair; once it is ready, /u },
+  { label: "a worker that cannot confirm its registration at startup", registration: {}, startup: "foreground",
+    summary: /verification: none; no tests ran: the run's worker could not confirm its request or registration before readiness/u },
+  { label: "a worker whose request became unreadable before startup", registration: {}, startup: "unreadable request",
+    summary: /verification: none; no tests ran: the run's worker could not confirm its request or registration before readiness/u },
+  { label: "a detached worker that cannot confirm its registration at startup", registration: {}, startup: "detached",
+    refusal: /^detached worker closed before readiness/u,
+    summary: /verification: none; no tests ran: the run's worker could not confirm its request or registration before readiness/u },
+  // The input kind comes from the run's own creation records, not from a
+  // request that failed validation.
+  { label: "a worker whose results were replaced by other valid JSON", registration: {}, startup: "replaced results",
+    summary: /verification: none; no tests ran: the run's worker could not confirm its request or registration before readiness/u },
+  { label: "a refused registration whose failure result cannot be saved",
+    registration: { status: 409, acceptRegistration: false, errorReason: "fixture refusal" },
+    afterCreated: (directory) => {
+      // A directory where the results file was leaves the failure result unwritable.
+      const results = join(directory, "results.json");
+      rmSync(results);
+      mkdirSync(results);
+    },
+    refusal: /registration error:.*run directory: .*\(its failure result could not be saved: /su },
+  pendingRefusal(),
+  // The cause, the run directory and the correction outlive a failure result
+  // the worker cannot write.
+  { label: "a worker whose failure result cannot be saved", registration: {}, startup: "unsavable result",
+    refusal: /^worker startup failed before readiness: no tests ran: .*; run directory: .*\(its failure result could not be saved: /su },
+  { label: "a worker whose request was replaced by other valid JSON", registration: {}, startup: "replaced request",
+    summary: /verification: none; no tests ran: the run's worker could not confirm its request or registration before readiness/u },
+  { label: "a plain-input worker whose request now claims committed input", registration: {}, options: { input: "plain" },
+    startup: "request claims commit", plain: true },
+  { label: "a plain-input launch to an unreachable host", host: "down", options: { input: "plain" },
+    refusal: /source owner metadata unavailable/u, plain: true },
+];
+const startupCreditLine = `verification: none; no tests ran: the run's worker could not confirm its request or registration before readiness; ${correction}`;
+
+// A launch stopped or killed while it registers records no registration
+// outcome: its records are left as they stand when registration begins, or,
+// killed between its two first records, only its request is. Its summary says
+// no tests ran and how to get credit, without claiming the host refused it.
+// A plain request left alone has no summary.
+const stoppedLaunches = [
+  { label: "a committed launch stopped while registering", records: ["request.json", "results.json"] },
+  { label: "a committed launch killed between its first two records", records: ["request.json"] },
+  { label: "a plain launch killed between its first two records", records: ["request.json"], input: "plain" },
+];
+test("a committed launch stopped while registering says no tests ran and how to get credit", async (t) => {
+  for (const row of stoppedLaunches) {
+    const f = fixture(t);
+    initializeRepository(f.root);
+    let stopped;
+    await registrationHost(async (host) => {
+      await createRun({ root: f.root, input: row.input ?? "commit",
+        stages: [{ name: "focused", command: process.execPath, args: ["-e", "process.exit(0)"] }],
+        onRunCreated: (directory) => {
+          // The run id is the directory's name, as the request records it.
+          stopped = join(f.root, ".git", "stopped", basename(directory));
+          mkdirSync(stopped, { recursive: true });
+          for (const name of row.records) copyFileSync(join(directory, name), join(stopped, name));
+        } }, env(host));
+    }, { autoAcknowledge: true });
+    if (row.input === "plain") {
+      await assert.rejects(summarize(stopped), { code: "ENOENT" }, row.label);
+      continue;
+    }
+    const summary = await summarize(stopped);
+    assert.match(summary, /^UNKNOWN /u, `${row.label}: ${summary}`);
+    assert.match(summary, /verification: none; no tests ran: its registration was never recorded as complete/u,
+      `${row.label}: ${summary}`);
+    assert.ok(summary.includes(correction), `${row.label}: ${summary}`);
+    assert.doesNotMatch(summary, /refused/u, `${row.label}: ${summary}`);
+  }
+});
+
+test("every launch refused before its first stage names its cause and the correction for credit", async (t) => {
+  const stages = [{ name: "focused", command: process.execPath, args: ["-e", "process.exit(0)"] }];
+  for (const row of launchRefusals) {
+    const f = fixture(t);
+    initializeRepository(f.root);
+    let runEnv = { ...hostlessEnv(), ...(row.host ? { TERMAL_SESSION_ID: "fixture-owner", TERMAL_BASE_URL: "http://127.0.0.1:9" } : {}),
+      ...row.env };
+    if (row.git === false) {
+      runEnv.PATH = join(f.root, ".git", "empty-bin");
+      mkdirSync(runEnv.PATH);
+    }
+    const fetchMock = row.host === "down"
+      ? t.mock.method(globalThis, "fetch", async () => {
+        throw new TypeError("fixture host down", { cause: { code: "ECONNREFUSED" } });
+      })
+      : row.host ? t.mock.method(globalThis, "fetch", row.host) : undefined;
+    let runDir;
+    const launch = async (launchEnv) => {
+      let refusal;
+      try {
+        runDir = await createRun({ root: f.root, input: "commit", stages, registrationWait: row.wait,
+          onRunCreated: (directory) => { runDir = directory; row.afterCreated?.(directory); }, ...row.options }, launchEnv);
+      } catch (error) { refusal = error; }
+      return refusal;
+    };
+    let refusal;
+    try {
+      if (row.registration) {
+        await registrationHost(async (host) => {
+          runEnv = env(host);
+          refusal = await launch(runEnv);
+        }, { autoAcknowledge: true, ...row.registration });
+      } else {
+        refusal = await launch(runEnv);
+      }
+    } finally { fetchMock?.mock.restore(); }
+    if (row.startup) {
+      // A host that never saw the run cannot confirm it at worker startup.
+      assert.equal(refusal, undefined, row.label);
+      const requestPath = join(runDir, "request.json");
+      if (row.startup === "unreadable request") writeFileSync(requestPath, "{");
+      if (row.startup === "replaced request") writeFileSync(requestPath, "{}");
+      // Valid JSON that fails validation carries no input evidence; the
+      // request, which passed its own validation, decides.
+      if (row.startup === "replaced results") writeFileSync(join(runDir, "results.json"), "{}");
+      if (row.startup === "unsavable result") {
+        rmSync(join(runDir, "results.json"));
+        mkdirSync(join(runDir, "results.json"));
+      }
+      if (row.startup === "request claims commit") {
+        writeFileSync(requestPath, JSON.stringify({ ...JSON.parse(readFileSync(requestPath, "utf8")), input: "commit" }));
+      }
+      await registrationHost(async (other) => {
+        if (row.startup === "detached") {
+          // The refusal ends with the run's own credit line, whatever its log tail holds.
+          await assert.rejects(startDetachedRun(runDir, env(other)), (error) => {
+            assert.match(error.message, row.refusal, row.label);
+            assert.ok(error.message.endsWith(`; ${startupCreditLine}`), `${row.label}: ${error.message}`);
+            return true;
+          });
+        } else if (row.startup === "unsavable result") {
+          await assert.rejects(executeRun(runDir, env(other)), (error) => {
+            assert.match(error.message, row.refusal, row.label);
+            assert.ok(error.message.endsWith(`; ${correction}`), `${row.label}: ${error.message}`);
+            return true;
+          });
+        } else {
+          assert.equal((await executeRun(runDir, env(other))).state, "failed", row.label);
+        }
+      }, { autoAcknowledge: true });
+      if (row.plain) assert.ok(!(await summarize(runDir)).includes(correction), row.label);
+    } else {
+      // Refused before its first stage, the CLI refusal ends with the correction.
+      assert.ok(refusal, `${row.label}: refused`);
+      assert.match(refusal.message, row.refusal, row.label);
+      assert.equal(refusal.message.endsWith(correction), !row.plain, `${row.label}: ${refusal.message}`);
+    }
+    if (row.summary) {
+      const summary = await summarize(runDir);
+      assert.match(summary, row.summary, row.label);
+      assert.ok(summary.includes(correction), `${row.label}: ${summary}`);
+      assert.doesNotMatch(summary, /not registered at start/u, row.label);
+    } else if (!row.startup && !row.afterCreated) {
+      assert.equal(runDir, undefined, `${row.label}: no run directory`);
+    }
+  }
 });

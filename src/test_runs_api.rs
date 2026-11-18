@@ -280,9 +280,12 @@ fn get_test_run_observed_without_native_diagnostics(
             diagnostics.request_digest = row.request_identity.clone();
             let mut run = test_run_compacted_summary(&inner, row);
             test_run_enrich_artifact_summary(&inner, &mut run, None);
+            let registration_bound = row.registration.as_ref()
+                .is_some_and(|registration| registration.work_binding.is_some());
             return Ok(Json(TestRunDetailResponse {
                 source: "retained",
                 run,
+                registration_bound,
                 detail: TestRunDetail {
                     limitations: Some(if row.compacted {
                         format!(
@@ -301,11 +304,13 @@ fn get_test_run_observed_without_native_diagnostics(
     // run. Neither branch writes the index or waits for its rescan mutex.
     diagnostics.enter("get_exact_lookup");
     if let Some(exact) = test_run_exact_query(&state, run_id, diagnostics)? {
+        let registration_bound = exact.registration_bound;
         diagnostics.request_digest = exact.request_identity;
         return if let Some(directory) = exact.directory {
             if !include_detail {
                 return Ok(Json(TestRunDetailResponse {
                     source: "index", run: exact.run, detail: TestRunDetail::default(),
+                    registration_bound,
                 }));
             }
             diagnostics.enter("get_detail_dispatch");
@@ -318,11 +323,11 @@ fn get_test_run_observed_without_native_diagnostics(
                     if detail.is_ok() { "read_complete" } else { "read_failed" });
             }
             Ok(Json(TestRunDetailResponse {
-                source: "index", run: exact.run, detail: detail?,
+                source: "index", run: exact.run, detail: detail?, registration_bound,
             }))
         } else {
             Ok(Json(TestRunDetailResponse {
-                source: "registration", run: exact.run,
+                source: "registration", run: exact.run, registration_bound,
                 detail: TestRunDetail {
                     limitations: Some("Durable registration; the background artifact index has not caught up.".to_owned()),
                     ..TestRunDetail::default()
@@ -331,24 +336,33 @@ fn get_test_run_observed_without_native_diagnostics(
         };
     }
     diagnostics.enter("get_global_summary");
-    let summaries = {
+    let (summaries, retained_bound) = {
         let inner = diagnostics.lock(&state.inner);
         // A registration/index arriving after the captured absence must go
         // through the fenced exact lookup on a fresh request, never this tail.
         if inner.test_run_registrations.contains_key(run_id) || inner.test_runs.find(run_id).is_some() {
             return Err(ApiError::conflict("test run identity changed during query; retry"));
         }
-        test_run_summaries_locked(&inner)
+        // The retained row the first lookup looks for, found here without its
+        // installed filter: one under revalidation, or one compacted after
+        // that lookup, is served below, and its durable registration still
+        // says whether it bound the run.
+        let retained_bound = inner.test_run_compacted.get(run_id)
+            .or_else(|| inner.test_run_compacted.values()
+                .find(|row| test_run_summary_ids(&row.summary).any(|id| id == run_id)))
+            .and_then(|row| row.registration.as_ref())
+            .is_some_and(|registration| registration.work_binding.is_some());
+        (test_run_summaries_locked(&inner), retained_bound)
     };
     let run = summaries.into_iter().find(|run| run.run_id == run_id)
         .ok_or_else(|| ApiError::not_found("unknown test run"))?;
     if run.run_dir.is_empty() {
-        return Ok(Json(TestRunDetailResponse { source: "observation", run, detail: TestRunDetail {
+        return Ok(Json(TestRunDetailResponse { source: "observation", run, registration_bound: false, detail: TestRunDetail {
             limitations: Some("Host-observed provider execution; no launcher artifact directory was reported.".to_owned()),
             ..TestRunDetail::default()
         } }));
     }
-    Ok(Json(TestRunDetailResponse { source: "retained", run, detail: TestRunDetail {
+    Ok(Json(TestRunDetailResponse { source: "retained", run, registration_bound: retained_bound, detail: TestRunDetail {
         limitations: Some("The durable registration is retained; current launcher artifacts are unavailable.".to_owned()),
         ..TestRunDetail::default()
     } }))

@@ -274,8 +274,11 @@ Registration adapters use `GET /api/test-runs/{id}?view=registration`. This
 view uses the same exact identity fence and returns only `source` and `run`.
 The latter contains `runId`, `ownerSessionId`, `initiatingSessionId`,
 `registrationState`, `trackingDurability`, `trackingProvenances`, `creatorPid`,
-`startedAt`, `detached`, `runDir` and `worktree`. It reads no stage/log detail
-and includes no source identities, commands or per-path data. Its encoded JSON
+`startedAt`, `detached`, `runDir`, `worktree` and `bound`, whether the
+registration bound the run to work (never which work; the launcher's summary
+uses it to say why an unbound run earns no credit, docs/test.md). It reads no
+stage/log detail and includes no source identities, commands, bound work
+lists or per-path data. Its encoded JSON
 is limited to 64 KiB; metadata that exceeds that bound is refused with HTTP 413
 rather than truncated. The size is independent of the changed-path count.
 The shipped adapter keeps its own 64 KiB response limit and all identity checks.

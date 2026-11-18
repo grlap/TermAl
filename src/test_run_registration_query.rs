@@ -19,10 +19,13 @@ const TEST_RUN_REGISTRATION_CONFIRMATION_MAX_BYTES: usize = 64 * 1024;
 fn test_run_registration_confirmation(
     response: TestRunDetailResponse,
 ) -> Result<Response, ApiError> {
+    let bound = response.registration_bound;
     let run = response.run;
     // Fixed identity fields only: no stages, logs, command, sourceId, bound
     // work lists or per-path data. Keep nulls so missing identity fails closed
     // in the adapter, rather than manufacturing an acknowledged identity.
+    // `bound` says only whether the registration bound the run to work, so
+    // the launcher can say why an unbound run earns no credit.
     let mut value = json!({
         "source": response.source,
         "run": {
@@ -37,6 +40,7 @@ fn test_run_registration_confirmation(
             "detached": run.detached,
             "runDir": run.run_dir,
             "worktree": run.worktree,
+            "bound": bound,
         }
     });
     if let Some(selector) = &run.registration.request_message_id {

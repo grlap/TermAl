@@ -192,6 +192,10 @@ struct TestRunDetailResponse {
     #[serde(serialize_with = "serialize_test_run_detail_summary")]
     run: TestRunSummary,
     detail: TestRunDetail,
+    // Whether the registration this response was served from, live or
+    // retained, bound the run to work. Only the registration view reports it.
+    #[serde(skip)]
+    registration_bound: bool,
 }
 
 /// One indexed run: what its directory said, and the summary built from it.

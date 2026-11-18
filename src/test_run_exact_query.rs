@@ -5,6 +5,10 @@ struct TestRunExactQuery {
     run: TestRunSummary,
     directory: Option<PathBuf>,
     request_identity: Option<String>,
+    /// Whether the durable registration this answer was served from bound
+    /// the run to work: read inside the same fence as the answer, so a
+    /// registration still being published binds nothing yet.
+    registration_bound: bool,
 }
 
 #[cfg(test)]
@@ -61,6 +65,10 @@ fn test_run_exact_query(
     {
         return Err(ApiError::conflict("test run registration changed during query; retry"));
     }
+    let registration_bound = durable
+        && registration
+            .as_ref()
+            .is_some_and(|row| row.work_binding.is_some());
     let indexed = inner.test_runs.find(run_id);
     let same_index = match (&entry, indexed) {
         (Some(before), Some(now)) => Arc::ptr_eq(&before.disk, &now.disk),
@@ -77,6 +85,7 @@ fn test_run_exact_query(
             run,
             directory: Some(entry.disk.run_dir.clone()),
             request_identity: entry.disk.request_identity.clone(),
+            registration_bound,
         }));
     }
     if let Some(row) = &registration {
@@ -87,6 +96,7 @@ fn test_run_exact_query(
             run,
             directory: None,
             request_identity: Some(row.request_identity.clone()),
+            registration_bound,
         }));
     }
     if !same_index {
