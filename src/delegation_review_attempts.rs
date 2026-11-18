@@ -492,6 +492,49 @@ impl AppState {
         self.read_review_publication(parent, delegation, attempt, None)
     }
 
+    /// Parent-only discovery through the existing bounded authenticated custody
+    /// reader. This neither captures a cut nor finalizes dispatch metadata.
+    fn retained_review_attempt_identities(
+        &self,
+        parent: &str,
+        delegation: &str,
+    ) -> Result<Vec<RetainedReviewAttemptIdentity>, ApiError> {
+        let (child, policy) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = find_parent_delegation_index_locked(&inner, parent, delegation)?;
+            let record = &inner.delegations[index];
+            if record.mode != DelegationMode::Reviewer {
+                return Ok(Vec::new());
+            }
+            (record.child_session_id.clone(), record.write_policy.clone())
+        };
+        let rows = self.review_custody_rows_read_only(Some(&child), delegation)?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let key = self
+            .mailbox_store
+            .review_attempt_auth_key(false)
+            .map_err(mailbox_api_error)?
+            .ok_or_else(review_attempt_corrupt)?;
+        let slots = decode_review_slots(&rows, parent, delegation, &child, &policy, &key)?;
+        let mut published = slots
+            .into_iter()
+            .filter_map(|slot| {
+                slot.publication
+                    .map(|proof| (slot.submission_attempt, proof.ordinal, proof.result_id))
+            })
+            .collect::<Vec<_>>();
+        published.sort_by_key(|(attempt, ordinal, _)| (*attempt, *ordinal));
+        Ok(published
+            .into_iter()
+            .map(|(submission_attempt, _, result_id)| RetainedReviewAttemptIdentity {
+                submission_attempt,
+                result_id,
+            })
+            .collect())
+    }
+
     fn read_review_publication(
         &self,
         parent: &str,
@@ -957,7 +1000,9 @@ impl AppState {
         }
         Err(ApiError::bad_request(
             "exact_identity_required: a root other than the parent reads an original review \
-             only by its exact submissionAttempt and resultId",
+             only by its exact submissionAttempt and resultId; obtain both from the parent's \
+             compact termal_get_session_result packet under retainedReviewAttempts, then \
+             pin them on every packet and output-page read",
         ))
     }
 
@@ -1058,6 +1103,8 @@ impl AppState {
         }
         let revision = self.inner.lock().expect("state mutex poisoned").revision;
         Ok(DelegationResultResponse {
+            retained_review_attempts: Vec::new(),
+            retained_review_attempts_error: None,
             review_attempt_state: Some(self.review_attempt_read_state(&snapshot, &id)),
             revision,
             result: delegation_result_for_policy(&snapshot.result, &snapshot.write_policy)

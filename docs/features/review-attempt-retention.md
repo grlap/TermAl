@@ -28,6 +28,16 @@ Pin both when reading output pages, including
 continuations using the returned `nextOffsetBytes`. A result identity mismatch,
 unavailable attempt or corrupt retained record is an explicit error.
 
+The parent's current compact `termal_get_session_result` packet also lists
+`retainedReviewAttempts`: the `submissionAttempt` and `resultId` of every
+confirmed retained publication, including earlier versions of an attempt.
+These are discovery locators, separate from the packet's current result. They
+do not certify that result or a later input. The list uses the existing bounded,
+authenticated custody reader and creates no new capture. If discovery cannot
+validate the retained history, `retainedReviewAttemptsError` explains why;
+the parent's available current result remains readable. Unpublished candidates
+and reservations supply no result identity.
+
 Parent historical reads retain existing parent/delegation authorization and
 result write-policy filtering. Other native roots of the original project use
 the exact read described below. Neither read recovers an older result into the current
@@ -162,6 +172,8 @@ or foreign-project caller keep the plain 404, so existence does not leak. The
 original project is decided as for the exact read: the commissioning stamp, then
 a stamped archive snapshot, and consistent native facts only for an unstamped
 legacy record, so moving its sessions later does not redirect the diagnostic.
+The 400 directs the reader to obtain both identifiers from the parent's compact
+packet's `retainedReviewAttempts` list and pin them on each read.
 
 The host records the original project at commissioning and in the authenticated
 archive snapshot, including an explicit recorded-without-project basis. A new

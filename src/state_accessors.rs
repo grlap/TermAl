@@ -1314,9 +1314,8 @@ impl AppState {
         ))
     }
 
-    /// Returns the effective Cursor agent mode for a session
-    /// (`Agent` / `Composer` / etc., falling back to the app
-    /// default). Used by the Cursor spawn helpers.
+    /// Reads the effective Cursor mode for tests without reader admission.
+    #[cfg(test)]
     fn cursor_mode(&self, session_id: &str) -> Result<CursorMode> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner

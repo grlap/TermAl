@@ -551,6 +551,8 @@ struct AcpTurnState {
     thinking_buffer: String,
     /// Kimi tool calls observed by the reader, for the read-only gate.
     kimi_read_only: KimiReadOnlyObservations,
+    #[cfg(test)]
+    before_cursor_permission_fallback: Option<fn(&AppState, &str)>,
 }
 
 /// Holds turn configuration.

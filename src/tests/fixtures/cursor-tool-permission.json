@@ -1,0 +1,33 @@
+{
+  "provenance": {
+    "kind": "schema-derived, not a runtime capture",
+    "protocol": "ACP v1",
+    "source": "https://github.com/agentclientprotocol/agent-client-protocol/blob/6faa3d9f74e94da307ed89f521416a9fb3b99bf9/schema/v1/schema.json",
+    "definitions": ["RequestPermissionRequest", "ToolCallUpdate", "PermissionOption", "ToolCallContent", "Diff", "ToolCallLocation"],
+    "values": "Synthetic public path, text and opaque identifiers; no installed-provider behavior is claimed."
+  },
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "cursor-permission-opaque-17",
+    "method": "session/request_permission",
+    "params": {
+      "sessionId": "cursor-schema-session",
+      "toolCall": {
+        "toolCallId": "cursor-edit-9",
+        "title": "Update the development label",
+        "kind": "edit",
+        "status": "pending",
+        "content": [
+          { "type": "content", "content": { "type": "text", "text": "Replace the development label in approval-demo.txt" } },
+          { "type": "diff", "path": "/workspace/cursor/src/approval-demo.txt", "oldText": "label = old\n", "newText": "label = new\n" }
+        ],
+        "locations": [{ "path": "/workspace/cursor/src/approval-demo.txt", "line": 1 }]
+      },
+      "options": [
+        { "optionId": "cursor-no-83", "kind": "reject_once", "name": "Allow once" },
+        { "optionId": "cursor-always-52", "kind": "allow_always", "name": "Remember this choice" },
+        { "optionId": "cursor-once-71", "kind": "allow_once", "name": "Continue this operation" }
+      ]
+    }
+  }
+}

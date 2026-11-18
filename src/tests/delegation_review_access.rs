@@ -1,4 +1,6 @@
 //! Same-project exact archive reads preserve identity, isolation and pure custody.
+mod discovery;
+
 use super::delegation_review_attempts::terminal_review;
 use super::delegation_support::{
     finish_delegation_child_with_assistant_text, install_delegation_codex_runtime,

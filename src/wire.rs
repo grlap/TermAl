@@ -2309,9 +2309,22 @@ struct DelegationListResponse {
     server_instance_id: String,
 }
 
+/// Confirmed immutable publications, separate from the mutable current packet.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RetainedReviewAttemptIdentity {
+    submission_attempt: u32,
+    result_id: String,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationResultResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    retained_review_attempts: Vec<RetainedReviewAttemptIdentity>,
+    /// Discovery failure does not hide the parent's available current result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retained_review_attempts_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     review_attempt_state: Option<ReviewAttemptReadState>,
     revision: u64,

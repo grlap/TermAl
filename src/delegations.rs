@@ -1128,7 +1128,14 @@ impl AppState {
         );
         let result =
             result.ok_or_else(|| ApiError::conflict("delegation result is not available yet"))?;
+        let (retained_review_attempts, retained_review_attempts_error) =
+            match self.retained_review_attempt_identities(parent_session_id, delegation_id) {
+                Ok(identities) => (identities, None),
+                Err(error) => (Vec::new(), Some(error.message)),
+            };
         Ok(DelegationResultResponse {
+            retained_review_attempts,
+            retained_review_attempts_error,
             review_attempt_state: None,
             revision,
             result,

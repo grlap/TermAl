@@ -272,6 +272,12 @@ Cursor supports three modes that can be selected at session creation:
 | `plan` | Read-only planning — proposes changes without executing |
 | `ask` | Q&A only — explores code, answers questions |
 
+An incoming tool permission in Plan mode is refused without an approval card.
+The session shows a short reason and explains how to continue in a writable
+Agent session. This also applies to read-only Cursor delegations. An old or
+stopped runtime is cancelled without a new constraint notice, and a failed
+response handoff does not create a notice.
+
 ## Mapping to TermAl concepts
 
 | Cursor concept | TermAl equivalent | Notes |

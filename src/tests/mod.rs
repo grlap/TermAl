@@ -24,6 +24,7 @@ mod workspace_pending_memory;
 mod acceptance_evaluation;
 mod acceptance_settings;
 mod acp_gemini;
+mod acp_permission_modes;
 mod acp_tool_status;
 mod agent_commands;
 mod agent_readiness;

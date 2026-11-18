@@ -1362,14 +1362,28 @@ fn handle_acp_message(
     };
 
     if message.get("id").is_some() {
-        if matches!(agent, AcpAgent::OpenCode | AcpAgent::Gemini)
-            && method == "session/request_permission"
+        let mut cursor_mode = None;
+        if matches!(
+            agent,
+            AcpAgent::OpenCode | AcpAgent::Gemini | AcpAgent::Cursor
+        ) && method == "session/request_permission"
         {
             // Admission uses the same lock as Stop ownership and runtime replacement.
             // This is an unbounded std::mpsc send, not an IO/backpressure wait: keep
             // validation and enqueue indivisible so Stop cannot intervene between them.
             let mut inner = state.inner.lock().expect("state mutex poisoned");
-            let current = inner.find_session_index(session_id).is_some_and(|index| {
+            let index = inner.find_session_index(session_id);
+            if agent == AcpAgent::Cursor {
+                let index = index.ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+                cursor_mode = Some(
+                    inner.sessions[index]
+                        .session
+                        .cursor_mode
+                        .unwrap_or_else(default_cursor_mode),
+                );
+            }
+            let cursor_plan = cursor_mode == Some(CursorMode::Plan);
+            let current = index.is_some_and(|index| {
                 let record = &inner.sessions[index];
                 record.session.agent == agent.agent()
                     && record.runtime.matches_runtime_token(runtime_token)
@@ -1379,7 +1393,11 @@ fn handle_acp_message(
                         SessionStatus::Stopping | SessionStatus::Idle
                     )
             });
-            let refusal = if current && agent == AcpAgent::Gemini {
+            let refusal = if current && cursor_plan {
+                Some(
+                    "TermAl refused this tool permission because Cursor is in Plan mode. Continue planning without this operation, or use a writable session in Agent mode to run it.",
+                )
+            } else if current && agent == AcpAgent::Gemini {
                 if read_only_session_delegation_block_locked(&inner, Some(session_id)).is_some() {
                     Some(
                         "Gemini's read-only delegation refused a tool permission grant. Continue with operations allowed by Plan mode, or use a writable session for this operation.",
@@ -1396,12 +1414,21 @@ fn handle_acp_message(
                 None
             };
             let options = message.pointer("/params/options").and_then(Value::as_array);
-            let outcome = if !current {
+            // Cursor Agent/Ask keep their existing handling below. Only Plan
+            // refusals use this runtime-fenced response and session notice.
+            let outcome = if !current && (agent != AcpAgent::Cursor || cursor_plan) {
                 Some(json!({"outcome": "cancelled"}))
             } else if refusal.is_some() {
                 Some(
                     options
-                        .and_then(|options| find_acp_permission_option(options, &["reject_once"]))
+                        .and_then(|options| {
+                            let kinds: &[&str] = if cursor_plan {
+                                &["reject_once", "reject_always"]
+                            } else {
+                                &["reject_once"]
+                            };
+                            find_acp_permission_option(options, kinds)
+                        })
                         .map(|option_id| json!({"outcome":"selected", "optionId":option_id}))
                         .unwrap_or_else(|| json!({"outcome":"cancelled"})),
                 )
@@ -1462,7 +1489,15 @@ fn handle_acp_message(
                 return Ok(());
             }
         }
-        return handle_acp_request(message, state, session_id, input_tx, recorder, agent);
+        // Agent and Ask use the mode from admission, even if settings change
+        // before the generic handler parses the request.
+        #[cfg(test)]
+        if cursor_mode.is_some()
+            && let Some(before_fallback) = turn_state.before_cursor_permission_fallback.take()
+        {
+            before_fallback(state, session_id);
+        }
+        return handle_admitted_acp_request(message, input_tx, recorder, agent, cursor_mode);
     }
 
     handle_acp_notification(
@@ -1479,7 +1514,8 @@ fn handle_acp_message(
     )
 }
 
-/// Handles ACP request.
+// Direct-handler tests do not have a running reader to perform admission.
+#[cfg(test)]
 fn handle_acp_request(
     message: &Value,
     state: &AppState,
@@ -1487,6 +1523,22 @@ fn handle_acp_request(
     input_tx: &Sender<AcpRuntimeCommand>,
     recorder: &mut SessionRecorder,
     agent: AcpAgent,
+) -> Result<()> {
+    let cursor_mode = if agent == AcpAgent::Cursor {
+        Some(state.cursor_mode(session_id)?)
+    } else {
+        None
+    };
+    handle_admitted_acp_request(message, input_tx, recorder, agent, cursor_mode)
+}
+
+/// Handles an ACP request after admission by the reader.
+fn handle_admitted_acp_request(
+    message: &Value,
+    input_tx: &Sender<AcpRuntimeCommand>,
+    recorder: &mut SessionRecorder,
+    agent: AcpAgent,
+    cursor_mode: Option<CursorMode>,
 ) -> Result<()> {
     let request_id = message
         .get("id")
@@ -1547,14 +1599,8 @@ fn handle_acp_request(
                 request_id,
             };
 
-            // Gemini and OpenCode automatic replies are admitted only by
-            // handle_acp_message with its runtime token and Stop fence.
-            // A direct or fallback request stays manual.
-            let automatic_option = if matches!(agent, AcpAgent::OpenCode | AcpAgent::Gemini) {
-                None
-            } else {
-                acp_permission_response_option_id(agent, state, session_id, &approval)?
-            };
+            let automatic_option =
+                cursor_mode.and_then(|mode| cursor_permission_response_option_id(mode, &approval));
             if let Some(option_id) = automatic_option {
                 input_tx
                     .send(AcpRuntimeCommand::JsonRpcMessage(
@@ -1598,7 +1644,23 @@ fn handle_acp_request(
     Ok(())
 }
 
-/// Handles ACP permission response option ID.
+fn cursor_permission_response_option_id(
+    mode: CursorMode,
+    approval: &AcpPendingApproval,
+) -> Option<String> {
+    match mode {
+        CursorMode::Agent => approval
+            .allow_once_option_id
+            .clone()
+            .or_else(|| approval.allow_always_option_id.clone()),
+        CursorMode::Ask => None,
+        // Only direct-handler tests exercise this arm. The reader handles Plan
+        // before the generic request path.
+        CursorMode::Plan => approval.reject_option_id.clone(),
+    }
+}
+
+#[cfg(test)]
 fn acp_permission_response_option_id(
     agent: AcpAgent,
     state: &AppState,
@@ -1606,17 +1668,10 @@ fn acp_permission_response_option_id(
     approval: &AcpPendingApproval,
 ) -> Result<Option<String>> {
     match agent {
-        AcpAgent::Cursor => {
-            let cursor_mode = state.cursor_mode(session_id)?;
-            Ok(match cursor_mode {
-                CursorMode::Agent => approval
-                    .allow_once_option_id
-                    .clone()
-                    .or_else(|| approval.allow_always_option_id.clone()),
-                CursorMode::Ask => None,
-                CursorMode::Plan => approval.reject_option_id.clone(),
-            })
-        }
+        AcpAgent::Cursor => Ok(cursor_permission_response_option_id(
+            state.cursor_mode(session_id)?,
+            approval,
+        )),
         AcpAgent::OpenCode => {
             // Policy is session-scoped and cannot change during an active turn.
             // Never promote a one-operation grant to a persistent allow_always.
