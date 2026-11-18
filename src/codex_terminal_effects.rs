@@ -88,6 +88,11 @@ impl SharedCodexTerminalEffect {
             else {
                 return Ok(());
             };
+            state.close_provider_execution_turn(
+                &owner.session_id,
+                &owner.runtime,
+                owner.generation,
+            );
             // The provider's typed quota terminal is independent of the
             // reviewer's later MCP settlement. A duplicate finish owns nothing.
             if let SharedCodexTerminalOutcome::Failed { usage_limit_refusal, .. } = &outcome {

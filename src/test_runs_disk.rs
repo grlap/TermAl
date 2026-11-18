@@ -239,16 +239,7 @@ fn test_run_read_json(path: &FsPath) -> TestRunJson {
         return TestRunJson::TooLarge;
     }
     match review_freeze_file_versioned(path, TEST_RUN_JSON_MAX_BYTES) {
-        Ok((bytes, version)) => {
-            let stamp = version
-                .modified()
-                .ok()
-                .map(|modified| (version.len(), modified));
-            match serde_json::from_slice(&bytes) {
-                Ok(value) => TestRunJson::Parsed(value, file_content_hash(&bytes), stamp),
-                Err(_) => TestRunJson::Malformed(stamp),
-            }
-        }
+        Ok((bytes, version)) => test_run_parse_json(&bytes, &version),
         Err(err)
             if err
                 .downcast_ref::<io::Error>()
@@ -257,6 +248,17 @@ fn test_run_read_json(path: &FsPath) -> TestRunJson {
             TestRunJson::Missing
         }
         Err(_) => TestRunJson::Failed,
+    }
+}
+
+fn test_run_parse_json(bytes: &[u8], version: &fs::Metadata) -> TestRunJson {
+    let stamp = version
+        .modified()
+        .ok()
+        .map(|modified| (version.len(), modified));
+    match serde_json::from_slice(bytes) {
+        Ok(value) => TestRunJson::Parsed(value, file_content_hash(bytes), stamp),
+        Err(_) => TestRunJson::Malformed(stamp),
     }
 }
 
@@ -519,6 +521,7 @@ struct TestRunDisk {
     run_id: String,
     request_identity: Option<String>,
     locator_identity: Option<String>,
+    provider_directory_identity: Option<FederationImageFileIdentity>,
     run_dir: PathBuf,
     request_stamp: TestRunFileStamp,
     results_stamp: TestRunFileStamp,
@@ -588,20 +591,75 @@ impl TestRunDisk {
         previous: Option<&Self>,
         after_stamp: &dyn Fn(),
     ) -> TestRunRead {
+        Self::read_from(run_dir, previous, after_stamp, None, None)
+    }
+
+    fn read_provider_directory(
+        directory: &delegation_git_boundary::ProviderDirectory,
+        expected: Option<&TestRunLinkedArtifactIdentity>,
+    ) -> Option<Self> {
+        // Both files are opened through the same run-directory handle. A
+        // linked placement must not fall back to pathname reads here.
+        Self::read_from(directory.path(), None, &|| {}, Some(directory), expected).into_run()
+    }
+
+    fn read_linked_artifact(
+        run_dir: &FsPath,
+        source: Option<&TestRunLinkedArtifactSource>,
+    ) -> TestRunRead {
+        let Some(source) = source else { return TestRunRead::Pending };
+        let run_id = &source.identity.run_id;
+        let Ok(directory) = source.layout.open_run(run_dir, run_id) else {
+            return TestRunRead::Pending;
+        };
+        if directory.identity().ok().as_ref() != Some(&source.identity.directory_identity) {
+            return TestRunRead::Pending;
+        }
+        let Some(disk) = Self::read_provider_directory(&directory, Some(&source.identity)) else {
+            return TestRunRead::Pending;
+        };
+        if !source.layout.open_run(run_dir, run_id)
+            .and_then(|current| current.same_directory(&directory))
+            .unwrap_or(false)
+        {
+            return TestRunRead::Pending;
+        }
+        TestRunRead::Run(disk)
+    }
+
+    fn read_from(
+        run_dir: &FsPath,
+        previous: Option<&Self>,
+        after_stamp: &dyn Fn(),
+        directory: Option<&delegation_git_boundary::ProviderDirectory>,
+        expected: Option<&TestRunLinkedArtifactIdentity>,
+    ) -> TestRunRead {
         // Unsupported, not failed: nothing to report, and nothing to read.
         if !test_run_dir_within_bounds(run_dir) {
             return TestRunRead::Unsupported;
         }
         let request_path = run_dir.join("request.json");
         let results_path = run_dir.join("results.json");
+        let read_json = |path: &FsPath, name: &str| match directory {
+            None => test_run_read_json(path),
+            Some(directory) => match directory.read(name, TEST_RUN_JSON_MAX_BYTES) {
+                Ok((bytes, version)) => test_run_parse_json(&bytes, &version),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => TestRunJson::Missing,
+                Err(error) if error.kind() == io::ErrorKind::FileTooLarge => TestRunJson::TooLarge,
+                Err(_) => TestRunJson::Failed,
+            },
+        };
         // Stamped before the read: it is kept only when there are no parsed
         // results, which carry the stamp of their own version.
-        let results_stamp = test_run_file_stamp(&results_path);
+        let results_stamp = directory
+            .is_none()
+            .then(|| test_run_file_stamp(&results_path))
+            .flatten();
         after_stamp();
         // Only evidence from a good read earns the grace.
         let grace = previous.filter(|previous| previous.read_failures == 0);
         let failures = previous.map_or(1, |previous| previous.read_failures.saturating_add(1));
-        let (request, request_stamp) = match test_run_read_json(&request_path) {
+        let (request, request_stamp) = match read_json(&request_path, "request.json") {
             TestRunJson::Parsed(request, _, stamp) => (request, stamp),
             // The run directory is still listed (a removed directory leaves
             // the index at once), so a missing request is a failed read like
@@ -621,7 +679,8 @@ impl TestRunDisk {
             // Deterministic, not a race: no grace, and nothing to report.
             TestRunJson::TooLarge => return TestRunRead::Unsupported,
         };
-        let run_id = test_run_str(&request, "runId").unwrap_or_else(|| {
+        let reported_run_id = request.get("runId").and_then(Value::as_str);
+        let run_id = reported_run_id.map(str::to_owned).unwrap_or_else(|| {
             run_dir
                 .file_name()
                 .unwrap_or_default()
@@ -632,6 +691,32 @@ impl TestRunDisk {
         let Some(run_id) = test_run_within(run_id, TEST_RUN_TEXT_MAX_BYTES) else {
             return TestRunRead::Unsupported;
         };
+        let request_identity = test_run_registration_identity(&request).ok();
+        let directory_identity = directory.and_then(|directory| directory.identity().ok());
+        if expected.is_some_and(|identity| {
+            !test_run_linked_identity_admits(
+                identity,
+                reported_run_id,
+                request_identity.as_deref(),
+                directory_identity.as_ref(),
+            )
+        }) {
+            return TestRunRead::Pending;
+        }
+        // On the first scoped read the request and directory supply the
+        // prospective link. Later reads compare against the original link.
+        let first_link = if expected.is_none() {
+            directory_identity.as_ref().and_then(|directory_identity| {
+                Some(TestRunLinkedArtifactIdentity {
+                    run_id: reported_run_id?.to_owned(),
+                    request_identity: request_identity.clone()?,
+                    directory_identity: directory_identity.clone(),
+                })
+            })
+        } else {
+            None
+        };
+        let linked_identity = expected.or(first_link.as_ref());
         let preset = if request.get("full").and_then(Value::as_bool) == Some(true) {
             TestRunPreset::Full
         } else if request
@@ -678,9 +763,23 @@ impl TestRunDisk {
         // A confirmation belongs to the results it was made on, so it is kept
         // only with the grace's copy of those same results.
         let mut confirmed_unknown = None;
-        let (results, results_stamp) = match test_run_read_json(&results_path) {
+        let (results, results_stamp) = match read_json(&results_path, "results.json") {
             // The pid in these results is judged against when this version
             // was written, never against a stamp of a replaced version.
+            TestRunJson::Parsed(results, _, stamp)
+                if directory.is_some()
+                    && test_run_results_are_terminal(&results)
+                    && !linked_identity.is_some_and(|identity| {
+                        test_run_linked_identity_admits(
+                            identity,
+                            results.get("runId").and_then(Value::as_str),
+                            request_identity.as_deref(),
+                            directory_identity.as_ref(),
+                        )
+                    }) =>
+            {
+                (None, stamp)
+            }
             TestRunJson::Parsed(results, digest, stamp) => {
                 #[cfg(test)]
                 TEST_HISTORY_PARSED.with(|slot| {
@@ -688,7 +787,19 @@ impl TestRunDisk {
                         parsed(run_dir, &digest);
                     }
                 });
-                (Some(TestRunResultsExtract::new(&results, digest)), stamp)
+                let mut results = TestRunResultsExtract::new(&results, digest);
+                if directory.is_some()
+                    && let Some(state) = results.terminal_state
+                    && !(results.ended.as_deref().and_then(EngramHost::check_timestamp).is_some()
+                        && results.exit_code.is_some_and(|exit| {
+                            state == if exit == 0 { TestRunState::Passed } else { TestRunState::Failed }
+                        }))
+                {
+                    // A scoped launcher terminal must also be representable
+                    // by the original provider execution's terminal phase.
+                    results.terminal_state = None;
+                }
+                (Some(results), stamp)
             }
             // A run is created with both files, but a reader may still find
             // no results. Missing results are an answer only while no good
@@ -758,8 +869,13 @@ impl TestRunDisk {
             .or_else(|| results.as_ref().and_then(|results| results.started.clone()));
         TestRunRead::Run(Self {
             run_id,
-            request_identity: test_run_registration_identity(&request).ok(),
-            locator_identity: test_run_locator_identity(run_dir),
+            request_identity,
+            locator_identity: match directory {
+                #[cfg(unix)]
+                Some(directory) => Some(test_run_native_path_key(directory.path())),
+                _ => test_run_locator_identity(run_dir),
+            },
+            provider_directory_identity: directory_identity,
             run_dir: run_dir.to_path_buf(),
             request_stamp,
             results_stamp,

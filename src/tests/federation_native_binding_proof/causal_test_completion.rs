@@ -1,7 +1,7 @@
 // Real selected S2b request -> original native producer -> authenticated READ.
 use super::*;
 use crate::tests::test_runs::test_run_registration::causal_completion_fixture::{
-    compact, finish, producer,
+    compact, destination, finish, producer,
 };
 use crate::tests::test_runs::test_run_registration::selected_provider::selected_provider_completion;
 
@@ -147,66 +147,158 @@ async fn wire(
         .await
 }
 
-async fn selected_provider_over_relay(mode: MailboxTestMode) {
+async fn selected_provider_over_relay(mode: MailboxTestMode, linked_worktree: bool) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::production_shape().await;
     let (mut server, handles) = connect(&fixture).await;
-    selected_provider_completion(fixture.satellite.clone(), mode, |runner| {
-        let fixture = &fixture;
-        async move {
-            let key = "selected-provider-relay";
-            let request = SendMailboxMessageRequest {
-                target_session_id: format!(
-                    "host:{}::{runner}",
-                    fixture.satellite_channel.snapshot.local.host_id
-                ),
-                message: "run the original selected request".into(),
-                idempotency_key: key.into(),
-                topic: None,
-                state_stamp: None,
-                class: None,
-            };
-            let input = crate::tests::mailboxes::test_request::typed_request(mode);
-            let capture = fixture
-                .central
-                .prepare_mailbox_test_request(&fixture.native, key, Some(&input))
-                .unwrap()
-                .unwrap();
-            let receipt = fixture
-                .central
-                .send_native_mailbox_relay_with_test_custody(
-                    &fixture.native,
-                    &request,
-                    Some(&capture),
-                )
-                .await
-                .unwrap()
-                .unwrap();
-            let page = fixture
-                .satellite
-                .read_native_mailbox_relay(
-                    &runner,
-                    MailboxRelayLocator::decode(&receipt.mailbox_id, false)
-                        .unwrap()
-                        .unwrap(),
-                    ReadMailboxRequest {
-                        read_key: None,
-                        issue_receipt: false,
-                        after_sequence: None,
-                        limit: 50,
-                    },
-                )
-                .await
-                .unwrap();
-            page.messages
-                .iter()
-                .find(|message| message.id == receipt.message_id)
-                .expect("recipient receives the actual typed relay request")
-                .id
-                .clone()
-        }
-    })
-    .await;
+    let consumer = linked_worktree.then(|| destination(fixture.central.clone(), &fixture.native));
+    let mut input = consumer
+        .as_ref()
+        .map(|(input, _, _)| input.clone())
+        .unwrap_or_else(|| crate::tests::mailboxes::test_request::typed_request(mode));
+    input.mode = mode;
+    let registration =
+        selected_provider_completion(fixture.satellite.clone(), mode, linked_worktree, |runner| {
+            let fixture = &fixture;
+            let input = &input;
+            async move {
+                let key = "selected-provider-relay";
+                let request = SendMailboxMessageRequest {
+                    target_session_id: format!(
+                        "host:{}::{runner}",
+                        fixture.satellite_channel.snapshot.local.host_id
+                    ),
+                    message: "run the original selected request".into(),
+                    idempotency_key: key.into(),
+                    topic: None,
+                    state_stamp: None,
+                    class: None,
+                };
+                let capture = fixture
+                    .central
+                    .prepare_mailbox_test_request(&fixture.native, key, Some(input))
+                    .unwrap()
+                    .unwrap();
+                let receipt = fixture
+                    .central
+                    .send_native_mailbox_relay_with_test_custody(
+                        &fixture.native,
+                        &request,
+                        Some(&capture),
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let page = fixture
+                    .satellite
+                    .read_native_mailbox_relay(
+                        &runner,
+                        MailboxRelayLocator::decode(&receipt.mailbox_id, false)
+                            .unwrap()
+                            .unwrap(),
+                        ReadMailboxRequest {
+                            read_key: None,
+                            issue_receipt: false,
+                            after_sequence: None,
+                            limit: 50,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                page.messages
+                    .iter()
+                    .find(|message| message.id == receipt.message_id)
+                    .expect("recipient receives the actual typed relay request")
+                    .id
+                    .clone()
+            }
+        })
+        .await;
+    if let Some((_, transport, scope)) = consumer {
+        let causal = test_run_causal_request(&registration).unwrap();
+        let selector = CausalTestCompletionSelector {
+            canonical_message_id: causal.canonical_message_id.clone(),
+            payload: causal.payload.clone(),
+        };
+        let producer = registration.native_completion.as_ref().unwrap();
+        let pulled = wire(&fixture, selector.clone())
+            .await
+            .unwrap()
+            .completion
+            .unwrap();
+        assert_eq!(pulled, producer.completion);
+        assert_eq!(pulled.run_id, registration.run_id);
+
+        // Engram's reply is scripted. Only authenticated pull and exact atomic
+        // requester custody are observed here, never a real qualification.
+        let receipt = json!({
+            "operation": Uuid::new_v4().simple().to_string(),
+            "origin": Uuid::new_v4().simple().to_string(),
+            "verifications": [],
+            "qualification": {"credited": false, "reason": "not_full_mode"},
+        });
+        transport.responses.lock().unwrap().extend([
+            ScriptedEngramControlResponse::Reply(Ok(json!({
+                "work_session": true, "session_id": fixture.native,
+                "project_id": scope.store.project_id,
+                "capabilities": ["host_work_v1", "remote_verification_record_v1"],
+            }))),
+            ScriptedEngramControlResponse::Reply(Ok(receipt.clone())),
+        ]);
+        let deliveries = fixture
+            .central
+            .read_causal_test_completion_batch()
+            .await
+            .unwrap();
+        assert_eq!(deliveries.len(), 1);
+        let delivery = &deliveries[0];
+        assert_eq!(delivery.selector, selector);
+        assert_eq!(delivery.completion, pulled);
+        assert_eq!(delivery.scope.as_ref(), Some(&scope));
+        fixture
+            .central
+            .settle_causal_test_completion(delivery)
+            .unwrap();
+        let recovered = MailboxStore::open(&resolve_coordination_persistence_path(
+            &fixture.central.persistence_path,
+        ))
+        .unwrap();
+        let saved = recovered
+            .causal_test_settlement(&selector, Some(&scope))
+            .unwrap()
+            .unwrap();
+        assert!(saved.complete());
+        assert_eq!(saved.completion, producer.completion);
+        assert_eq!(saved.admissions[0].receipt, Some(receipt));
+        let calls = transport.requests();
+        let writes: Vec<_> = calls
+            .iter()
+            .filter(|call| call.request["operation"] == "remote_verification_record")
+            .collect();
+        assert_eq!(writes.len(), 1);
+        assert_eq!(
+            writes[0].request["completion"],
+            serde_json::to_value(&pulled).unwrap()
+        );
+        fixture
+            .central
+            .settle_causal_test_completion(delivery)
+            .unwrap();
+        assert_eq!(transport.requests().len(), calls.len());
+        let central = fixture.central.inner.lock().unwrap();
+        assert!(
+            central
+                .test_run_registrations
+                .get(&registration.run_id)
+                .is_none()
+        );
+        assert!(
+            central
+                .test_run_observations
+                .get(&producer.execution_id)
+                .is_none()
+        );
+    }
     drop(handles);
     server.finish().await;
     fixture.finish().await;
@@ -214,12 +306,17 @@ async fn selected_provider_over_relay(mode: MailboxTestMode) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn focused_relay_selector_records_provider_and_native_completion_with_engram_disabled() {
-    selected_provider_over_relay(MailboxTestMode::Focused).await;
+    selected_provider_over_relay(MailboxTestMode::Focused, false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_relay_selector_records_provider_and_native_completion_with_engram_disabled() {
-    selected_provider_over_relay(MailboxTestMode::Full).await;
+    selected_provider_over_relay(MailboxTestMode::Full, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn linked_relay_selector_records_provider_and_native_completion_with_engram_disabled() {
+    selected_provider_over_relay(MailboxTestMode::Focused, true).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
