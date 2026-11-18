@@ -661,6 +661,8 @@ export async function createRun({
   // The committed-input status reader; tests replace it to act between the
   // reads.
   commitInputStatus = captureCommitInputStatus,
+  // The registration wait for a store in repair; tests shorten its pauses.
+  registrationWait,
 }, env = process.env) {
   if (requestMessageId !== undefined) {
     validateRequestMessageId(requestMessageId);
@@ -759,13 +761,14 @@ export async function createRun({
   });
   onRunCreated?.(runDir);
   try {
-    request.registration = await registerTestRun(request, runDir, env);
+    request.registration = await registerTestRun(request, runDir, env, registrationWait);
     save(join(runDir, "request.json"), request);
   } catch (error) {
     const result = readJson(join(runDir, "results.json"));
     const pending = error.durabilityPending;
     const stateLock = boundedStateLockEvidence(error.stateLock);
-    const message = request.input === "commit"
+    // A store in repair names its own cause and fix; the claim is not at fault.
+    const message = request.input === "commit" && !error.storeTransient
       ? `${error.message}; if the named claim lapsed or changed, renew the claim or name the source root again; use --input plain for a run without verification credit`
       : error.message;
     Object.assign(result, {

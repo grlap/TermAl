@@ -1129,6 +1129,7 @@ include!("state_lock_observer.rs");
 include!("engram_budget.rs");
 include!("engram_connection_reset.rs");
 include!("engram_host_adapter.rs");
+include!("engram_store_transient.rs");
 include!("engram_control_non_application.rs");
 include!("engram_session_authority.rs");
 include!("engram_causal_failure.rs");

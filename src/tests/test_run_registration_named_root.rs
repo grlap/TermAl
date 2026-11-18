@@ -5,7 +5,9 @@
 // that root; that a stale session binding is never used for it; that such a
 // run in another worktree stays unbound, but two matching names refuse; and
 // that a staged-lane run keeps copying the session's binding; and that the
-// input kind joins the registration identity only when a request names one.
+// input kind joins the registration identity only when a request names one;
+// and that a held read refused by a store in repair is a typed 503 after which
+// the unchanged request registers once, while any other refusal stays a 502.
 // Uses the parent's run and registration fixtures. Does not own the
 // named-root lifecycle (src/tests/engram_source_roots.rs), observed commands,
 // or the fence-time refusal of a flipped input (src/tests/test_run_phase_trace.rs).
@@ -812,6 +814,248 @@ fn committed_registration_never_falls_back_to_an_unavailable_or_different_claim(
                 .contains_key(&run_id)
         );
     }
+}
+
+/// The error the CLI held-claim reader returns when Engram exits with its
+/// JSON refusal `code` on stderr.
+fn cli_refusal(code: &str) -> EngramTransportError {
+    let stderr = serde_json::to_vec_pretty(&json!({
+        "error": { "code": code, "message": "fixture refusal", "details": {} }
+    }))
+    .unwrap();
+    decode_engram_cli_json(
+        EngramCliOutput {
+            success: false,
+            exit: EngramCliExit::Code(1),
+            status: "exit code: 1".to_owned(),
+            stdout: Vec::new(),
+            stderr,
+        },
+        ENGRAM_WORK_BINDING_READER_LABEL,
+    )
+    .unwrap_err()
+}
+
+#[test]
+fn a_store_in_repair_refuses_with_a_typed_transient_code_and_the_unchanged_request_registers_once()
+{
+    let fixture = RunFixture::new("registration-store-transient");
+    let (session, store) = engram_owner(&fixture);
+    let binding = claim("transient");
+    name_root(
+        &fixture,
+        &store,
+        &binding,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
+    let transport = ScriptedEngramControlTransport::new([]);
+    fixture
+        .state
+        .install_test_engram_transport(transport.clone());
+    let run_id = "test-store-transient";
+    let directory = registered_run(&fixture, &session, run_id);
+    let path = directory.join("request.json");
+    let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    request["input"] = json!("commit");
+    fs::write(path, request.to_string()).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    for code in ["work_projection_invalid", "projection_repair_required"] {
+        transport.replace_held_claims([Err(cli_refusal(code))]);
+        let error = fixture
+            .state
+            .register_test_run(&session, registration_request(run_id, &directory))
+            .err()
+            .expect("a store in repair refuses the registration");
+        assert_eq!(
+            error.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{code}: {}",
+            error.message
+        );
+        assert!(error.message.contains(code), "{}", error.message);
+        let body: Value = serde_json::from_slice(
+            &runtime
+                .block_on(axum::body::to_bytes(
+                    error.into_response().into_body(),
+                    64 * 1024,
+                ))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["code"], "engram_store_transient");
+        let inner = fixture.state.inner.lock().unwrap();
+        assert!(!inner.test_run_registrations.contains_key(run_id));
+        assert!(!inner.test_runs.registered.contains(run_id));
+    }
+
+    // Once the store is ready, the same request registers, exactly once.
+    transport.replace_held_claims([Ok(current_held_claim(&binding))]);
+    fixture
+        .state
+        .register_test_run(&session, registration_request(run_id, &directory))
+        .unwrap();
+    let registration = fixture.state.inner.lock().unwrap().test_run_registrations[run_id].clone();
+    assert_eq!(registration.work_binding.as_ref(), Some(&binding));
+    let reads = transport.held_claim_reads();
+    fixture
+        .state
+        .register_test_run(&session, registration_request(run_id, &directory))
+        .unwrap();
+    assert_eq!(
+        transport.held_claim_reads(),
+        reads,
+        "a replay reads nothing again"
+    );
+    let inner = fixture.state.inner.lock().unwrap();
+    assert_eq!(inner.test_run_registrations[run_id], registration);
+    assert!(!inner.test_runs.registration_failures.contains(run_id));
+}
+
+#[test]
+fn any_other_held_read_refusal_stays_a_named_bad_gateway() {
+    let fixture = RunFixture::new("registration-store-permanent");
+    let (session, store) = engram_owner(&fixture);
+    let binding = claim("permanent");
+    name_root(
+        &fixture,
+        &store,
+        &binding,
+        &session,
+        &canonical_root(&fixture),
+        1,
+    );
+    let transport = ScriptedEngramControlTransport::new([]);
+    fixture
+        .state
+        .install_test_engram_transport(transport.clone());
+    let mut abnormal = cli_refusal("work_projection_invalid");
+    abnormal.refusal_code = None;
+    for (index, (error, cause)) in [
+        (cli_refusal("work_invalid"), "work_invalid"),
+        (cli_refusal("store_corrupt"), "store_corrupt"),
+        (abnormal, "Engram"),
+        (
+            EngramTransportError::protocol("fixture held read failed"),
+            "fixture held read failed",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        transport.replace_held_claims([Err(error)]);
+        let run_id = format!("test-store-permanent-{index}");
+        let directory = registered_run(&fixture, &session, &run_id);
+        let path = directory.join("request.json");
+        let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        request["input"] = json!("commit");
+        fs::write(path, request.to_string()).unwrap();
+        let error = fixture
+            .state
+            .register_test_run(&session, registration_request(&run_id, &directory))
+            .err()
+            .expect("registration must refuse");
+        assert_eq!(
+            error.status,
+            StatusCode::BAD_GATEWAY,
+            "case {index}: {}",
+            error.message
+        );
+        assert_eq!(error.kind, None, "case {index}");
+        assert!(
+            error.message.contains("held-claim read"),
+            "case {index}: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains(cause),
+            "case {index}: {}",
+            error.message
+        );
+        assert!(
+            !error.message.contains("in repair"),
+            "case {index}: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn only_a_plain_code_from_an_ordinary_exit_is_kept_as_the_refusal_code() {
+    let failed = |exit, stderr: &[u8]| {
+        decode_engram_cli_json(
+            EngramCliOutput {
+                success: false,
+                exit,
+                status: "fixture".to_owned(),
+                stdout: Vec::new(),
+                stderr: stderr.to_vec(),
+            },
+            "fixture",
+        )
+        .unwrap_err()
+    };
+    let refused = failed(
+        EngramCliExit::Code(1),
+        br#"  {"error":{"code":"work_projection_invalid"}}  "#,
+    );
+    assert_eq!(
+        refused.refusal_code.as_deref(),
+        Some("work_projection_invalid")
+    );
+    assert_eq!(
+        refused.code.as_deref(),
+        Some("control_unavailable"),
+        "the transport code is unchanged"
+    );
+    assert!(engram_store_transient(&refused));
+    let ignored: [(EngramCliExit, &[u8]); 5] = [
+        (
+            EngramCliExit::Abnormal,
+            br#"{"error":{"code":"work_projection_invalid"}}"#,
+        ),
+        (EngramCliExit::Code(1), b"database is locked"),
+        (
+            EngramCliExit::Code(1),
+            br#"{"error":{"code":"Work Projection"}}"#,
+        ),
+        (
+            EngramCliExit::Code(1),
+            br#"{"error":"work_projection_invalid"}"#,
+        ),
+        (
+            EngramCliExit::Code(1),
+            br#"{"code":"work_projection_invalid"}"#,
+        ),
+    ];
+    for (exit, stderr) in ignored {
+        let error = failed(exit, stderr);
+        assert_eq!(
+            error.refusal_code,
+            None,
+            "{}",
+            String::from_utf8_lossy(stderr)
+        );
+        assert!(!engram_store_transient(&error));
+    }
+    // A control-transport reply carries Engram's code as its remote code.
+    let remote = |code: &str| {
+        EngramTransportError::remote(EngramControlErrorBody {
+            code: code.to_owned(),
+            message: "fixture".to_owned(),
+        })
+    };
+    assert!(engram_store_transient(&remote(
+        "projection_repair_required"
+    )));
+    assert!(!engram_store_transient(&remote("work_invalid")));
+    assert!(!engram_store_transient(&EngramTransportError::transport(
+        "work_projection_invalid"
+    )));
 }
 
 #[test]

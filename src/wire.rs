@@ -141,6 +141,10 @@ enum ApiErrorKind {
     FederationBoundSessions,
     /// Retained exact receipt forbids recreating an explicitly retired queue.
     FederationExecutorAssociationRetired,
+    /// The project's Engram store refused because it is in repair
+    /// (`engram_store_transient`). Its stable code goes beside `error`, so a
+    /// caller can resend the unchanged request once the store is ready.
+    EngramStoreTransient,
 }
 
 impl ApiErrorKind {
@@ -241,6 +245,13 @@ impl ApiError {
         }
     }
 
+    /// A 503 for a refusal that `engram_store_transient` classified: nothing
+    /// was done, and the unchanged request may succeed once the store is ready.
+    fn engram_store_transient(message: impl Into<String>) -> Self {
+        Self::from_status(StatusCode::SERVICE_UNAVAILABLE, message)
+            .with_kind(ApiErrorKind::EngramStoreTransient)
+    }
+
     /// Builds the value from status.
     fn from_status(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
@@ -300,6 +311,16 @@ impl IntoResponse for ApiError {
                 Json(json!({
                     "error": self.message,
                     "code": "local_session_missing",
+                })),
+            )
+                .into_response();
+        }
+        if matches!(self.kind, Some(ApiErrorKind::EngramStoreTransient)) {
+            return (
+                self.status,
+                Json(json!({
+                    "error": self.message,
+                    "code": ENGRAM_STORE_TRANSIENT_API_CODE,
                 })),
             )
                 .into_response();

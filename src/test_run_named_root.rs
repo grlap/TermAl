@@ -252,7 +252,15 @@ impl AppState {
                 .min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT).min(target.settings.call_timeout());
             let result = target.adapter.read_held_claims(&target.connection, timeout);
             test_run_registration_remaining(clock, deadline, diagnostics)?;
-            Some(result.map_err(|error| ApiError::bad_gateway(format!("test registration held-claim read: {error}")))?)
+            // A store in repair refuses before anything is recorded, so the
+            // launcher may resend the unchanged request once it is ready.
+            Some(result.map_err(|error| if engram_store_transient(&error) {
+                ApiError::engram_store_transient(format!(
+                    "test registration held-claim read: the project's Engram store is in repair \
+                     ({ENGRAM_STORE_TRANSIENT_API_CODE}); retry the unchanged request once it is ready: {error}"))
+            } else {
+                ApiError::bad_gateway(format!("test registration held-claim read: {error}"))
+            })?)
         } else {
             None
         };

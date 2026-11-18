@@ -194,6 +194,88 @@ test("editing a selected request invalidates its saved ACK instead of acquiring 
   }, { autoAcknowledge: true });
 });
 
+// The host's typed refusal while the project's Engram store is in repair.
+const inRepair = { error: "test registration held-claim read: the project's Engram store is in repair (engram_store_transient)",
+  code: "engram_store_transient" };
+
+test("a store in repair is waited out with printed pauses, then the unchanged request registers once and the run executes", async (t) => {
+  const f = fixture(t);
+  initializeRepository(f.root);
+  const marker = join(f.root, ".git", "transient-stage-executed");
+  const pauses = [];
+  const log = t.mock.method(console, "log");
+  let service;
+  await registrationHost(async (host) => {
+    service = host;
+    const runDir = await createRun({ root: f.root, input: "commit",
+      registrationWait: { pause: async (ms) => { pauses.push(ms); } },
+      stages: [{ name: "focused", command: process.execPath,
+        args: ["-e", `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'once\\n')`] }],
+    }, env(host));
+    assert.deepEqual(pauses, [10_000, 20_000]);
+    const waits = log.mock.calls.map(call => String(call.arguments[0])).filter(line => line.startsWith("registration waiting:"));
+    assert.equal(waits.length, 2);
+    assert.match(waits[0], /Engram store is in repair \(engram_store_transient\).*in 10 s/u);
+    assert.equal(host.requests.length, 3);
+    assert.ok(host.requests.every(record => record.rawBody === host.requests[0].rawBody), "every send is the unchanged request");
+    assert.equal(JSON.parse(readFileSync(join(runDir, "request.json"), "utf8")).registration.state, "registered");
+    assert.equal((await executeRun(runDir, env(host))).state, "passed");
+    assert.equal(readFileSync(marker, "utf8"), "once\n");
+    assert.equal(host.requests.length, 3, "the run registers exactly once");
+  }, { autoAcknowledge: true, status: () => service.requests.length <= 2 ? 503 : 201,
+    acknowledgement: (ack) => service.requests.length <= 2 ? inRepair : ack });
+});
+
+test("a store still in repair at the wait bound ends with a named refusal and no tests", async (t) => {
+  const f = fixture(t);
+  initializeRepository(f.root);
+  const marker = join(f.root, ".git", "must-not-execute");
+  const pauses = [];
+  let runDir;
+  await registrationHost(async (host) => {
+    await assert.rejects(createRun({ root: f.root, input: "commit", onRunCreated: (directory) => { runDir = directory; },
+      registrationWait: { boundMs: 70_000, pause: async (ms) => { pauses.push(ms); } },
+      stages: [{ name: "focused", command: process.execPath,
+        args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'executed')`] }],
+    }, env(host)), (error) => {
+      assert.match(error.message, /Engram store stayed in repair \(engram_store_transient\) through 4 sends and 70 s of pauses/u);
+      assert.match(error.message, /no tests started; rerun once the store is ready/u);
+      assert.doesNotMatch(error.message, /named claim lapsed/u);
+      return true;
+    });
+    assert.deepEqual(pauses, [10_000, 20_000, 40_000]);
+    assert.equal(host.requests.length, 4);
+  }, { autoAcknowledge: true, status: 503, acknowledgement: () => inRepair });
+  assert.equal(existsSync(marker), false);
+  const result = JSON.parse(readFileSync(join(runDir, "results.json"), "utf8"));
+  assert.equal(result.state, "failed");
+  assert.equal(result.registration.state, "failed");
+  assert.match(result.error, /stayed in repair/u);
+  assert.ok(result.stages.every(stage => stage.state === "unrun"));
+});
+
+for (const [label, status, body] of [
+  ["a named host refusal", 502, { error: "test registration held-claim read: Engram held-claim reader failed: work_invalid" }],
+  ["a 503 with another code", 503, { error: "fixture unavailable", code: "other_code" }],
+]) {
+  test(`${label} is not waited on or resent`, async (t) => {
+    const f = fixture(t);
+    saveRequest(f);
+    const pauses = [];
+    await registrationHost(async (host) => {
+      await assert.rejects(registerTestRun(f.request, f.runDirectory, env(host), { pause: async (ms) => { pauses.push(ms); } }),
+        (error) => {
+          assert.match(error.message, /host refused registration/u);
+          assert.match(error.message, new RegExp(body.error.slice(0, 40), "u"));
+          assert.equal(error.storeTransient, undefined);
+          return true;
+        });
+      assert.deepEqual(pauses, []);
+      assert.equal(host.requests.length, 1);
+    }, { autoAcknowledge: true, status, acknowledgement: () => body });
+  });
+}
+
 test("a lost selected-request ACK replays the same selector and original registration bytes", async (t) => {
   const f = fixture(t);
   f.request.requestMessageId = selector;

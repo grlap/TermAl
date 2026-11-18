@@ -832,6 +832,11 @@ struct EngramTransportError {
     causal_failure: Option<EngramCausalFailure>,
     kind: EngramTransportErrorKind,
     code: Option<String>,
+    /// Engram's own refusal code, when a failed CLI call printed its JSON
+    /// error (`decode_engram_cli_json`). It sits beside `code`, which stays
+    /// the transport's own code, so that callers matching on `code` are
+    /// unchanged. Read by `engram_store_transient`.
+    refusal_code: Option<String>,
     message: String,
     /// The process this call meant to run never started, so it cannot have
     /// written anything. Only a failed spawn says so: every later failure
@@ -861,6 +866,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::LocalState,
             causal_failure: None,
             code: Some("control_binding_unavailable".to_owned()),
+            refusal_code: None,
             message: message.into(),
             process_never_started: true,
             request_never_sent: false,
@@ -873,6 +879,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Deadline,
             causal_failure: None,
             code: Some("deadline_exceeded".to_owned()),
+            refusal_code: None,
             message: message.into(),
             process_never_started: false,
             request_never_sent: false,
@@ -893,6 +900,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Transport,
             causal_failure: None,
             code: Some("control_unavailable".to_owned()),
+            refusal_code: None,
             message: message.into(),
             process_never_started: false,
             request_never_sent: false,
@@ -940,6 +948,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Protocol,
             causal_failure: None,
             code: Some("unknown_control_schema".to_owned()),
+            refusal_code: None,
             message: message.into(),
             process_never_started: false,
             request_never_sent: false,
@@ -952,6 +961,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Remote,
             causal_failure: None,
             code: Some(error.code),
+            refusal_code: None,
             message: error.message,
             process_never_started: false,
             request_never_sent: false,
@@ -1578,13 +1588,31 @@ fn run_engram_json_command(
 fn decode_engram_cli_json(output: EngramCliOutput, label: &str) -> std::result::Result<Value, EngramTransportError> {
     if !output.success {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(EngramTransportError::transport(if detail.is_empty() {
+        let mut error = EngramTransportError::transport(if detail.is_empty() {
             format!("Engram {label} exited with {}", output.status)
         } else {
             format!("Engram {label} failed: {detail}")
-        }));
+        });
+        error.refusal_code = engram_cli_refusal_code(&output);
+        return Err(error);
     }
     engram_decode_slice(&output.stdout, &format!("invalid Engram {label} response"))
+}
+
+/// Engram's refusal code from a failed `--json` CLI call: its stderr is one
+/// JSON value `{"error": {"code": ...}}`. Only a process that ran to its own
+/// exit is taken at its word, and only a plain code (lowercase ASCII letters,
+/// digits and `_`, at most 64 bytes) is kept. Anything else gives `None`.
+fn engram_cli_refusal_code(output: &EngramCliOutput) -> Option<String> {
+    if output.exit == EngramCliExit::Abnormal {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(output.stderr.trim_ascii()).ok()?;
+    let code = value.get("error")?.get("code")?.as_str()?;
+    (!code.is_empty()
+        && code.len() <= 64
+        && code.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'))
+    .then(|| code.to_owned())
 }
 
 /// Whether `run_engram_cli_command` failed before any Engram process ran, so

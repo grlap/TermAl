@@ -1158,6 +1158,19 @@ choosing `--input plain` for a run without verification credit. A runner with no
 matching named root stays unbound; it does not read a held claim for that absent
 binding and earns no claim-bound verification credit.
 
+A project Engram store in repair is the one held-read refusal the launcher
+waits out. Engram reports it with the typed code `work_projection_invalid` or
+`projection_repair_required`, which the host's shared classifier
+(`src/engram_store_transient.rs`) recognises. The host then refuses with HTTP
+503 and the body code `engram_store_transient`, before it records anything.
+The launcher prints each wait as a `registration waiting:` line and sends the
+unchanged request again. It pauses 10 s, 20 s and 40 s, then 60 s each time,
+for at most 15 minutes of pauses in all. No stage starts while it waits. If the
+store is ready within that bound, the run registers once and runs as usual.
+Otherwise the run ends before any stage with a named refusal: the store stayed
+in repair, no tests started, rerun once the store is ready. Every other
+held-read failure keeps its named refusal (HTTP 502) and is not resent.
+
 TermAl still carries such a launch past the turn as local custody, and says
 before the next prompt when a launch is not carried or a carried one is
 dropped: a launch joined to another command, a `--detach` launch that failed,

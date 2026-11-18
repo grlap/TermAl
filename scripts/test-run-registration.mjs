@@ -14,6 +14,13 @@ const responseByteLimit = 65_536;
 const contract = "termal-durable-test-run-registration";
 const version = 1;
 const errorPrefix = "registration error:";
+// The host's typed 503 for a project Engram store in repair
+// (src/engram_store_transient.rs). Nothing was recorded, so the unchanged
+// request is sent again after a printed wait, within this overall bound.
+const storeTransientCode = "engram_store_transient";
+export const storeTransientWaitMs = 15 * 60_000;
+const storeTransientPausesMs = [10_000, 20_000, 40_000];
+const storeTransientPauseCapMs = 60_000;
 const immutableFields = ["runId", "root", "stages", "notifyTo", "full", "scope", "detached",
   "creatorPid", "owner", "started", "requiredBinaryEnv", "prerequisiteFiles", "needsCargo", "liveEngram"];
 
@@ -194,6 +201,7 @@ class RegistrationDiagnostics {
     const result = new Error(`${errorPrefix} ${human}; ${this.fields(category)}`.slice(0, 1280), { cause: error });
     result.registrationDiagnostic = true;
     if (error?.durabilityPending) result.durabilityPending = error.durabilityPending;
+    if (error?.storeTransient) result.storeTransient = true;
     const stateLock = boundedStateLockEvidence(error?.stateLock);
     if (stateLock) result.stateLock = stateLock;
     return result;
@@ -277,6 +285,7 @@ async function httpFailure(response, diagnostics, signal) {
   let bodyCode = "unavailable";
   let pending;
   let stateLock;
+  let storeTransient = false;
   try {
     const body = await readResponse(response);
     if (typeof body?.error === "string" && body.error.trim()) {
@@ -285,6 +294,8 @@ async function httpFailure(response, diagnostics, signal) {
     }
     pending = registrationPending(body, response, diagnostics, reason);
     if (pending) stateLock = boundedStateLockEvidence(body.stateLock);
+    storeTransient = !pending && response.status === 503 && diagnostics.method === "POST"
+      && body?.code === storeTransientCode;
   } catch (error) {
     // Non-2xx forbids execution. Only the fully validated pending envelope
     // permits the bounded same-request replay; a body failure
@@ -293,10 +304,12 @@ async function httpFailure(response, diagnostics, signal) {
     bodyCode = transportCode(error);
   }
   const disposition = pending ? "registration durability is pending; retry the unchanged original request; no tests started"
-    : "host refused registration";
-  const error = responseFailure(pending ? "durability_pending" : "http_error",
+    : storeTransient ? `the project's Engram store is in repair (${storeTransientCode}); no tests started`
+      : "host refused registration";
+  const error = responseFailure(pending ? "durability_pending" : storeTransient ? storeTransientCode : "http_error",
     `${diagnostics.method} HTTP ${response.status}: ${disposition}; ${reason}; errorBodyCategory=${bodyCategory}; errorBodyCode=${bodyCode}`);
   if (pending) error.durabilityPending = pending;
+  if (storeTransient) error.storeTransient = true;
   if (stateLock) error.stateLock = stateLock;
   return diagnostics.failure(error, signal);
 }
@@ -370,10 +383,33 @@ async function queryRegisteredRun(request, runDirectory, configuration, deadline
   } finally { clearTimeout(timeout); }
 }
 
-export async function registerTestRun(request, runDirectory, env = process.env) {
-  const warning = warnSlowEngramOperation("test run registration");
-  try { return await registerTestRunWithin(request, runDirectory, env); }
-  finally { clearTimeout(warning); }
+// `wait` is a test seam: the overall bound and the pause between sends.
+export async function registerTestRun(request, runDirectory, env = process.env, {
+  boundMs = storeTransientWaitMs,
+  pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  let waited = 0;
+  for (let sends = 0; ; sends += 1) {
+    const warning = warnSlowEngramOperation("test run registration");
+    try { return await registerTestRunWithin(request, runDirectory, env); }
+    catch (error) {
+      if (!error?.storeTransient) throw error;
+      const next = Math.min(storeTransientPausesMs[sends] ?? storeTransientPauseCapMs, boundMs - waited);
+      if (next <= 0) {
+        const exhausted = new Error(`${errorPrefix} the project's Engram store stayed in repair (${storeTransientCode}) `
+          + `through ${sends + 1} sends and ${Math.round(waited / 1000)} s of pauses, the wait bound; no tests started; `
+          + `rerun once the store is ready; last refusal: ${error.message.slice(errorPrefix.length).trim()}`.slice(0, 1280),
+        { cause: error });
+        exhausted.storeTransient = true;
+        throw exhausted;
+      }
+      console.log(`registration waiting: the project's Engram store is in repair (${storeTransientCode}); `
+        + `sending the unchanged request again in ${Math.round(next / 1000)} s `
+        + `(paused ${Math.round(waited / 1000)} s of ${Math.round(boundMs / 1000)} s); no tests started yet`);
+      await pause(next);
+      waited += next;
+    } finally { clearTimeout(warning); }
+  }
 }
 
 async function registerTestRunWithin(request, runDirectory, env) {
