@@ -75,6 +75,7 @@ fn coalesced_path_crossing_launch_uses_latest_arrival_and_keeps_first_provenance
             &path,
             WorkspaceDirtyFact {
                 kind: WorkspaceFileChangeKind::Modified,
+                covers_watched_root: false,
                 first: arrival,
                 last: arrival,
                 raw_kind: None,
@@ -105,6 +106,7 @@ fn covering_parent_marker_reaches_check_in_nested_worktree_without_scratch_exemp
         parent,
         WorkspaceDirtyFact {
             kind: WorkspaceFileChangeKind::Subtree,
+            covers_watched_root: false,
             first: arrival,
             last: arrival,
             raw_kind: None,

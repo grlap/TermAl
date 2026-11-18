@@ -382,16 +382,20 @@ fn native_windows_launch_scratch_is_ignored_by_workspace_watcher() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"fixture").unwrap();
         assert!(
-            crate::is_ignored_workspace_file_event_path(&path),
+            crate::is_ignored_workspace_file_event_path(&path, &root()),
             "fixture write would fence its own carried gate: {}",
             path.display()
         );
     }
-    assert!(crate::is_ignored_workspace_file_event_path(&directory));
+    assert!(crate::is_ignored_workspace_file_event_path(
+        &directory,
+        &root()
+    ));
     // A nested worktree under .tmp still needs source-write observation.
     // Keeping fixture writes out of the watcher must not hide that worktree.
     assert!(!crate::is_ignored_workspace_file_event_path(
-        &root().join(".tmp/wt-visible/src/main.rs")
+        &root().join(".tmp/wt-visible/src/main.rs"),
+        &root()
     ));
     drop(directory);
     assert!(
