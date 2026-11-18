@@ -1412,6 +1412,7 @@ fn a_replaced_runtime_clears_only_its_own_running_tests() {
                 key: "exec-earlier-runtime".to_owned(),
                 runtime: RuntimeToken::Codex("replaced-runtime".to_owned()),
                 root_key: root_key.clone(),
+                codex_address: None,
             },
         );
     });

@@ -766,6 +766,8 @@ impl AppState {
             reevaluate_cards,
             compacted_dirs,
             mut compact_stamps,
+            linked_artifact_sources,
+            mut linked_run_ids,
         ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             points.mark("roots_acquired");
@@ -833,7 +835,7 @@ impl AppState {
                         .filter(|row| {
                             row.compacted
                                 && test_run_compact_is_installed_with(&*inner, row, |id| {
-                                    indexed.contains(id)
+                                    row.linked_artifact_source().is_none() && indexed.contains(id)
                                 })
                         })
                         .filter(|row| !row.summary.run_dir.is_empty())
@@ -841,6 +843,11 @@ impl AppState {
                         .collect::<HashMap<_, _>>()
                 },
                 inner.test_runs.compaction_stamps.clone(),
+                test_run_linked_artifact_sources(&inner),
+                inner.test_run_observations.index().linked_artifact_executions()
+                    .filter_map(|execution| inner.test_run_observations.get(execution))
+                    .filter_map(|row| row.artifact.as_ref().map(|artifact| artifact.run_id.clone()))
+                    .collect::<HashSet<_>>(),
             )
         };
         points.mark("roots_taken");
@@ -875,11 +882,37 @@ impl AppState {
         let mut parsed = HashMap::new();
         let mut seen = HashSet::new();
         let mut tracked_dirs = Vec::new();
+        // Compacted rows keep their original linked proof after the live
+        // observation is retired. Check that proof off-lock, before using any
+        // pathname stamps. A failed read changes availability, not the proof.
+        let mut compact_linked_conflicts = HashMap::new();
+        for row in compacted_dirs.values() {
+            let Some(source) = row.linked_artifact_source() else {
+                continue;
+            };
+            let run_dir = FsPath::new(&row.summary.run_dir);
+            linked_run_ids.insert(row.summary.run_id.clone());
+            let matches = TestRunDisk::read_linked_artifact(run_dir, source.as_ref())
+                .into_run()
+                .is_some_and(|disk| test_run_compact_artifact_matches(row, &disk));
+            compact_stamps.remove(&row.summary.run_id);
+            compact_linked_conflicts.insert(row.summary.run_id.clone(), !matches);
+        }
         for (common_key, common_dir) in &common_dirs {
             for run_dir in test_runs_directories(common_dir, &mut tracked_dirs) {
-                if let Some(compacted) =
-                    compacted_dirs.get(&test_run_path_key(&test_run_display_path(&run_dir)))
+                let run_dir_key = test_run_path_key(&test_run_display_path(&run_dir));
+                let linked_source = linked_artifact_sources.get(&run_dir_key);
+                if linked_source.is_none()
+                    && run_dir.file_name().and_then(|name| name.to_str())
+                        .is_some_and(|id| linked_run_ids.contains(id))
+                    && !compacted_dirs.contains_key(&run_dir_key)
                 {
+                    continue;
+                }
+                if let Some(compacted) = compacted_dirs.get(&run_dir_key) {
+                    if compact_linked_conflicts.contains_key(&compacted.summary.run_id) {
+                        continue;
+                    }
                     let request_stamp = test_run_file_stamp(&run_dir.join("request.json"));
                     let results_stamp = test_run_file_stamp(&run_dir.join("results.json"));
                     if compact_stamps.get(&compacted.summary.run_id).is_some_and(
@@ -908,17 +941,24 @@ impl AppState {
                     // Contradictions surface on its original minimal record.
                     continue;
                 }
+                // A different directory name may still declare a reserved
+                // linked run ID in request.json.
+                let reserved = |disk: &TestRunDisk| {
+                    linked_source.is_none() && linked_run_ids.contains(&disk.run_id)
+                };
+                let read = |previous: Option<&TestRunDisk>| match linked_source {
+                    Some(source) => TestRunDisk::read_linked_artifact(&run_dir, source.as_ref()),
+                    None => TestRunDisk::read_classified(&run_dir, previous),
+                };
                 let earlier = previous.remove(&run_dir);
                 // A run directory still waiting for a file is stamped before
                 // its files are read: the launcher creates the directory, then
                 // renames `request.json` and then `results.json` into it, so a
                 // file arriving after this rescan's read changes the stamp.
-                let dir_stamp = earlier
+                let dir_stamp = (linked_source.is_none() && earlier
                     .as_ref()
-                    .is_none_or(|disk| disk.results.is_none() || disk.read_failures > 0)
+                    .is_none_or(|disk| disk.results.is_none() || disk.read_failures > 0))
                     .then(|| test_run_dir_stamp(&run_dir));
-                let request_stamp = test_run_file_stamp(&run_dir.join("request.json"));
-                let results_stamp = test_run_file_stamp(&run_dir.join("results.json"));
                 // An entry that kept an earlier read after a failed one is
                 // read again whatever its stamps say, and so is one whose read
                 // failed outright: the failure may be transient. Results read
@@ -929,14 +969,15 @@ impl AppState {
                 // and any stamp change reads it again.
                 let disk = match earlier {
                     Some(disk)
-                        if (disk.read_failures == 0 || disk.results_malformed)
+                        if linked_source.is_none()
+                            && (disk.read_failures == 0 || disk.results_malformed)
                             && disk.locator_identity.is_some()
-                            && disk.request_stamp == request_stamp
-                            && disk.results_stamp == results_stamp =>
+                            && disk.request_stamp == test_run_file_stamp(&run_dir.join("request.json"))
+                            && disk.results_stamp == test_run_file_stamp(&run_dir.join("results.json")) =>
                     {
                         disk
                     }
-                    earlier => match TestRunDisk::read_classified(&run_dir, earlier.as_deref()) {
+                    earlier => match read(earlier.as_deref()) {
                         TestRunRead::Run(disk) => Arc::new(disk),
                         TestRunRead::Pending => {
                             if let Some(stamp) = dir_stamp {
@@ -947,6 +988,9 @@ impl AppState {
                         TestRunRead::Unsupported => continue,
                     },
                 };
+                if reserved(&disk) {
+                    continue;
+                }
                 parsed.insert(run_dir.clone(), disk.clone());
                 // Run ids are random, so a repeat means a copied directory. The
                 // first in sorted order wins on every scan; nothing is logged,
@@ -975,8 +1019,8 @@ impl AppState {
                         break;
                     }
                     let checked = disk.responsible_pid().map(|(pid, _)| pid);
-                    let Some(mut fresh) = TestRunDisk::read(&run_dir, Some(disk.as_ref()))
-                        .filter(|fresh| fresh.read_failures == 0)
+                    let Some(mut fresh) = read(Some(disk.as_ref())).into_run()
+                        .filter(|fresh| fresh.read_failures == 0 && !reserved(fresh))
                     else {
                         // The read after the check failed; the verdict stays
                         // this rescan's, and the next rescan reads again.
@@ -1061,6 +1105,9 @@ impl AppState {
         let unavailable: HashSet<_> = compacted_dirs
             .values()
             .filter(|row| {
+                if let Some(conflict) = compact_linked_conflicts.get(&row.summary.run_id) {
+                    return *conflict;
+                }
                 let path = FsPath::new(&row.summary.run_dir);
                 test_run_file_stamp(&path.join("request.json")).is_none()
                     || test_run_file_stamp(&path.join("results.json")).is_none()
@@ -1087,12 +1134,19 @@ impl AppState {
                 .test_run_compacted
                 .iter()
                 .filter_map(|(id, compacted)| {
+                    let linked_conflict = compact_linked_conflicts.get(id);
+                    if compacted.linked_artifact_source().is_some()
+                        && compacted_dirs.get(&test_run_path_key(&compacted.summary.run_dir))
+                            != Some(compacted)
+                    {
+                        return None;
+                    }
                     let unavailable_now = (compacted.compacted
                         && !compacted.summary.run_dir.is_empty()
                         && compacted.artifact_unavailable != unavailable.contains(id))
                     .then(|| unavailable.contains(id));
-                    let conflict_now = compact_updates
-                        .get(id)
+                    let conflict_now = linked_conflict
+                        .or_else(|| compact_updates.get(id))
                         .filter(|conflict| compacted.artifact_conflict != **conflict)
                         .copied();
                     (unavailable_now.is_some() || conflict_now.is_some()).then(|| {
@@ -1145,7 +1199,7 @@ impl AppState {
             // once; it neither retries nor publishes stale authority/evidence.
             let matches = projection_cut.matches(&inner);
             points.mark("validation_done");
-            let entries = if matches {
+            let mut entries = if matches {
                 points.mark("projection_cut_reused");
                 prepared
             } else {
@@ -1154,6 +1208,18 @@ impl AppState {
                 TEST_RUN_PROJECTION_FALLBACKS.with(|count| count.set(count.get() + 1));
                 test_run_project_entries(&inner, &scanned)
             };
+            entries.retain(|entry| {
+                let disk = &entry.disk;
+                match test_run_linked_artifact_by_id(&inner, &disk.run_id) {
+                    None => disk.provider_directory_identity.is_none(),
+                    Some(None) => false,
+                    Some(Some(source)) => source.admits_disk(disk)
+                        && !inner.test_run_compacted.get(&disk.run_id).is_some_and(|row| {
+                            row.compacted && row.linked_artifact_source().is_some()
+                                && test_run_compact_is_installed_with(&*inner, row, |_| false)
+                        }),
+                }
+            });
             points.mark("fallback_done");
             work.projected = entries.len();
             for entry in &entries {

@@ -469,11 +469,15 @@ trait SessionRecorderAccess {
     /// Reports an observation to the Engram sink, with the provenance the
     /// recorder holds for the frame it is applying.
     fn observe(&mut self, observation: EngramRecorderObservation<'_>) {
+        let frame = self.recorder_state_mut().provider_test_frame.clone();
         let provenance = self.recorder_state_mut().observation_provenance.clone();
         let session_id = self.session_id().to_owned();
-        self.state()
-            .engram_host()
-            .observe(&session_id, &provenance, observation);
+        self.state().engram_host().observe_with_provider(
+            &session_id,
+            &provenance,
+            observation,
+            frame.as_ref(),
+        );
     }
 }
 
@@ -945,6 +949,29 @@ fn recorder_command_started<R: SessionRecorderAccess>(
         "",
         CommandStatus::Running,
     )?;
+    let recorder_state = recorder.recorder_state_mut();
+    if let Some(address) = recorder_state
+        .provider_test_frame
+        .as_ref()
+        .and_then(TestRunProviderFrame::codex_address)
+        && let Some(ran) = ran
+    {
+        let start = CodexCommandStart {
+            address,
+            command_identity: sha256_hex(ran.as_bytes()),
+        };
+        recorder_state
+            .codex_command_starts
+            .entry(key.to_owned())
+            .and_modify(|original| {
+                if let CodexCommandStartState::Active(owner) = original
+                    && *owner != start
+                {
+                    *original = CodexCommandStartState::Conflicting;
+                }
+            })
+            .or_insert(CodexCommandStartState::Active(start));
+    }
     recorder.observe(EngramRecorderObservation::CommandStarted { key, ran, cwd });
     Ok(())
 }
