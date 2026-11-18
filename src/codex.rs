@@ -2233,6 +2233,7 @@ fn handle_shared_codex_start_turn_inner(
             if let Some(session_state) = sessions.get_mut(session_id) {
                 if session_state.pending_turn_start_request_id.as_deref() == Some(&request_id) {
                     session_state.deferred_terminals.clear();
+                    session_state.deferred_command_completions.clear();
                     session_state.turn_id_provisional = false;
                     session_state.pending_turn_start_request_id = None;
                     session_state.turn_started_before_response = false;
@@ -2360,6 +2361,18 @@ fn handle_shared_codex_start_turn_inner(
                         session_state.turn_started_watchdog_cancel_tx = Some(cancel_tx);
                         watchdog_cancel_rx = Some(cancel_rx);
                     }
+                    if let Err(error) = reconcile_shared_codex_command_turn(
+                        &wait_state,
+                        &wait_session_id,
+                        &RuntimeToken::Codex(wait_runtime_id.clone()),
+                        &request_id,
+                        &wait_thread_sessions,
+                        session_state,
+                    ) {
+                        eprintln!(
+                            "runtime state warning> deferred Codex command completion: {error:#}"
+                        );
+                    }
                     if let Some(terminal) = deferred_terminal {
                         let method = terminal.get("method").and_then(Value::as_str).unwrap_or("");
                         match apply_owned_shared_codex_notification(
@@ -2416,6 +2429,7 @@ fn handle_shared_codex_start_turn_inner(
                         return;
                     }
                     session_state.deferred_terminals.clear();
+                    session_state.deferred_command_completions.clear();
                     session_state.turn_id_provisional = false;
                     session_state.pending_turn_start_request_id = None;
                     session_state.turn_started_before_response = false;
@@ -2446,6 +2460,7 @@ fn handle_shared_codex_start_turn_inner(
                         false
                     } else {
                         session_state.deferred_terminals.clear();
+                        session_state.deferred_command_completions.clear();
                         session_state.turn_id_provisional = false;
                         session_state.pending_turn_start_request_id = None;
                         session_state.turn_started_before_response = false;
@@ -2476,6 +2491,7 @@ fn handle_shared_codex_start_turn_inner(
                         false
                     } else {
                         session_state.deferred_terminals.clear();
+                        session_state.deferred_command_completions.clear();
                         session_state.turn_id_provisional = false;
                         session_state.pending_turn_start_request_id = None;
                         session_state.turn_started_before_response = false;

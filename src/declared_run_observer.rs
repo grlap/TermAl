@@ -561,7 +561,7 @@ impl AppState {
             origin.validated_unbound = false;
         }
         self.observe_test_command_start_with_native(origin, &command, &reservation.named.workspace_id,
-            &reservation.registered_at, Some(&declaration), Some(reservation.clone()));
+            &reservation.registered_at, Some(&declaration), Some(reservation.clone()), None, None);
         self.inner.lock().expect("state mutex poisoned").test_runs.declared_executions
             .insert(reservation.run_id.clone(), execution.clone());
         self.spawn_native_declared_worker(execution);

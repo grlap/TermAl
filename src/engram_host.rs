@@ -128,6 +128,25 @@ impl EngramHost<'_> {
         }
     }
 
+    pub(crate) fn observe_codex_command_start(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+        command_turn: CodexCommandTurn,
+    ) {
+        self.state.note_engram_command_started_with_turn(
+            session_id,
+            provenance,
+            key,
+            ran,
+            cwd,
+            Some(command_turn),
+        );
+    }
+
     /// The user wrote at `path` through TermAl itself: a file save, a Git
     /// file action, a terminal command starting or ending.
     pub(crate) fn host_write(&self, path: &FsPath) {
@@ -384,9 +403,8 @@ impl EngramHost<'_> {
     /// Codex reported, on `session_id`'s own thread, the end of the command
     /// its item `key` names in a turn that is no longer running, an end the
     /// turn's events otherwise drop. It is taken only for a Codex test of that
-    /// session carried since its turn closed under exactly that item key
-    /// (`note_engram_reported_end`); the transcript is not touched. Returns
-    /// whether it was taken.
+    /// session with an original carried execution owner. A late end has no
+    /// new transcript entry. Returns whether the original check took it.
     pub(crate) fn codex_reported_end(
         &self,
         session_id: &str,
@@ -394,9 +412,18 @@ impl EngramHost<'_> {
         command: &str,
         output: &str,
         exit: EngramCommandExit,
+        owner: &EngramRunningCodexTest,
     ) -> bool {
-        self.state
-            .note_engram_reported_end(session_id, key, command, output, exit)
+        self.state.note_engram_reported_end_inner(
+            session_id,
+            key,
+            command,
+            output,
+            exit,
+            Some(owner),
+            #[cfg(test)]
+            || {},
+        )
     }
 
     /// The exit a Claude Bash tool result states.

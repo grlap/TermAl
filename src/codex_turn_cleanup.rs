@@ -300,6 +300,7 @@ fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionS
     session_state.turn_started_before_response = false;
     session_state.turn_id_provisional = false;
     session_state.deferred_terminals.clear();
+    session_state.deferred_command_completions.clear();
     session_state.terminal_identity_unresolved = false;
     session_state.active_turn_generation = None;
     session_state.turn_id = None;

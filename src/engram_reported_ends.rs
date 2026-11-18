@@ -371,6 +371,10 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, host_turn_ref: 
                 key: check.key.clone(),
                 runtime: runtime.clone(),
                 root_key: engram_path_key(&check.target.root),
+                turn_generation: record.active_turn_generation,
+                host_turn_ref: check.host_turn_ref.clone(),
+                sequence: check.sequence,
+                codex_turn: check.codex_turn.clone(),
             })
             .collect::<Vec<_>>();
         for test in running {
@@ -383,6 +387,7 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, host_turn_ref: 
         if check.host_turn_ref != host_turn_ref
             || check.end.is_some()
             || engram_check_key_is_its_line(check)
+            || check.codex_turn.as_ref().is_some_and(|turn| !turn.proven)
             || engram_carry_refusal(record, check).is_some()
         {
             position += 1;
@@ -619,21 +624,33 @@ fn engram_closed_unended_carry_line(command: &EngramCheckCommand, why: &str) -> 
 /// holder is told so when a carried test is closed that way
 /// (`engram_with_runtime_gone_caveat`). Keeping it instead would leave no release
 /// but a host restart; ending such commands is a later change.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct EngramRunningCodexTest {
     key: String,
     runtime: RuntimeToken,
     root_key: String,
+    turn_generation: u64,
+    host_turn_ref: String,
+    sequence: usize,
+    codex_turn: Option<CodexCommandTurn>,
 }
 
-/// Notes `test` as still running, replacing any test under the same key.
+impl EngramRunningCodexTest {
+    fn owns(&self, carried: &EngramCarriedCheck) -> bool {
+        carried.runtime.as_ref() == Some(&self.runtime)
+            && carried.check.host_turn_ref == self.host_turn_ref
+            && carried.check.sequence == self.sequence
+    }
+}
+
+/// Retains each still-running execution independently across item reuse.
 /// Nothing else bounds the record: a count, an age or a slot limit would
 /// drop a test whose process may still write, which is what it is kept
 /// against. It leaves only by its end or its runtime's going.
 fn engram_note_running_codex_test(engram: &mut EngramSessionState, test: EngramRunningCodexTest) {
     engram
         .running_codex_tests
-        .retain(|running| running.key != test.key);
+        .retain(|running| running != &test);
     engram.running_codex_tests.push(test);
 }
 
@@ -662,7 +679,7 @@ fn engram_carried_running_key(
         .find(|running| {
             Some(&running.runtime) == current
                 && running.root_key == root_key
-                && running.key != starting
+                && (running.key != starting || running.codex_turn.is_some())
         })
         .map(|running| running.key.clone())
 }
@@ -691,6 +708,109 @@ fn engram_carried_start_provenance(check: &EngramTurnCheck) -> EngramRootCapture
 }
 
 impl AppState {
+    fn confirm_codex_check_openings(
+        &self,
+        session_id: &str,
+        runtime: &RuntimeToken,
+        generation: u64,
+        proven_digest: Option<&str>,
+    ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
+        let record = &mut inner.sessions[index];
+        if record.active_turn_generation != generation
+            || !record.runtime.matches_runtime_token(runtime)
+        {
+            return;
+        }
+        let Some(host_turn) = runtime_observation_check_owner(record).map(str::to_owned) else {
+            return;
+        };
+        for check in record
+            .engram
+            .active_turn_checks
+            .iter_mut()
+            .filter(|check| check.host_turn_ref == host_turn)
+        {
+            if let Some(turn) = check.codex_turn.as_mut()
+                && turn.digest.as_deref() == proven_digest
+            {
+                turn.proven = true;
+            }
+        }
+    }
+
+    fn codex_late_command_owner(
+        &self,
+        session_id: &str,
+        runtime: &RuntimeToken,
+        key: &str,
+        reported_digest: Option<&str>,
+        active_generation: Option<u64>,
+        allow_unaddressed: bool,
+        reported_active_turn: bool,
+    ) -> Option<EngramRunningCodexTest> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let record = &inner.sessions[inner.find_session_index(session_id)?];
+        if !record.runtime.matches_runtime_token(runtime) {
+            return None;
+        }
+        let running = record.engram.running_codex_tests.iter().filter(|test| {
+            &test.runtime == runtime
+                && test.key == key
+                && Some(test.turn_generation) != active_generation
+        });
+        // An explicitly addressed predecessor does not borrow the active
+        // generation, even when both commands have the same item key.
+        if let Some(digest) = reported_digest {
+            let mut exact = running.clone().filter(|test| {
+                test.codex_turn
+                    .as_ref()
+                    .is_some_and(|turn| turn.proven && turn.digest.as_deref() == Some(digest))
+            });
+            if let Some(owner) = exact.next() {
+                return exact.next().is_none().then(|| owner.clone());
+            }
+        }
+        if !allow_unaddressed {
+            return None;
+        }
+        let mut running = running;
+        let owner = running.next()?;
+        if running.next().is_some()
+            || owner.codex_turn.as_ref().is_some_and(|turn| {
+                !turn.proven || (reported_digest.is_some() && !reported_active_turn)
+            })
+        {
+            return None;
+        }
+        let identity = test_run_runtime_identity(record, &EngramObservationProvenance::Ambient);
+        let tool = sha256_hex(key.as_bytes());
+        if let Some(generation) = active_generation {
+            let id = test_run_execution_id(session_id, &identity, generation, &tool);
+            if inner.test_run_observations.contains_key(&id)
+                || inner.test_runs.unclassified_commands.contains_key(&id)
+                || record.engram.running_command_keys.contains_key(key)
+            {
+                return None;
+            }
+        }
+        (inner
+            .test_run_observations
+            .values()
+            .filter(|row| {
+                row.summary.owner_session_id.as_deref() == Some(session_id)
+                    && row.runtime_identity == identity
+                    && row.tool_identity == tool
+            })
+            .take(2)
+            .count()
+            <= 1)
+            .then(|| owner.clone())
+    }
+
     /// Codex reported, for `session_id`'s thread, the end of the command its
     /// item `key` names, `command` with `output` and `exit`, whichever turn
     /// it names. A Codex test still running under that key since its turn
@@ -701,6 +821,7 @@ impl AppState {
     /// longer counts as running; the test is then settled at a later
     /// checkpoint on its claim. Returns whether it ended one; any other late
     /// end is left as it was, dropped.
+    #[cfg(test)]
     fn note_engram_reported_end(
         &self,
         session_id: &str,
@@ -716,6 +837,7 @@ impl AppState {
         )
     }
 
+    #[cfg(test)]
     fn note_engram_reported_end_with_settlement(
         &self,
         session_id: &str,
@@ -723,21 +845,29 @@ impl AppState {
         command: &str,
         output: &str,
         exit: EngramCommandExit,
-        #[cfg(test)] after_observation_end: impl FnOnce(),
+        after_observation_end: impl FnOnce(),
     ) -> bool {
-        self.settle_reported_test_observation(
-            session_id, key, command, exit,
-            #[cfg(test)]
-            after_observation_end,
-        );
-        self.observe_test_command_artifact(
+        self.note_engram_reported_end_inner(
             session_id,
-            &EngramObservationProvenance::Ambient,
             key,
             command,
             output,
-            false,
-        );
+            exit,
+            None,
+            after_observation_end,
+        )
+    }
+
+    fn note_engram_reported_end_inner(
+        &self,
+        session_id: &str,
+        key: &str,
+        command: &str,
+        output: &str,
+        exit: EngramCommandExit,
+        owner: Option<&EngramRunningCodexTest>,
+        #[cfg(test)] after_observation_end: impl FnOnce(),
+    ) -> bool {
         // The output is read off the lock, for a carried test only.
         let started = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -745,14 +875,65 @@ impl AppState {
                 return false;
             };
             // Its process ended, whether or not its evidence is still carried.
-            engram_forget_running_codex_test(&mut inner.sessions[index].engram, key);
-            inner.sessions[index]
+            let record = &mut inner.sessions[index];
+            if let Some(owner) = owner {
+                if !record.runtime.matches_runtime_token(&owner.runtime)
+                    || !record.engram.running_codex_tests.contains(owner)
+                {
+                    return false;
+                }
+                record
+                    .engram
+                    .running_codex_tests
+                    .retain(|running| running != owner);
+            } else {
+                engram_forget_running_codex_test(&mut record.engram, key);
+            }
+            record
                 .engram
                 .carried_checks
                 .iter()
-                .find(|carried| engram_carried_awaits_report(carried, key))
+                .find(|carried| {
+                    engram_carried_awaits_report(carried, key)
+                        && owner.is_none_or(|owner| owner.owns(carried))
+                })
                 .map(|carried| carried.check.clone())
         };
+
+        let provenance = owner.map_or(EngramObservationProvenance::Ambient, |owner| {
+            EngramObservationProvenance::Runtime {
+                token: owner.runtime.clone(),
+                turn_generation: owner.turn_generation,
+            }
+        });
+        self.settle_reported_test_observation(
+            session_id,
+            &provenance,
+            key,
+            command,
+            exit,
+            #[cfg(test)]
+            after_observation_end,
+        );
+        if let Some(owner) = owner {
+            self.observe_carried_codex_test_command_artifact(
+                session_id,
+                &provenance,
+                owner,
+                key,
+                command,
+                output,
+            );
+        } else {
+            self.observe_test_command_artifact(
+                session_id,
+                &provenance,
+                key,
+                command,
+                output,
+                false,
+            );
+        }
         let Some(started) = started else {
             return false;
         };
@@ -769,6 +950,7 @@ impl AppState {
         let engram = &mut record.engram;
         let Some(carried) = engram.carried_checks.iter_mut().find(|carried| {
             engram_carried_awaits_report(carried, key)
+                && owner.is_none_or(|owner| owner.owns(carried))
                 && carried.check.host_turn_ref == started.host_turn_ref
                 && carried.check.sequence == started.sequence
         }) else {
@@ -790,11 +972,13 @@ impl AppState {
             session_id.to_owned(),
         );
         carried.terminal_at = Some(engram_interference_tick());
-        engram.running_command_keys.remove(key);
-        engram.withheld_command_keys.remove(key);
-        engram
-            .running_command_worktrees
-            .retain(|(running, _)| running != key);
+        if owner.is_none() {
+            engram.running_command_keys.remove(key);
+            engram.withheld_command_keys.remove(key);
+            engram
+                .running_command_worktrees
+                .retain(|(running, _)| running != key);
+        }
         true
     }
 }

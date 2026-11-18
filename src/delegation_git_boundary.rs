@@ -57,7 +57,7 @@ pub(super) fn is_valid(directory: &FsPath, marker_is_dir: bool) -> io::Result<bo
         && fs::metadata(common_dir.join("refs"))?.is_dir())
 }
 
-fn metadata_line(path: &FsPath) -> io::Result<Option<String>> {
+pub(super) fn metadata_line(path: &FsPath) -> io::Result<Option<String>> {
     use std::io::Read as _;
     let inspected = fs::symlink_metadata(path)?;
     if !inspected.is_file()

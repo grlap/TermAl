@@ -761,6 +761,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
         turn_started_before_response: true,
         turn_id_provisional: false,
         deferred_terminals: Vec::new(),
+        deferred_command_completions: Vec::new(),
         terminal_identity_unresolved: false,
         retired_turn_ids: VecDeque::new(),
         active_turn_generation: None,

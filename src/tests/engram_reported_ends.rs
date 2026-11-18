@@ -29,6 +29,9 @@ mod claim_deferral {
 #[path = "engram_reported_declared_waits.rs"]
 mod declared_waits;
 
+#[path = "engram_reported_command_turns.rs"]
+mod command_turns;
+
 /// The Codex item id the test's command runs under.
 const ITEM: &str = "exec-late-item";
 /// The Codex item id a second test, in the next turn, runs under.
@@ -289,9 +292,13 @@ fn a_legacy_carried_terminal_requires_its_exact_item_thread_and_terminal_state()
             !take_shared_codex_late_command_end(
                 &turn.state,
                 &turn.session_id,
+                &turn.record(|record| record.runtime.runtime_token().unwrap()),
                 Some(THREAD),
                 &rejected,
                 rejected.pointer("/params/msg/item").unwrap(),
+                None,
+                true,
+                None,
             ),
             "{rejected:#}"
         );
@@ -1412,6 +1419,10 @@ fn a_replaced_runtime_clears_only_its_own_running_tests() {
                 key: "exec-earlier-runtime".to_owned(),
                 runtime: RuntimeToken::Codex("replaced-runtime".to_owned()),
                 root_key: root_key.clone(),
+                turn_generation: 0,
+                host_turn_ref: "replaced-turn".to_owned(),
+                sequence: 0,
+                codex_turn: None,
             },
         );
     });

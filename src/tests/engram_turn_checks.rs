@@ -1263,6 +1263,7 @@ impl EOCheckedTurn {
     ) -> EngramTurnCheck {
         let root = engram_worktree_root_path(&self.root);
         EngramTurnCheck {
+            codex_turn: None,
             host_turn_ref: self.record(|record| {
                 record
                     .engram
@@ -2143,6 +2144,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         capture
     };
     let check = |key: &str, end_basis: Arc<EngramBasisCapture>| EngramTurnCheck {
+        codex_turn: None,
         declared: None,
         host_turn_ref: owner.clone(),
         key: key.to_owned(),
@@ -2213,6 +2215,7 @@ pub(super) fn finished_check(
     end_basis: Arc<EngramBasisCapture>,
 ) -> EngramTurnCheck {
     EngramTurnCheck {
+        codex_turn: None,
         declared: None,
         host_turn_ref: FIXTURE_CHECK_TURN_REF.to_owned(),
         key: format!("check-{sequence}"),

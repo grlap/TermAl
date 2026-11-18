@@ -71,6 +71,7 @@ impl AppState {
     fn settle_reported_test_observation(
         &self,
         session_id: &str,
+        provenance: &EngramObservationProvenance,
         key: &str,
         command: &str,
         exit: EngramCommandExit,
@@ -82,7 +83,19 @@ impl AppState {
                 return;
             };
             let record = &inner.sessions[index];
-            let runtime = test_run_runtime_identity(record, &EngramObservationProvenance::Ambient);
+            let generation = match provenance {
+                EngramObservationProvenance::Runtime {
+                    token,
+                    turn_generation,
+                } => {
+                    if !record.runtime.matches_runtime_token(token) {
+                        return;
+                    }
+                    Some(*turn_generation)
+                }
+                _ => None,
+            };
+            let runtime = test_run_runtime_identity(record, provenance);
             let tool = sha256_hex(key.as_bytes());
             let rows = inner
                 .test_run_observations
@@ -91,6 +104,7 @@ impl AppState {
                     row.summary.owner_session_id.as_deref() == Some(session_id)
                         && row.runtime_identity == runtime
                         && row.tool_identity == tool
+                        && generation.is_none_or(|turn| row.turn_generation == turn)
                         && row.summary.ended_at.is_none()
                 })
                 .collect::<Vec<_>>();
@@ -102,7 +116,7 @@ impl AppState {
             let ended = self.observe_test_command_end_locked_with_declared_phase(
                 &mut inner,
                 session_id,
-                &EngramObservationProvenance::Ambient,
+                provenance,
                 key,
                 Some(exit),
                 None,

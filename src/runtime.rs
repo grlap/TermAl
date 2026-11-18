@@ -852,14 +852,32 @@ struct SessionRecorderState {
     // Frame-local native execution proof; an ambient/replayed event cannot
     // acquire a new turn's opening snapshot.
     native_tool_provenance: Option<EngramObservationProvenance>,
+    // An early item can report a turn without proving it.
+    codex_command_start: Option<CodexCommandTurn>,
+    codex_command_completion: Option<CodexCommandCompletion>,
+    codex_replaying_command_completion: bool,
     /// Commands whose message a turn reset keeps: a Claude subagent's tool
     /// calls still pending across the root turn's reset, so their late
     /// results update the same card.
     kept_command_keys: HashSet<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CodexCommandTurn {
+    digest: Option<String>,
+    proven: bool,
+}
+
+enum CodexCommandCompletion {
+    TranscriptOnly,
+    Proven(Option<String>),
+}
+
 fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
     recorder_state.native_tool_provenance = None;
+    recorder_state.codex_command_start = None;
+    recorder_state.codex_command_completion = None;
+    recorder_state.codex_replaying_command_completion = false;
     let kept = &recorder_state.kept_command_keys;
     recorder_state
         .command_messages
@@ -925,6 +943,7 @@ struct SharedCodexSessionState {
     /// Item routing may learn an id before the handshake proves it.
     turn_id_provisional: bool,
     deferred_terminals: Vec<DeferredCodexTerminal>,
+    deferred_command_completions: Vec<DeferredCodexCommandCompletion>,
     terminal_identity_unresolved: bool,
     /// Defense against delayed starts/terminals across subsequent requests.
     retired_turn_ids: VecDeque<(String, String)>,

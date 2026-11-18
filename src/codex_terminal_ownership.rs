@@ -14,6 +14,189 @@ struct DeferredCodexTerminal {
     bytes: usize,
 }
 
+const CODEX_DEFERRED_COMMAND_LIMIT: usize = 16;
+const CODEX_DEFERRED_COMMAND_BYTES: usize = 512 * 1024;
+
+struct DeferredCodexCommandCompletion {
+    runtime: RuntimeToken,
+    thread_id: String,
+    request_id: String,
+    generation: u64,
+    turn_id: Option<String>,
+    key: String,
+    message: Value,
+    bytes: usize,
+}
+
+fn shared_codex_command_item<'a>(method: &str, message: &'a Value) -> Option<&'a Value> {
+    let (item, kind) = match method {
+        "item/started" | "item/completed" => (message.pointer("/params/item")?, "commandExecution"),
+        "codex/event/item_completed" => (message.pointer("/params/msg/item")?, "CommandExecution"),
+        _ => return None,
+    };
+    (item.get("type").and_then(Value::as_str) == Some(kind)).then_some(item)
+}
+
+fn shared_codex_proven_command_turn(shared: &SharedCodexSessionState) -> bool {
+    shared.turn_started
+        && !shared.turn_id_provisional
+        && !shared.terminal_identity_unresolved
+        && (shared.turn_id.is_some()
+            || (!shared.turn_started_before_response
+                && shared.pending_turn_start_request_id.is_none()))
+}
+
+fn prepare_shared_codex_command_frame(
+    method: &str,
+    message: &Value,
+    runtime: &RuntimeToken,
+    shared: &mut SharedCodexSessionState,
+) {
+    let event_turn = shared_codex_event_turn_id(message);
+    let thread = shared_codex_session_thread_id(method, message);
+    let authenticated = thread.is_some() && thread == shared.thread_id.as_deref();
+    let routed = shared.turn_started && event_turn == shared.turn_id.as_deref() && authenticated;
+    let proven = routed && shared_codex_proven_command_turn(shared);
+    let generation = shared.active_turn_generation;
+    let native_item = matches!(
+        method,
+        "item/started" | "item/completed" | "codex/event/item_completed"
+    );
+    shared.recorder.native_tool_provenance =
+        generation
+            .filter(|_| proven && native_item)
+            .map(|turn_generation| EngramObservationProvenance::Runtime {
+                token: runtime.clone(),
+                turn_generation,
+            });
+    shared.recorder.codex_command_start = None;
+    shared.recorder.codex_command_completion = None;
+    let Some(item) = shared_codex_command_item(method, message) else {
+        return;
+    };
+    let digest = event_turn.map(|turn| sha256_hex(turn.as_bytes()));
+    if method == "item/started" {
+        shared.recorder.codex_command_start = Some(CodexCommandTurn { digest, proven });
+        return;
+    }
+    let key = item.get("id").and_then(Value::as_str);
+    shared.recorder.codex_command_completion =
+        Some(if proven && generation.is_some() && key.is_some() {
+            CodexCommandCompletion::Proven(digest)
+        } else {
+            CodexCommandCompletion::TranscriptOnly
+        });
+    // Keep the transcript on the normal path. Only a real terminal for the
+    // pending handshake gets a bounded candidate for later settlement.
+    if !routed
+        || proven
+        || !shared.turn_started_before_response
+        || EngramHost::codex_command_exit(item) == EngramCommandExit::NotFinished
+    {
+        return;
+    }
+    let (Some(key), Some(thread), Some(request), Some(generation)) = (
+        key,
+        thread,
+        shared.pending_turn_start_request_id.as_ref(),
+        generation,
+    ) else {
+        return;
+    };
+    let pending = &mut shared.deferred_command_completions;
+    if !shared.recorder.command_messages.contains_key(key)
+        || pending.len() >= CODEX_DEFERRED_COMMAND_LIMIT
+        || pending.iter().any(|candidate| candidate.key == key)
+    {
+        return;
+    }
+    let Ok(bytes) = serde_json::to_vec(message).map(|serialized| serialized.len()) else {
+        return;
+    };
+    if bytes
+        + pending
+            .iter()
+            .map(|candidate| candidate.bytes)
+            .sum::<usize>()
+        > CODEX_DEFERRED_COMMAND_BYTES
+    {
+        return;
+    }
+    pending.push(DeferredCodexCommandCompletion {
+        runtime: runtime.clone(),
+        thread_id: thread.to_owned(),
+        request_id: request.clone(),
+        generation,
+        turn_id: event_turn.map(str::to_owned),
+        key: key.to_owned(),
+        message: message.clone(),
+        bytes,
+    });
+}
+
+fn reconcile_shared_codex_command_turn(
+    state: &AppState,
+    session_id: &str,
+    runtime: &RuntimeToken,
+    request_id: &str,
+    thread_sessions: &SharedCodexThreadMap,
+    shared: &mut SharedCodexSessionState,
+) -> Result<()> {
+    if !shared_codex_proven_command_turn(shared) {
+        return Ok(());
+    }
+    let Some(generation) = shared.active_turn_generation else {
+        return Ok(());
+    };
+    let proven_digest = shared
+        .turn_id
+        .as_ref()
+        .map(|turn| sha256_hex(turn.as_bytes()));
+    state.confirm_codex_check_openings(session_id, runtime, generation, proven_digest.as_deref());
+    let candidates = std::mem::take(&mut shared.deferred_command_completions);
+    for candidate in candidates {
+        if candidate.runtime != *runtime
+            || candidate.generation != generation
+            || candidate.request_id != request_id
+            || Some(candidate.thread_id.as_str()) != shared.thread_id.as_deref()
+        {
+            continue;
+        }
+        if candidate.turn_id != shared.turn_id {
+            let digest = candidate
+                .turn_id
+                .as_ref()
+                .map(|turn| sha256_hex(turn.as_bytes()));
+            state.reject_provisional_codex_completion(
+                session_id,
+                runtime,
+                generation,
+                &candidate.key,
+                digest.as_deref(),
+            );
+            continue;
+        }
+        let method = candidate
+            .message
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        shared.recorder.codex_replaying_command_completion = true;
+        let applied = apply_owned_shared_codex_notification(
+            method,
+            &candidate.message,
+            state,
+            session_id,
+            runtime,
+            thread_sessions,
+            shared,
+        );
+        shared.recorder.codex_replaying_command_completion = false;
+        applied?;
+    }
+    Ok(())
+}
+
 fn shared_codex_error_is_retryable(payload: &Value) -> bool {
     let error = payload.get("error").unwrap_or(payload);
     is_retryable_connectivity_error(payload)
@@ -54,6 +237,7 @@ fn hold_unresolved_codex_terminal(
     shared: &mut SharedCodexSessionState,
 ) -> Result<()> {
     shared.deferred_terminals.clear();
+    shared.deferred_command_completions.clear();
     shared.terminal_identity_unresolved = true;
     let mut inner = state.inner.lock().expect("state mutex poisoned");
     let Some(index) = inner.find_session_index(session_id) else {
@@ -205,10 +389,12 @@ fn apply_owned_shared_codex_notification(
             retire_codex_terminal_identity(shared, &id);
         }
     }
+    prepare_shared_codex_command_frame(method, message, runtime, shared);
     let SharedCodexSessionState {
         pending_turn_start_request_id,
         turn_started_watchdog_cancel_tx,
         turn_started_before_response,
+        turn_id_provisional,
         active_turn_generation,
         recorder,
         thread_id,
@@ -234,6 +420,7 @@ fn apply_owned_shared_codex_notification(
         pending_turn_start_request_id,
         turn_started_watchdog_cancel_tx,
         turn_started_before_response,
+        *turn_id_provisional,
         turn_state,
         thread_sessions,
         &mut recorder,
