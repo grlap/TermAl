@@ -4,7 +4,9 @@
   "title": "Contain the shared Codex app-server in a kill-on-close job so it cannot outlive a host restart",
   "outcome": "The shared Codex app-server ends whenever the TermAl host process ends, on every platform, as dedicated runtimes already do; a host restart then provably ends any turn it was running, and the delegation worktree sweep's boot rule that retains Codex children's worktrees can be relaxed.",
   "acceptance": [
-    "Contain the shared Codex app-server in a kill-on-close job so it cannot outlive a host restart is done"
+    "On Windows the shared Codex app-server is started inside a job object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, using the same mechanism as dedicated runtimes, so it and its children end when the TermAl host process ends. Shown by a behavioural test that the spawned app-server is assigned to such a job.",
+    "On Unix the shared app-server gets the same containment that dedicated runtimes have today. Full process-tree containment on Unix is w-7c906a31958b and is out of scope here.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,

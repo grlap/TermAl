@@ -1,0 +1,27 @@
+{
+  "id": "01a1f087-4228-78e1-ae0b-c00630179bd3",
+  "external_ref": null,
+  "title": "Delegation follow-up: refuse a worktree whose HEAD is malformed, keeping any Git-valid branch name",
+  "outcome": "The follow-up owner check refuses a worktree whose administrative HEAD is not a detached object id or a symbolic ref (for example truncated to a fragment of a commit id), while any branch name Git accepts, including Unicode whitespace, still passes; a test covers the malformed-HEAD refusal beside the missing-HEAD case.",
+  "acceptance": [
+    "Delegation follow-up: refuse a worktree whose HEAD is malformed, keeping any Git-valid branch name is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

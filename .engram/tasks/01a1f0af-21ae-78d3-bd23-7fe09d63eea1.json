@@ -1,0 +1,38 @@
+{
+  "id": "01a1f0af-21ae-78d3-bd23-7fe09d63eea1",
+  "external_ref": null,
+  "title": "Prevent an alternate directory with the same ordinary test run ID from displacing the original",
+  "outcome": "Ordinary test-run discovery preserves the canonical original identity when another scanned directory presents the same run ID.",
+  "acceptance": [
+    "A real ordinary run plus a same-ID copy in another scanned review-runs directory leaves the original live or retained identity authoritative across refresh and restart.",
+    "When original files are unavailable, the history and detail show the original run's bounded unavailable state and never attribute the copy's diagnostics or outcome to it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

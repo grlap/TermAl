@@ -1,0 +1,31 @@
+{
+  "id": "01a1f0b3-a9cb-76b2-a250-8dfeec06bd47",
+  "external_ref": null,
+  "title": "Document mailbox route-miss 404 and its bounded diagnostics history",
+  "outcome": "The mailbox docs explain both the public native_mailbox_route_miss error and nativeRouteMisses on the existing read-only diagnostics route, with its scope, safe fields, retained history limit and reset behavior.",
+  "acceptance": [
+    "The mailbox feature documentation and architecture endpoint reference explain the new code and diagnostic section.",
+    "The documented code means a domain 404 after an observed native membership lookup miss, with no claim that the downstream 404 proves a particular cause or operation outcome.",
+    "The docs describe bounded process-local retention, caller and mailbox identity, store and server identity, and omission of bodies and receipts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "docs",
+    "mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

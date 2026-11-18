@@ -1,0 +1,38 @@
+{
+  "id": "01a1f0af-2057-7523-afc4-8d8bb9ae74e3",
+  "external_ref": null,
+  "title": "Keep ordinary command transcripts and writers settled after a replayed START",
+  "outcome": "Replaying an ordinary command START for its already completed execution preserves the terminal transcript and settled writer and shell state.",
+  "acceptance": [
+    "An ordinary Codex router replay after a real START and matching END preserves the one terminal card, settled shell position, and removed current writer.",
+    "A genuinely distinct next execution and supported nonterminal START updates still work."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

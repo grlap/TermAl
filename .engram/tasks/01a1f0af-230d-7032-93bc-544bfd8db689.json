@@ -1,0 +1,38 @@
+{
+  "id": "01a1f0af-230d-7032-93bc-544bfd8db689",
+  "external_ref": null,
+  "title": "Bind ordinary test detail and raw results to the originally indexed artifact",
+  "outcome": "Ordinary test-run detail and raw-results responses either read facts from the originally indexed execution or report the original unavailable.",
+  "acceptance": [
+    "After ordinary run refresh, deterministic replacement of a directory or file before another scan never makes detail or raw results return data from the replacement alongside the original summary.",
+    "The original unchanged ordinary directory still serves the expected detail and raw response bytes, with the preserved digest and existing response contracts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

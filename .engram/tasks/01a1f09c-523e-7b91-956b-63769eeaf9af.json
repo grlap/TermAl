@@ -1,0 +1,32 @@
+{
+  "id": "01a1f09c-523e-7b91-956b-63769eeaf9af",
+  "external_ref": null,
+  "title": "Exercise warm hidden-retention cache invalidation in persistence tests",
+  "outcome": "A behavioral test warms the retention cache with an existing duty and then independently verifies that an unstamped duty, newly hidden visibility and a delegation topology change preserve custody.",
+  "acceptance": [
+    "Exercise warm hidden-retention cache invalidation in persistence tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "greg-reported",
+    "performance",
+    "persistence",
+    "review-follow-up",
+    "scaling",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0f0-a50e-7f91-b7b9-ee1cc0cf84bf",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

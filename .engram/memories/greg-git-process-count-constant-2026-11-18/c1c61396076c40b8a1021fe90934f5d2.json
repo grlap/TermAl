@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-git-process-count-constant-2026-11-18",
+    "revision_id": "c1c61396076c40b8a1021fe90934f5d2",
+    "previous": "049b8190bd8948c8a3d6d953c156cfbb",
+    "body_sha256": "6490868130cc527647fd69e27c13a753e01b159d830f9ee63ebbc2c38248abb2",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-808add714773"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T21:53:00.592061700Z"
+    }
+  },
+  "body": "Greg, 2026-11-18 ~21:50Z, verbatim via Engram::Asistant #1570, relayed by Engram::Fable (TermAl mailbox 28ccc255 #1308): „ale nadal ilosc procesow git nie powina zalezyc wogole od ilosci taskow” (\"but still, the number of git processes should not depend at all on the number of tasks\").\n\nMeaning, per Fable: the number of git launches in task-sync export and import must be constant, whether or not tasks are changed and however many tasks there are. Sources that scale with the task count are defects. In w-808a R3 these were: cat-file batches of 8,192, check-attr in chunks of 128 paths, and possibly the rev-parse and ls-tree launches.\n\nFor scheduling: a w-808a pair is held until R4 removes those sources, and the review brief should check the count is constant across a matrix of changed tasks.\n\nUPDATE 21:52Z (Engram::Fable #1309, Asistant #1572): Greg rejects batching as the fix. The w-808a R3 pair is cancelled for good, and there will be no R4 batching.\n\nKimi, 11334 and 11330 are tracing, read-only, why export reads task contents from Git at all. The aim is an export of DB changes with a constant handful of git launches.\n\nUntil then, TermAl Central keeps the interim --rebuild sync (33 s)."
+}

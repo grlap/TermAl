@@ -1,0 +1,32 @@
+{
+  "id": "01a1f09c-4283-77b2-843a-94029f5b52fe",
+  "external_ref": null,
+  "title": "Keep delegation catalog relationships aligned in custody traversal fixtures",
+  "outcome": "Tests maintain the authoritative catalog when editing relationships in place, and custody traversal has a regression for same-length relationship replacement through its owner.",
+  "acceptance": [
+    "Keep delegation catalog relationships aligned in custody traversal fixtures is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-directed",
+    "greg-reported",
+    "performance",
+    "persistence",
+    "review-follow-up",
+    "scaling",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0f0-a50e-7f91-b7b9-ee1cc0cf84bf",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

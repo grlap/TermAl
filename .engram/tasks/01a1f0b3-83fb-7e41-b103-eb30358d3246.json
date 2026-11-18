@@ -1,0 +1,30 @@
+{
+  "id": "01a1f0b3-83fb-7e41-b103-eb30358d3246",
+  "external_ref": null,
+  "title": "Timestamp native mailbox route-miss records in UTC and count evictions",
+  "outcome": "Each retained nativeRouteMisses record has an RFC 3339 UTC timestamp with millisecond precision, and the existing diagnostics section reports how many older rows have been evicted since process start.",
+  "acceptance": [
+    "The diagnostic records match the UTC timestamp format of the existing home RPC failure history.",
+    "The reported evicted count increments when the bounded 64-entry history drops its oldest record and resets with its process-local history.",
+    "Deterministic tests cover the reported count and boundary behavior without timing-based assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

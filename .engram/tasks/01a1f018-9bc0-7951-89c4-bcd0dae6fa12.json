@@ -17,12 +17,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Corrected the root coding session brief and examples to select an explicit Sol model from the target host catalog, and documented the saved preference and gpt-5.4 fallback for omitted model. Docs-only exact commit e9074b21 landed.",
+    "completed_at": "2026-11-18T21:20:39.938673100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-git-process-count-constant-2026-11-18",
+    "revision_id": "049b8190bd8948c8a3d6d953c156cfbb",
+    "previous": null,
+    "body_sha256": "2f60cfddbf33559024f90600cb072652d575780d7b18f08049ace352ad6ff5c2",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-808add714773"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T21:50:55.861991900Z"
+    }
+  },
+  "body": "Greg, 2026-11-18 ~21:50Z, verbatim via Engram::Asistant #1570, relayed by Engram::Fable (TermAl mailbox 28ccc255 #1308): „ale nadal ilosc procesow git nie powina zalezyc wogole od ilosci taskow” (\"but still, the number of git processes should not depend at all on the number of tasks\").\n\nMeaning, per Fable: the number of git launches in task-sync export and import must be constant, whether or not tasks are changed and however many tasks there are. Sources that scale with the task count are defects. In w-808a R3 these were: cat-file batches of 8,192, check-attr in chunks of 128 paths, and possibly the rev-parse and ls-tree launches.\n\nFor scheduling: a w-808a pair is held until R4 removes those sources, and the review brief should check the count is constant across a matrix of changed tasks."
+}

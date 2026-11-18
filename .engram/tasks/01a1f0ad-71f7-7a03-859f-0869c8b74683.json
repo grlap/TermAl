@@ -1,0 +1,39 @@
+{
+  "id": "01a1f0ad-71f7-7a03-859f-0869c8b74683",
+  "external_ref": null,
+  "title": "Match an ordinary carried Codex completion to its original command before settlement",
+  "outcome": "A late ordinary Codex completion with a different command leaves the original execution and running-writer fence intact, and the original command's genuine completion settles it once.",
+  "acceptance": [
+    "A real ordinary Codex router witness establishes a live carried writer and provider observation with the original start command, including a writer without a carried evidence row.",
+    "A completion with the original item and a different command leaves the writer and observation unchanged and supplies no outcome, artifact or credit. A later genuine completion settles only that original execution once.",
+    "Unambiguous valid ordinary late completions still settle, and addressed or ambiguous successor completions cannot release the predecessor writer."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
