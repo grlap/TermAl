@@ -404,8 +404,12 @@ impl EngramRuntimeClosingJob {
 
     fn failed(&self, session_id: &str, error: &EngramTransportError) -> Self {
         let mut next = self.clone();
-        next.attempts = next.attempts.saturating_add(1);
-        next.retry_at = (chrono::Utc::now() + runtime_observation_retry_delay(session_id, next.attempts))
+        let store_unavailable = engram_store_transient(error);
+        if !store_unavailable {
+            next.attempts = next.attempts.saturating_add(1);
+        }
+        next.retry_at = (chrono::Utc::now() + runtime_observation_retry_delay(session_id,
+            if store_unavailable { ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS } else { next.attempts }))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         next.last_error = Some(error.message.clone());
         next
