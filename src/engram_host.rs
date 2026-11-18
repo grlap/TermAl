@@ -67,6 +67,28 @@ pub(crate) enum EngramRecorderObservation<'a> {
 }
 
 impl EngramHost<'_> {
+    /// Retires a proven current command's writer without touching carried writers.
+    pub(crate) fn retire_current_command_writer(record: &mut SessionRecord, key: &str) {
+        engram_retire_command_writer(&mut record.engram, key);
+    }
+
+    pub(crate) fn settle_current_provider_shell(
+        record: &mut SessionRecord,
+        key: &str,
+        exit: Option<EngramCommandExit>,
+    ) {
+        engram_settle_shell_move(record, key, exit);
+    }
+
+    fn carried_codex_address(
+        record: &SessionRecord,
+        runtime: &RuntimeToken,
+        key: &str,
+        native_turn: &str,
+    ) -> Option<EngramCodexCommandAddress> {
+        engram_codex_report_address(record, runtime, key, native_turn)
+    }
+
     /// Presents a native run's withheld-credit diagnostic under the state lock.
     pub(crate) fn native_run_withheld(record: &mut SessionRecord, line: String) {
         engram_publish_check_notice(
@@ -89,10 +111,21 @@ impl EngramHost<'_> {
         provenance: &EngramObservationProvenance,
         observation: EngramRecorderObservation<'_>,
     ) {
+        self.observe_with_provider(session_id, provenance, observation, None);
+    }
+
+    pub(crate) fn observe_with_provider(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        observation: EngramRecorderObservation<'_>,
+        provider: Option<&TestRunProviderFrame>,
+    ) {
         match observation {
             EngramRecorderObservation::CommandStarted { key, ran, cwd } => {
-                self.state
-                    .note_engram_command_started(session_id, provenance, key, ran, cwd);
+                self.state.note_engram_command_started_with_provider(
+                    session_id, provenance, key, ran, cwd, provider,
+                );
             }
             EngramRecorderObservation::CommandDescribed { key, ran, cwd } => {
                 self.state
@@ -106,20 +139,23 @@ impl EngramHost<'_> {
                 exit,
                 runtime_output_cut,
             } => {
-                self.state.note_engram_command_finished_reported(
-                    session_id,
-                    provenance,
-                    key,
-                    command,
-                    reported_command,
-                    output,
-                    exit,
-                    runtime_output_cut,
-                );
+                self.state
+                    .note_engram_command_finished_reported_with_provider(
+                        session_id,
+                        provenance,
+                        key,
+                        command,
+                        reported_command,
+                        output,
+                        exit,
+                        runtime_output_cut,
+                        provider,
+                    );
             }
             EngramRecorderObservation::CommandAbandoned { key } => {
-                self.state
-                    .note_engram_command_abandoned(session_id, provenance, key);
+                self.state.note_engram_command_abandoned_with_provider(
+                    session_id, provenance, key, provider,
+                );
             }
             EngramRecorderObservation::WorkspaceEdit { target } => {
                 self.state
@@ -397,6 +433,27 @@ impl EngramHost<'_> {
     ) -> bool {
         self.state
             .note_engram_reported_end(session_id, key, command, output, exit)
+    }
+
+    fn codex_reported_end_at(
+        &self,
+        session_id: &str,
+        key: &str,
+        command: &str,
+        output: &str,
+        exit: EngramCommandExit,
+        address: &EngramCodexCommandAddress,
+    ) -> bool {
+        self.state.note_engram_reported_end_owned(
+            session_id,
+            key,
+            command,
+            output,
+            exit,
+            Some(address),
+            #[cfg(test)]
+            || {},
+        )
     }
 
     /// The exit a Claude Bash tool result states.

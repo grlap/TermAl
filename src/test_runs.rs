@@ -766,6 +766,7 @@ impl AppState {
             reevaluate_cards,
             compacted_dirs,
             mut compact_stamps,
+            linked_artifact_sources,
         ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             points.mark("roots_acquired");
@@ -841,6 +842,7 @@ impl AppState {
                         .collect::<HashMap<_, _>>()
                 },
                 inner.test_runs.compaction_stamps.clone(),
+                test_run_linked_artifact_sources(&inner),
             )
         };
         points.mark("roots_taken");
@@ -877,9 +879,8 @@ impl AppState {
         let mut tracked_dirs = Vec::new();
         for (common_key, common_dir) in &common_dirs {
             for run_dir in test_runs_directories(common_dir, &mut tracked_dirs) {
-                if let Some(compacted) =
-                    compacted_dirs.get(&test_run_path_key(&test_run_display_path(&run_dir)))
-                {
+                let run_dir_key = test_run_path_key(&test_run_display_path(&run_dir));
+                if let Some(compacted) = compacted_dirs.get(&run_dir_key) {
                     let request_stamp = test_run_file_stamp(&run_dir.join("request.json"));
                     let results_stamp = test_run_file_stamp(&run_dir.join("results.json"));
                     if compact_stamps.get(&compacted.summary.run_id).is_some_and(
@@ -908,17 +909,20 @@ impl AppState {
                     // Contradictions surface on its original minimal record.
                     continue;
                 }
+                let linked_source = linked_artifact_sources.get(&run_dir_key);
+                let read = |previous: Option<&TestRunDisk>| match linked_source {
+                    Some(source) => TestRunDisk::read_linked_artifact(&run_dir, source.as_ref()),
+                    None => TestRunDisk::read_classified(&run_dir, previous),
+                };
                 let earlier = previous.remove(&run_dir);
                 // A run directory still waiting for a file is stamped before
                 // its files are read: the launcher creates the directory, then
                 // renames `request.json` and then `results.json` into it, so a
                 // file arriving after this rescan's read changes the stamp.
-                let dir_stamp = earlier
+                let dir_stamp = (linked_source.is_none() && earlier
                     .as_ref()
-                    .is_none_or(|disk| disk.results.is_none() || disk.read_failures > 0)
+                    .is_none_or(|disk| disk.results.is_none() || disk.read_failures > 0))
                     .then(|| test_run_dir_stamp(&run_dir));
-                let request_stamp = test_run_file_stamp(&run_dir.join("request.json"));
-                let results_stamp = test_run_file_stamp(&run_dir.join("results.json"));
                 // An entry that kept an earlier read after a failed one is
                 // read again whatever its stamps say, and so is one whose read
                 // failed outright: the failure may be transient. Results read
@@ -929,14 +933,15 @@ impl AppState {
                 // and any stamp change reads it again.
                 let disk = match earlier {
                     Some(disk)
-                        if (disk.read_failures == 0 || disk.results_malformed)
+                        if linked_source.is_none()
+                            && (disk.read_failures == 0 || disk.results_malformed)
                             && disk.locator_identity.is_some()
-                            && disk.request_stamp == request_stamp
-                            && disk.results_stamp == results_stamp =>
+                            && disk.request_stamp == test_run_file_stamp(&run_dir.join("request.json"))
+                            && disk.results_stamp == test_run_file_stamp(&run_dir.join("results.json")) =>
                     {
                         disk
                     }
-                    earlier => match TestRunDisk::read_classified(&run_dir, earlier.as_deref()) {
+                    earlier => match read(earlier.as_deref()) {
                         TestRunRead::Run(disk) => Arc::new(disk),
                         TestRunRead::Pending => {
                             if let Some(stamp) = dir_stamp {
@@ -975,7 +980,7 @@ impl AppState {
                         break;
                     }
                     let checked = disk.responsible_pid().map(|(pid, _)| pid);
-                    let Some(mut fresh) = TestRunDisk::read(&run_dir, Some(disk.as_ref()))
+                    let Some(mut fresh) = read(Some(disk.as_ref())).into_run()
                         .filter(|fresh| fresh.read_failures == 0)
                     else {
                         // The read after the check failed; the verdict stays
