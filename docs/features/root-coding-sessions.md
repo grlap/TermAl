@@ -38,11 +38,12 @@ delegations for subwork integrated by their parent. Do not create speculative or
 unbounded idle capacity. Serial gate windows and landing ownership remain in
 force.
 
-Codex `gpt-6.1-sol` is the default for new coding assignments. Record an exception
-when Sol is unavailable or moving already-started work would cost more than
-continuing it. The recorded initial exception was the existing Claude
-CSharpProof assignment; an existing Codex root already using Sol was not an
-exception. This is a coordinator choice, not the API's omitted-model default.
+For new coding assignments, coordinators explicitly select a Codex Sol model
+from the running host's Codex app-server `model/list` catalog
+(`src/codex_rpc.rs:208–215`). Record an exception when Sol is unavailable or
+moving already-started work would cost more than continuing it. The recorded
+initial exception was the existing Claude CSharpProof assignment. The existing
+Codex root already using Sol followed the usual selection.
 
 Use the agreed [team strategy](#team-strategy) to choose roots, bounded
 delegations and capacity. Ready package count alone is insufficient evidence of
@@ -83,7 +84,13 @@ Source: [CreateSessionRequest](../../src/wire.rs#L1158), `src/wire.rs:1156–117
 | `name` | String; trimmed, with blank treated as absent. Absence generates a name (`src/session_crud.rs:3795`, `src/state_inner.rs:113`). |
 | `workdir` | String naming an existing directory; trimmed, resolved and normalized. Empty or non-directory paths fail. Use an absolute path in coordinator requests (`src/paths.rs:354`, `src/paths.rs:381`). |
 | `projectId` | String matching an existing project. With no workdir, the project's root is used. With both, a local workdir must be inside that project. With workdir alone, the host infers a containing project; without either, it uses its default workdir (`src/session_crud.rs:3775–3835`). |
-| `model` | String; trimmed, blank treated as absent. Absence uses the app's configured default for the agent. Creation does not validate model membership in a provider catalog. OpenCode additionally limits nonblank models to 200 characters and rejects control characters (`src/session_crud.rs:3781`, `src/state_inner.rs:115`, `src/opencode.rs:17`). |
+| `model` | String. TermAl trims it and treats a blank value as absent. Absence uses the app's configured default for the agent. Creation does not validate model membership in a provider catalog. OpenCode additionally limits nonblank models to 200 characters and rejects control characters (`src/session_crud.rs:1388–1398`, `src/state_inner.rs:119–120`, `src/opencode.rs:17`). |
+
+If a Codex request omits `model`, TermAl uses the saved `defaultCodexModel`
+preference (`src/state_inner.rs:119–120`, `src/turns.rs:508–534`). When that
+preference is unset, blank or set to `default`, the built-in fallback is
+`gpt-5.4` (`src/turns.rs:539–541`, `src/wire.rs:439–443`). The app-server catalog
+supplies the available model choices.
 
 Agent-specific fields, validated against `src/wire.rs:834–1043` and
 `src/session_crud.rs:3750–3773`, `src/session_crud.rs:3841–3985`:
@@ -171,7 +178,8 @@ establish a remote creation or capacity policy.
    UI/message or durable mailbox route. A successful creation alone leaves it idle.
 5. Follow the existing claim, worktree, test, review and integration workflow.
 
-Example request, matching the recorded TermAl Sol root settings:
+In both examples, replace `<sol-model-id>` with the exact Sol model ID
+advertised by the target host's Codex app-server catalog.
 
 ```json
 {
@@ -179,7 +187,7 @@ Example request, matching the recorded TermAl Sol root settings:
   "name": "Termal::Sol-docs",
   "projectId": "project-6",
   "workdir": "C:/github/Personal/TermAl",
-  "model": "gpt-6.1-sol",
+  "model": "<sol-model-id>",
   "approvalPolicy": "never",
   "sandboxMode": "danger-full-access",
   "reasoningEffort": "high"
@@ -201,7 +209,7 @@ $request = @{
     name = 'Termal::Sol-docs'
     projectId = 'project-6'
     workdir = 'C:/github/Personal/TermAl'
-    model = 'gpt-6.1-sol'
+    model = '<sol-model-id>'
     approvalPolicy = 'never'
     sandboxMode = 'danger-full-access'
     reasoningEffort = 'high'
