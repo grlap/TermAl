@@ -87,6 +87,7 @@ mod delegation_wait;
 mod delegation_worker;
 mod delegation_worker_handoff;
 mod delegation_worktree_location;
+mod delegation_worktree_owner;
 mod delegations;
 mod session_restart_recovery;
 mod source_capture;

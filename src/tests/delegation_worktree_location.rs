@@ -11,16 +11,16 @@ use super::*;
 
 /// A source repository whose `.worktrees/` is ignored (or not), with a parent
 /// Codex session in it.
-struct WorktreeRepo {
-    state: AppState,
+pub(super) struct WorktreeRepo {
+    pub(super) state: AppState,
     _input_rx: mpsc::Receiver<CodexRuntimeCommand>,
-    parent: String,
-    repo: PathBuf,
+    pub(super) parent: String,
+    pub(super) repo: PathBuf,
     _root: TestTempRoot,
 }
 
 impl WorktreeRepo {
-    fn new(name: &str, ignore_worktrees: bool) -> Self {
+    pub(super) fn new(name: &str, ignore_worktrees: bool) -> Self {
         Self::with_repo_path(name, ignore_worktrees, |root| root.join("repo"))
     }
 
@@ -68,7 +68,10 @@ impl WorktreeRepo {
         }
     }
 
-    fn spawn(&self, worktree_path: Option<&FsPath>) -> Result<DelegationResponse, ApiError> {
+    pub(super) fn spawn(
+        &self,
+        worktree_path: Option<&FsPath>,
+    ) -> Result<DelegationResponse, ApiError> {
         self.state.create_read_only_delegation(
             &self.parent,
             CreateDelegationRequest {
@@ -87,7 +90,7 @@ impl WorktreeRepo {
         )
     }
 
-    fn worktree_of(created: &DelegationResponse) -> PathBuf {
+    pub(super) fn worktree_of(created: &DelegationResponse) -> PathBuf {
         let DelegationWritePolicy::IsolatedWorktree { worktree_path, .. } =
             &created.delegation.write_policy
         else {
@@ -109,7 +112,7 @@ impl WorktreeRepo {
     }
 }
 
-fn same_path(left: &FsPath, right: &FsPath) -> bool {
+pub(super) fn same_path(left: &FsPath, right: &FsPath) -> bool {
     normalize_path_best_effort(left) == normalize_path_best_effort(right)
 }
 

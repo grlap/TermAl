@@ -59,7 +59,20 @@ spawning parent removes it with `git worktree remove` once it has integrated
 or discarded the work; the worker handoff says so. A worktree lives inside the
 parent's checkout, so removing that checkout, or `git clean -X` in it, also
 deletes the worktree: integrate its work first. Automatic removal of a
-worktree with nothing to lose is a separate, later change.
+worktree with nothing to lose is a separate, later change; until then a
+worktree is removed by hand, by an agent under the "Cleanup deletions" rule in
+AGENTS.md.
+
+TermAl records, in the worktree's Git administrative directory, which
+delegation created it. A follow-up runs only in that worktree: once it has
+been removed, or its path holds anything else (a worktree another delegation
+or a person made, a plain directory, a partly removed worktree whose Git link
+is broken, or a worktree from before owners were recorded), the follow-up is
+refused and the worktree is not recreated; start a new delegation instead.
+The check reads Git's metadata only as regular files and never judges what a
+HEAD names, so any branch name Git accepts passes. A repository whose HEAD is
+stored as a symbolic link (`core.preferSymlinkRefs`) is refused as well: a link
+could lead the check outside the worktree's own metadata.
 
 ## Tests
 

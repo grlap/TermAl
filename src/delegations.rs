@@ -1569,11 +1569,13 @@ impl AppState {
             return Err(ApiError::bad_request("follow-up message cannot be empty"));
         }
 
+        let checked_worktree = self.check_followup_worktree(parent_session_id, delegation_id)?;
         let child_session_id = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let child = inner.delegations[index].child_session_id.clone();
+            confirm_followup_worktree_locked(&inner, index, checked_worktree.as_deref())?;
             validate_delegation_followup_child_locked(
                 &inner,
                 &child,
@@ -1629,6 +1631,9 @@ impl AppState {
         ) {
             self.prepare_codex_child_rearm(&child_session_id)?;
         }
+        // The worktree is checked again just before the lock that admits the
+        // follow-up, off that lock; under it, only that it is unchanged.
+        let worktree_check = self.check_followup_worktree(parent_session_id, delegation_id);
 
         // Phase 1 (atomic): reserve one resumable terminal attempt. Concurrent
         // follow-ups cannot share this reservation; ordinary dispatch cannot
@@ -1687,6 +1692,13 @@ impl AppState {
                 Some(ApiError::conflict(
                     "review terminal attempt changed after retention; no follow-up was admitted",
                 ))
+            } else if let Some(error) = match worktree_check {
+                Ok(checked) => {
+                    confirm_followup_worktree_locked(&inner, index, checked.as_deref()).err()
+                }
+                Err(error) => Some(error),
+            } {
+                Some(error)
             } else if inner
                 .delegation_followup_admissions
                 .contains_key(delegation_id)
@@ -4667,12 +4679,17 @@ fn prepare_isolated_delegation_worktree(
 
     ensure_isolated_worktree_target_available(&worktree_root)?;
     if let Some(base) = worker_base {
-        return prepare_committed_worker_worktree(
+        let prepared = prepare_committed_worker_worktree(
             &source_repo_root,
             &worktree_root,
             &relative_cwd,
             base,
-        );
+        )?;
+        let mut cleanup_guard =
+            IsolatedWorktreeCleanupGuard::new(&source_repo_root, &worktree_root);
+        record_delegation_worktree_owner(&worktree_root, delegation_id)?;
+        cleanup_guard.disarm();
+        return Ok(prepared);
     }
     let staged_patch = git_repo_output(
         &source_repo_root,
@@ -4694,6 +4711,7 @@ fn prepare_isolated_delegation_worktree(
 
     create_detached_git_worktree(&source_repo_root, &worktree_root, "HEAD")?;
     let mut cleanup_guard = IsolatedWorktreeCleanupGuard::new(&source_repo_root, &worktree_root);
+    record_delegation_worktree_owner(&worktree_root, delegation_id)?;
     if git_patch_has_content(&staged_patch) {
         run_git_repo_command_with_input(
             &worktree_root,
