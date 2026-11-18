@@ -168,6 +168,12 @@ fn execution_start(row: &TestRunCommandObservation) -> &str {
 }
 
 fn assert_original_execution_identity(turn: &EOCheckedTurn, original: &TestRunCommandObservation) {
+    assert!(assert_original_execution_custody(turn, original).artifact.is_none());
+}
+
+fn assert_original_execution_custody(
+    turn: &EOCheckedTurn, original: &TestRunCommandObservation,
+) -> TestRunCommandObservation {
     let inner = turn.state.inner.lock().unwrap();
     let now = inner.test_run_observations.get(&original.execution_id).unwrap();
     assert_eq!((&now.execution_id, &now.runtime_identity, &now.tool_identity,
@@ -176,7 +182,8 @@ fn assert_original_execution_identity(turn: &EOCheckedTurn, original: &TestRunCo
         (&original.execution_id, &original.runtime_identity, &original.tool_identity,
         original.turn_generation, &original.grant_identity, &original.command_fingerprint,
         &original.work_binding, &original.source_root, &original.summary.started_at, &original.summary.worktree));
-    assert!(now.artifact.is_none() && now.evidence.is_empty() && now.final_unbound_proof.is_none());
+    assert!(now.evidence.is_empty() && now.final_unbound_proof.is_none());
+    now.clone()
 }
 
 fn observe_start(turn: &EOCheckedTurn, key: &str, command: &str) {
