@@ -1,0 +1,514 @@
+//! Temporary producer repair keeps the same closing facts and durable wire.
+//! The scheduler is driven one due attempt at a time, without wall-clock waits.
+use super::repairs::stored_session;
+use super::*;
+
+const REPAIR_ATTEMPTS: usize = 61;
+
+fn refusal(code: &str) -> EngramTransportError {
+    if code == "store_open_refused" {
+        return engram_observation_readiness_error(
+            ApiError::bad_request("store temporarily unopenable").with_kind(
+                ApiErrorKind::EngramStoreTemporarilyUnavailable {
+                    code: "store_open_refused",
+                    refusal_kind: Some("io"),
+                },
+            ),
+        );
+    }
+    EngramTransportError::remote(EngramControlErrorBody {
+        code: code.to_owned(),
+        message: format!("store refused: {code}"),
+    })
+}
+
+fn close_without_worker(fixture: &mut ReportingTurn) -> EngramRuntimeClosingJob {
+    // Own the normal worker's iteration boundary; the production capture,
+    // installation, persistence and delivery owners still do every transition.
+    fixture
+        .turn
+        .record_mut(|record| record.engram.unadmitted_worker_running = true);
+    fixture.check("repair-retained-check", false);
+    fixture.turn.wait_for_snapshots();
+    // Subsequent production installs use their synchronous fallback, so the
+    // exact-row readbacks cannot race the fixture's background writer.
+    fixture.turn.state.shutdown_persist_blocking();
+    fixture.finish();
+    fixture
+        .turn
+        .record(|record| record.engram.unadmitted_closing_jobs[0].clone())
+}
+
+fn ready_report(
+    fixture: &ReportingTurn,
+    mut job: EngramRuntimeClosingJob,
+) -> EngramRuntimeObservationReport {
+    for _ in 0..4 {
+        let outcome = fixture
+            .turn
+            .state
+            .capture_runtime_observation_report(&fixture.turn.session_id, &job)
+            .expect("ready store must allow closing capture");
+        fixture
+            .turn
+            .state
+            .install_runtime_closing_result(&fixture.turn.session_id, &job, Ok(outcome))
+            .unwrap();
+        if let Some(report) = fixture.turn.record(|record| {
+            record
+                .engram
+                .unadmitted_reports
+                .iter()
+                .find(|report| report.host_turn_ref == job.trace.host_turn_ref)
+                .cloned()
+        }) {
+            return report;
+        }
+        job = fixture
+            .turn
+            .record(|record| record.engram.unadmitted_closing_jobs[0].clone());
+    }
+    panic!("binding and policy preparation must reach an immutable report");
+}
+
+fn install_attempt(
+    fixture: &ReportingTurn,
+    report: &EngramRuntimeObservationReport,
+) -> EngramRuntimeObservationReport {
+    assert!(
+        runtime_observation_report_is_durable(
+            &fixture.turn.state.persistence_path,
+            &fixture.turn.session_id,
+            report
+        )
+        .unwrap()
+    );
+    let adapter = fixture
+        .turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_host_adapter
+        .clone();
+    let index = report.pending().unwrap();
+    let (mut next, unavailable) =
+        deliver_runtime_observation_attempt(&adapter, report, index, Duration::from_secs(1))
+            .unwrap();
+    finish_runtime_observation_delivery_attempt(
+        &mut next,
+        &fixture.turn.session_id,
+        index,
+        unavailable,
+    );
+    fixture
+        .turn
+        .state
+        .install_runtime_observation_result(&fixture.turn.session_id, report, next.clone(), index)
+        .unwrap();
+    next
+}
+
+#[test]
+fn closing_capture_survives_a_repair_schedule_over_one_hour_then_reports_original_checks_once() {
+    for code in [
+        "projection_repair_required",
+        "work_projection_invalid",
+        "store_open_refused",
+    ] {
+        let mut fixture =
+            ReportingTurn::new("closing-store-repair", true, ReplyMode::Recorded, false);
+        let mut job = close_without_worker(&mut fixture);
+        let original = job.clone();
+        let mut scheduled = chrono::Duration::zero();
+        for _ in 0..REPAIR_ATTEMPTS {
+            fixture
+                .turn
+                .transport
+                .observation_policy_errors
+                .lock()
+                .unwrap()
+                .push_back(refusal(code));
+            let error = fixture
+                .turn
+                .state
+                .capture_runtime_observation_report(&fixture.turn.session_id, &job)
+                .err()
+                .expect("the policy read must hit the repair refusal");
+            assert_eq!(
+                error.refusal_code.as_deref().or(error.code.as_deref()),
+                Some(code)
+            );
+            let before = chrono::Utc::now();
+            fixture
+                .turn
+                .state
+                .install_runtime_closing_result(&fixture.turn.session_id, &job, Err(error))
+                .unwrap();
+            job = fixture
+                .turn
+                .record(|record| record.engram.unadmitted_closing_jobs[0].clone());
+            assert!(job.terminal_failure.is_none());
+            assert_eq!(
+                job.attempts, original.attempts,
+                "repair must not spend the unknown-failure budget"
+            );
+            assert_eq!(job.trace, original.trace);
+            assert_eq!(job.scope, original.scope);
+            let due = chrono::DateTime::parse_from_rfc3339(&job.retry_at)
+                .unwrap()
+                .with_timezone(&chrono::Utc);
+            assert!(
+                due >= before + chrono::Duration::minutes(1) - chrono::Duration::milliseconds(1)
+            );
+            scheduled += due - before;
+            assert!(runtime_observation_retry_due(&job.retry_at, due));
+            let persisted: Value = serde_json::from_str(&stored_session(
+                &fixture.turn.state,
+                &fixture.turn.session_id,
+            ))
+            .unwrap();
+            assert_eq!(
+                persisted["engramUnadmittedClosingJobs"][0],
+                serde_json::to_value(&job).unwrap()
+            );
+        }
+        assert!(scheduled >= chrono::Duration::hours(1));
+        assert!(fixture.producer.requests().is_empty());
+        let mut report = ready_report(&fixture, job);
+        let wire: Vec<_> = report
+            .envelopes
+            .iter()
+            .map(|entry| entry.request.clone())
+            .collect();
+        assert_eq!(wire[0]["policy_basis"]["mode"], "account_if_eligible");
+        assert!(
+            !wire[0]["occurrence"]["observed_checks"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        let checks: Vec<_> = original
+            .trace
+            .commands
+            .iter()
+            .map(|entry| entry.check.clone())
+            .collect();
+        assert_eq!(
+            wire[0]["occurrence"]["observed_checks"],
+            serde_json::to_value(checks).unwrap()
+        );
+        while report.pending().is_some() {
+            report = install_attempt(&fixture, &report);
+        }
+        assert!(report.is_discharged());
+        assert_eq!(fixture.producer.requests(), wire);
+        assert_eq!(fixture.producer.records.lock().unwrap().len(), wire.len());
+        assert!(
+            !fixture
+                .turn
+                .record(system_notices)
+                .iter()
+                .any(|line| line.contains("not reported to Engram"))
+        );
+        fixture.assert_no_granted_activity();
+    }
+}
+
+#[test]
+fn retained_delivery_survives_store_repair_without_changing_request_or_prior_budget() {
+    for policy_read in [false, true] {
+        let mode = if policy_read {
+            ReplyMode::Recorded
+        } else {
+            ReplyMode::TransientFor("work_projection_invalid", REPAIR_ATTEMPTS)
+        };
+        let mut fixture = ReportingTurn::new("delivery-store-repair", true, mode, false);
+        let job = close_without_worker(&mut fixture);
+        let mut report = ready_report(&fixture, job);
+        // A pre-existing ambiguous attempt remains owed, including across
+        // serialization/restart; temporary repair neither spends nor erases it.
+        let mut initial = report.next_version();
+        initial.attempts = ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS - 1;
+        fixture
+            .turn
+            .state
+            .install_runtime_observation_result(
+                &fixture.turn.session_id,
+                &report,
+                initial.clone(),
+                0,
+            )
+            .unwrap();
+        report = initial;
+        let wire: Vec<_> = report
+            .envelopes
+            .iter()
+            .map(|entry| entry.request.clone())
+            .collect();
+        for _ in 0..REPAIR_ATTEMPTS {
+            if policy_read {
+                fixture
+                    .turn
+                    .transport
+                    .observation_policy_errors
+                    .lock()
+                    .unwrap()
+                    .push_back(refusal("projection_repair_required"));
+            }
+            report = install_attempt(&fixture, &report);
+            assert_eq!(report.pending(), Some(0));
+            assert_eq!(report.attempts, ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS - 1);
+            assert_eq!(
+                report
+                    .envelopes
+                    .iter()
+                    .map(|entry| entry.request.clone())
+                    .collect::<Vec<_>>(),
+                wire
+            );
+            report = serde_json::from_slice(&serde_json::to_vec(&report).unwrap()).unwrap();
+        }
+        while report.pending().is_some() {
+            report = install_attempt(&fixture, &report);
+        }
+        assert!(report.is_discharged());
+        assert_eq!(fixture.producer.records.lock().unwrap().len(), wire.len());
+        let requests = fixture.producer.requests();
+        let first_attempts = if policy_read { 1 } else { REPAIR_ATTEMPTS + 1 };
+        assert!(
+            requests[..first_attempts]
+                .iter()
+                .all(|request| request == &wire[0])
+        );
+        assert_eq!(&requests[first_attempts..], &wire[1..]);
+        let adapter = fixture
+            .turn
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_host_adapter
+            .clone();
+        assert_eq!(
+            deliver_runtime_observation_attempt(&adapter, &report, 0, Duration::from_secs(1))
+                .unwrap()
+                .0,
+            report
+        );
+        assert_eq!(
+            fixture.producer.requests(),
+            requests,
+            "a recorded envelope is not sent again"
+        );
+    }
+}
+
+#[test]
+fn permanent_observation_refusal_still_settles_once_with_readable_notice() {
+    let mut fixture = ReportingTurn::new("permanent-store-refusal", true, ReplyMode::Refuse, false);
+    let job = close_without_worker(&mut fixture);
+    let mut report = ready_report(&fixture, job);
+    let count = report.envelopes.len();
+    while report.pending().is_some() {
+        report = install_attempt(&fixture, &report);
+    }
+    assert!(report.is_discharged());
+    assert_eq!(fixture.producer.requests().len(), count);
+    assert!(
+        fixture
+            .turn
+            .record(system_notices)
+            .iter()
+            .any(|line| line.contains("Engram refused")
+                && line.contains("execution_observation_policy_basis_mismatch"))
+    );
+}
+
+#[test]
+fn unknown_capture_failure_still_exhausts_with_named_recovery_guidance() {
+    let mut fixture = ReportingTurn::new("unknown-store-failure", true, ReplyMode::Recorded, false);
+    let mut job = close_without_worker(&mut fixture);
+    job.attempts = ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS - 1;
+    fixture
+        .turn
+        .record_mut(|record| record.engram.unadmitted_closing_jobs[0] = job.clone());
+    fixture
+        .turn
+        .state
+        .install_runtime_closing_result(
+            &fixture.turn.session_id,
+            &job,
+            Err(EngramTransportError::transport(
+                "private unknown producer failure",
+            )),
+        )
+        .unwrap();
+    fixture.turn.record(|record| {
+        let failed = &record.engram.unadmitted_closing_jobs[0];
+        assert!(failed.terminal_failure.is_some());
+        assert_eq!(failed.trace, job.trace);
+        assert_eq!(failed.scope, job.scope);
+    });
+    let notices = fixture.turn.record(system_notices).join("\n");
+    assert!(notices.contains("runtime_observation_retry_exhausted"));
+    assert!(notices.contains("reconcile the original observation"));
+    assert!(!notices.contains("private unknown producer failure"));
+    assert!(fixture.producer.requests().is_empty());
+}
+
+#[test]
+fn typed_store_refusals_survive_cli_and_readiness_decoding_without_parsing_prose() {
+    for code in [
+        "projection_repair_required",
+        "work_projection_invalid",
+        "store_open_refused",
+    ] {
+        let value = json!({"schema_version":1,"scope":"readiness","ready":false,
+            "mutation_enabled":false,"full_audit":"not_run","code":code,"kind":"io"});
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let (admitted, refusal_kind) = engram_readiness_transient_store_code(&bytes).unwrap();
+        let error = engram_observation_readiness_error(
+            ApiError::bad_request("store unavailable").with_kind(
+                ApiErrorKind::EngramStoreTemporarilyUnavailable {
+                    code: admitted,
+                    refusal_kind,
+                },
+            ),
+        );
+        assert!(engram_store_transient(&error));
+        for kind in ["permission", "path_policy"] {
+            let mut permanent = value.clone();
+            permanent["code"] = json!("store_open_refused");
+            permanent["kind"] = json!(kind);
+            assert!(
+                engram_readiness_transient_store_code(&serde_json::to_vec(&permanent).unwrap())
+                    .is_none()
+            );
+        }
+        let cli = |exit| EngramCliOutput {
+            success: false,
+            exit,
+            status: "fixture refusal".into(),
+            stdout: serde_json::to_vec(&json!({"error":{"code":code,"message":"repair pending"}}))
+                .unwrap(),
+            stderr: Vec::new(),
+        };
+        assert!(!engram_store_transient(
+            &decode_engram_cli_json(cli(EngramCliExit::Code(1)), "fixture held claims")
+                .unwrap_err()
+        ));
+        let mut stderr = cli(EngramCliExit::Code(1));
+        stderr.stderr = std::mem::take(&mut stderr.stdout);
+        assert_eq!(
+            engram_store_transient(
+                &decode_engram_cli_json(stderr.clone(), "fixture held claims").unwrap_err()
+            ),
+            code != "store_open_refused"
+        );
+        // The shared decoder's Code(101) contract still needs one whole JSON
+        // refusal, not panic prose, and makes no claim about write application.
+        let mut code_101 = stderr.clone();
+        code_101.exit = EngramCliExit::Code(101);
+        assert_eq!(
+            engram_store_transient(
+                &decode_engram_cli_json(code_101.clone(), "fixture held claims").unwrap_err()
+            ),
+            code != "store_open_refused"
+        );
+        code_101.stderr = [
+            b"thread 'fixture' panicked at a fixture:\n".as_slice(),
+            code_101.stderr.as_slice(),
+        ]
+        .concat();
+        assert!(!engram_store_transient(
+            &decode_engram_cli_json(code_101, "fixture held claims").unwrap_err()
+        ));
+        stderr.exit = EngramCliExit::Abnormal;
+        assert!(!engram_store_transient(
+            &decode_engram_cli_json(stderr, "fixture held claims").unwrap_err()
+        ));
+        let mut ready = value;
+        ready["ready"] = json!(true);
+        assert!(
+            engram_readiness_transient_store_code(&serde_json::to_vec(&ready).unwrap()).is_none()
+        );
+    }
+    assert!(engram_readiness_transient_store_code(b"projection_repair_required").is_none());
+    assert!(
+        engram_readiness_transient_store_code(&vec![b' '; ENGRAM_DIAGNOSTIC_REPORT_LIMIT + 1])
+            .is_none()
+    );
+    assert!(!engram_store_transient(&EngramTransportError::transport(
+        "projection_repair_required"
+    )));
+    for kind in [
+        None,
+        Some("permission"),
+        Some("path_policy"),
+        Some("busy"),
+        Some("io"),
+    ] {
+        let mut error = EngramTransportError::remote(EngramControlErrorBody {
+            code: "store_open_refused".into(),
+            message: "busy io projection_repair_required".into(),
+        });
+        error.refusal_kind = kind.map(str::to_owned);
+        assert_eq!(
+            engram_store_transient(&error),
+            matches!(kind, Some("busy" | "io"))
+        );
+        error.code = Some("permanent_failure".into());
+        assert!(!engram_store_transient(&error));
+    }
+}
+
+#[test]
+fn observation_policy_reader_preserves_a_real_readiness_process_repair_refusal() {
+    for (mode, transient) in [
+        ("fixture-readiness-repair", true),
+        ("fixture-readiness-store-io", true),
+        ("fixture-readiness-store-permission", false),
+    ] {
+        let state = test_app_state();
+        let root = state
+            .test_temp_root
+            .as_ref()
+            .unwrap()
+            .path()
+            .join("repair-policy");
+        fs::create_dir_all(&root).unwrap();
+        let marker = root.join(".engram-project");
+        fs::write(&marker, format!("{mode}\n")).unwrap();
+        let connection = EngramConnectionConfig {
+            binary_path: real_engram_control_fixture_path(),
+            project_file: marker,
+            home: root.clone(),
+            project_root: root.clone(),
+            actor_id: "fixture".into(),
+            actor_context: None,
+            session_id: "repair-policy-reader".into(),
+        };
+        let store = EngramAuthorityStoreKey {
+            database_path: root.join("unused.db"),
+            project_id: "fixture".into(),
+        };
+        let error =
+            read_engram_observation_policy(&connection, &store, ENGRAM_MIN_CALL_TIMEOUT, &root)
+                .unwrap_err();
+        assert_eq!(engram_store_transient(&error), transient, "{mode}");
+        if mode == "fixture-readiness-repair" {
+            assert_eq!(
+                error.refusal_code.as_deref(),
+                Some("projection_repair_required")
+            );
+        } else if transient {
+            assert_eq!(error.refusal_code.as_deref(), Some("store_open_refused"));
+            assert_eq!(error.refusal_kind.as_deref(), Some("io"));
+        }
+        assert_eq!(
+            fs::read_to_string(root.join("diagnostic-commands")).unwrap(),
+            "readiness\n"
+        );
+    }
+}

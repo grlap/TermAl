@@ -138,6 +138,9 @@ if [ "$is_doctor" -eq 1 ] || [ "$is_readiness" -eq 1 ]; then
       fixture-readiness-malformed) printf '{}\n'; exit 0 ;;
       fixture-report-temp) printf 'TEMP=%s\nTMP=%s\n' "${TEMP:-}" "${TMP:-}"; exit 0 ;;
       fixture-readiness-refusal) printf '{"ready":true}\n'; exit 1 ;;
+      fixture-readiness-repair) printf '{"schema_version":1,"scope":"readiness","ready":false,"mutation_enabled":false,"full_audit":"not_run","code":"projection_repair_required"}\n'; exit 1 ;;
+      fixture-readiness-store-io) printf '{"schema_version":1,"scope":"readiness","ready":false,"mutation_enabled":false,"full_audit":"not_run","code":"store_open_refused","kind":"io"}\n'; exit 1 ;;
+      fixture-readiness-store-permission) printf '{"schema_version":1,"scope":"readiness","ready":false,"mutation_enabled":false,"full_audit":"not_run","code":"store_open_refused","kind":"permission"}\n'; exit 1 ;;
     esac
   fi
   if command -v sha256sum >/dev/null 2>&1; then

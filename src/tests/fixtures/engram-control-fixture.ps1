@@ -152,6 +152,9 @@ if (($args -contains "doctor") -or ($args -contains "readiness")) {
     if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-old') { [Console]::Error.WriteLine('unknown subcommand readiness'); exit 2 }
     if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-malformed') { [Console]::Out.WriteLine('{}'); exit 0 }
     if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-refusal') { [Console]::Out.WriteLine('{"ready":true}'); exit 1 }
+    if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-repair') { [Console]::Out.WriteLine('{"schema_version":1,"scope":"readiness","ready":false,"mutation_enabled":false,"full_audit":"not_run","code":"projection_repair_required"}'); exit 1 }
+    if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-store-io') { [Console]::Out.WriteLine('{"schema_version":1,"scope":"readiness","ready":false,"mutation_enabled":false,"full_audit":"not_run","code":"store_open_refused","kind":"io"}'); exit 1 }
+    if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-store-permission') { [Console]::Out.WriteLine('{"schema_version":1,"scope":"readiness","ready":false,"mutation_enabled":false,"full_audit":"not_run","code":"store_open_refused","kind":"permission"}'); exit 1 }
     # Reports the temporary directory this child was given, which is where
     # PowerShell writes its startup policy probe.
     if (($args -contains 'readiness') -and $mode -eq 'fixture-report-temp') { [Console]::Out.WriteLine("TEMP=$env:TEMP"); [Console]::Out.WriteLine("TMP=$env:TMP"); exit 0 }

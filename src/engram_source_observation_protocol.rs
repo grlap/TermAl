@@ -67,7 +67,7 @@ fn read_engram_observation_policy(
         &connection.project_root,
         timeout,
         host_workdir,
-    ).map_err(|error| EngramTransportError::transport(error.message))?;
+    ).map_err(engram_observation_readiness_error)?;
     let store = validate_engram_readiness(
         &receipt, &connection.project_file, &connection.home,
     ).map_err(|error| EngramTransportError::protocol(error.message))?;
@@ -79,6 +79,18 @@ fn read_engram_observation_policy(
     receipt.observation_policy.as_ref().ok_or_else(|| {
         EngramTransportError::protocol("Engram readiness supplied no observation policy tuple")
     })?.observation_policy()
+}
+
+fn engram_observation_readiness_error(error: ApiError) -> EngramTransportError {
+    match error.kind {
+        Some(ApiErrorKind::EngramStoreTemporarilyUnavailable { code, refusal_kind }) => {
+            let mut error = EngramTransportError::transport(error.message);
+            error.refusal_code = Some(code.to_owned());
+            error.refusal_kind = refusal_kind.map(str::to_owned);
+            error
+        },
+        _ => EngramTransportError::transport(error.message),
+    }
 }
 
 // This boundary uses only the producer's explicitly admitted root states;

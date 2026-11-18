@@ -8,8 +8,8 @@ enum EngramRuntimeObservationWork {
     Deliver(EngramRuntimeObservationReport),
 }
 
-// An unavailable producer never blocks later historical reports forever.
-// Exhaustion retains the immutable wire as a visible local failure.
+// Unknown failures retain the bounded diagnostic path. A typed temporary
+// store refusal instead keeps its original custody until the store is ready.
 const ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS: u32 = 8;
 
 // Bounded observation delivery backoff, independent of any turn or queue.
@@ -32,12 +32,15 @@ fn finish_runtime_observation_delivery_attempt(
     report: &mut EngramRuntimeObservationReport,
     session_id: &str,
     envelope_index: usize,
+    store_unavailable: bool,
 ) {
     if let EngramRuntimeObservationDelivery::Pending { last_error } =
         &report.envelopes[envelope_index].delivery
     {
-        report.attempts = report.attempts.saturating_add(1);
-        if report.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS {
+        if !store_unavailable {
+            report.attempts = report.attempts.saturating_add(1);
+        }
+        if !store_unavailable && report.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS {
             let message = last_error.clone()
                 .unwrap_or_else(|| "delivery remained uncertain".to_owned());
             report.envelopes[envelope_index].delivery = EngramRuntimeObservationDelivery::LocalFailure {
@@ -47,7 +50,9 @@ fn finish_runtime_observation_delivery_attempt(
             report.attempts = 0;
         }
         report.retry_at = (chrono::Utc::now()
-            + runtime_observation_retry_delay(session_id, report.attempts))
+            + runtime_observation_retry_delay(session_id, if store_unavailable {
+                ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS
+            } else { report.attempts }))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     } else {
         report.attempts = 0;
@@ -340,14 +345,14 @@ impl AppState {
             };
             let timeout = Duration::from_millis(report.call_timeout_ms);
             let next =
-                deliver_runtime_observation_envelope(&adapter, &report, envelope_index, timeout);
+                deliver_runtime_observation_attempt(&adapter, &report, envelope_index, timeout);
             // A reply arriving after this process was shut down cannot
             // overwrite a restarted host's pending image. That host replays
             // the retained request and validates its own immutable receipt.
             if *shutdown.borrow() {
                 break;
             }
-            let mut next = match next {
+            let (mut next, store_unavailable) = match next {
                 Ok(next) => next,
                 Err(error) => {
                     let mut failed = report.next_version();
@@ -356,10 +361,12 @@ impl AppState {
                             code: "runtime_observation_invalid_retained_image".to_owned(),
                             message: error.message,
                         };
-                    failed
+                    (failed, false)
                 }
             };
-            finish_runtime_observation_delivery_attempt(&mut next, session_id, envelope_index);
+            finish_runtime_observation_delivery_attempt(
+                &mut next, session_id, envelope_index, store_unavailable,
+            );
             if let Err(error) =
                 self.install_runtime_observation_result(session_id, &report, next, envelope_index)
             {
@@ -544,20 +551,26 @@ impl AppState {
             Ok(EngramRuntimeClosingOutcome::ReportWithFocus { .. }) => unreachable!(),
             Err(error) => {
                 let failed = expected.failed(session_id, &error);
-                if matches!(error.code.as_deref(), Some(
-                    "runtime_observation_scope_changed" | "runtime_observation_source_refused"))
-                    || failed.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS
-                {
-                    let code = runtime_observation_notice_code(error.code.as_deref().unwrap_or(""));
+                let definitive = matches!(error.code.as_deref(), Some(
+                    "runtime_observation_scope_changed" | "runtime_observation_source_refused"));
+                let exhausted = !definitive && !engram_store_transient(&error)
+                    && failed.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS;
+                if definitive || exhausted {
+                    let code = if exhausted { "runtime_observation_retry_exhausted" }
+                        else { runtime_observation_notice_code(error.code.as_deref().unwrap_or("")) };
                     let reason = match code {
                         "runtime_observation_scope_changed" => "source scope changed",
                         "runtime_observation_source_refused" => "source capture was refused",
                         _ => "report preparation failed",
                     };
-                    diagnostic = Some(format!(
+                    let mut notice = format!(
                         "Runtime-started turn {} not reported to Engram ({code}): {reason}. Its checks remain uncredited.",
                         expected.trace.host_turn_ref
-                    ));
+                    );
+                    if exhausted {
+                        notice.push_str(" Report preparation reached its retry limit. The original closing facts and error remain retained locally. Correct the producer/store problem and reconcile the original observation before retrying.");
+                    }
+                    diagnostic = Some(notice);
                     let mut failed = failed;
                     failed.terminal_failure = Some(error.message);
                     state.unadmitted_closing_jobs[position] = failed;
