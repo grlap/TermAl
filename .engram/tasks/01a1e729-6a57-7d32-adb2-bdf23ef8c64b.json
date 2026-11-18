@@ -1,0 +1,29 @@
+{
+  "id": "01a1e729-6a57-7d32-adb2-bdf23ef8c64b",
+  "external_ref": null,
+  "title": "Replace terminal timeout process-tree test’s sleep-and-marker race with owned readiness",
+  "outcome": "Replace terminal timeout process-tree test’s sleep-and-marker race with owned readiness",
+  "acceptance": [
+    "run_terminal_shell_command_timeout_kills_process_tree proves descendant readiness and exact process ownership before observing timeout cleanup, with a phase-controlled lifetime rather than relying on 500 ms startup and a 1.5 s delayed marker.",
+    "Keep the timeout result and descendant-termination property without retry, increased production timeouts or a marker window that can falsely pass before a delayed child writes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "process-containment",
+    "tests",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

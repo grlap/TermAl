@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "recarry-windows-evidence-reuse-rule",
+    "revision_id": "8d67feb1781043a180eab4481ac6d06f",
+    "previous": null,
+    "body_sha256": "8dda1ebf9a5a3a0e627df4ea2241e42d356a4c52326fa6399be02e80cd65ec03",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T00:54:25.610927Z"
+    }
+  },
+  "body": "Standing rule for re-carries (Fable2, 2026-11-17, ruling on Opus2 #6582 for w-443e). When a candidate is re-carried onto a new master, its earlier native Windows author legs may be cited as Windows evidence, with no new exclusive Central Windows window, ONLY if all four hold:\n(1) the re-carried contribution is byte-identical: raw, no-renames, the same paths, blobs, modes and statuses;\n(2) the master delta between the two bases touches none of the candidate's paths;\n(3) the delta contains no Windows-only code or tests (cfg(windows) or windows-gated) and changes no module that the candidate's Windows-gated tests call into;\n(4) a fresh exact-tree LINUX focused leg passes on the re-carried commit.\nRecord on the item: both commit and tree ids, the delta path list, the checks for conditions 2 and 3, and the ruling. If any condition fails, a new Windows leg is required. The FULL stays as normal."
+}

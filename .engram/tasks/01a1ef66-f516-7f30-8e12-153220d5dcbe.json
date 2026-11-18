@@ -1,0 +1,27 @@
+{
+  "id": "01a1ef66-f516-7f30-8e12-153220d5dcbe",
+  "external_ref": null,
+  "title": "Launcher summary decides committed input from request.json alone, unlike the worker startup path",
+  "outcome": "A committed-input run whose registration was refused or left pending keeps its 'no tests ran' line and correction in `summary` even when its request.json can no longer be read after the run ended.",
+  "acceptance": [
+    "Launcher summary decides committed input from request.json alone, unlike the worker startup path is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "check-credit",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

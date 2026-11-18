@@ -1,0 +1,38 @@
+{
+  "id": "01a1e38a-a8d4-7ee0-ae5b-38c6e811056b",
+  "external_ref": null,
+  "title": "Make forged completion-ready hint controls discriminate original identity refusals",
+  "outcome": "Each forged requester or runner identity is refused for its identity mismatch in a behavioral test, even when duplicate scheduling would otherwise mask removal of that guard.",
+  "acceptance": [
+    "Fault cases exercise an unscheduled original or assert their specific identity-refusal outcome so removing the requester descriptor or runner-match guard makes the corresponding test fail; a genuine positive control still schedules the exact original, with no fabricated completion or credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "eo-critical",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "review-followup",
+    "test-runs",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0ef-212e-70d0-aa69-97bc1f59bf56",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

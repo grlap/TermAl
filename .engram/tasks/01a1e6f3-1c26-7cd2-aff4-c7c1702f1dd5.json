@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6f3-1c26-7cd2-aff4-c7c1702f1dd5",
+  "external_ref": null,
+  "title": "Arm the Windows inherited-lock deadline only at its controlled contention phase",
+  "outcome": "The inherited-lock budget regression verifies an expired read budget after controlled lock contention without requiring its child worker to pass pre-launch admission within two physical seconds.",
+  "acceptance": [
+    "native_windows_bounded_read_reports_inheritance_lock_budget and its isolated native_windows_lock_budget_child retain exact wait/TimedOut, measured lock-wait lower bound, child reap and process-isolation assertions, using controlled deadline admission/expiry phases.",
+    "A scheduler pause before the pre-lock hook cannot cause a spawn-stage failure or missing readiness signal; production budgets and lock ownership remain unchanged without retry or ignore."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-defect",
+    "wall-clock-audit",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

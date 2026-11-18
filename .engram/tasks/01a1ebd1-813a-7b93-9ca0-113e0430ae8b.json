@@ -1,0 +1,28 @@
+{
+  "id": "01a1ebd1-813a-7b93-9ca0-113e0430ae8b",
+  "external_ref": null,
+  "title": "Clarify Cursor Plan permission cancellation in the integration guide",
+  "outcome": "The Cursor integration guide describes a cancelled permission request for a stale or stopped Plan runtime and leaves the reader's runtime lifecycle behavior distinct.",
+  "acceptance": [
+    "The guide describes the cancelled outcome as the permission response, with no new constraint notice for stale or Stop-owned requests, and keeps the existing failed-handoff explanation accurate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "cursor",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

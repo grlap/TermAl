@@ -1,0 +1,29 @@
+{
+  "id": "01a1ead4-a81d-7260-91a1-327a2ee0b656",
+  "external_ref": null,
+  "title": "Align shared cleanup evidence retention with open-task retention and Codex execution",
+  "outcome": "The shared cleanup rule unambiguously retains evidence needed by every open task and routes directory removal through Codex.",
+  "acceptance": [
+    "The shared .logs/.evidence wording agrees with the existing retain-until-every-served-task-closes rule and distinguishes that need from an explicitly recorded extension, without treating still-needed open-task evidence as removable.",
+    "Accountability of the last closer or sweep is distinct from Codex directory-removal execution, and exact shared wording follows existing concurrence/notification/audit and review/gate rules without new Markdown phrase tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

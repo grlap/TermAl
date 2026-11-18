@@ -1,0 +1,37 @@
+{
+  "id": "01a1e633-772d-72a0-a43b-707ad5e437d5",
+  "external_ref": null,
+  "title": "federation_m4_round_two_satellite_recovery_reaches_work_after_settled_history depends on the recovery pass's 2 s wall-clock deadline",
+  "outcome": "The satellite recovery regression proves that one recovery pass reaches a new operation behind settled history, without depending on how much wall-clock time 151 rows of work take on a loaded host.",
+  "acceptance": [
+    "The failure in test-7e401f66 is classified as a source-confirmed wall-clock test-design defect. Expiry of the original recovery pass's two-second budget is identified as an inference from source and load, not a directly measured fact; the original artifacts and their absence of per-pass telemetry are preserved and cited.",
+    "The regression passes deterministically under concurrent full-gate load and still fails if recovery stops after one settled page; no timeout is enlarged and no retry is added.",
+    "No new diagnostics or logging; the change is limited to test code or a test-only seam unless the evidence shows a product defect."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "gate",
+    "test-defect"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed deterministic satellite recovery regressions in 0def9212: preserve the 150-history single-pass traversal assertion with controlled time, and prove budget expiry retains a cursor that the next pass resumes. Production Real clock and 2 s budget unchanged. Two-vendor review has no Medium+; Low coverage follow-up filed separately. Both focused module runs119/0 and exact-tree authorized FULL passed; independent post-landing evaluation69e6398b8da145f4b87e043859810a86 passes all3criteria. Original expiry remains explicitly inferred, not measured. No native verification credit fabricated from remote standalone evidence.",
+    "completed_at": "2026-11-17T00:04:47.832205800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

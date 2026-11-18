@@ -1,0 +1,29 @@
+{
+  "id": "01a1ea31-9c2c-7410-a013-a038e4047877",
+  "external_ref": null,
+  "title": "Acceptance evaluation of an item with a long note history spends its whole evidence-read allowance on recovery and returns no verdict",
+  "outcome": "An independent acceptance evaluation of an item with a long note and gate history reaches the source and returns a verdict, because evidence recovery is bounded relative to the item's criteria (or the host supplies a criterion-indexed evidence set), instead of exhausting the read allowance before any source or command is inspected.",
+  "acceptance": [
+    "The cause is established from source: how the evaluator's evidence-read allowance and the host's entry_limit paging interact for an item with hundreds of notes and gates, and why recovery consumes the allowance before source inspection and judgment can complete.",
+    "A behavioural test with an item carrying a long history (at least 200 notes and gates) shows that the evaluator reaches source inspection and submits a verdict within its allowance, and that evidence named via criterionEvidence or recorded criterion links is read first.",
+    "The review pair is clean and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

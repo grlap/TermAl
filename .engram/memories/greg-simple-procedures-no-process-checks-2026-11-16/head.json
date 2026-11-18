@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-simple-procedures-no-process-checks-2026-11-16",
+  "head": {
+    "state": "active",
+    "chain": [
+      "044f6fd7117e4993b57b30ee9356c017",
+      "bac1f776b0f34fcca6a1fcd3ce4c9641"
+    ]
+  }
+}

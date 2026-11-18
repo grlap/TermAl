@@ -1,0 +1,29 @@
+{
+  "id": "01a1e1aa-83c3-7162-86a4-009ddd834696",
+  "external_ref": null,
+  "title": "Avoid artifact-refusal writes on associated or concurrently changed observations",
+  "outcome": "Only an exact still-unassociated observation snapshot can receive an artifact refusal; stale frames cannot reintroduce cleared diagnostics or disturb custody snapshots.",
+  "acceptance": [
+    "Already associated and concurrently changed observations remain unchanged after stale artifact frames; original proof and whole-row authority fields remain intact.",
+    "A behavioral control proves the exact unassociated owner still receives a bounded diagnostic and genuine association clears it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "native-completion",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

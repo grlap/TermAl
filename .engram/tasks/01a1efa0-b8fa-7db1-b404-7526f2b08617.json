@@ -1,0 +1,27 @@
+{
+  "id": "01a1efa0-b8fa-7db1-b404-7526f2b08617",
+  "external_ref": null,
+  "title": "Contain the shared Codex app-server in a kill-on-close job so it cannot outlive a host restart",
+  "outcome": "The shared Codex app-server ends whenever the TermAl host process ends, on every platform, as dedicated runtimes already do; a host restart then provably ends any turn it was running, and the delegation worktree sweep's boot rule that retains Codex children's worktrees can be relaxed.",
+  "acceptance": [
+    "Contain the shared Codex app-server in a kill-on-close job so it cannot outlive a host restart is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "runtime"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

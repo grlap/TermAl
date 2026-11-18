@@ -3,9 +3,13 @@
   "project_id": "github.com/grlap/TermAl",
   "key": "greg-next-p0-criteria-evaluation-2026-11-02",
   "head": {
-    "state": "active",
-    "chain": [
-      "783eea09347742ddba8317681fe5e457"
-    ]
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-16T06:38:14.362345200Z"
+    }
   }
 }

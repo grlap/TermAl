@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-benchmark-tests-in-suite-2026-11-18",
+    "revision_id": "ed0095dd348043a19a1ffcf46a9041bc",
+    "previous": null,
+    "body_sha256": "447dd2c4d80adc56e3498469f5ecc6918c8a39e5645235b2904a61a9e7773086",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1ef7e-62ce-7470-b658-a04c88d77f6c",
+      "work_ref": "w-a04c88d77f6c"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T16:30:24.556374600Z"
+    }
+  },
+  "body": "Greg, 2026-11-18 16:29Z, relayed by Engram::Asistant (TermAl mailbox 588693a8 #2049), verbatim: „prosze nie robic testow ktore dzialaja jak benchmarki w pakiecie testow + KIMI. ja rozumiem, ze zespol dodaje zabezpiecznenia, ale to chyba nie jest rozwiazanie dlugotermino, sugeruje przeniesc do Benchmark i trzymac wyniki. niech Kimi powie co sadzi. jestesmy blisko Sync, wiec skonczmy jak jest, po tym zaczniemy usprawniac”.\nWorking rule (Fable2 to Opus2, #6809), effective now for new work and review briefs:\n- no NEW test whose pass or fail rests on wall-clock duration, throughput or a timing deadline;\n- performance fixes prove themselves with deterministic counts (operations, lock-held work, records touched);\n- bounded waits for an event are fine.\nExisting tests stay unchanged until after sync. The migration to a separate benchmark run with durable results is TermAl item w-a04c88d77f6c (after-sync, P2). Kimi::Consultant was asked for its view, sent to Fable2 and Asistant."
+}

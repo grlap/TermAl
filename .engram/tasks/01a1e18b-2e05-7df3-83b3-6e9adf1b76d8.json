@@ -1,0 +1,26 @@
+{
+  "id": "01a1e18b-2e05-7df3-83b3-6e9adf1b76d8",
+  "external_ref": null,
+  "title": "Test-run docs and TestRunDisk::read comment still say a failed results read is never cached",
+  "outcome": "docs/features/test-runs.md (the Refresh section, about lines 590-600) and the TestRunDisk::read doc comment (src/test_runs_disk.rs, about lines 556-568) say that results read whole but unparseable, with no earlier good read (TestRunJson::Malformed), are kept until the request or results stamp changes, while I/O failures, Missing and request failures are still read again on every rescan.",
+  "acceptance": [
+    "Both texts describe the Malformed reuse and the unchanged re-read of I/O failures, Missing results and request failures, with no contradiction left between them and the code."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

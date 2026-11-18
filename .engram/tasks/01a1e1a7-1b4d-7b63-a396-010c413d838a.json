@@ -1,0 +1,29 @@
+{
+  "id": "01a1e1a7-1b4d-7b63-a396-010c413d838a",
+  "external_ref": null,
+  "title": "Bound extreme causal pending retry orders so one damaged row cannot exhaust store-wide scheduling",
+  "outcome": "An extreme numeric retry order cannot stop new original requests or healthy pending recovery, and damaged metadata retains its original bytes.",
+  "acceptance": [
+    "A disposable open-store regression with an extreme integer or real retry order demonstrates that new request creation and healthy pending settlement continue without rewriting original custody or malformed metadata.",
+    "Strict boot validation and bounded private diagnostics remain consistent with the supported retry-order domain."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-completion",
+    "corruption-isolation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

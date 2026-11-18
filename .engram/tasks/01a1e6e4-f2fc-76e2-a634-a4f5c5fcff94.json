@@ -1,0 +1,28 @@
+{
+  "id": "01a1e6e4-f2fc-76e2-a634-a4f5c5fcff94",
+  "external_ref": null,
+  "title": "Control the grace clock in named-root late-event completion test",
+  "outcome": "named_root_late_event_survives_actual_observation_close verifies late-event attribution after actual close without racing 750 ms of host time.",
+  "acceptance": [
+    "The test drives actual observation close and late event acceptance with a controlled grace clock or equivalent deterministic admission boundary, retaining the exact owner/path and one-summary assertions.",
+    "The 750 ms production grace and event attribution semantics remain unchanged; no timeout inflation, retry or ignore is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

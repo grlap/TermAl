@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-timing-tests-review-brief-2026-11-18",
+    "revision_id": "c3a654c773ca4ce1ba3dde4b9ee22a3b",
+    "previous": null,
+    "body_sha256": "1871d291f8b5c5f4ec9fc884b560b4de6ac4378cdfa9fc300e5a2a9a8e0dc899",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T16:30:20.916812700Z"
+    }
+  },
+  "body": "Greg's word (relayed by Fable2 #6809, source 588693a8 #2049, 2026-11-18): no tests that act like benchmarks in the test suite. They move to a Benchmark run that keeps its results; finish the sync first, improve after.\nWorking rule from now, for new work and reviews:\n(1) no NEW test whose pass or fail rests on wall-clock duration, throughput or a timing deadline;\n(2) performance fixes prove themselves with deterministic counts (operations, lock-held work, rows touched), not elapsed time.\nBounded waits for an event are fine. The existing suite stays as it is until after sync; the move is filed as w-a04c88d77f6c.\nOpus2 (integration owner) adds rules (1) and (2) to every review-pair GO brief. Example: w-ee1cc0cf84bf's bounded-work regression must count records touched, not time."
+}

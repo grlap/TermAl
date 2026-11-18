@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6ff-7955-7a01-a7a3-3229644800b1",
+  "external_ref": null,
+  "title": "Control the landing-lease clock around same-burst and opposite-wheel assertions",
+  "outcome": "The virtualizer landing-lease regression verifies same-burst preservation and opposite-input replacement without observing physical lease lifetime across React act work.",
+  "acceptance": [
+    "VirtualizedConversationMessageList.test.tsx 'keeps a landing lease through a same-burst no-op and lets opposite input supersede it' retains exact touch/down then wheel/up assertions with controlled performance time.",
+    "Production input lease/cooldown values and owner precedence remain unchanged, without retries, ignores or inflated deadlines."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "ui",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

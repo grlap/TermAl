@@ -1,0 +1,27 @@
+{
+  "id": "01a1e9dc-eee9-7323-8c2c-8ef7d7b49bd4",
+  "external_ref": null,
+  "title": "Worker handoff names .worktrees/ even when the delegation used an explicit worktreePath",
+  "outcome": "The worker handoff's retention line points at the worktree path the delegation actually used, so a worker spawned with an explicit Git-ignored worktreePath outside `.worktrees/` is told the right place to clean up.",
+  "acceptance": [
+    "Worker handoff names .worktrees/ even when the delegation used an explicit worktreePath is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

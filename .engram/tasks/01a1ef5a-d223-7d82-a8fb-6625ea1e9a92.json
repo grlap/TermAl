@@ -1,0 +1,26 @@
+{
+  "id": "01a1ef5a-d223-7d82-a8fb-6625ea1e9a92",
+  "external_ref": null,
+  "title": "Restore validate_engram_source_root's doc comment, displaced onto engram_source_root_requested_path",
+  "outcome": "validate_engram_source_root carries its own doc comment, and engram_source_root_requested_path's doc describes only what that helper does.",
+  "acceptance": [
+    "Restore validate_engram_source_root's doc comment, displaced onto engram_source_root_requested_path is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

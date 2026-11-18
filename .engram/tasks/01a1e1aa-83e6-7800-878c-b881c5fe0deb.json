@@ -1,0 +1,29 @@
+{
+  "id": "01a1e1aa-83e6-7800-878c-b881c5fe0deb",
+  "external_ref": null,
+  "title": "Remove unreachable native-refusal vocabulary and make remedy mapping exhaustive",
+  "outcome": "Every supported refusal fact/code has a producer and future codes require explicit remedy decisions.",
+  "acceptance": [
+    "Unreachable ArtifactLocatorMissing and LocatorPresent are removed or have a justified actual behavior producer.",
+    "The remedy mapping explicitly handles all supported codes without a wildcard fallback for future codes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "native-completion",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

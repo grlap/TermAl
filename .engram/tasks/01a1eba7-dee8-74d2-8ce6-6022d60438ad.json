@@ -1,0 +1,30 @@
+{
+  "id": "01a1eba7-dee8-74d2-8ce6-6022d60438ad",
+  "external_ref": null,
+  "title": "Scope Codex saved approval defaults to ordinary session creation",
+  "outcome": "The shared app-server feature doc sets correct expectations for ordinary, delegated, template-created and discovered sessions.",
+  "acceptance": [
+    "The feature doc limits the saved-default statement to the creation paths that use it and accounts for the overrides in create requests, delegation, orchestrator templates and startup discovery.",
+    "The change describes existing behavior without changing approval policy, and uses the applicable authority-text review procedure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "approvals",
+    "cleanup-docs",
+    "codex-runtime",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0ff58-5ae5-7970-bcaa-e2a5af1634f0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

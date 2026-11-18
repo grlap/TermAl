@@ -1,0 +1,35 @@
+{
+  "id": "01a1e736-5b7b-7f33-8db4-fc23975f1755",
+  "external_ref": null,
+  "title": "Clarify the standalone Codex REPL AutoApprove sandbox contract",
+  "outcome": "Users can distinguish the standalone REPL's existing AutoApprove behavior from the shared app-server sandbox-cap contract; runtime parity remains an explicit owner decision.",
+  "acceptance": [
+    "Document whether the standalone REPL uses the shared sandbox-cap responder or retains its older native on-request and unconditional command/file/permissions auto-accept behavior, without implying unimplemented parity.",
+    "If runtime parity is chosen, obtain the policy owner's scope decision and cover explicit network/write, FullAccess, humanCommand and genuine-input behavior through the REPL's actual response path; a documentation-only choice changes no runtime policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "codex",
+    "greg-reported",
+    "kimi",
+    "repl",
+    "review-follow-up",
+    "sandbox",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e2bc-8881-7a30-a376-443e364ea498",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

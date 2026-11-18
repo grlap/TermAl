@@ -1,0 +1,28 @@
+{
+  "id": "01a1ee63-e91a-78f3-a495-bc9d6b6ffd1b",
+  "external_ref": null,
+  "title": "Confirm fresh Engram focus at an ordinary opening and fence closing publication",
+  "outcome": "An ordinary host-delivered turn can follow a provable out-of-band focus change without explicit re-naming while honoring the opening's exact binding and provenance.",
+  "acceptance": [
+    "Reproduce the master stale cached binding with settled predecessor and a real mailbox delivery after an out-of-band focus change.",
+    "Discriminate a focus revert between closing publication and the next opening, and fence delayed closing publication to its exact turn."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "diagnosed-from-2c14",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

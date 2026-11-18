@@ -1,0 +1,31 @@
+{
+  "id": "01a1eb7b-2d83-7f13-a2fa-5f76d42aafd3",
+  "external_ref": null,
+  "title": "Codex CLI upgrade and switch to Sol 6.2 on Central, DL560 and Mac (Greg): plan, compatibility probe, rollback, one restart window",
+  "outcome": "TermAl's Codex sessions on Central, DL560 and Mac run the current Codex CLI and use Sol 6.2 by its exact model id. The switch has a tested rollback and happens in one agreed restart window, without stopping work early.",
+  "acceptance": [
+    "Facts recorded per host (Central, DL560, Mac), read-only: the `codex` TermAl resolves on PATH, its version, the latest published version, and the exact Sol 6.2 model id as reported by `model/list` of the new CLI.",
+    "A compatibility probe in a repo-local install (.tmp, no global install) shows that TermAl's app-server contract still works with the new CLI: thread start, turn, approvals and model/list, or names any break.",
+    "One plan, sent to Greg in Polish, gives: the upgrade and model-switch steps per host, the rollback (pin back to the old version), the one restart window, and exactly which steps need Greg's action and which agents can do."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "cross-host",
+    "greg-directed",
+    "restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

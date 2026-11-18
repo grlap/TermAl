@@ -1,0 +1,32 @@
+{
+  "id": "01a1eaa9-8dee-7f32-a304-eb11216024b5",
+  "external_ref": null,
+  "title": "Clean obsolete repository .tmp entries after checking ownership, retention and remote reachability",
+  "outcome": "Obsolete entries under C:/github/Personal/TermAl/.tmp are removed only under Fable2's exact safety conditions; active, recent, dirty, unpushed and uncertain entries remain, with an auditable inventory and before/after report.",
+  "acceptance": [
+    "For each top-level entry under C:/github/Personal/TermAl/.tmp, the inventory records its checked absolute path and reparse status, Git worktree registration with HEAD and branch, clean status, reachability from origin/master or an existing remote ref, evident owning item or session, mtime and size; inventory is kept under .logs/03d4-tmp-cleanup/.",
+    "Only entries that satisfy all Fable2 conditions are removed: not named or used by a live session's open claim, no open-item retention reference, clean or build/test output only, commits already on master or a remote ref, and last modified more than 24 hours ago. Anything uncertain, dirty, unpushed, recent, or owned by an open item is kept with its reason. No active run root, reparse point, outside-repository entry or process is touched.",
+    "Registered worktrees use git worktree remove without --force; plain-directory removal uses no -f or -Force. Any refused or failed removal stops that entry and is reported verbatim. Git worktree prune is dry-run only and its listing is reported.",
+    "Fable2 receives before/after entry counts, number removed, measured free-space delta and logical bytes removed, kept entries grouped by reason, and all refusals or failures. Existing coding items retain priority; cleanup starts after joint restart and repair are reported."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "codex",
+    "disk",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

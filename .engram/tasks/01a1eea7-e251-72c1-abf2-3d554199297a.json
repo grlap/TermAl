@@ -1,0 +1,30 @@
+{
+  "id": "01a1eea7-e251-72c1-abf2-3d554199297a",
+  "external_ref": null,
+  "title": "Define multi-root attribution for adopted Claude turns",
+  "outcome": "An adopted runtime-started Claude turn with ambiguous named roots either has exact source-selection authority or withholds claim-scoped source and check evidence.",
+  "acceptance": [
+    "A behavioral test exercises the adopted Claude opening with multiple acknowledged roots and no fresh selection, and verifies the chosen attribution outcome.",
+    "Ordinary host-delivered opening and single-root behavior are preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "review-follow-up",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

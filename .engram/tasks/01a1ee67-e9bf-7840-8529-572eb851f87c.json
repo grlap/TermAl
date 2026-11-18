@@ -1,0 +1,38 @@
+{
+  "id": "01a1ee67-e9bf-7840-8529-572eb851f87c",
+  "external_ref": null,
+  "title": "Preserve Codex completion across opening handshakes and bounded deferral",
+  "outcome": "Typed and legacy command ENDs retain safe original exit and locator facts through supported ID-less and provisional turn handshakes and bounded replay.",
+  "acceptance": [
+    "Exercise notification-first and response-first routing, matching or mismatching proof, addressed and ID-less frames, and single delivery.",
+    "Bound deferred output while preserving attributable terminal facts. Ambiguous, missing or incompatible proof does not settle another execution or keep a known-ended writer open."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

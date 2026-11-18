@@ -1,0 +1,26 @@
+{
+  "id": "01a1efea-a2fd-7cb1-accb-d2c7dce358f7",
+  "external_ref": null,
+  "title": "Recheck a delegation follow-up's worktree when its turn is dispatched, not only at admission",
+  "outcome": "A delegation follow-up whose worktree is removed, or whose path is reused, between its admission and its turn's dispatch is refused at dispatch with the same reason, instead of starting a turn in a missing or foreign directory.",
+  "acceptance": [
+    "Recheck a delegation follow-up's worktree when its turn is dispatched, not only at admission is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

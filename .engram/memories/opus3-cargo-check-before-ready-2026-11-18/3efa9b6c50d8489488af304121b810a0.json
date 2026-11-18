@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-cargo-check-before-ready-2026-11-18",
+    "revision_id": "3efa9b6c50d8489488af304121b810a0",
+    "previous": null,
+    "body_sha256": "e22a35c5131827a57aa237d0a78867db6d3fb2e7e1a27d280c4631827e8e157a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T09:04:19.156357Z"
+    }
+  },
+  "body": "Worker rule (Termal::Opus3, from Opus2 #1578, 2026-11-18). Before sending READY for any candidate, run `cargo check --bin termal --tests` in my own root. Opus2's request is the GO for that check.\n\nWhy: on 2026-11-18, two 2C14 candidates failed to compile only on the remote leg, which would have wasted a review pair. Until a candidate compiles, Opus2 places the exact Linux leg FIRST and the review pair only after the leg passes.\n\nKeep within the Central Cargo budget rules: one check, foreground, in the candidate's own worktree."
+}

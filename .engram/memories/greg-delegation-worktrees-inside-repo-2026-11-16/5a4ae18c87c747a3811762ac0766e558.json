@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-delegation-worktrees-inside-repo-2026-11-16",
+    "revision_id": "5a4ae18c87c747a3811762ac0766e558",
+    "previous": "a946a304a2f64c61a5d3f9785bf35f82",
+    "body_sha256": "5ec19bbd379c3a89d67ee090e9c9fef44d9f0aedabf5bbc0b17f8b7f1232ed30",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1e548-cfd9-7e12-8d44-eb21094eba5a",
+      "work_ref": "w-eb21094eba5a"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T17:03:42.418822600Z"
+    }
+  },
+  "body": "Greg's direction, 2026-11-16 ~16:58Z, relayed by Engram::Asistant in TermAl mailbox 588693a8 #1915. Greg, verbatim: „Jakis koszmar. Przeciez mamy reguly aby uzywac tylko katalogu repo.” This came after ~40 GiB was found under ~/.termal/delegations: TermAl's default isolated-worktree location, never cleaned up, plus 1,134 worktrees leaked there by tests.\nThe rule: delegation worktrees, their target/ and all test data are created INSIDE the right repository, never by default in ~/.termal/delegations, and host tests never write to the real ~/.termal.\nINTERIM, until w-eb21094eba5a lands: anyone spawning an isolated-worktree worker delegation passes an explicit worktree path inside the source repo's .tmp/. The no-path default is forbidden. Read-only delegations create no worktree.\nExisting folders there are deleted or moved only with Greg's word and an owner check: TermAl's by Opus2, Engram's by Engram::Fable's team. Fix owners: Opus3 for w-eb21 and w-26abac74c80a.\n\nCORRECTION, 2026-11-16 ~17:00Z. The interim \"explicit path inside .tmp/\" is IMPOSSIBLE: the running host refuses any isolated-worktree path inside the source repo (src/delegations.rs:4664-4670, found by Opus3). The interim rule is now: NO isolated-worktree delegations at all until w-eb21094eba5a lands. Authors work as root sessions in their own in-repo .tmp/wt-* worktrees. Engram follows the same rule. The default agreed for the fix is <source repo root>/.worktrees/delegation-<id>.\n\nWIDENED, 2026-11-16 ~17:02Z (Asistant #1920). Greg, verbatim: „Nie. Testy takze powinny byc w folderze repro. Juz widze gdzie to idzie. Testy termal nie moga uzywac 'produkcyjnego' folderu!” The rule: ALL TermAl tests keep their data inside the repo (e.g. target/): fake HOME, stores, fixtures, worktrees and artifacts. Tests never write to the production ~/.termal, the real HOME or the system temp folder. \"Test runs\" is NOT an outside-repo allowance, and the real ~/.termal is for the running product only. Known current leaks: ~/.termal/delegations (1,134 test worktrees) and %LOCALAPPDATA%/Temp/termal/tests (launcher-fixture-*, termal-test-state-*). Fix: w-26abac74c80a (Opus3, widened). Instruction text: w-ad5d15ee6903."
+}

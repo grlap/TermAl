@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-no-ref-delete-after-ready",
+    "revision_id": "a5a7e1092d014ba3bbdc4a566a27a790",
+    "previous": null,
+    "body_sha256": "d37813a7b724a068cd3fb44ffa3a5377d4a29b0246c04f49ef3fd696b54c85f5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T18:33:43.016726500Z"
+    }
+  },
+  "body": "Worker rule (Termal::Opus3, 2026-11-18 18:33Z, my own slip on w-e91a D12). Once READY has been sent for an author-test ref, never delete that ref until the integration owner (Opus2) confirms that no leg is placed on it, even when a successor candidate supersedes it a minute later. Opus2 had placed C6 on be41d04d within seconds of the READY, and my deletion at 18:32:54Z made C6's fetch fail (\"couldn't find remote ref\"). Opus2 #1699: \"Please do not delete a ref while its leg is placed; tell me first.\" Sending a correcting READY for the successor is fine; the deletion waits."
+}

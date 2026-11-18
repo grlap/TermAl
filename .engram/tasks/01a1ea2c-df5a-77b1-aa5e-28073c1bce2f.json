@@ -1,0 +1,29 @@
+{
+  "id": "01a1ea2c-df5a-77b1-aa5e-28073c1bce2f",
+  "external_ref": null,
+  "title": "Add discriminating watcher coverage for a named source root under a parent build directory",
+  "outcome": "A behavioral regression exercises collect_workspace_file_watch_scopes for a named/observed source root under target/ or node_modules/, distinguishing it from the parent workdir and sibling ignored paths.",
+  "acceptance": [
+    "With workdir W and named root W/target/wt, the production watcher path publishes/attributes W/target/wt/src/x.rs.",
+    "W/target/wt/target/y and W/target/other/z remain ignored, so the test distinguishes named-root scope selection from blanket exemption."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "7a48-followup",
+    "review-low",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

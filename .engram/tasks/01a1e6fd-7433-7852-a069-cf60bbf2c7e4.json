@@ -1,0 +1,38 @@
+{
+  "id": "01a1e6fd-7433-7852-a069-cf60bbf2c7e4",
+  "external_ref": null,
+  "title": "Coordination-store boot rebuilds every historical canonical schema and spends tens of seconds reopening under parallel load",
+  "outcome": "Opening a current coordination store avoids redundant canonical-schema construction while preserving exact schema/header validation, fail-closed corruption handling and atomic predecessor upgrades.",
+  "acceptance": [
+    "The source and measured phases explain the coordination-store reopen work observed in test-aeb18444-a9e4-47d5-a2cf-2cca4c3738c3 at commit 99a74ce6: the original phases distinguish current-canonical construction, writer admission (microseconds) and actual schema inspection (milliseconds), and source plus disposable-store measurements identify redundant historical construction (24 canonical builds, including 22 historical builds, per bootstrap-plus-board reopen before the fix; 2 current builds and no historical builds after it). The 47.430950 s and 19.076371 s of loaded time inside ensure that these probes do not separate are explicitly recorded and tracked independently in w-626c09f584be.",
+    "The change removes redundant schema work without weakening exact current/predecessor schema validation, corruption refusal or concurrent-upgrade correctness; behavioral tests cover these contracts and the loaded restart path, with no retry, skipped tests or increased timeout.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnosed-from-0a93",
+    "performance",
+    "sqlite",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered exact-current-schema reopen fast path without redundant historical construction, preserving complete schema/header/content validation and predecessor migration. Landed and pushed b04862a9f2971bc6f7018c76793d14769f74ded6, tree5dbb252220f39d2b8c582312b0ea0262ae9d94c0; exact-tree FULL passed, reviewed contribution adopted by raw blob equality. Independent evaluation b288526075254372a50afa17999a1b8e passed all3 revision2 criteria.",
+    "completed_at": "2026-11-17T14:02:16.437210400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

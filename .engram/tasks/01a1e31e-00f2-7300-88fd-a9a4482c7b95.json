@@ -1,0 +1,37 @@
+{
+  "id": "01a1e31e-00f2-7300-88fd-a9a4482c7b95",
+  "external_ref": null,
+  "title": "Hide causal-ready pending-state reasons until original runner identity matches",
+  "outcome": "A hint from another authenticated runner cannot distinguish existence or settlement state of an original request.",
+  "acceptance": [
+    "Before runner/requester ownership is proven, causal-ready replies expose one bounded indistinguishable refusal outcome; genuine original scheduling and no-authority controls still pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "eo-critical",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0ef-212e-70d0-aa69-97bc1f59bf56",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

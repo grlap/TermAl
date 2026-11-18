@@ -1,0 +1,31 @@
+{
+  "id": "01a1e6db-5d34-7681-8987-3929ba81f39d",
+  "external_ref": null,
+  "title": "Make shared_codex_patient_wait_outlasts_silence_budget_while_server_is_active independent of scheduling gaps",
+  "outcome": "The active-server response extension test proves that liveness extends a pending request across the silence budget using controlled time and explicit phases, without relying on a helper thread being scheduled every 10 ms.",
+  "acceptance": [
+    "The test deterministically arranges server activity and delivery of a response after the silence budget using an injected clock or explicit phase protocol, rather than 30 real 10 ms sleeps racing a 100 ms inactivity window.",
+    "The test still rejects a waiter that gives up at the original silence deadline despite valid intervening activity, and still checks the exact late response.",
+    "Production timeout policy is unchanged; no timeout inflation, automatic retry or ignored/quarantined test is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "audit-followup",
+    "codex",
+    "test-defect",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

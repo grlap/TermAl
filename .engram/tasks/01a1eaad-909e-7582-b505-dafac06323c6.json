@@ -1,0 +1,29 @@
+{
+  "id": "01a1eaad-909e-7582-b505-dafac06323c6",
+  "external_ref": null,
+  "title": "Cover Cursor Plan reject_always replies through the ACP router",
+  "outcome": "A behavior test proves that a current Cursor Plan permission offering only reject_always returns that exact opaque option id and publishes one bounded refusal notice without an approval card.",
+  "acceptance": [
+    "A real handle_acp_message test offers a current Cursor Plan runtime an opaque reject_always option with no reject_once, verifies the exact response/request ids, no pending approval card, and exactly one System refusal notice and MessageCreated event; the affected permission-mode tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "cursor",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

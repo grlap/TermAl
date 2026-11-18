@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-final-diff-audit-needs-passage-script",
+    "revision_id": "897ac189c4ee420299296ea0b397598e",
+    "previous": "cae4129b35364029b5cf42a8ef284bb7",
+    "body_sha256": "81933624656992b09c42afebfa483444e32dfaf82e2bbcc7691ddbab82fb1464",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T20:23:12.816537800Z"
+    }
+  },
+  "body": "Lesson (Fable2, 2026-11-16, Engram w-2e8b audit). Audit (c), a coordinator's final-diff audit under review-changes section 6, is not complete with only the identity check and a by-eye word-for-word check. It also needs the PASSAGE SCRIPT result. For each added or altered sentence and heading (taken from the word-diff, whitespace normalised, list and quote markers removed), the script looks it up as an exact string in the concurred text. Each removed passage needs a judgement that a concurrence names it as removed. Record, per passage, the governing concurrence message and the Greg-notice message. I missed the script in my first #538 report, and the author asked for it (#541).\nHow to do it without reopening the holder's root: read the pre- and post-images from the Git object DB (`git --no-optional-locks -C <main repo> show <base>:<path>` and `<commit>:<path>`), and run a small node script in TermAl .tmp/ against a file holding the concurred text. My script: .tmp/fable2/audit-2e8b/passages.mjs. Copy it for the next audit, then remove the audit's scratch.\n\nUpdate (2026-11-16, Engram w-ff963 audit): use passage script v2 at TermAl .tmp/fable2/passages.mjs. It treats every fenced code line, list-marker line and heading as its own unit, and splits sentences at .!?; so command-block replacements show up as clean line passages, and list-item continuations don't merge into one giant sentence. Run it from a folder holding pre_<file>, post_<file> and concurred.txt, passing the file names as arguments. For a STAGED input, read post-images with `git show :<path>` (the index) and pre-images with `git show HEAD:<path>`. The index tree id needs `git write-tree`, which writes objects; don't do that in another session's root. Verify path by path instead, and say so in the audit."
+}

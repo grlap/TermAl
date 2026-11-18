@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-testref-record-before-commit-tree",
+    "revision_id": "b2c6062f77ee43d09765b16e92c07841",
+    "previous": null,
+    "body_sha256": "d9e19d84e5f9bc74727d37b91beb55299631f87b6c9d86031e44f6c40089160f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T14:23:29.672876100Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-16, my own deviation on the 97bc test ref, flagged by Sol-03d4 #2759). The test-ref bullet requires the frozen input's tree id and freeze fingerprint to be recorded on the item BEFORE the test-ref commit is created. Do it as separate steps: (1) capture the fingerprint and tree and verify the carry; (2) write the item note with both values; (3) only then git commit-tree and check that the ref is absent; (4) push and read back; (5) note the push. Never chain capture, commit-tree and push in one command ahead of the note. In the 97bc case the note came about a minute after the push, and the ruling went to the TermAl coordinator."
+}

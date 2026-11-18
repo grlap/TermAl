@@ -1,0 +1,31 @@
+{
+  "id": "01a1e731-39d2-7c50-be56-0f4dedec8885",
+  "external_ref": null,
+  "title": "Cover retained bridge read intent after a selected-page participant retirement",
+  "outcome": "A bridge-level behavioral regression protects the original read intent/key across a selected-page participant-retirement refusal and explicit membership restoration.",
+  "acceptance": [
+    "A bridge-level read that observes participant retirement after selecting its page returns the unknown refusal while preserving its existing intent and read key; it does not silently issue a replacement page.",
+    "After explicit membership restoration, resolving the same read returns the identical frozen page and receipt. The regression covers the bridge retention branch and, where a deterministic existing seam permits, the receipt-issuance retirement branch."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "reliability",
+    "review-followup",
+    "testing",
+    "unreproduced"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

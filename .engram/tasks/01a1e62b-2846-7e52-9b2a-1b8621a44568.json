@@ -1,0 +1,30 @@
+{
+  "id": "01a1e62b-2846-7e52-9b2a-1b8621a44568",
+  "external_ref": null,
+  "title": "Strengthen recovery-work journal observations and helper-scan coverage",
+  "outcome": "The deterministic recovery work oracle detects missing journal observations and accurately bounds or describes the under-lock helper work it covers, without restoring elapsed-time assertions.",
+  "acceptance": [
+    "The active single-run fixture requires non-vacuous observations for every recovery journal phase, with a behavioral control that would reject missing or bypassed journal instrumentation.",
+    "Under-lock helper scans have appropriate per-run or per-candidate coverage, or comments and test names explicitly limit the asserted work bound to the observed capture/planning paths.",
+    "Relevant recovery and scheduler tests retain canonical read counts, current-authority revalidation, journal preservation and real negative controls, with no timing thresholds or sleeps reintroduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host",
+    "review-low",
+    "test-hardening"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

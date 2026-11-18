@@ -1,0 +1,39 @@
+{
+  "id": "01a1e552-5614-74c1-8159-2ff37b56340b",
+  "external_ref": null,
+  "title": "Clean up TermAl's ended delegation worktrees and orphaned test worktrees under ~/.termal/delegations (Codex executor only)",
+  "outcome": "TermAl's ended delegation worktrees and the orphaned test worktrees under C:/Users/grzeg/.termal/delegations are removed after their work is preserved, by a Codex session only. Anything that cannot be fully preserved stays and is reported. The report says what was removed, how much space was reclaimed, and what remains and why.",
+  "acceptance": [
+    "Executor is a Codex session (agent Codex, model recorded); no Opus/Claude session deletes anything. Only direct children C:/Users/grzeg/.termal/delegations/delegation-<uuid> are touched, each resolved to an absolute path and checked to lie in exactly that directory before any removal; the mcp/ subdirectory, Engram's ten delegation folders and the system TEMP are not touched.",
+    "For each of TermAl's eight real-repo worktrees (298c66b8, fafc4989, 8ab3ecaa, 386f6be6, 5c4aa0d9, 7b1578a1, a0e354f1, bc926923): the delegation is shown terminal and its child session not active from TermAl's API; every unique commit is reachable from a ref, or preserved as a local branch preserve/delegation-<id8>; uncommitted and untracked files are saved under the TermAl repo's .evidence/delegation-cleanup-2026-11-16/<id8>/ and verified readable. Then it is removed with git worktree remove from C:/github/Personal/TermAl (with --force only after that preservation is verified), without a global prune. A worktree that cannot be fully preserved is left and reported.",
+    "For each orphaned test worktree: its worktree/.git file's gitdir and the repository it names do not exist, and it is not registered in any existing repository. Only then is that delegation-<uuid> folder removed. Anything else is left and reported.",
+    "A report note lists counts removed, bytes reclaimed (measured before and after), and every folder left with its reason; the evidence folder is listed for retention until this item closes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 0,
+  "labels": [
+    "cleanup",
+    "delegations",
+    "disk",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Removed all8 ended TermAl delegation worktrees and1134 orphan test delegation folders; wholefolder43205373517→29292874407B,13912499110B(12.957GiB) reclaimed. ExecutorCodexgpt-6.1-sol/session13106. Preserveduniquecommitsinexistingrefs and257151436B diff/untracked/results copies before removal;mcp+10Engramfolders+systemTEMPuntouched. Independentfresh evaluationb835516bfd674dcb8f2d3ed626ab12b7 at2026-11-16T17:30:11.589759600Z,cut40/workrev1,all4PASS; actualrecordreadcomplete/stale:null immediatelybeforecompletion. Whole evaluatorpacket/config/full3428Bprose/request/wait/verdict archivedbeforeconsolidation; evaluator9commands/2read-onlygate refusals recoveredusingfor-each-refandarchivedrecords; no-global-prune basedonexecutorreport, not independentlycertified. No sourcechange/build/test/landing claim. Aftersealremoveunchangedadmission-onlyroot .tmp/wt-2ff-13106 andcleanup-onlyrawrecords. Preserve298c66b8/8ab3ecaa/fafc4989 recovery/evidence subtrees untilOPENw12446/w7b2d lastconsumercloses, perFable2871 andretentionnotes cd0e33df99374a0dba4b1f68bb69991e/1e820532b21f4014831b54a1e8f5efbb. Lastingcounts/paths/authority/API/ref/preservationevidence inholder772edc2ed4eb45d99d3c52fd624ed995; evaluatoractualverdictremainsnativeEngramrecord.",
+    "completed_at": "2026-11-16T17:31:27.845198500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

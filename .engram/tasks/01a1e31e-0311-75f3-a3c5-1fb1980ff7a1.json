@@ -1,0 +1,37 @@
+{
+  "id": "01a1e31e-0311-75f3-a3c5-1fb1980ff7a1",
+  "external_ref": null,
+  "title": "Extend causal-ready behavior tests for persisted owners, bounds and private diagnostics",
+  "outcome": "Causal-ready behavior tests cover durable absent completion, compacted notification owners, bounded queue and private diagnostics across a fresh wake signal.",
+  "acceptance": [
+    "Behavior controls exercise a readable store lacking completion, compacted survivor notifications, queue-full refusal, bounded identifier-free diagnostics and recovery with a fresh disposable signal; no tests pin repository text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "eo-critical",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0ef-212e-70d0-aa69-97bc1f59bf56",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

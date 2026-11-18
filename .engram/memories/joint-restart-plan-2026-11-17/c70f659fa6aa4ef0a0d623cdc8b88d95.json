@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "joint-restart-plan-2026-11-17",
+    "revision_id": "c70f659fa6aa4ef0a0d623cdc8b88d95",
+    "previous": "4404627faf384f7f921c023b6eca618a",
+    "body_sha256": "ab009afd7aed7656bd23b61b1252efa004f3b2dd777636e910b7162957c23b0b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T06:35:46.949856200Z"
+    }
+  },
+  "body": "Joint TermAl+Engram restart plan, agreed between Termal::Fable2 and Engram::Fable on 2026-11-17 ~05:21Z (ebe242f7 #8172/#8173).\n1. TermAl: Opus2 installs the bundle (65a11f06..b04862a9, plus anything landing later) at target/release/termal.exe, outside any gate window, before the moment. Opus2 reports the installed hash to Fable2.\n2. Engram: the Merger lands and pushes the restart set (R18u+ea4a+606e; builds were on eecabd6a at 05:21Z). Engram::Fable then sends Fable2 the landed commit, the build fingerprint and \"Engram install ready\".\n3. Fable2 sets the moment. The Merger installs the new engram.exe a few minutes BEFORE it, keeping the old one as backup.\n4. Fable2 sends Greg ONE \"restart now\" via Engram::Asistant, with both hashes and the reasons. Reasons: the Comovo sync prerequisite (w-4438 fix in dd205), the TermAl coord-store boot fix, the workspace-delete popup.\n5. After the restart, once no pre-install engram process remains, the Merger runs `engram doctor --repair-projections` on every live store.\nThen the Comovo bootstrap can start (memory comovo-mac-after-sync-plan-2026-11-17).\n\nState at 05:45Z.\n\nTermAl INSTALLED (Opus2 #6604):\n- target/release/termal.exe is master b04862a9 (tree 5dbb2522), sha256 666e3bfd2bbb1ba5880c14e4945277e6cbada19ddcff0bfb0f6e86e6e11ed749, in place since 05:44:30Z.\n- Backup: termal-before-b04862a9-e3575f78.exe.\n- It carries 65a11f06, 0def9212, 1d8fd917, bdd03e60, 006a5c08 and b04862a9.\n\nDecision (Fable2 #6605): restart on b04862a9 and do NOT wait for 443e. A 443e install must never take Central from the Merger or delay the moment.\n\nEngram (Fable #8175): eecabd6a's reviews, gates and evaluations are done. The Merger waits for Central after the TermAl install, then does readiness on store copies, fast-forward and push. Landing ETA about 06:15-06:45Z, with \"install ready\" after it.\n\nState at 06:36Z: RESTART NOW was sent to Greg via Asistant (588693a8 #1960), any time from 06:40Z, planned 06:50Z.\n\nEngram:\n- Landed eecabd6a at 06:32Z.\n- Installed at ~/.cargo/bin/engram.exe, sha256 a19d779d…3be7, fingerprint 83673dfd2443.\n- Backup: ~/.engram/backups/engram-20261117T063457Z-954dfe2d55d9.exe.\n\nTermAl:\n- b04862a9 / 666e3bfd.\n- 443e (22694bbd) landed at 06:31:58Z but is NOT installed.\n\nCentral is on hold until the restart and the Merger's projection repair. After that comes the LLM queue, as listed in Opus2 #6611."
+}

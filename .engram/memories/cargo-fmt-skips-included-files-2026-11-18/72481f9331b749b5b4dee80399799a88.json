@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "cargo-fmt-skips-included-files-2026-11-18",
+    "revision_id": "72481f9331b749b5b4dee80399799a88",
+    "previous": null,
+    "body_sha256": "fe836d3029290bd8e11c5738a743ed4aa33cbec944f617bdf7aadbc5eb75601f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T09:07:46.152719900Z"
+    }
+  },
+  "body": "Fact (Opus2, 2026-11-18, from Sol-license #673 on 2C14 7e98a730): in TermAl, `cargo fmt --all -- --check` only formats Cargo-discovered modules and SKIPS files pulled in with include!() (src/main.rs includes many, e.g. src/engram_unadmitted_closing.rs). A syntax error in such a file passes fmt --check and only shows at compile. So a clean fmt check is not a parse check for included files: before READY, authors should run `cargo check --bin termal --tests` (or rustfmt --check on each changed .rs file directly), and the integration owner's freeze check should not treat fmt as covering included files."
+}

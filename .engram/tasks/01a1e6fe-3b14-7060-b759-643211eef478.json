@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6fe-3b14-7060-b759-643211eef478",
+  "external_ref": null,
+  "title": "Control prior-input lease time across no-movement focus microtasks",
+  "outcome": "The three prior-input ownership parameter cases verify focus-without-movement preserves the existing owner using controlled lease time.",
+  "acceptance": [
+    "message-stack-scroll-sync.test.ts 'preserves prior %s authority across no-movement focus' retains wheel/keyboard/touch cases, pre/post microtask and native-event ownership checks with controlled performance.now.",
+    "The1200ms input lease and no-movement focus behavior remain unchanged, without retry, ignore or larger timeout."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-defect",
+    "ui",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

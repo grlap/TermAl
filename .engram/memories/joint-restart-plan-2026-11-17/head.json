@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "joint-restart-plan-2026-11-17",
+  "head": {
+    "state": "active",
+    "chain": [
+      "aeb6d206417b49448faffd66734278f5",
+      "4404627faf384f7f921c023b6eca618a",
+      "c70f659fa6aa4ef0a0d623cdc8b88d95",
+      "30fe64933900496389fecf3cb27d58c1",
+      "8326741a06634a1bbc65d9fec3a2904a"
+    ]
+  }
+}

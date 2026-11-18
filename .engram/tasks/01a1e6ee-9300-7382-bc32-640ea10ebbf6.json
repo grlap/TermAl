@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6ee-9300-7382-bc32-640ea10ebbf6",
+  "external_ref": null,
+  "title": "Control the yield clock in central settled-history drain regression",
+  "outcome": "federation_m4_round_two_central_drain_continues_a_settled_history_prefix proves one drain pass traverses settled history and reaches pending work independently of physical two-second expiry.",
+  "acceptance": [
+    "The existing settled-history seed and one-pass pending==0 oracle remain, with an injected/frozen yield clock for this traversal property.",
+    "A separate controlled-expiry test verifies production yielding and resumption; production2s budget, cursor rules and peer authority remain unchanged without retry, ignore or inflated timeouts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

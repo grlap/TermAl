@@ -1,0 +1,38 @@
+{
+  "id": "01a1f01d-0725-7521-bf69-d17f4e590d86",
+  "external_ref": null,
+  "title": "Settle exact malformed Codex ENDs through managed refusal",
+  "outcome": "An exact typed managed END with missing command text can seal a bounded refusal while preserving original identity and writer custody.",
+  "acceptance": [
+    "Actual provider routing sends an exact completion with a missing command to the managed refusal path, keeping the original row and withholding artifact or credit.",
+    "An unproven or unrelated completion changes neither owner nor writer. An ordinary command preserves its established route."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

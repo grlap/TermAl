@@ -1,0 +1,30 @@
+{
+  "id": "01a1e632-ac79-75b2-8d58-4a50c8ce50ca",
+  "external_ref": null,
+  "title": "termal_read_mailbox_message returns 404 for the messageId that a successful cross-host termal_send_to_session just returned",
+  "outcome": "The messageId returned by termal_send_to_session can always be read back with termal_read_mailbox_message by the sender, including for a relay (cross-host) recipient. If a status read is unsupported for that route, the error names the route and the supported alternative instead of a bare 404.",
+  "acceptance": [
+    "Root cause identified with file:line: why the messageId returned for a send to a remote (relay) recipient, e.g. the Mac Engram Runner, does not resolve in termal_read_mailbox_message (e.g. a local vs relay id namespace, or a lookup scoped to the local store).",
+    "Behavioral regression: a send to a relay recipient returns an id that the sender can read back with the message-status tool, OR the tool refuses with a typed, readable error naming the relay route and the supported alternative (the relay mailbox page and its receipt). Never a bare 'mailbox message not found' for an id the host itself issued.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "mailbox",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

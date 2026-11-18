@@ -1,0 +1,29 @@
+{
+  "id": "01a1e282-faac-74e2-9397-61bbf2c25946",
+  "external_ref": null,
+  "title": "A single Claude /review-code child can't cover a large (15-path, about 1.4k-line) contribution: it hits memory exhaustion or drops lenses, so the pair stalls; partition the review by a path ledger",
+  "outcome": "A single Claude /review-code child can't cover a large (15-path, about 1.4k-line) contribution: it hits memory exhaustion or drops lenses, so the pair stalls; partition the review by a path ledger",
+  "acceptance": [
+    "/review-changes partitions a contribution above a stated size (paths or changed lines) into fixed path groups per vendor. Every group is reviewed with ALL lenses by a read-only child of that vendor on the same frozen input, and a coverage ledger records each path's full read and owner traces. The groups together count as that vendor's ONE review.",
+    "An incomplete group (missing lens, path, attestation or record) is reported as incomplete coverage for that group only, and only that group is re-reviewed; it never silently counts and never restarts the whole pair.",
+    "The instruction change follows the repository's rule for instruction and command files, and is checked by use on a real large contribution, not by a test that reads the Markdown."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "process-simplification",
+    "review-cadence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

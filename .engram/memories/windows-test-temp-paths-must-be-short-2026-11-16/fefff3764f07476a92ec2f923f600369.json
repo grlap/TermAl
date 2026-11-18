@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "windows-test-temp-paths-must-be-short-2026-11-16",
+    "revision_id": "fefff3764f07476a92ec2f923f600369",
+    "previous": null,
+    "body_sha256": "bed3039d42c397f689da0ae198eacfbcb843ead3e64655cd81822a698e286b5b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T23:28:09.602979Z"
+    }
+  },
+  "body": "Central Windows test runs: keep the private test temp prefix SHORT. Fixture Git calls under a long prefix fail before any assertion.\nTwo occurrences on 2026-11-16:\n1. Sol-c593, 5c8b, test-195aef74. git init failed with exit 128, \"Filename too long\": the sample hook paths reached 261 characters. A short .tmp/w5/t prefix (239 characters) worked.\n2. Sol-d50d, w-2b87 landed-closure run, test-d03c5c70. git worktree add failed with exit 128, \"'$GIT_DIR' too big\": the repo and worktree paths were 194 and 219 characters. The short .tmp/r13196/t prefix worked in a paired Git-only check.\nRULE for Windows GOs: point TEMP, TMP, TMPDIR and TERMAL_TEST_USER_TEMP at a short in-repo prefix such as C:/github/Personal/TermAl/.tmp/<short>/t, outside the inspected worktree. A failure of this kind is an environment or setup cause. The corrected run is a setup correction, not a retry; it still gets its own named window."
+}

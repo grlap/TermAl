@@ -1,0 +1,27 @@
+{
+  "id": "01a1f06b-a12a-7650-afc4-f89ac55bd364",
+  "external_ref": null,
+  "title": "Approval Git boundary: metadata_line trims Unicode whitespace from Git metadata paths",
+  "outcome": "The approval boundary's Git validation (delegation_git_boundary::is_valid via metadata_line) reads a `.git` gitdir line, commondir and backpointer exactly as Git wrote them, removing only the line ending, so a worktree path ending in Unicode whitespace validates its own administrative directory and never a sibling's.",
+  "acceptance": [
+    "Approval Git boundary: metadata_line trims Unicode whitespace from Git metadata paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "approvals",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

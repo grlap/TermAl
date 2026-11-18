@@ -1,0 +1,29 @@
+{
+  "id": "01a1ead4-a7f3-7f71-8313-2f9f1bec9ba8",
+  "external_ref": null,
+  "title": "Clarify which owner is accountable for cleanup of landed and unlanded candidates",
+  "outcome": "Cleanup instructions identify one accountable owner for each candidate lifecycle while keeping Codex as directory/worktree executor.",
+  "acceptance": [
+    "AGENTS.md and CLAUDE.md distinguish the integration owner's accountability for a landed candidate from the author's accountability otherwise, without changing Codex's executor restriction or adding deletion authority.",
+    "The exact instruction wording follows the existing coordinator-concurrence, Greg-notification and final-diff-audit procedure, with required review/gate evidence; no Markdown phrase-pinning tests are introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "instructions",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

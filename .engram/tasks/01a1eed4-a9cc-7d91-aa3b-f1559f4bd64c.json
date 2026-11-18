@@ -1,0 +1,29 @@
+{
+  "id": "01a1eed4-a9cc-7d91-aa3b-f1559f4bd64c",
+  "external_ref": null,
+  "title": "Launcher: say why a committed-input run earns no verification credit and how to get it",
+  "outcome": "A run never registered at START earns no credit, and says why and how to correct it. Every committed-input launch that stops before its first stage because it was not registered for credit, and every unregistered or unbound run, names the cause and the correction \"register at start with --input commit in the claim's named root\". The host's registration view reports whether the registration itself bound the run to work. The custody model (credit rests on tracking from START) and the --detach classifier are unchanged.",
+  "acceptance": [
+    "A committed-input launch never registered for credit at START (hostless, unbound, refused or unconfirmed registration including a store in repair, a worker that cannot confirm its registration before readiness, or refused before it has a run directory) earns no credit, and its refusal or summary states the cause and the correction 'register at start with --input commit in the claim's named root'. Every path between argument parsing and the first stage is either covered or listed as deliberately unchanged with its reason. Shown by one table-driven behavioral test; the --detach classifier is unchanged.",
+    "The host's registration view reports whether the durable registration itself bound the run to work, never which work and never from observations. Shown by a behavioral test.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

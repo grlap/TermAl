@@ -1,0 +1,32 @@
+{
+  "id": "01a1e5bd-af64-72a2-b015-b9bce2aefc26",
+  "external_ref": null,
+  "title": "State supported and Git-ignored placement requirements for delegated worktrees in the test skill",
+  "outcome": "The canonical skill clearly limits delegated worktree placement to host-supported, repository-local, Git-ignored paths and explains the unsupported case without permitting outside worktrees.",
+  "acceptance": [
+    "Clarify the skill's .worktrees/delegation-<id> recommendation so it requires host support and a Git-ignored destination, with an explicit stop/report path when the host cannot provide compliant placement.",
+    "Coordinate the wording with the host placement owner and the repository authority process; do not duplicate the implementation work or add instruction-phrase tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "disk",
+    "greg-directed",
+    "instructions",
+    "review-followup",
+    "skills"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e54e-4ae3-7c93-b340-ad5d15ee6903",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "joint-restart-plan-2026-11-17",
+    "revision_id": "aeb6d206417b49448faffd66734278f5",
+    "previous": null,
+    "body_sha256": "2e3ec2a28b60e13984158ded6e6f7fc01fa6915b937a37dc0a4df97946fb897a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T05:21:15.954454800Z"
+    }
+  },
+  "body": "Joint TermAl+Engram restart plan, agreed between Termal::Fable2 and Engram::Fable on 2026-11-17 ~05:21Z (ebe242f7 #8172/#8173).\n1. TermAl: Opus2 installs the bundle (65a11f06..b04862a9, plus anything landing later) at target/release/termal.exe, outside any gate window, before the moment. Opus2 reports the installed hash to Fable2.\n2. Engram: the Merger lands and pushes the restart set (R18u+ea4a+606e; builds were on eecabd6a at 05:21Z). Engram::Fable then sends Fable2 the landed commit, the build fingerprint and \"Engram install ready\".\n3. Fable2 sets the moment. The Merger installs the new engram.exe a few minutes BEFORE it, keeping the old one as backup.\n4. Fable2 sends Greg ONE \"restart now\" via Engram::Asistant, with both hashes and the reasons. Reasons: the Comovo sync prerequisite (w-4438 fix in dd205), the TermAl coord-store boot fix, the workspace-delete popup.\n5. After the restart, once no pre-install engram process remains, the Merger runs `engram doctor --repair-projections` on every live store.\nThen the Comovo bootstrap can start (memory comovo-mac-after-sync-plan-2026-11-17)."
+}

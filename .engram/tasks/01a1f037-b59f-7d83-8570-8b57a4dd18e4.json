@@ -1,0 +1,27 @@
+{
+  "id": "01a1f037-b59f-7d83-8570-8b57a4dd18e4",
+  "external_ref": null,
+  "title": "Refresh stale root coding session request-contract source citations",
+  "outcome": "The root coding sessions request contract points to the current Rust owners for request fields, creation and errors.",
+  "acceptance": [
+    "Each outdated session_crud.rs and state_inner.rs line reference in the request contract resolves to the behavior it describes.",
+    "The correction does not change the API, operating procedure or authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1f018-9bc0-7951-89c4-bcd0dae6fa12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

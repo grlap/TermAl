@@ -1,0 +1,36 @@
+{
+  "id": "01a1e6c7-910d-7e60-9b57-5dca71aec075",
+  "external_ref": null,
+  "title": "UI: workspace delete confirmation as a compact popup like session delete (not an inline list block)",
+  "outcome": "UI: workspace delete confirmation as a compact popup like session delete (not an inline list block)",
+  "acceptance": [
+    "Deleting a workspace shows a compact confirmation popup anchored at that workspace's entry, reusing the existing session-delete confirmation pattern, instead of the inline 'Delete <id>? This removes the saved layout.' block that pushes the list. The popup states clearly what is removed: the saved layout only, not files.",
+    "It has Confirm delete and Cancel. Focus moves into the popup on open and returns to the triggering entry on cancel (or to a sensible neighbour after delete). Escape cancels, keyboard activation works, and the popup stays fully visible for the first and last entries of the list.",
+    "Behavioral Vitest coverage for open, cancel, confirm, focus return and edge placement. `npx tsc --noEmit` is clean. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delivered compact row-anchored workspace-delete popup with saved-layout-only copy, visible initial Cancel focus, Escape/cancel and trigger/survivor restoration, viewport clamping and nonblocking pending interaction. Independent post-landing evaluation d3dcdd3d7ae6406c8a233b77dd3738f9 passed all 3 criteria on clean bdd03e60863fd81bb995e076f35c15648d10004f/tree0b966c69137917c853acdfbd683f54d0899327e2. Native tsc and six-file 186-test focused checks passed; adopted independent R2 review pair has no Medium-or-higher findings; exact-tree FULL test-e0ea988e passed all stages including 5188 UI assertions. Remaining Low keyboard focus-out issue filed separately as optional w-ef2b3a1339f3. Installation remains deferred by integration owner; no running-build claim. Proceeding with owned cleanup after sealing.",
+    "completed_at": "2026-11-17T03:11:50.000341500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

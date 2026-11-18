@@ -1,0 +1,30 @@
+{
+  "id": "01a1eb0e-1f46-7403-8eed-223e63492830",
+  "external_ref": null,
+  "title": "Avoid replaying historical local-refusal notices after host restart",
+  "outcome": "Restart recovery preserves a local-refusal notice that has not yet been presented without repeatedly resurfacing historical notices already presented to the requester.",
+  "acceptance": [
+    "After a local refusal has been presented to its owning session, normal host restart does not requeue the same historical notice; completion is associated with the exact original registration.",
+    "An interruption before first presentation still recovers a bounded readable refusal. Existing ownership, privacy, no producer send/credit, compaction and mirror repair remain unchanged; a queued-but-lost in-memory line is not falsely treated as delivered.",
+    "Behavioral tests distinguish before-presentation and after-presentation restarts, repeated restarts and newer notices, and the exact landing input passes the required full gate and independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "restart",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

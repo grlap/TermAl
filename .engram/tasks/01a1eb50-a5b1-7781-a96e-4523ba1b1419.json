@@ -1,0 +1,28 @@
+{
+  "id": "01a1eb50-a5b1-7781-a96e-4523ba1b1419",
+  "external_ref": null,
+  "title": "A failed `git worktree remove` of an ended delegation's worktree should be retried, or its note should fit a partly removed worktree",
+  "outcome": "A transient removal failure (Windows file in use) does not leave a worktree permanently retained with a note telling the owner to run a command that no longer works on it.",
+  "acceptance": [
+    "When `git worktree remove` fails, the sweep classifies it as Retry (a later pass settles it, including when Git already deleted the admin directory), or the retention note names the partly removed state and the right cleanup.",
+    "A behavioural test covers a removal that fails after Git has removed part of the worktree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-engram-focused-cargo-rule-rev17",
+  "head": {
+    "state": "active",
+    "chain": [
+      "8eeb1c57a73d4297a7a5abed4d767385"
+    ]
+  }
+}

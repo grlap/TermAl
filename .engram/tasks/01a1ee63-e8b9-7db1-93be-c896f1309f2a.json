@@ -1,0 +1,28 @@
+{
+  "id": "01a1ee63-e8b9-7db1-93be-c896f1309f2a",
+  "external_ref": null,
+  "title": "Preserve exact predecessor capture custody across automatic named-root switches",
+  "outcome": "An automatic switch between named roots preserves the exact old turn's closing scope and report when a successor opens or closes while the predecessor's capture is pending.",
+  "acceptance": [
+    "A deterministic test pauses a predecessor before focus sampling and queues a same-binding successor's closing capture. Neither report is lost or relabeled.",
+    "Define which component owns the old binding until its durable capture or explicit terminal outcome when automatic switching is introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "diagnosed-from-2c14",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

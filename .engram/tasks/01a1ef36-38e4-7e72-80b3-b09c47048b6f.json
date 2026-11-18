@@ -1,0 +1,30 @@
+{
+  "id": "01a1ef36-38e4-7e72-80b3-b09c47048b6f",
+  "external_ref": null,
+  "title": "Exercise prepared native snapshot invalidation at provider enqueue",
+  "outcome": "A deterministic regression proves that provider composition clears a native opening snapshot already installed for a stale acknowledged root, and delivers the prompt with the reason attribution is withheld.",
+  "acceptance": [
+    "Install a native S0 snapshot under a valid prepared selection, mutate the selected name after installation and before provider enqueue, and assert both the refusal reason and absence of the installed snapshot.",
+    "Preserve the pre-S0 drift tests and positive unchanged-selection control."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "review-follow-up",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

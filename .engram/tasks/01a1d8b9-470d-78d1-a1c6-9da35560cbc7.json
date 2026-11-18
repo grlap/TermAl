@@ -18,12 +18,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "cancelled",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
-  "disposal_reason": null,
+  "disposal_reason": "Moot: w-3fe8f4472e5d C6 is met for Cursor on the post-cutover removal build 491dd015 (rows 07b4ea1a, 4a0ce2b4; tally 50384bf1). Opus3's read-only reconciliation (mailbox 03723eab #5422) confirms that no further probe is owed after a later restart. Cancelled by Fable2, coordinator.",
   "completion": null
 }

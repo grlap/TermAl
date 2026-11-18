@@ -1,0 +1,29 @@
+{
+  "id": "01a1eb99-bdf5-77b2-bce1-373691d48d7e",
+  "external_ref": null,
+  "title": "Test retained review discovery purity, ordering and reservation exclusion",
+  "outcome": "Behavioral tests show that the parent discovery read preserves an unset dispatch outcome and makes no custody writes, emits confirmed identities in attempt and publication order, and omits a reservation-only slot.",
+  "acceptance": [
+    "Test retained review discovery purity, ordering and reservation exclusion is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "greg-directed",
+    "refusals",
+    "review-custody"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1eb26-0f67-7ea3-abd7-2f5fb5691ed2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

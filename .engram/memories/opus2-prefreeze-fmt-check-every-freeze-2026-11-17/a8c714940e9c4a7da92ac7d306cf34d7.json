@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-prefreeze-fmt-check-every-freeze-2026-11-17",
+    "revision_id": "a8c714940e9c4a7da92ac7d306cf34d7",
+    "previous": null,
+    "body_sha256": "c65fe1a4ffc18b93279c15664e0731938be033f2962ec6681dc8f0b56956f5ca",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T20:18:52.357947600Z"
+    }
+  },
+  "body": "Integration-owner practice (Opus2, 2026-11-17, from my own miss). On 528F-FULL-1 (test-08cd2438) the FULL failed at fmt because I froze be7413dd without running the pre-freeze check that rule integration-prefreeze-fmt-diff-check-2026-11-15 requires; that cost a FULL slot and a successor round. Practice from then on: in EVERY freeze worktree, before computing the fingerprint and before git commit-tree, run `cargo fmt --all -- --check` and `git diff --check BASE COMMIT`. If either fails, refuse the freeze, remove the freeze worktree, and send it back to the author: a fmt-only successor, a cheap new pair (any change needs a new review, Fable2 #6669), and a fresh exact leg. The first application caught 0308 R7 02a452d8 the same evening, before any test ref was made."
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1e655-d27b-72f1-b57e-47e4b559ff29",
+  "external_ref": null,
+  "title": "Clarify Clippy follow-up messaging when its advisory report is incomplete",
+  "outcome": "Clippy reporting distinguishes completed lint-only follow-up from a failed tool or incomplete report, while retaining Greg's non-blocking Clippy decision and the standing compile, test and review requirements.",
+  "acceptance": [
+    "Observable report/summary tests distinguish a completed lint report from a failed or incomplete report: failed reports retain their failure and native cause, and the lint-only next-round line is limited to completed reports.",
+    "Docs and summary wording preserve the recorded rule: Clippy findings alone do not fail the gate or block landing; compile errors, test failures and Medium-or-higher review findings retain the standing rule. No test pins repository Markdown or instruction text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "clippy",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

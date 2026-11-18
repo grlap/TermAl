@@ -1,0 +1,34 @@
+{
+  "id": "01a1e5f4-99ce-7bd1-8fd7-0813a2506f50",
+  "external_ref": null,
+  "title": "Update Codex model-switching and worker docs for restricted AutoApprove",
+  "outcome": "The remaining model-switching guide and worker comment describe the active restricted AutoApprove contract.",
+  "acceptance": [
+    "Update docs/features/model-switching.md Codex approval text to distinguish restricted granular native policy from FullAccess on-request, including refusal of explicit network/additional write grants and the notice remedy; cross-link the shared app-server contract.",
+    "Update the configure_worker_prompt_settings comment in src/delegation_worker.rs to match workers' AutoApprove plus WorkspaceWrite behavior without changing runtime policy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "codex",
+    "docs",
+    "greg-reported",
+    "kimi",
+    "sandbox",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e2bc-8881-7a30-a376-443e364ea498",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

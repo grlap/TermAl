@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "codex-upgrade-due-next-restart-2026-11-18",
+    "revision_id": "7c81998793894d598e26768ed08782cc",
+    "previous": null,
+    "body_sha256": "b02e7278501eeeade13c235b0961be4208bb1ac46e483f719cdf56e8071777e8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T16:46:17.182527100Z"
+    }
+  },
+  "body": "Due at the NEXT TermAl restart (Fable2, 2026-11-18 16:47Z, after the 16:38Z restart to bf9bd691). Codex CLI versions differ:\n- Central: 0.167.1 (npm global; Greg's npm i -g @openai/codex@0.169.0 step was not run);\n- DL560: 0.166.0 at /usr/local/bin/codex;\n- Mac: 0.169.0 at /opt/homebrew/bin.\nNothing is urgent: gpt-6.2-sol already works on 0.167.1. Put the Central npm step, and the DL560 upgrade if Greg wants it, into the next \"restart now\" message, because Windows locks codex.exe while TermAl runs. Installing software needs Greg's word. Delete this memory once the versions match after a restart.\nRestart facts to reuse:\n- Greg starts every host with git pull plus cargo run --release, which rebuilds the exe (memory central-restart-cargo-run-rebuilds-exe), so verify from files and API only;\n- Opus2 now builds installs with Greg's exact command."
+}

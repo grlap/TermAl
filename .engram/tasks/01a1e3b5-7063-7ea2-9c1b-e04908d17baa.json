@@ -1,0 +1,30 @@
+{
+  "id": "01a1e3b5-7063-7ea2-9c1b-e04908d17baa",
+  "external_ref": null,
+  "title": "Test that a failed Kimi read-only answer handoff publishes no refusal notice",
+  "outcome": "Test that a failed Kimi read-only answer handoff publishes no refusal notice",
+  "acceptance": [
+    "A behavioral test drops the runtime answer receiver, submits a refused read-only operation, observes the returned error and verifies the transcript is unchanged with no MessageCreated delta.",
+    "The test protects answer-handoff-before-notice ordering without mirroring production reason strings, and preserves existing stale/Stop/refusal behavior coverage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "review-follow-up",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

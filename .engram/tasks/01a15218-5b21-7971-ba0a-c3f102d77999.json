@@ -6,7 +6,7 @@
   "acceptance": [
     "Tests show a qualified result from a satellite root session's run on the exact tree is admitted automatically through the existing automatic checkpoint or carried-settlement backend when a valid current target basis exists. It is admitted as test evidence with GitTree applicability, with remote execution facts kept distinct from the local association, and with full provenance (origin host and build, run, plan, commit, tree, platform, toolchain, results SHA-256). Test-bound acceptance criteria then pass at the judged revision.",
     "Tests show every non-qualifying case named in K3 remains visible with its reason and grants no verification credit. Mail is only a wake hint; neither mail, raw result files nor caller declarations alone can create or change a qualified result. No manual import, evidence bundle, registration or additional agent turn is required.",
-    "One live proof each on the MacBookPro and Windows B passes through the automatic path. The full five-stage TermAl gate, the named TermAl landing plan and not a universal remote-qualification count, passes on the exact input with an independent review pair and no outstanding in-scope Medium-or-higher finding."
+    "One live proof each from the MacBookPro and DL560 runners, admitted on Central, passes through the automatic path (K4; Windows B is not used). The full five-stage TermAl gate, the named TermAl landing plan and not a universal remote-qualification count, passes on the exact input with an independent review pair and no outstanding in-scope Medium-or-higher finding."
   ],
   "acceptance_bindings": [
     {

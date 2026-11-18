@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-backticks-in-shell-message-strings",
+    "revision_id": "c1d70087472e4a3095796e4d7f027cd3",
+    "previous": null,
+    "body_sha256": "20e5b4deb7fdad1032b25fcf1c22b88e1463a5b0b7f4db33f3418232f799156c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T11:00:46.753073Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-16, my own incident). At about 10:54Z I built a mailbox GO with a shell printf whose double-quoted text contained a command in backticks (the launcher full command). The shell executed it: an unrequested TermAl full-launcher run (test-22d27ac5) started in the TermAl main checkout on Central, just before a P0 Engram FULL. I stopped my own tool command after about 6 minutes and settled the run with the launcher's recover command (interrupted, no rerun); Fable2 was told.\nRule: write every message body with the file tool (Write), never inside a shell string, and never put a command in backticks or $( ) in any shell-quoted text. The pre-send byte check also rejects a backtick: grep -c for ESC, BEL, VT, FF and the backtick must print 0 before send-one.sh. If a send hangs past its normal second or two, suspect command substitution first and inspect what the shell actually ran."
+}

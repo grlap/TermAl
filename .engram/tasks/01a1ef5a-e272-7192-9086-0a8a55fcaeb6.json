@@ -1,0 +1,27 @@
+{
+  "id": "01a1ef5a-e272-7192-9086-0a8a55fcaeb6",
+  "external_ref": null,
+  "title": "Review custody recheck conflicts when the sweep adds a worktree retention note after the snapshot",
+  "outcome": "A host worktree-retention note added to a reviewer's delegation result after its snapshot does not make the review's custody recheck report a conflict.",
+  "acceptance": [
+    "Review custody recheck conflicts when the sweep adds a worktree retention note after the snapshot is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

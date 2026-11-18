@@ -1,0 +1,32 @@
+{
+  "id": "01a1e374-8349-7330-817c-44bee1ea8fd0",
+  "external_ref": null,
+  "title": "Show the changed region in bounded full-file ACP diff previews",
+  "outcome": "Show the changed region in bounded full-file ACP diff previews",
+  "acceptance": [
+    "A small edit near the end of a large full-file ACP diff shows the changed region with bounded context rather than only an unchanged prefix.",
+    "Behavioral coverage retains bounded Unicode output and approval decision handling."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "greg-reported",
+    "kimi",
+    "review-follow-up",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e295-a4d4-7000-a550-d06c40369f6c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

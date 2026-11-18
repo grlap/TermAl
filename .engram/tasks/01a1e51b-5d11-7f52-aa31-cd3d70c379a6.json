@@ -1,0 +1,36 @@
+{
+  "id": "01a1e51b-5d11-7f52-aa31-cd3d70c379a6",
+  "external_ref": null,
+  "title": "Cover Codex approval capture races, read-only refusals and Windows junctions",
+  "outcome": "Behavioral coverage exercises refusal after a capture changes, read-only refusal without a notice, and Windows junction escape.",
+  "acceptance": [
+    "A controlled change to the captured turn/runtime/sandbox between path resolution and final admission produces the native decline with no fabricated System notice or pending approval card.",
+    "A read-only delegation encountering an explicit sandbox refusal declines without a new refusal notice, preserving the read-only owner.",
+    "A Windows-local junction or symlink escape is refused through the real host decision path; the test uses repository-local fixtures and makes no external network access."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "codex",
+    "greg-reported",
+    "kimi",
+    "review-finding",
+    "sandbox",
+    "tests",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e2bc-8881-7a30-a376-443e364ea498",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

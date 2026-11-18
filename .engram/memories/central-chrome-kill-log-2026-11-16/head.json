@@ -1,0 +1,14 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-chrome-kill-log-2026-11-16",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b196cde287ac43b58e8de57ea070fc9e",
+      "6e9e4b89ec9242b0a0918b639284c92d",
+      "2fb2d8ec1090445cbad597ed0427e10d",
+      "2910be57dffd493bb376bf56cac68f6b"
+    ]
+  }
+}

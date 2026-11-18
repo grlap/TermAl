@@ -1,0 +1,30 @@
+{
+  "id": "01a1e354-c836-7872-b78e-83f06d3adfe3",
+  "external_ref": null,
+  "title": "Keep monitoring interruption confirmation stable during artifact-refusal diagnostics",
+  "outcome": "A saved operator monitoring interruption on an unassociated provider row is not reported as failed solely because a bounded artifact diagnostic changes.",
+  "acceptance": [
+    "A deterministic behavioral interleaving persists an operator monitoring interruption, writes or discards an artifact-association diagnostic during its off-lock durability wait, and confirms the intended interruption without a spurious superseded or HTTP 409 result.",
+    "Original observation identity, real durability and completion/receipt/credit custody guards remain intact; an idempotent retry and a genuinely changed observation remain covered."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "monitoring",
+    "native-completion",
+    "review-follow-up",
+    "severity-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

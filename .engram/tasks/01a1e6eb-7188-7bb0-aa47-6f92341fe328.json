@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6eb-7188-7bb0-aa47-6f92341fe328",
+  "external_ref": null,
+  "title": "Freeze the pre-compaction clock in virtualized scroll prewarm matrix",
+  "outcome": "The virtualized prewarm matrix verifies pre-native-paint range expansion before a controlled idle-compaction transition, independently of real200ms timer expiry.",
+  "acceptance": [
+    "AgentSessionPanel.virtualization-scroll.test.tsx 'prewarms pages above for $name before native scroll paints' retains all seven input cases and geometry/range assertions, with controlled performance/timers for pre-compaction observations.",
+    "The multi-touch cooldown-crossing case retains its explicit post-cooldown logical time control; production200ms compaction/cooldown semantics remain unchanged without retry, ignore or timeout inflation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "ui",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

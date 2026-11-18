@@ -1,0 +1,37 @@
+{
+  "id": "01a1e31e-01bd-7520-9f43-896c30bcd0ec",
+  "external_ref": null,
+  "title": "Move runner descriptor lookup off the async completion notifier thread",
+  "outcome": "Completion-ready notifier identity checks keep blocking mailbox SQLite reads off Tokio worker threads.",
+  "acceptance": [
+    "Notifier descriptor/pre-RPC blocking reads use the existing blocking owner, preserve lease and registration currentness checks, and pass focused behavioral controls."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "eo-critical",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0ef-212e-70d0-aa69-97bc1f59bf56",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

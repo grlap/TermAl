@@ -1,0 +1,31 @@
+{
+  "id": "01a1eb26-2068-7f51-baa9-d6e5f888ee3e",
+  "external_ref": null,
+  "title": "Acceptance evaluation requested while a named verification is pending should wait for it, not go stale when the record lands",
+  "outcome": "An evaluation request made while a named verification run is still pending waits for that record, or is evaluated against it, instead of becoming stale and needing another request. The source-freshness guard and verdict standards are unchanged.",
+  "acceptance": [
+    "Recorded with file:line: where an evaluation becomes stale when a pending verification record lands, and the simplest way to queue or bind the evaluation to the named pending run. No new gate, and no weaker verdicts.",
+    "Behavioral test: an evaluation requested while a named verification is pending is judged against that record once it lands, without a second request. A source change after the request still makes the evaluation stale, with a message naming the cause and the correction.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance",
+    "check-credit",
+    "greg-directed",
+    "refusals"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

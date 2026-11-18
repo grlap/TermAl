@@ -1,0 +1,29 @@
+{
+  "id": "01a1e623-e5c1-7933-8f7e-c7132344d948",
+  "external_ref": null,
+  "title": "Delegation worktree spawned from a dirty parent is always retained: record the materialized baseline so an untouched one is reclaimable",
+  "outcome": "A non-worker isolated delegation whose worktree was materialized from the parent's staged and unstaged changes, and which the child did not change, is reclaimed by the worktree sweep instead of being retained as holding uncommitted changes.",
+  "acceptance": [
+    "Behavioral: a non-worker isolated delegation spawned from a parent with staged and unstaged changes, whose child changes nothing, has its worktree removed when the delegation ends; one whose child changed a file is retained with the uncommitted-changes note.",
+    "The baseline is recorded at materialization without changing the parent repository's refs, index or working tree.",
+    "docs/features/delegation-worktrees.md describes the rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

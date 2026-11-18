@@ -1,0 +1,29 @@
+{
+  "id": "01a1f03a-2371-7921-beb7-38d0c01f3065",
+  "external_ref": null,
+  "title": "Mailbox read and ACK transiently return 404 (\"mailbox not found for this participant/session\") while list_mailboxes shows the caller as a participant",
+  "outcome": "A participant reading a mailbox the listing shows them in never gets a participant-not-found 404. If the participant check and the listing can briefly disagree (for example during a federation reconnect or relay projection refresh), the read either waits for the authoritative membership or returns a typed retryable error that names that cause.",
+  "acceptance": [
+    "The cause of the disagreement between the read path's participant check and termal_list_mailboxes is identified with file and line, and stated in the item note (for example a stale relay or federation projection after a reconnect).",
+    "A behavioural test reproduces a read by a listed participant during the disagreeing window and shows the fixed behaviour: success, or a typed retryable error naming the cause, never 'mailbox not found for this participant'.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

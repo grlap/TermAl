@@ -1,0 +1,31 @@
+{
+  "id": "01a1e69b-9dbb-7523-9768-cb8b5a4392c2",
+  "external_ref": null,
+  "title": "Cover retained bridge read intent after a selected-page participant retirement",
+  "outcome": "A bridge-level behavioral regression protects the original read intent/key across a selected-page participant-retirement refusal and explicit membership restoration.",
+  "acceptance": [
+    "A bridge-level read that observes participant retirement after selecting its page returns the unknown refusal while preserving its existing intent and read key; it does not silently issue a replacement page.",
+    "After explicit membership restoration, resolving the same read returns the identical frozen page and receipt. The regression covers the bridge retention branch and, where a deterministic existing seam permits, the receipt-issuance retirement branch."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "reliability",
+    "review-followup",
+    "testing",
+    "unreproduced"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1e5c7-928c-78f3-97ca-ec6ad041bb96",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1e731-39d2-7c50-be56-0f4dedec8885",
+  "disposal_reason": "Continue the separately filed nonblocking bridge intent-retention coverage follow-up as independent work after parent w-ec6ad041bb96 completed. No execution claimed; exact reviewer provenance and retention exception remain in its notes.",
+  "completion": null
+}

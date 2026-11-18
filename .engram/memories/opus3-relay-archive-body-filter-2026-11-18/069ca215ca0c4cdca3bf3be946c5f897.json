@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-relay-archive-body-filter-2026-11-18",
+    "revision_id": "069ca215ca0c4cdca3bf3be946c5f897",
+    "previous": null,
+    "body_sha256": "1dee640b40ef682d723855e65d9c90e1d987c7ed94fda6e581f14ec1cca64dfe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T14:54:06.073409100Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-11-18; my own slip, twice in one day). When a runner sends a run archive as base64 parts over relay mail, I save the mailbox with the CLI to .evidence/<dir>/mail.json, which is correct. But I printed the bodies while filtering only on the message topic, and the runners' topics vary (\"archive part 1 of 5\", \"originals 3\", \"panic archive 2/5\"). Base64 therefore reached the context. Rule: when printing relay bodies, skip any body that is not short plain text. Print a body only when it is under 2000 characters AND its first line contains neither \"base64\" nor \"Tar.gz\". Decode the parts with node, selected by sequence range, and never echo them."
+}

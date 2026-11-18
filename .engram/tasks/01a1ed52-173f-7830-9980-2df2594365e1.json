@@ -1,0 +1,24 @@
+{
+  "id": "01a1ed52-173f-7830-9980-2df2594365e1",
+  "external_ref": null,
+  "title": "Preserve lifecycle diagnostics for placement-refused test runs",
+  "outcome": "Test-run history and detail expose the deciding placement refusal and any later monitoring interruption, runtime loss, or unknown-terminal explanation while keeping retained diagnostics bounded.",
+  "acceptance": [
+    "A behavioral test drives a placement-refused observation through a later lifecycle error and verifies the user-visible placement and lifecycle diagnostics through the relevant history or detail surface, with no change to artifact, proof, or verification authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

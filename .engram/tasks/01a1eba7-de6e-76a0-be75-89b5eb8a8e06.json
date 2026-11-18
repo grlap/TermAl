@@ -1,0 +1,30 @@
+{
+  "id": "01a1eba7-de6e-76a0-be75-89b5eb8a8e06",
+  "external_ref": null,
+  "title": "Separate the cleanup rule from other commands that may prompt",
+  "outcome": "The instruction headings place scp, ssh, apt-get and brew guidance with the non-interactive shell guidance.",
+  "acceptance": [
+    "The other-commands guidance is outside the Cleanup deletions section, which retains all of its requirements.",
+    "Any move or heading change is coordinated with the shared instruction text under the existing procedure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "approvals",
+    "cleanup-docs",
+    "codex-runtime",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0ff58-5ae5-7970-bcaa-e2a5af1634f0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

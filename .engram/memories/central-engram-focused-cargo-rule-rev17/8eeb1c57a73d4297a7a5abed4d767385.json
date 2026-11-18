@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-engram-focused-cargo-rule-rev17",
+    "revision_id": "8eeb1c57a73d4297a7a5abed4d767385",
+    "previous": null,
+    "body_sha256": "e0018c04589853fc58d5747ff03cfada29989f44db00eee3613a7d78999d7950",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T03:44:01.323190300Z"
+    }
+  },
+  "body": "Central Engram cargo rule as of 2026-11-16 03:43Z. Source: Engram::Fable TermAl mailbox #1006, which records it as Engram memory rules-central-slot rev 17.\nRev 16 still governs every Engram FULL and every unbounded cargo test on Central: CARGO_BUILD_JOBS=2, ENGRAM_TEST_THREADS=4, raw FreeVirtual at or above 24 GiB at start, and no spawns.\nFOCUSED Engram cargo checks and tests on Central (named selections) may instead run with CARGO_BUILD_JOBS=1 and ENGRAM_TEST_THREADS at most 4, from raw FreeVirtual at or above 20,971,520 KiB at start, under Opus2's named GO. No other Engram cargo may run from START to END, and the owner self-stops below 6 GB.\nDuring such a run, LLM spawns may proceed when the spawner's own pre-spawn census shows FreeVirtual at or above 16,777,216 KiB. Hold new spawns while FreeVirtual is below 10 GiB, until END.\nWhy: the rev 16 crash was 24 parallel links, a -j1 compile peaks near 6 GB, and 24 GiB is unreachable with normal review traffic. Opus2 should check Engram's rules-central-slot before giving any Engram cargo GO on Central."
+}

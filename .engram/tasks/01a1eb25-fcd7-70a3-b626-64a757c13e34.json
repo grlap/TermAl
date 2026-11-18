@@ -1,0 +1,38 @@
+{
+  "id": "01a1eb25-fcd7-70a3-b626-64a757c13e34",
+  "external_ref": null,
+  "title": "Credit an exact committed-input PASS without a rerun: register/settle the original run's artifacts instead of forcing a credit-only rerun",
+  "outcome": "A launcher run that was registered at START with a claim binding and passed on its exact committed input with equal source ids gets exactly one verification record through the existing recover/notify path when its record was not delivered, without rerunning tests. The custody model (credit rests on tracking from START) and the --detach classifier are unchanged.",
+  "acceptance": [
+    "A run registered at START with a claim binding that ended PASS on its exact committed input with equal source ids, but whose verification-record send failed or whose route was held (session gone, connection or store changed) and later became available, is settled exactly once by the existing pending path under the same key, without rerunning tests. Shown by a behavioral test.",
+    "A record refused because the claim was recovered under a new fence before the record was sent stays Rejected. Its stored detail, and the launcher summary's existing 'verification: rejected:' line, state the cause ('the claim was recovered under a new fence before the record was sent') and the correction ('keep the claim live until the record lands'), and carry no private text from Engram's message. Shown by a behavioral test.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "greg-directed",
+    "launcher",
+    "refusals"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed at master bf9bd69196e12921788a9768e3495223104346d3 (tree 8b33b79d83471696edbb00182770bf454ff2633d), fast-forwarded from 633cffee and pushed by Opus2 at 15:01:36Z.\n\nWhat changed on the host:\n- It keeps a verification_record_refused reply's details.field as a strict typed label (refused_field), separate from refusal_code.\n- For a claim-field refusal, the stored rejection detail, which the launcher summary already shows, now states the causes and the correction:\n  - causes: the claim was recovered under a new fence, lapsed, had a pending handoff, or the claim or its run moved;\n  - correction: keep the claim live until the record lands, and offer no handoff of it until then.\n  The refusal stays final, and no private Engram text reaches the detail.\n- A new test witnesses a held-route PASS settling once, under the same key, through the existing pending path.\n- docs/test.md is updated.\n\nHow it was checked:\n- The review pair on candidate 11 was clean: Codex 87e6c8fc and Claude 86e78a88.\n- The exact leg passed on runner C6 (test-1a88dd6f, 2144/0).\n- The landing FULL-3 passed on DL560 (test-41225430, exit 0, equal source ids on tree 8b33b79d), and its panic journal is classified.\n- Evaluation e2663d78 passed before landing, with C3 still waiting on the landing itself. The post-landing evaluation passed 3/3.\n\nWhat moved elsewhere: the launcher's no-credit explanations went to w-f1559f4bd64c, by coordinator decision and attestation. The docs Low went to w-affc4826017f, and the save-ordering Low to w-63aea9e47436.",
+    "completed_at": "2026-11-18T15:06:17.539499300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

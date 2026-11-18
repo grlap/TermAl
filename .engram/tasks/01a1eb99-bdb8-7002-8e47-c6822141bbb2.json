@@ -1,0 +1,29 @@
+{
+  "id": "01a1eb99-bdb8-7002-8e47-c6822141bbb2",
+  "external_ref": null,
+  "title": "Preserve discoverable review identities when a later custody slot is damaged",
+  "outcome": "A damaged custody slot cannot conceal independently authenticated earlier publication identities from the authorized parent. Discovery reports partial failure explicitly and excludes unauthenticated identities and unpublished slots.",
+  "acceptance": [
+    "Preserve discoverable review identities when a later custody slot is damaged is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "greg-directed",
+    "refusals",
+    "review-custody"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1eb26-0f67-7ea3-abd7-2f5fb5691ed2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

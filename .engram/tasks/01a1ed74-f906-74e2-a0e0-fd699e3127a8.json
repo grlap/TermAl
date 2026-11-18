@@ -1,0 +1,30 @@
+{
+  "id": "01a1ed74-f906-74e2-a0e0-fd699e3127a8",
+  "external_ref": null,
+  "title": "Canceled worker delegation keeps a handle on its isolated worktree directory: git worktree remove leaves an empty dir with Permission denied (Windows)",
+  "outcome": "After a worker delegation is canceled and its child session has ended, nothing in TermAl (host or child runtime) keeps a handle on the child's isolated worktree directory, so a non-forced `git worktree remove` removes the directory completely.",
+  "acceptance": [
+    "Root cause identified with file:line: which process or handle (child runtime cwd, host watcher, app-server thread cwd, or open file) still holds the canceled child's worktree directory, and when it would release.",
+    "Fix plus behavioral test on Windows: cancel a worker delegation with an isolated worktree, then a non-forced worktree removal of that directory succeeds, leaving no empty directory, without force and without killing processes.",
+    "The review pair is clean and the full gate passes on the exact landed input, including the Windows leg."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

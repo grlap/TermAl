@@ -1,0 +1,27 @@
+{
+  "id": "01a1efc0-b4ef-7650-8e54-ad06bf5de019",
+  "external_ref": null,
+  "title": "Automatic removal of ended delegation worktrees, once a runtime's stop can be proven",
+  "outcome": "The sweep that w-e91a lands, which inspects each ended delegation's worktree and records a verdict, also removes a worktree with git worktree remove when its verdict is \"nothing to lose found\" and its child's runtime is provably stopped. Anything else keeps the worktree with its reason.",
+  "acceptance": [
+    "Automatic removal of ended delegation worktrees, once a runtime's stop can be proven is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

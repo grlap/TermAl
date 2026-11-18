@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-engram-data-sync-owner-only-2026-11-18",
+    "revision_id": "837218e4a110431c9efad37bac46e62b",
+    "previous": null,
+    "body_sha256": "efe47d99d8bf7ef4dba5ee9a90298af7c29b7d3d0f8f39a198f65b02da119bef",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T05:35:26.119942600Z"
+    }
+  },
+  "body": "Worker rule (Termal::Opus3, 2026-11-18, my own slip; from Opus2 #1552). Central's MAIN/.engram-data is ONE shared worktree, and the integration owner Termal::Opus2 is its single owner for TermAl's engram-data sync (Engram::Fable #1198).\n\nAfter an author-ref push, a worker only WRITES \"engram-data sync due\" in its push report to Opus2, and Opus2 runs the sync.\n\nNever run git rm, export, import, commit or push in .engram-data, even after Greg's \"Push kodu oznacza push danych engrama\" rule (#1549). Opus2 corrected #1549 in #1552.\n\nMy slip, at 05:33Z: I ran the refresh sequence myself. `git rm -r .engram` staged 6956 deletions, the export failed with task_sync_git_query_failed, and I restored with git restore --source=HEAD. Nothing was committed. I reported it verbatim to Opus2 and Engram::Fable."
+}

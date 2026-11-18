@@ -1,10 +1,10 @@
 {
   "id": "01a15bc9-e276-75c1-af03-1855c1ca87ae",
   "external_ref": null,
-  "title": "K4: live automatic remote-gate admission proofs on the Mac and Windows B",
+  "title": "K4: live automatic remote-gate admission proofs from the Mac and DL560 runners, admitted on Central",
   "outcome": "One input is gated on a real MacBookPro and on Windows B, each by a root session on that host, and each result is admitted automatically on the integration host with no manual step.",
   "acceptance": [
-    "A real MacBookPro full gate and a real Windows B full gate, each launched by a root session on that host on the judged input's tree, are each admitted automatically on the integration host as test evidence, with no import, registration or additional agent turn. Each records its observed platform and toolchain as provenance, and the bound item's test-bound acceptance evaluation passes on each.",
+    "A real MacBookPro (macOS) full gate and a real DL560 (Linux) full gate, each launched by a root session on that runner host on the judged input's tree, are each admitted automatically on the integration host Central (Windows), as test evidence, with no import, registration or additional agent turn. Each records its observed platform and toolchain as provenance, and the bound item's test-bound acceptance evaluation passes on each. Windows B is not used.",
     "A non-matching live case (a different tree, or a focused run against a full-gate criterion) stays visible on the integration host with its named reason and grants no credit.",
     "The full gate passes on the exact final input that lands, with an independent review pair and no outstanding in-scope Medium-or-higher finding on that input."
   ],

@@ -1,0 +1,30 @@
+{
+  "id": "01a1eba7-de02-7b23-a303-b3a0cc0baba4",
+  "external_ref": null,
+  "title": "Limit cleanup force-flag guidance to deletions",
+  "outcome": "The scope of the cleanup force-flag instruction is clear alongside existing copy and move guidance.",
+  "acceptance": [
+    "The sentence in AGENTS.md applies to cleanup deletions and is consistent with the copy and move examples.",
+    "The change preserves cleanup safeguards and follows the shared authority-text procedure."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "approvals",
+    "cleanup-docs",
+    "codex-runtime",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0ff58-5ae5-7970-bcaa-e2a5af1634f0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

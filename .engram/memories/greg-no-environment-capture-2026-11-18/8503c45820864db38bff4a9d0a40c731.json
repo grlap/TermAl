@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-environment-capture-2026-11-18",
+    "revision_id": "8503c45820864db38bff4a9d0a40c731",
+    "previous": null,
+    "body_sha256": "bf58efa45f0a9af75165944935758106840e06d1846c9d0afd0d620cd0576d5f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T04:31:50.975610900Z"
+    }
+  },
+  "body": "Greg, 2026-11-18 about 04:31Z, directly to Kimi::Consultant (relayed in 852a55c9 #434), verbatim: „wlasnie znowu probujemy zrobic capture caelgo srodowiska, upewnic sie milion razy, nad czyms co pewnie nie ma znaczenia / NIE ZNAM SYSTEMU CO PRACALBYM W TAKI SPOSOB”.\nStanding practice for TermAl: NO whole-environment capture and NO repeated world-unchanged proofs, such as before/after listings of ~/.termal or the home, environment snapshots, or process lists around runs. Evidence is the exact source_id, the actual command and result, and the retained artifacts.\nThe occurrence stopped at 04:31Z was the before/after \"delegations safety listings\" of the real ~/.termal around Windows runs (in Opus2's GO template, executed by Sol-a7bb), which led to a needless mtime investigation.\nA deliberate one-time proof for an act that writes real stores, such as a repair, is the exception and is not repeated. No new rule or gate."
+}

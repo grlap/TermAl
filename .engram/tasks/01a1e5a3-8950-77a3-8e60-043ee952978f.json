@@ -1,0 +1,37 @@
+{
+  "id": "01a1e5a3-8950-77a3-8e60-043ee952978f",
+  "external_ref": null,
+  "title": "Fixture asserts a wall-clock backoff window: engram_source_root_selection_snapshot.rs:101 fails under concurrent test load",
+  "outcome": "The source-root selection snapshot fixture proves that a retry backoff was applied after a transient capture failure, without asserting a wall-clock window that concurrent load can exceed. It passes deterministically under full-suite load.",
+  "acceptance": [
+    "The assertion at src/tests/engram_source_root_selection_snapshot.rs:101 (and any sibling with the same pattern) checks the observable backoff, e.g. retry_at later than a timestamp taken before the install, instead of 'not yet due' within a 2.0-2.4 s window across a synchronous persistence step. No timeout is inflated, and no retry or skip is added.",
+    "Evidence that the original failure is a test timing defect and not a product regression: the discriminating runs Opus3 requested from Opus2, (A) master with the same 9 filters and (B) GREEN5 with only that module, are recorded with their run ids.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "gate",
+    "test-defect",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The snapshot fixture older_turn_in_retry (src/tests/engram_source_root_selection_snapshot.rs) no longer asserts that the retry is \"not yet due\" against the wall clock, which loaded hosts outran. It now records a timestamp before install_runtime_closing_result and asserts retry_at >= before_install + 1 s, proving a backoff was applied without a wall-clock window. No timeout was inflated and no retry or skip was added. It landed in the combined test-stability candidate (commit faf2de4f, master 65a11f06, pushed 22:21:08Z), whose FULL passed on DL560 (test-b14789ad: Rust 8054/0, vitest 5178/0). The independent acceptance evaluation passed all 3 criteria. The remaining Low (a scheduling stall of 1 s or more could mask a missing backoff) is filed as w-45f6775032b2.",
+    "completed_at": "2026-11-16T22:26:58.177876400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

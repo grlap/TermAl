@@ -1,0 +1,30 @@
+{
+  "id": "01a1ef36-39ca-7801-b3c5-7b2f9e2a4c1d",
+  "external_ref": null,
+  "title": "Preserve a kept named-root acknowledgement across closing focus refresh",
+  "outcome": "A same-root acknowledgement made during an ordinary turn remains usable at the next opening when the exact claim and root still hold, despite a closing focus or revision refresh.",
+  "acceptance": [
+    "Confirm the ordering and actual focus or revision preconditions, then exercise a Kept acknowledgement made inside a turn with a different focused claim at closing.",
+    "The next opening uses the exact still-valid acknowledgement or states a concrete reason it could not apply it. The prior turn’s ownership, fail-closed behavior and distinct-work custody remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "review-follow-up",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

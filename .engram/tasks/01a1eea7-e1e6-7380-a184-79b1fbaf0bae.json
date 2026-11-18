@@ -1,0 +1,30 @@
+{
+  "id": "01a1eea7-e1e6-7380-a184-79b1fbaf0bae",
+  "external_ref": null,
+  "title": "Explain single-opening named-root acknowledgement in multi-root guidance",
+  "outcome": "The naming receipt and source-root guidance explain how to make a fresh acknowledgement for each ordinary opening that needs attribution when multiple named roots are acknowledged.",
+  "acceptance": [
+    "The naming receipt and the next-turn and focus passages in the host-adapter guide explain the one-opening lifetime and the re-naming remedy consistently.",
+    "Single-root guidance remains accurate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "review-follow-up",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

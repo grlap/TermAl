@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-roadmap-direction-2026-11-16",
+    "revision_id": "93569dfdcf324edfa7fd2a42c344d087",
+    "previous": null,
+    "body_sha256": "5df5811dfdac3fb77a8a435f3893ca226ae30066312347992fa54e88b0bfcd33",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T01:56:54.333624700Z"
+    }
+  },
+  "body": "Greg's roadmap direction (via Engram::Asistant, TermAl mailbox 588693a8 #1865, 2026-11-16 01:56Z). This is product direction only: agree no unagreed details or new architecture from it. EO and sync stay the priority.\n1. Closing EO and sync: accepted.\n2. Work optimization is a CONTINUOUS process, especially context use and KV caching.\n3. Work on other applications is already partly happening; Greg says TermAl currently has the largest Engram base.\n4. He agrees with the detachable-federation direction.\n5. The view and operator surface are part of work optimization.\n6. Mobile: Telegram, including file sending, covers the mobile role well. He sees no justification for 2-3 months on a separate mobile frontend. Small UI fixes may run in parallel.\n7. THE MOST IMPORTANT NEED: a simple Engram sync in the style of git push / git pull.\nKimi updates the roadmap draft and explains to Greg what it meant by \"backend organizacyjny\"."
+}

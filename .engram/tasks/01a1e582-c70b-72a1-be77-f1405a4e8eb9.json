@@ -1,0 +1,24 @@
+{
+  "id": "01a1e582-c70b-72a1-be77-f1405a4e8eb9",
+  "external_ref": null,
+  "title": "Delegation worktree reclaim retains every non-worker isolated worktree seeded from a dirty parent",
+  "outcome": "A non-worker isolated delegation whose worktree holds only the parent's seeded staged/unstaged state, unchanged by the child, is reclaimed when it ends like a clean worktree, instead of being retained forever with a note asking the parent to integrate its own state.",
+  "acceptance": [
+    "Delegation worktree reclaim retains every non-worker isolated worktree seeded from a dirty parent is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

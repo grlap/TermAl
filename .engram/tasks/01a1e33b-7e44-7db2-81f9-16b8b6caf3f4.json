@@ -1,0 +1,40 @@
+{
+  "id": "01a1e33b-7e44-7db2-81f9-16b8b6caf3f4",
+  "external_ref": null,
+  "title": "Claude native refusals: match the CLI's real deny-rule/sandbox refusal texts or narrow the docs to the \"requested permissions\" refusal",
+  "outcome": "TermAl's claims about which Claude CLI refusals end as bounded, abandoned errors match what it actually detects: every refusal text the CLI really emits for deny rules, its sandbox and managed policy either takes the refused-command path with a fixture proving it, or the docs and comments name only the refusal TermAl recognises.",
+  "acceptance": [
+    "The Claude CLI's actual refusal texts for a deny rule, its sandbox and managed policy are recorded on the item from captured output or pinned upstream source, with locators.",
+    "Either is_permission_denial recognises each recorded text, with a behavioural fixture per text proving the command ends as an abandoned Error with a bounded reason and no approval card, or docs/architecture.md, the claude_native_denial test header and the claude.rs comments name only the refusal it recognises.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the landing input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "greg-reported",
+    "kimi",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1e295-a4d4-7000-a550-d06c40369f6c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "The Claude CLI's real refusal wordings for deny rules, managed policy, plugins, the classifier and sandbox behaviour are recorded from the installed CLI. The matcher recognises each of them, and each has a behavioural fixture that proves the command ends abandoned with no approval card. Landed as 006a5c08, gated by 16B8-FULL-1. The runs-code-as fixture missing from the first post-landing evaluation landed as 4243b729, gated by 16B8-FIX1B-FULL-1 (test-c26b6075), with a clean review pair. The post-landing evaluation passed all 3 criteria.",
+    "completed_at": "2026-11-17T18:00:59.331095800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

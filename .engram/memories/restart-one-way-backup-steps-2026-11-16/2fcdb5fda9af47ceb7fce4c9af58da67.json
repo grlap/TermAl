@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-one-way-backup-steps-2026-11-16",
+    "revision_id": "2fcdb5fda9af47ceb7fce4c9af58da67",
+    "previous": null,
+    "body_sha256": "1dfb73983f4b98989b934bc4b4e493ee26907e910c70b653dfc57f4aae382ee6",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+      "work_ref": "w-5c8b45a10439"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T01:34:51.939104200Z"
+    }
+  },
+  "body": "Backup steps for the first restart onto a build at or after 7cdee39c (w-05ff, ONE-WAY coordination-store migration). Compiled from Opus2 #6510 (2026-11-16 01:34Z), which drew on source and file hashes only; no store was opened. Fable2 puts these in Greg's \"restart now\" message.\n\nSTORES (source: src/codex_home.rs resolve_termal_data_dir, src/persist.rs, src/coordination_persist.rs):\n- The data dir is <HOME>/.termal (HOME, else USERPROFILE, from the host process environment). On Central this is normally C:\\Users\\grzeg\\.termal\\; Greg confirms.\n- coordination.sqlite migrates ONE-WAY, from schema \"...-remote-verification-1\" to \"...-remote-verification-1-causal-pending-1\". Older binaries refuse the migrated store.\n- termal.sqlite is not migrated by 05ff, but is backed up as a consistent pair.\n- Both are in WAL mode.\n\nFILES, copied with TermAl STOPPED, into a dated folder, each store with its sidecars together:\n- coordination.sqlite, plus coordination.sqlite-wal and coordination.sqlite-shm if present;\n- termal.sqlite, plus termal.sqlite-wal and termal.sqlite-shm if present.\n\nHOSTS:\n- Central takes the build at the coming restart. The OLD EXE is target/release/termal.exe, sha256 fa97e2fa198e347bd250298135dd4726764b85862f9db542542adf065cf18c9f (Nov 15 09:02). Opus2's install swap renames it to target/release/termal.exe.fa97e2fa.bak. ROLLBACK means that .bak PLUS the restored backup set, never the exe alone.\n- DL560 does NOT take this build at the Central restart, only at its later remote rollout (after w-97bc and w-ab6c). Its backup of the same files is owed before THAT rollout.\n- Mac: it is a federation peer (aarch64, macOS), so it runs a TermAl host. The same rule applies at its own rollout.\nAgents never open a live store; Greg performs the backup and the restart."
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "no-delegation-worktrees-under-termal-home-2026-11-16",
+  "head": {
+    "state": "active",
+    "chain": [
+      "16927b3c3708488c885c234f1d25cd2b",
+      "09ea198f2ec942c4aaca90e5c94f0bff"
+    ]
+  }
+}

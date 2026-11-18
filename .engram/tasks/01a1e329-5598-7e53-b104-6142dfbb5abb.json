@@ -1,0 +1,28 @@
+{
+  "id": "01a1e329-5598-7e53-b104-6142dfbb5abb",
+  "external_ref": null,
+  "title": "Add a same-fixture positive control for conflicting Codex item-start invalidation",
+  "outcome": "The conflicting item-start test demonstrates that its original fixture can genuinely associate a launcher stream before proving that changed or missing start commands invalidate it.",
+  "acceptance": [
+    "The same router fixture proves an unchanged original start attaches the exact launcher artifact, and conflicting or missing-command variants preserve original custody and refuse that association."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "provider-placement",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

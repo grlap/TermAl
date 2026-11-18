@@ -1,0 +1,26 @@
+{
+  "id": "01a1f037-b56b-73e0-b197-be4c17760897",
+  "external_ref": null,
+  "title": "Document how to look up the host's Sol model ID before creating a root session",
+  "outcome": "A coordinator can find an advertised Sol model ID on the target host using the documented existing model options surface.",
+  "acceptance": [
+    "The guide names the per-session modelOptions and supported refresh route, links the model-switching guide, and keeps catalog choices distinct from the omitted-model preference."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1f018-9bc0-7951-89c4-bcd0dae6fa12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

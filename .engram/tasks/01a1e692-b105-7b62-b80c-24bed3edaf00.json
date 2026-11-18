@@ -1,0 +1,29 @@
+{
+  "id": "01a1e692-b105-7b62-b80c-24bed3edaf00",
+  "external_ref": null,
+  "title": "Delegation worktree sweep: settle only on definitive evidence and clear the settled mark when a follow-up starts a new attempt",
+  "outcome": "A delegation worktree that the sweep skipped for a transient reason, or whose delegation got a follow-up, is inspected again after its next end instead of waiting for a restart.",
+  "acceptance": [
+    "The sweep marks a delegation settled only on definitive evidence (no .git file, or a readable owner naming another delegation); a Git or IO failure during inspection waits for a later pass instead.",
+    "A follow-up that starts a new attempt removes the delegation from the settled set, so its worktree is reclaimed after that attempt ends when it has nothing to lose.",
+    "Behavioural tests cover both: a transient inspection failure followed by a successful pass, and a follow-up after a settled skip."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-task-sync-exchange-routine-2026-11-15",
+    "revision_id": "c04b8c308e334ee68ccd42eaceae8e02",
+    "previous": "22ea632b994d4cc7ae069fc2d4ef1f70",
+    "body_sha256": "0618cf4fe65986c8d205415e55acbd11461106d9c765da1816d4db35852ad0a9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T05:35:45.457024600Z"
+    }
+  },
+  "body": "TermAl task-sync regular exchange. Revision 6, Fable2, 2026-11-18 05:37Z. It SUPERSEDES the old remove-folder sequence of revision 5, which caused the transient 6956-deletion staging at 05:33Z when Opus3, Sol-c593 and Sol-license ran it.\nOWNER: Termal::Opus2 is the SINGLE owner and writer of TermAl's Central MAIN/.engram-data, which every worktree shares. Other TermAl sessions NEVER sync there. After any code push (master, test ref or author-test ref) they write \"sync due\" in their push report, and Opus2 runs one sync. Fable2 coordinates.\nCADENCE (Greg: „Push kodu oznacza push danych engrama”, every code push, not only master): after each code push, plus on demand. The sync follows the push and never blocks it. If it fails, report it openly; never skip it silently.\nROUTE: the current Engram engram-use skill, docs/skills/engram-use/SKILL.md on Engram master, sections \"Keep the exchange state\" and \"Refresh the export\". In short, from the TermAl root:\n(1) the three checks: HEAD is the recorded imported commit, MERGE_HEAD is empty, and the status is clean;\n(2) export IN PLACE: `engram task-sync export .engram-data/.engram --include-memories --json`. NEVER remove the folder first. On failure, `git -C .engram-data restore --source=HEAD --staged --worktree -- .engram`, read the status, STOP and report to Engram::Fable with the exact command and output;\n(3) if project.json changed, copy it as the next private basis under target/task-sync/;\n(4) `git -C .engram-data add .engram`; the staged files may be only .engram/project.json, .engram/tasks/ and .engram/memories/. Nothing staged means no commit. Otherwise run the disclosure check, commit, record the imported commit, then do a fast-forward push of engram-data with an explicit refspec and verify with ls-remote.\nFORM: planning only, with no --origin-machine and no --include-notes; memories included; privacy and disclosure re-scan before every commit.\nImport on another host follows the skill's incremental import (no --basis unless the refusal names one; never use another host's project.json as the basis).\nSTATUS 2026-11-18: the Central export is blocked by Engram P0 w-2be9029800f0 (task_sync_git_query_failed, a Git ls-tree deadline). The DL560 TermAl store rebuild waits for Greg's word (Engram::Fable, Asistant #1543).\nAuthority: the \"Task-sync data branch\" bullet in AGENTS.md and CLAUDE.md."
+}

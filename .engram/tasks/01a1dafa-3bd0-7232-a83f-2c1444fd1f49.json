@@ -4,7 +4,7 @@
   "title": "Named source root (gen 3755) not applied on later host-delivered turns; turn still measured in the previous root, registered run gets no credit",
   "outcome": "After termal_name_source_root returns \"takes effect next turn\", the session's next host-delivered turn is measured in the newly named root, or TermAl states exactly why not (for example: the named claim is not the session's focus) with an actionable remedy, so a registered run started there earns credit or the refusal names its cause.",
   "acceptance": [
-    "Root cause identified with file:line for Engram::Merger's case: gen 3755 named at about 16:44:40Z, two later host-delivered turns (16:44:47Z, 16:45:50Z), run test-e04b7dcb at 16:49:16Z still measured in .worktrees\\baa6-testref-merger-11859. In particular whether it is (a) focus/claim selection (the named claim is not the session's focused claim, 'focus alone decides later turns'), (b) path spelling (\\\\?\\C:\\ verbatim prefix vs C:/ cwd), or (c) turn admission.",
+    "Account for the original generation 3755 report using retained evidence, distinguishing turn measurement from the registered run's eligibility and stating which historical admission facts are unavailable. Identify the demonstrated stale ordinary-turn opening mechanism with file and line, separating it from path spelling and an unsettled predecessor.",
     "If (a) is by design, the naming receipt and the turn notice say so explicitly with the remedy; if (b) or (c), a behavioural test reproduces it and fails before the fix.",
     "Review pair clean and full gate green on the landing input."
   ],

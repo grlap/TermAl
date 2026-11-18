@@ -1,0 +1,33 @@
+{
+  "id": "01a1e574-699f-7293-8dfb-a8d484a31d02",
+  "external_ref": null,
+  "title": "Full gate: catch compile and lint errors before the long test stages (cargo check --all-targets / Clippy early, per platform)",
+  "outcome": "Compile errors, including test-code and feature-specific errors, fail early before long fixture or test stages. Clippy reports findings without blocking check-in or landing, with an owned next fix round. Full and focused launcher commands default their test storage to <main checkout>/target/t/<run id>, resolving the main checkout from Git's common directory and preserving an explicit TERMAL_TEST_USER_TEMP.",
+  "acceptance": [
+    "Recorded with file:line: the full gate's actual stage order on each host that runs it (Windows Central, Linux DL560, macOS) and the measured time to each stage, taken from existing run results without reruns. Facts at 5537064c: the stages are fmt, then `cargo check` (scripts/test-launcher.mjs:348, no --all-targets, so test code is not compiled), then tsc, then fingerprint and launcher fixtures (4-13 min), then Rust tests, then Vitest. TermAl runs no Clippy anywhere.",
+    "The early compile stage covers test code (`cargo check --all-targets`) and BLOCKS on compile errors, so a test-code compile error fails before the fingerprint stage. Clippy runs early on the same input and is NON-BLOCKING: its findings appear visibly in the run's result with a count and location, never fail the gate or block a landing, and are filed as an owned item for the next round of fixes.",
+    "The change keeps one full gate, adds no manual step, and does not repeat a compile or test that a later stage already performs, beyond reusing Cargo's cache. A behavioral launcher test shows a deliberately broken test file failing at the early compile stage with the later stages unrun, and a Clippy finding being reported without failing the gate. The launcher creates <main checkout>/target/t/<run id> and sets TERMAL_TEST_USER_TEMP unless it is explicitly set, shown by a child-process witness. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "clippy",
+    "gate",
+    "greg-directed",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a1e6bd-3280-7a42-938b-7a4873f3bf19"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

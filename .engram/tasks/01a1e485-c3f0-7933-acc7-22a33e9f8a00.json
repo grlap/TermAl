@@ -1,0 +1,34 @@
+{
+  "id": "01a1e485-c3f0-7933-acc7-22a33e9f8a00",
+  "external_ref": null,
+  "title": "Keep Gemini permission choices manual during unrelated pending runtime resets",
+  "outcome": "A generic pending runtime reset does not reject a Gemini request under a misleading Yolo-mode-change reason; uncertain grant authority stays with the existing manual decision owner.",
+  "acceptance": [
+    "An unrelated reset on an active Yolo process does not fabricate a mode-change-specific refusal or reject a genuine multi-choice request solely because the generic reset flag is set.",
+    "Router-level behavior tests cover an unrelated reset and a multi-choice permission request, preserving opaque request/option IDs and the existing manual-card ownership without an automatic persistent grant.",
+    "Stop, stale runtime, read-only custody and pending native-mode authority checks retain their independent behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "gemini",
+    "greg-reported",
+    "kimi",
+    "review-low",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1e2a8-7e47-78a1-b337-724f8b36a85f",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1e4ce-4489-7613-849d-98d8fb5db3b3",
+  "disposal_reason": "Continue independently after Gemini parent w-724f8b36a85f completed on independent 3/3 acceptance. This optional Low remains open; provenance and reviewed input are preserved in its notes. It does not require the removed completed worktree.",
+  "completion": null
+}

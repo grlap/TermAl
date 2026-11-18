@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6e9-2328-7dc3-b018-6def47d3e082",
+  "external_ref": null,
+  "title": "Separate macOS zombie-cleanup readiness from a two-second physical capture window",
+  "outcome": "bounded_read_cleanup_native_zombie_only_group_finishes_successfully proves retained zombie-only cleanup and exact exit/output independently of a two-second process-start/exit race.",
+  "acceptance": [
+    "The macOS test observes the intended exited-but-unreaped child phase deterministically before judging cleanup, retaining status23 and exact stdout/stderr checks.",
+    "The regression does not race setup and exit against fresh physical two-second windows; production read/cleanup budgets are unchanged, with no retry or ignore."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "macos",
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

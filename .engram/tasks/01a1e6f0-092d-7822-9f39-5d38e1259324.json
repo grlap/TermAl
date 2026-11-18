@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6f0-092d-7822-9f39-5d38e1259324",
+  "external_ref": null,
+  "title": "Control central-drain admission time in durable-receipt preservation test",
+  "outcome": "The authenticated durable-receipt preservation test cannot fail merely because initial reservation work consumes the drain's physical yield budget before dispatch.",
+  "acceptance": [
+    "federation_m4_runtime_central_drain_has_authenticated_durable_receipt_and_preserves_append keeps authenticated matching receipt, immutable append disposition, mirror and later activation assertions, with controlled drain-yield time.",
+    "The production2s yield budget remains unchanged and deadline behavior is covered separately without retries or ignore."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

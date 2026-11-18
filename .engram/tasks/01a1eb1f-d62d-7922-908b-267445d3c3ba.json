@@ -1,0 +1,31 @@
+{
+  "id": "01a1eb1f-d62d-7922-908b-267445d3c3ba",
+  "external_ref": null,
+  "title": "Review unjustified refusals and blocks in TermAl's workflow (Greg + Kimi): keep only the necessary ones, each with a stated cause and fix",
+  "outcome": "Every refusal or block in TermAl's workflow is listed. For each, the concrete problem it solves is named and a verdict is given: necessary, or remove. Unjustified restrictions and false refusals get an owner and a simple fix. Every refusal that stays tells the user its cause and a possible correction. No new gates are added, and Comovo sync delivery is not delayed.",
+  "acceptance": [
+    "An inventory of TermAl refusals and blocks, with file:line for each, read-only and led by Kimi::Consultant. It covers check recognition and test credit, launcher input and registration refusals, acceptance evaluation and done blockers, delegation and mailbox refusals, named-root and source-root refusals, and Codex approval and command refusals. Each entry states the concrete problem the refusal solves and a verdict: necessary, or remove/relax.",
+    "Every remove/relax verdict is filed as its own owned item with a simple fix. Every refusal kept as necessary either already states its cause and a possible correction in its message, or has an owned item that adds them.",
+    "No new review, evaluation, FULL or approval gate is introduced, and no Comovo sync work is delayed. A short Polish report reaches Greg via Engram::Asistant."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "kimi",
+    "refusals",
+    "workflow"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

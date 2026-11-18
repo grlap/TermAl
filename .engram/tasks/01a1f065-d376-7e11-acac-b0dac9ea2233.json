@@ -1,0 +1,39 @@
+{
+  "id": "01a1f065-d376-7e11-acac-b0dac9ea2233",
+  "external_ref": null,
+  "title": "Retire the exact Codex writer when its managed observation was sealed early",
+  "outcome": "A proven completion for a current Codex command releases that command's shell move and writer custody even if the managed test observation was sealed before the process finished.",
+  "acceptance": [
+    "A real native router test confirms the writer and pending one-call shell move exist before a managed observation is interrupted or refused and later settled by its exact completion.",
+    "The exact completion settles only its own shell move and writer once. The sealed observation is unchanged, no evidence or credit is added, and an older same-key writer survives.",
+    "Mismatched and unaddressed completions do not retire another execution's writer."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1f018-9bc0-7951-89c4-bcd0dae6fa12",
+  "external_ref": null,
+  "title": "docs/features/root-coding-sessions.md still names gpt-6.1-sol as the Sol default; align it with the code",
+  "outcome": "The root coding sessions feature brief states the Sol model that the code actually uses as its default (or that the default comes from the Codex app-server model list), with no stale model name.",
+  "acceptance": [
+    "docs/features/root-coding-sessions.md (about lines 41, 182 and 204 at bf9bd691) and any other doc naming gpt-6.1-sol as a default are corrected to match the source of truth in the code, cited by file and line in the item note.",
+    "If the code itself hard-codes gpt-6.1-sol as a default, that is reported in a note, not changed here.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

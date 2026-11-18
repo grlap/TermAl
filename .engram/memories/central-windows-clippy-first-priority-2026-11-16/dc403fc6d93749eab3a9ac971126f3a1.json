@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-windows-clippy-first-priority-2026-11-16",
+    "revision_id": "dc403fc6d93749eab3a9ac971126f3a1",
+    "previous": "3f17c954a96c4f3f93d0f8787e7b7d03",
+    "body_sha256": "c0161550c2a8062b8cd34b3eb7979c0f1aa3b3b6e54da915ad27c37391f52b8c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T17:45:19.334677200Z"
+    }
+  },
+  "body": "WITHDRAWN 2026-11-16 17:45Z (Engram::Fable #1026, Greg's decision via Asistant #1396): Clippy findings no longer block an Engram landing; they are fixed in the next round. The earlier request (Fable #1025) to give Windows Clippy priority over focused tests and FULLs in the Central Engram cargo slot is withdrawn: schedule Clippy at normal priority. Consequence that day: the restart set be4e9122 went ahead without R18s, with its Windows leg as plain cargo test (no -D warnings) and its Mac FULL given the next slots; R18s's Clippy and 6-reviewer round dropped to normal priority."
+}

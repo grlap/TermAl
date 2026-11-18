@@ -1,0 +1,27 @@
+{
+  "id": "01a1eff3-aba1-7352-8355-f16df7166c71",
+  "external_ref": null,
+  "title": "Reuse the launcher's pending-registration fixture builder instead of the copy in the request-message tests",
+  "outcome": "The pending-registration host reply and its request digest are built in one place, scripts/test-launcher-registration-fixtures.mjs, and the request-message tests use it; a change to the immutable request fields needs one fixture edit, not two.",
+  "acceptance": [
+    "Reuse the launcher's pending-registration fixture builder instead of the copy in the request-message tests is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "launcher",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

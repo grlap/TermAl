@@ -1,0 +1,37 @@
+{
+  "id": "01a1e602-2fb6-7443-a06b-3c1a32a94158",
+  "external_ref": null,
+  "title": "Vitest focus assertion failed in a landing FULL: WorkPanel details-visibility \"reveals the loaded details body in Dependencies\" (line 53, body focused instead of the details aside)",
+  "outcome": "The WorkPanel details-visibility test is deterministic under full-gate load, so landing FULLs no longer fail on it.",
+  "acceptance": [
+    "The original failing landing-run evidence is preserved, and a concrete test, fixture, or product mechanism explains why the Work details focus assertion received body; the diagnosis is supported by a discriminating behavioral check.",
+    "The confirmed cause is corrected with a behavioral regression covering details focus and loaded-body visibility while preserving the user's later focus choice; no retries, skips, or increased timeouts are used.",
+    "TypeScript checking and focused affected Vitest tests pass on the exact candidate, and the change receives the independent review pair and landing validation required by the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "gate",
+    "test-defect",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Corrected the WorkPanel passive-effect focus-request race, with a deterministic Profiler-boundary regression preserving loaded details visibility and later user focus. Exact candidate TypeScript/59-test validation, independent Codex+Claude review and byte-identical combined landing/full gate recorded. Fresh independent acceptance0c270ec3e9e34be7a5e0ef72ec660cdb passed all3 criteria; completed without changing the evaluated source.",
+    "completed_at": "2026-11-16T22:30:16.594085200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

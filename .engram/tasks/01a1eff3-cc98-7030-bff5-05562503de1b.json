@@ -1,0 +1,27 @@
+{
+  "id": "01a1eff3-cc98-7030-bff5-05562503de1b",
+  "external_ref": null,
+  "title": "Registration view: a compacted row's retained lookup can match by an alias run id",
+  "outcome": "The test-run registration view answers for the run id it was asked about: a compacted row found by one of its other summary ids does not report that row's primary registration (including `bound`) as the queried run's.",
+  "acceptance": [
+    "Registration view: a compacted row's retained lookup can match by an alias run id is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

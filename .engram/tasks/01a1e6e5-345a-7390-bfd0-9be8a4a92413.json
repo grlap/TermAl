@@ -1,0 +1,28 @@
+{
+  "id": "01a1e6e5-345a-7390-bfd0-9be8a4a92413",
+  "external_ref": null,
+  "title": "Remove the physical 750 ms race from late-file grace acceptance test",
+  "outcome": "late_turn_file_changes_are_summarized_during_grace_window proves acceptance before the grace deadline using deterministic time.",
+  "acceptance": [
+    "The test controls before-deadline time while retaining real tracking completion and exact Created/path summary assertions; pair it with the existing forced-expiry negative control.",
+    "Production ACTIVE_TURN_FILE_CHANGE_GRACE remains750ms and existing attribution behavior is retained without retry or ignore."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

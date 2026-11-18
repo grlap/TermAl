@@ -1,0 +1,29 @@
+{
+  "id": "01a1e71d-6237-7ee0-b5ad-f6b151fcba96",
+  "external_ref": null,
+  "title": "Use controlled time for split OpenCode post-model notification accumulation test",
+  "outcome": "Use controlled time for split OpenCode post-model notification accumulation test",
+  "acceptance": [
+    "opencode_post_model_options_accumulate_across_repeated_model_notifications deterministically consumes both prequeued notifications without racing a physical 50 ms expiry, using controlled time or a pure accumulation boundary.",
+    "Keep the exact effort and mode assertions and separate real timeout coverage; do not change production timeout semantics or retry the test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "audit",
+    "tests",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "codex-upgrade-due-next-restart-2026-11-18",
+  "head": {
+    "state": "active",
+    "chain": [
+      "7c81998793894d598e26768ed08782cc"
+    ]
+  }
+}

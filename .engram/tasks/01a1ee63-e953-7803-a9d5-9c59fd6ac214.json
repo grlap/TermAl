@@ -1,0 +1,28 @@
+{
+  "id": "01a1ee63-e953-7803-a9d5-9c59fd6ac214",
+  "external_ref": null,
+  "title": "Settle Stop and shutdown receipts for asynchronous ordinary pre-send carriers",
+  "outcome": "If asynchronous ordinary opening preparation is introduced, exact Stop, failed Stop and host retirement settle the provably unsent prompt under its delivery rules.",
+  "acceptance": [
+    "Exercise successful Stop, failed Stop and host retirement with a carrier blocked before provider enqueue. Verify exact receipt, direct prompt and no-send dispositions.",
+    "The original runtime and generation fence protects a superseded or replayed carrier."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnosed-from-2c14",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

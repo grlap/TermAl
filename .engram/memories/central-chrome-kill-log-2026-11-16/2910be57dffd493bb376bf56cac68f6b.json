@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-chrome-kill-log-2026-11-16",
+    "revision_id": "2910be57dffd493bb376bf56cac68f6b",
+    "previous": "2fb2d8ec1090445cbad597ed0427e10d",
+    "body_sha256": "998f0b981169b5da359db559ebe8ae10e5a2e9271657250e744bb3d3b7016127",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T15:24:54.016643100Z"
+    }
+  },
+  "body": "Central chrome.exe cleanup under Greg's grant (memory central-chrome-kill-grant-2026-11-16), performed by Opus2.\n- Use 1, 2026-11-16, for Engram::Merger's w-8732 focused step 3 (cold -j1 cargo test, floor 20,971,520 under rules-central-slot rev 17). The Merger's required census at 03:57:12Z read 20,090,040, below the floor.\n- At 03:58:20.89Z FreeVirtual read 20,610,524, with 28 chrome processes. Stop-Process -Name chrome was issued once.\n- At 03:58:21.43Z FreeVirtual read 29,388,388, with 21 chrome processes still exiting or left. No second kill was issued.\n- No test run was in progress on Central at the time. Only chrome.exe was touched, only on Central, and only once for this need.\n- The Merger was asked to record the same values on its Engram item w-8732.\n\n- Use 2, 2026-11-17. Central FreeVirtual had fallen to 13.9M, below every floor: the 443e and GREEN12 exclusive Windows legs (23,068,672), 12325's Engram calls (20,971,520) and LLM spawns (16,777,216). At 00:27:09.76Z FreeVirtual read 13,951,936. Stop-Process -Name chrome -Force was issued once, with no process listing (Greg's no-process-checks directive). At 00:27:11.15Z FreeVirtual read 25,847,552. No cargo or test run was in progress on Central; one LLM reviewer (Sol-edfd's Claude) was running and was not touched. Only chrome.exe was touched, once.\n\n- Attempt 3, 2026-11-17 00:43:46Z. FreeVirtual read 18,055,768, below the 20,971,520 floor for Sol-a7bb's warm 443e call B. Stop-Process -Name chrome was issued once and refused: no chrome process existed. At 00:43:48Z FreeVirtual read 18,013,516. Nothing was stopped. The current memory use is not chrome, and no other process may be touched (Greg's no-kill rule), so the queue waits for capacity.\n\n- Use 4, 2026-11-17 15:24Z, for Engram::Merger's E-prime Windows landing FULL, which needs raw FreeVirtual of at least 25,165,824 KiB (rules-central-slot rev 17: 24 GiB, CARGO_BUILD_JOBS=2, ENGRAM_TEST_THREADS=4). With no LLM child and no cargo or test running on Central, FreeVirtual stayed near 23.0 to 23.3M. At 15:24:47.90Z it read 23,347,068. Stop-Process -Name chrome -Force was issued once, with no process listing. At 15:24:49.76Z it read 27,557,540. Only chrome.exe was touched, once, on Central."
+}

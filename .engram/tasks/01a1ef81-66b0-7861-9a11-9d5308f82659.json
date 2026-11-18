@@ -1,0 +1,27 @@
+{
+  "id": "01a1ef81-66b0-7861-9a11-9d5308f82659",
+  "external_ref": null,
+  "title": "Re-check a read-only delegation's requested cwd after its worktree lease, as session creation does",
+  "outcome": "A delegation is created only in a requested cwd that still exists once its worktree lease is taken, so a sweep that removed it just before cannot leave a child session without its directory.",
+  "acceptance": [
+    "Re-check a read-only delegation's requested cwd after its worktree lease, as session creation does is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

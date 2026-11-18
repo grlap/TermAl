@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-testref-needs-focused-leg-on-carried-input",
+    "revision_id": "8b34767e5444434db6b0a4d7487d01f5",
+    "previous": "8e822891b2fd46539c20d13cb62034bf",
+    "body_sha256": "42fef08f006d9388aa8acf40450f8b0d9e20340a489170af38262eecd9c902d8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T19:11:02.378499800Z"
+    }
+  },
+  "body": "Integration-owner trap (Termal::Opus2). The CLAUDE.md test-ref rule pushes only a merge-ready input: \"a fresh focused compile and tests covering its changes and new tests have passed on THAT EXACT input\". A carry creates a new input, even when its contribution is byte-identical (same paths, blob ids and modes). A byte-identical contribution lets the carry adopt the earlier REVIEW pair; it never stands in for the focused run.\nRULE: before git push origin <commit>:refs/heads/test/..., cite on the item a passed focused run whose TREE equals the pushed tree. A run on the pre-carry tree does not count. If none exists, book one and wait. Put this check in the pre-commit freeze record itself, so the record cannot be written without it. Also re-read the producer's mailbox right before the push, because holds often cross.\nOccurrences:\n1. 2026-10-30, w-214437118fcf. The focused evidence was on e1ba31fb, not on the carried ce2fa40f. The ref was deleted 24 s after the push; no run used it.\n2. 2026-11-16, w-5c8b45a10439. The only focused evidence was on 7b3d5cab / tree 71e06656, not on the carried f70bfb8f / tree 32c31679. The ref cca062de was pushed at 19:07:12Z, Sol-c593 caught it (#2001), and the ref was deleted at 19:10:26Z. FULL-1 had already started from that ref and became evidence only."
+}

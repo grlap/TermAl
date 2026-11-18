@@ -1,0 +1,31 @@
+{
+  "id": "01a1e14c-6ff4-7283-a0d7-7d0b5e394fa2",
+  "external_ref": null,
+  "title": "Host utilization briefly reports DL560 and Mac as peerDisconnected with stale metrics while federation attestation stays authenticated (lastSuccessfulRpc never populated)",
+  "outcome": "Host utilization briefly reports DL560 and Mac as peerDisconnected with stale metrics while federation attestation stays authenticated (lastSuccessfulRpc never populated)",
+  "acceptance": [
+    "The cause of the discrepancy is established from source and diagnostics: a real transient link loss, a utilization RPC timeout or failure, or a projection or staleness artefact. It is stated as CONFIRMED with evidence, not assumed.",
+    "Whatever the cause, the status surface reports a peer's state truthfully and consistently with attestation and link state, and an unavailable or stale state names its reason (for example 'utilization RPC timed out at T, last fresh at T0'). A behavioural test covers the transition.",
+    "lastObserved.lastSuccessfulRpc and lastSuccessfulWake are either populated on successful RPCs and wakes, or removed if unused.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "refusal-reasons",
+    "status-visibility"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

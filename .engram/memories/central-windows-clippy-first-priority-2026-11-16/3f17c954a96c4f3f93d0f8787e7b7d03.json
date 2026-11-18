@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-windows-clippy-first-priority-2026-11-16",
+    "revision_id": "3f17c954a96c4f3f93d0f8787e7b7d03",
+    "previous": null,
+    "body_sha256": "3472be8b9d0fec247b964afde141a31650053e4dc24edc1f13c5e1eeaa2f65b5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T17:43:10.615607800Z"
+    }
+  },
+  "body": "Scheduling rule (Engram::Fable #1025 to Opus2, 2026-11-16 17:42Z, from Greg's direction, Engram memory rules-greg-clippy-first-2026-11-16). Strict Clippy (cargo clippy --all-targets --all-features -- -D warnings) is the FIRST check on Engram coder inputs, on every platform whose cfg code the change touches. In the Central Engram cargo slot, short Windows Clippy requests (-j1) take priority over focused test runs and FULLs: place them at the next slot boundary ahead of queued tests. Origin: the restart-set candidate be4e9122 passed Linux and macOS checks but failed Windows Clippy on a cfg(not(unix)) function (test-ef51a730), which a Windows Clippy first would have caught before costlier runs. First applied: dd205 R18s (Engram::Opus #1791), whose Windows Clippy passed at 17:37Z."
+}

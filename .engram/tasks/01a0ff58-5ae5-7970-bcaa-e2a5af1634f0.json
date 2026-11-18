@@ -5,7 +5,7 @@
   "outcome": "Codex sessions under approval policy \"never\" reject authorized forced deletions (\"blocked by policy\"), with no route to approve them",
   "acceptance": [
     "A note establishes where the refusal comes from (Codex CLI's own command-safety check under approval policy never, or something TermAl configures), citing the source or the Codex documentation.",
-    "A decision is recorded: either TermAl surfaces such refusals as an approval request a coordinator or Greg can grant, or the documented route for an authorized deletion from a Codex session is to hand it to a non-Codex session; the chosen route is written into the relevant feature doc."
+    "A coordinator decision is recorded and documented for already-authorized cleanup by Codex: non-forced initial removal after the existing path, ownership and not-in-use checks; policy refusals and non-forced operational failures stop the attempt and are reported without a tool, form or executor switch, invented approval UI or default-policy change; a forced case needs Greg's recorded authorization and a permitted native execution route."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
@@ -17,12 +17,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed and independently accepted on 178f5a811fabf3532a1c84cdac93ee5c2b327e52. The documentation attributes the native Codex refusal mechanism and records the exact coordinator-approved cleanup route and precedence. Evaluation 9e10ba9655fe49349b6b456425838c89 passed both criteria at exact tree 7bea4d010f9b8b60e675fbae8a72c05ffd9b2f0a. The DL560 full landing gate passed on that tree and was hostless, with no registered Test credit. The auditor recorded the passage script after landing and confirmed all passages on the landed input. This timing gap remains disclosed. Both owned author refs were retired and confirmed absent.",
+    "completed_at": "2026-11-18T04:22:56.369214700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

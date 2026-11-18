@@ -1,0 +1,29 @@
+{
+  "id": "01a1eaf5-f1dd-7550-ae91-40213144f3cd",
+  "external_ref": null,
+  "title": "Strengthen recovery-priority refusal tests with exact API error status and unfinished-attempt cause",
+  "outcome": "Recovery-priority negative controls distinguish the intended invalid-gap, readKey-conflict and unfinished-attempt refusals from unrelated failures.",
+  "acceptance": [
+    "Tests assert HTTP400 for criterion0 and out-of-range gaps, HTTP409 for a reused readKey with changed intent, and HTTP409 plus the unfinished-attempt cause for submission after a failed proof read.",
+    "Focused behavioral coverage passes without using instruction or brief prose assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "test-hardening"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ea31-9c2c-7410-a013-a038e4047877",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

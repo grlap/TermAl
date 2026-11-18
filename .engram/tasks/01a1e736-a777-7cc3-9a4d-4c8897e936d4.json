@@ -1,0 +1,35 @@
+{
+  "id": "01a1e736-a777-7cc3-9a4d-4c8897e936d4",
+  "external_ref": null,
+  "title": "Cover Codex thread setup AutoApprove sandbox variants",
+  "outcome": "Thread/start and thread/resume behavior tests cover restricted ReadOnly and FullAccess AutoApprove policy serialization.",
+  "acceptance": [
+    "Parameterize the existing setup policy helper's sandbox or drive equivalent real setup paths, covering AutoApprove plus ReadOnly and AutoApprove plus DangerFullAccess at both thread/start and thread/resume.",
+    "Assert the actual outgoing native policy is granular for ReadOnly and on-request for DangerFullAccess, retaining Never/read-only-delegation, WorkspaceWrite, configuration and identity controls without reading Markdown or mirroring the production selector."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "codex",
+    "greg-reported",
+    "kimi",
+    "review-follow-up",
+    "sandbox",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e2bc-8881-7a30-a376-443e364ea498",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

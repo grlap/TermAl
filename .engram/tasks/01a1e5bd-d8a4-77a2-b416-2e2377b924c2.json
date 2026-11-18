@@ -1,0 +1,29 @@
+{
+  "id": "01a1e5bd-d8a4-77a2-b416-2e2377b924c2",
+  "external_ref": null,
+  "title": "coder-test-execution skill: per-platform order line (cheap compile first, Clippy report-only, then focused tests, then one FULL)",
+  "outcome": "coder-test-execution skill: per-platform order line (cheap compile first, Clippy report-only, then focused tests, then one FULL)",
+  "acceptance": [
+    "After w-ad5d15ee6903 has landed, .agents/skills/coder-test-execution/SKILL.md gains one procedure line: on each platform, first run the cheap compile on the exact input (`cargo check --all-targets --all-features`; it blocks), with Clippy reported but never blocking; then the focused tests; then one final FULL. No other change to the skill, no authority text, no Greg quotes.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "clippy",
+    "gate",
+    "skills"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

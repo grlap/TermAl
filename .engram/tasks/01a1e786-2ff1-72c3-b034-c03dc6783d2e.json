@@ -1,0 +1,29 @@
+{
+  "id": "01a1e786-2ff1-72c3-b034-c03dc6783d2e",
+  "external_ref": null,
+  "title": "Make current coordination-schema work-count regressions reject missing instrumentation",
+  "outcome": "The no-historical-build regression tests fail when canonical work was not observed, while continuing to assert zero historical builds and exact schema/data preservation.",
+  "acceptance": [
+    "The current-reopen and per-worker parallel-reopen controls require positive or exact observed current canonical work and observed content validation in addition to zero historical builds.",
+    "A meaningful discriminator demonstrates that absent/renamed/unrecorded canonical observation cannot make these controls pass; all existing no-historical-work, query-only and preservation assertions remain, with no elapsed ceiling or timeout inflation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "sqlite",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

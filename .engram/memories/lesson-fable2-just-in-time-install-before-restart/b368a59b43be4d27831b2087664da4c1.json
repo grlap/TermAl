@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-fable2-just-in-time-install-before-restart",
+    "revision_id": "b368a59b43be4d27831b2087664da4c1",
+    "previous": null,
+    "body_sha256": "6ce62345b44dc5a5fa259501808c2276eddef70724746fad671a26cafae84d7e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T13:45:29.283002200Z"
+    }
+  },
+  "body": "Lesson (Termal::Fable2, 2026-11-17). On 11-17 the Engram restart-set binary (eecabd6a) was installed at 06:35Z, ahead of a 06:50Z \"restart now\". Greg was not available, and by 13:45Z the restart still hadn't happened. From install on, every NEW engram CLI process refused with projection_repair_required, so Engram writes were blocked for about 7 h. The Merger then restored the old binary 954dfe2d.\n\nRULE: never pre-stage an install whose new binary refuses work before the restart, such as one needing a projection repair or cutover. The order is:\n1. Greg tells Asistant he is available.\n2. Within about 15 min, the installs go in and Central is confirmed quiet.\n3. \"restart now\" goes out for an IMMEDIATE restart.\n4. The post-restart repair runs.\nA TermAl install that only replaces target/release/termal.exe and blocks nothing may still be pre-staged."
+}

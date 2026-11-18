@@ -1,0 +1,27 @@
+{
+  "id": "01a1e9dc-e233-7c20-a79c-39c05805be7e",
+  "external_ref": null,
+  "title": "Linked-worktree write exemption re-reads .git without the bounded no-follow read",
+  "outcome": "The nested-worktree exemption in the read-only review scope decides \"linked worktree\" from the same bounded, no-follow, non-blocking read that delegation_git_boundary already performs on `.git`, so a FIFO or link substituted for `.git` cannot block a write or approval check, and both paths parse `gitdir:` the same way.",
+  "acceptance": [
+    "Linked-worktree write exemption re-reads .git without the bounded no-follow read is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

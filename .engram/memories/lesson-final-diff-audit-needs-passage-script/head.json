@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "lesson-final-diff-audit-needs-passage-script",
+  "head": {
+    "state": "active",
+    "chain": [
+      "cae4129b35364029b5cf42a8ef284bb7",
+      "897ac189c4ee420299296ea0b397598e",
+      "90213b01823a455b93f443af76c9428d"
+    ]
+  }
+}

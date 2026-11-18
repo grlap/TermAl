@@ -1,0 +1,29 @@
+{
+  "id": "01a1e71d-b0bd-76f0-b28b-1a4f353ddd88",
+  "external_ref": null,
+  "title": "Make dependent-only OpenCode notification acceptance test independent of physical expiry",
+  "outcome": "Make dependent-only OpenCode notification acceptance test independent of physical expiry",
+  "acceptance": [
+    "opencode_post_model_options_accept_dependent_only_notification_after_ack deterministically verifies the queued dependent-only notification with controlled time or a pure notification-decision boundary.",
+    "Retain exact effort and mode results and real expiry coverage elsewhere; no production timeout increase, test retry or weakened assertion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "audit",
+    "tests",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

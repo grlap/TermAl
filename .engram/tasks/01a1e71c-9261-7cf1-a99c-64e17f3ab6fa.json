@@ -1,0 +1,29 @@
+{
+  "id": "01a1e71c-9261-7cf1-a99c-64e17f3ab6fa",
+  "external_ref": null,
+  "title": "Make partial post-model OpenCode timeout test independent of the 30 ms notification race",
+  "outcome": "Make partial post-model OpenCode timeout test independent of the 30 ms notification race",
+  "acceptance": [
+    "The opencode_post_model_timeout_preserves_and_applies_reported_dependent regression deterministically observes the partial effort notification before exercising the missing-mode timeout, using an owned phase or controlled clock.",
+    "Keep the existing exact model, effort, mode, write-count and single-notice assertions; do not increase the production timeout, retry the test or weaken the timeout behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "audit",
+    "tests",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

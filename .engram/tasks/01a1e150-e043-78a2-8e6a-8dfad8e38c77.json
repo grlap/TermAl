@@ -1,0 +1,30 @@
+{
+  "id": "01a1e150-e043-78a2-8e6a-8dfad8e38c77",
+  "external_ref": null,
+  "title": "Mailbox status says \"heldBehindPausedQueue\" when the recipient is merely compacting context — name the real blocking cause and keep \"paused\" for a deliberate pause with its release condition",
+  "outcome": "Mailbox status says \"heldBehindPausedQueue\" when the recipient is merely compacting context — name the real blocking cause and keep \"paused\" for a deliberate pause with its release condition",
+  "acceptance": [
+    "The send receipt's notificationDisposition and the exact-message currentStatus name the ACTUAL reason a wake is held, for example the recipient compacting its context (resumes automatically), an operator pause (with its release condition), or provider capacity. 'Paused' appears only when a deliberate pause is in effect.",
+    "Behavioural tests drive each blocking cause that sets the auto-dispatch block and assert the distinct disposition and summary text class (not exact prose). Existing dispositions and wake semantics are otherwise unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "refusal-reasons",
+    "status-visibility"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

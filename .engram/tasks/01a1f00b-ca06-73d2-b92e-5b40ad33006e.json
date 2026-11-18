@@ -1,0 +1,27 @@
+{
+  "id": "01a1f00b-ca06-73d2-b92e-5b40ad33006e",
+  "external_ref": null,
+  "title": "Launcher: `recover` on a committed run killed between its first two records gives the request-only explanation",
+  "outcome": "`node scripts/test-launcher.mjs recover RUN_DIR` on a committed-input run that holds only request.json (killed between its two first records) says no tests ran and gives the registration correction, as `summary` does, instead of failing with a raw ENOENT; or docs/test.md says to use `summary` for such a run.",
+  "acceptance": [
+    "Launcher: `recover` on a committed run killed between its first two records gives the request-only explanation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

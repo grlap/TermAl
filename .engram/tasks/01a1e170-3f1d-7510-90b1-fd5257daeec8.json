@@ -1,0 +1,31 @@
+{
+  "id": "01a1e170-3f1d-7510-90b1-fd5257daeec8",
+  "external_ref": null,
+  "title": "Typed test-request send dispatches a run already known to be uncreditable (no claim or named root) without saying so — surface it on the receipt, and refuse unless explicitly evidence-only",
+  "outcome": "Typed test-request send dispatches a run already known to be uncreditable (no claim or named root) without saying so — surface it on the receipt, and refuse unless explicitly evidence-only",
+  "acceptance": [
+    "The send receipt of `termal mailbox send --test-request-json`, and the MCP equivalent, reports for each target the captured association, or its uncreditedReason, at send time.",
+    "When a requested target can't be associated (no unique current held claim and named root, or the producer is unsupported), the send REFUSES before dispatch, naming the check, the observed values and the remedy (for example 'claim the item and name its source root, then resend'). The exception is a caller that explicitly marks the request evidence-only; then it dispatches and the receipt says it will not be credited.",
+    "Behavioural tests cover a credited target, a target with no claim, a target with no named root, the evidence-only opt-in, and a mixed set of targets. Existing creditable sends are unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "builder-v1",
+    "refusal-reasons",
+    "remote-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

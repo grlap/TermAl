@@ -1,0 +1,27 @@
+{
+  "id": "01a1f037-b529-7e33-ac6c-b7efb043cbfa",
+  "external_ref": null,
+  "title": "Document the oversized saved Codex model preference fallback",
+  "outcome": "The root coding sessions guide says how an oversized saved Codex model preference resolves when model is omitted.",
+  "acceptance": [
+    "The guide cites the persisted preference length fallback in src/turns.rs and its built-in Codex model, in addition to the missing, blank, and default cases.",
+    "The existing API preference and creation behavior stays unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1f018-9bc0-7951-89c4-bcd0dae6fa12",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

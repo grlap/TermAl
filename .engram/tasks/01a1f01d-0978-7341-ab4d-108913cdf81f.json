@@ -1,0 +1,38 @@
+{
+  "id": "01a1f01d-0978-7341-ab4d-108913cdf81f",
+  "external_ref": null,
+  "title": "Extract provider execution lifecycle from the Engram turn-check modules after landing",
+  "outcome": "After the linked-worktree change lands, a pure move gives the provider execution context and lifecycle a clear source module without changing behavior.",
+  "acceptance": [
+    "The provider execution context and its lifecycle move after the parent lands. Behavior and authority stay unchanged, and the source file has the required provenance header.",
+    "The independent review and appropriate exact gates cover the move."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

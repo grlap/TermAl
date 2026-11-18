@@ -1,0 +1,29 @@
+{
+  "id": "01a1ee02-5749-75c1-bb40-e2842ec028eb",
+  "external_ref": null,
+  "title": "Refine the verification-credit wording: lapsed-but-not-retaken claims, retained store-repair runs, and record eligibility in docs",
+  "outcome": "The claim-refusal cause, the launcher's credit line for retained runs, and the docs' promise about records each match what actually happens.",
+  "acceptance": [
+    "The claim-refusal detail (engram_verification_record_refusal_detail) also covers a claim that expired without being retaken and a pending handoff, for example 'the original claim was no longer valid for this record', without forwarding Engram's message or reason.",
+    "A retained run whose registration failed because the store stayed in repair, created by a launcher that did not yet record registration.storeTransient, gets no generic credit line, recognised by the launcher's own store-repair refusal text. Shown by a behavioural test.",
+    "docs/test.md limits the 'gets its record without a rerun' promise to an eligible frozen record whose only obstacle was delivery (an unclassified stage, for example, gets no record)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1e3b3-4d62-7090-a972-8d11f86edbcb",
+  "external_ref": null,
+  "title": "After an accepted claim handoff, the former holder's named-root binding stays \"current, active\" and both supported release routes refuse, each pointing to the other",
+  "outcome": "After an accepted claim handoff, the former holder's named-root binding stays \"current, active\" and both supported release routes refuse, each pointing to the other",
+  "acceptance": [
+    "When an Engram claim is handed off and the handoff is accepted (the claim is now held by another session), the former holder's named-root binding for that claim is retired, or reported as superseded and releasable, and no longer as \"current, active\". The canonical run's own continuity under the new holder is unaffected.",
+    "termal_release_named_root and termal_name_source_root with path omitted, from the former holder after an accepted handoff, either succeed or refuse with ONE readable, actionable reason naming the exact release condition. Neither refers the caller to the other route when that route will also refuse.",
+    "Behavioural tests cover: handoff accepted then release by the former holder; handoff offered but not yet accepted (still refused, with a reason); and a live claim's root that is still never released. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "named-roots",
+    "refusal-reasons"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

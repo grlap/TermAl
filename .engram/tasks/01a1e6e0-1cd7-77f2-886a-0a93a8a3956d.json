@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6e0-1cd7-77f2-886a-0a93a8a3956d",
+  "external_ref": null,
+  "title": "unadmitted_review_actual_boot_archives_custody_before_new_router_adoption fails under a parallel focused run but passes alone (boot coordination_store waits ~60 s)",
+  "outcome": "The custody recovery test preserves its scripted fixture provider policy across a real boot and does not race optional real provider processes under parallel load; coordination-store startup performance is owned separately by w-cf60bbf2c7e4.",
+  "acceptance": [
+    "Record, with source locations and the retained failing and diagnostic runs, the fixture's unintended real-provider restart path and how it can race the active.is_none assertion. Preserve the fact that the diagnostic PASS did not directly reproduce that assertion; the separate coordination-store startup cost is tracked on w-cf60bbf2c7e4.",
+    "The restarted fixture preserves the original fixture's provider-spawning policy while still exercising actual boot recovery, the original custody archive and explicit next-adoption behavior. The affected test passes in the original parallel ten-filter focused selection on the fixed input with default test threads; absent selectors earn no coverage. No retry, increased timeout or skipped test is used.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "engram-host-adapter",
+    "test-stability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

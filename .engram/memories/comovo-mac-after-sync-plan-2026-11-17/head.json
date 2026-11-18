@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "comovo-mac-after-sync-plan-2026-11-17",
+  "head": {
+    "state": "active",
+    "chain": [
+      "bdaa4dec93db48c9a8e58e520d85d71a",
+      "8bb6f87a7d5745bea8f7be5287b4f2dd",
+      "afa6b103981845b091b96684f6969ccc",
+      "82643e9e189448b383ec1e63b8020693",
+      "0d313c739531452892b07982dc88dc89"
+    ]
+  }
+}

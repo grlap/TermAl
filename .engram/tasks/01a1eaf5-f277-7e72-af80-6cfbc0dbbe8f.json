@@ -1,0 +1,29 @@
+{
+  "id": "01a1eaf5-f277-7e72-af80-6cfbc0dbbe8f",
+  "external_ref": null,
+  "title": "Assert exact recovery-priority unread count, cursor provenance and remaining budget",
+  "outcome": "The large-history recovery-priority witness checks the exact observable unread count and scripted remaining allowance, with a host-issued cursor.",
+  "acceptance": [
+    "The240-row fixture asserts remainingUnread224 and validates the returned host-issued cursor through behavior.",
+    "The vacuous elapsed<120s assertion is removed or replaced with an exact remainingReadMillis check based on scripted I/O cost; focused tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "test-hardening"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1ea31-9c2c-7410-a013-a038e4047877",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

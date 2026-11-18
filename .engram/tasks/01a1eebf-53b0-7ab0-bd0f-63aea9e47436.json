@@ -1,0 +1,27 @@
+{
+  "id": "01a1eebf-53b0-7ab0-bd0f-63aea9e47436",
+  "external_ref": null,
+  "title": "Launcher: a request.json save that fails after a successful registration is reported as a refused registration",
+  "outcome": "createRun tells a local save failure after registration apart from a host refusal. The run's results and summary do not say the registration was refused or unconfirmed when the host holds it.",
+  "acceptance": [
+    "Launcher: a request.json save that fails after a successful registration is reported as a refused registration is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "launcher",
+    "low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

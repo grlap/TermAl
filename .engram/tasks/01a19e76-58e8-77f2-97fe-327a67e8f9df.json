@@ -20,12 +20,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1e313-d2cf-72a3-b72e-e767acd91bab",
+  "disposal_reason": "Continue as independent work. The parent EO epic w-3fe8f4472e5d is completed (evaluation 05018cd1, 8/8). This optional cleanup of dead protocol remnants remains a P4 cleanup.",
   "completion": null
 }

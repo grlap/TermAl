@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-delegation-worktrees-under-termal-home-2026-11-16",
+    "revision_id": "09ea198f2ec942c4aaca90e5c94f0bff",
+    "previous": "16927b3c3708488c885c234f1d25cd2b",
+    "body_sha256": "24c929a3d24efdb17edea6a5b2a9f1ebf4ad520d5aa7d9b61f2733126da2bba6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T17:00:20.107616200Z"
+    }
+  },
+  "body": "REVISED 2026-11-16 17:00Z (Fable2 #6559, correcting #6558): the running host refuses any isolated-worktree path inside the source repository (src/delegations.rs:4664-4670, found by Opus3), so an explicit .tmp/ path does NOT work. Interim rule until w-eb21094eba5a lands: NO isolated-worktree delegations at all. Authors work as root sessions in their own in-repository .tmp/wt-* worktrees. Read-only reviewer delegations create no worktree and are unaffected. Origin: Greg's rule via Engram::Asistant #1915 that nothing a delegation creates may go under ~/.termal/delegations. Existing folders under ~/.termal/delegations: touch nothing; cleanup only by a Greg-approved procedure that Fable2 sends. Opus3 owns the fix (w-eb21094eba5a and w-26abac74c80a). Never grant an isolated-worktree worker delegation while this holds."
+}

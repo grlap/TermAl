@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-standalone-rustfmt-edition-2024",
+    "revision_id": "a1a0eb2c59864836979430e1837b9ebd",
+    "previous": null,
+    "body_sha256": "9d17a45fba7e92a16cc0c74f69a6a64e6f74c0a06b57efb832783b5b10cbfc57",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T05:13:09.862468500Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-11-16, my own miss on the w-78d4 RED candidate 0bfd2274, which DL560 C7 stopped at cargo fmt --check). When checking format without Cargo (no cargo GO on Central), run `rustfmt --edition 2024 --check <files>`: TermAl's Cargo.toml says edition = \"2024\", and rustfmt's default or --edition 2021 style differs (for example, it joins a long `let x =` string on one line). Checking src/tests/mod.rs this way also follows every child test module."
+}

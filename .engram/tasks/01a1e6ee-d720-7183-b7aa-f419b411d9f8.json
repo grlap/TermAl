@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6ee-d720-7183-b7aa-f419b411d9f8",
+  "external_ref": null,
+  "title": "Make the one-pass three-wake drain test independent of physical two-second budget",
+  "outcome": "federation_m4_review_one_drain_pass_delivers_a_bounded_burst_without_waiting_a_tick_per_wake proves bounded burst work in one owned pass with controlled yield time.",
+  "acceptance": [
+    "The test retains three ready wake requests, one owned drain tick/join and pending==0, with controlled clock input so scheduling/RPC/storage load alone cannot stop the pass early.",
+    "The production2s budget and bounded batch behavior are unchanged; a controlled expiry/resumption regression protects yielding, without retries, ignore or timeout inflation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

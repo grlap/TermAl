@@ -1,0 +1,30 @@
+{
+  "id": "01a1e683-4cc5-7ed0-93c8-4aaaa25a1665",
+  "external_ref": null,
+  "title": "Recovery expiry regression must distinguish an interior-row deadline from the page-level deadline",
+  "outcome": "The deterministic satellite recovery regression rejects removal of the per-row yield check while retaining the page-level check, and proves exact cursor continuation without elapsed wall-clock dependence.",
+  "acceptance": [
+    "A scripted expiry at an interior row of a 100-row recovery page proves that recovery yields at that exact row and retains that row's exact cursor key; no real wait, timeout increase or automatic retry is added.",
+    "The next explicit recovery pass resumes without skipping or rescanning history and reaches the pending operation across the remaining pages; the original 150-history single-pass traversal assertion remains.",
+    "The test discriminates deleting the row-level deadline check while retaining the page-level deadline check, with source reasoning or a controlled mutation diagnostic documented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "review-followup",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

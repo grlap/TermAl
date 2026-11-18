@@ -1,0 +1,28 @@
+{
+  "id": "01a1e6e5-5213-7770-a372-1c43ddf8f2ec",
+  "external_ref": null,
+  "title": "Control time in the late-file summary exactly-once regression",
+  "outcome": "late_turn_file_change_grace_window_emits_only_once proves the first event consumes grace and the second creates no duplicate without racing the initial physical window.",
+  "acceptance": [
+    "A controlled clock or deterministic admission seam keeps the first late event eligible and verifies one exact summary after the second event; preserve completion and duplicate-suppression behavior.",
+    "Production750ms grace and event filtering are unchanged; no timeout inflation, automated retry or ignore is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

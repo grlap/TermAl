@@ -1,0 +1,28 @@
+{
+  "id": "01a1e6e5-1a81-7912-895a-e4a85f070017",
+  "external_ref": null,
+  "title": "Control the grace clock when a held file capture completes after named-root close",
+  "outcome": "named_root_capture_applied_after_actual_observation_close_stays_resolved checks held-capture completion order and resolution independently of physical grace expiry.",
+  "acceptance": [
+    "The test retains its parked capture, actual close, zero-unresolved result and exact late-summary assertions, with controlled time at the grace-admission boundary.",
+    "Production grace and attribution policies are unchanged; no timeout increase, retry, skip or ignore is used."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

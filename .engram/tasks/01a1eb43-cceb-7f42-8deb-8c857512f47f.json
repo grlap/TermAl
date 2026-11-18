@@ -1,0 +1,38 @@
+{
+  "id": "01a1eb43-cceb-7f42-8deb-8c857512f47f",
+  "external_ref": null,
+  "title": "Confirm the shared Engram task-sync rule (Greg: teams sync as they see fit; a code push includes the engram-data push), with Kimi and both coordinators",
+  "outcome": "TermAl and Engram carry one identical task-sync rule. Teams run the routine engram-data sync whenever they judge it useful, without asking each time. A landing push of master is followed by the engram-data sync. The data branch stays separate from code, and nothing here grants any code push.",
+  "acceptance": [
+    "Kimi and both coordinators confirm the scope of the existing 'Task-sync data branch' bullets in TermAl (AGENTS.md and CLAUDE.md, Commit and push section) and Engram (AGENTS.md:376-384). The confirmation records whether they are identical and what, if anything, Greg's word adds.",
+    "If the text changes, the identical shared wording lands in both repositories under the authority-text procedure: (a) both coordinators concur, (b) Greg is sent the wording and its consequence, and (c) the final-diff audit is recorded. Greg's words are quoted verbatim with their source.",
+    "No new gate, no general code-push permission, and no delay to the Comovo sync."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "greg-directed",
+    "kimi",
+    "task-sync"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed the identical shared Task-sync data branch rule in TermAl 4cbf8936 and Engram eb24a85a. Independent post-landing evaluation e9d331e73f984fae89357f7380f2b159 passed 3/3 at cut 90 on the exact clean TermAl SourceId. After reading the evaluator's complete original, I also verified live origin/master in both repositories and compared the full landed Task-sync bullets from all four committed blobs. They are identical after whitespace normalization, with the exact concurred addition once at the end. Pre-landing audit and Linux FULL-1 passed. The docs-only landing installed no build. The full gate is hostless landing evidence; no registered test credit claimed.",
+    "completed_at": "2026-11-18T06:52:15.193601800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

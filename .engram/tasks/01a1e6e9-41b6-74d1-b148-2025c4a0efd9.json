@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6e9-41b6-74d1-b148-2025c4a0efd9",
+  "external_ref": null,
+  "title": "Use an owned readiness phase for the macOS live-group cleanup control",
+  "outcome": "bounded_read_cleanup_native_live_group_control_is_killed_and_reaped verifies a ready live process group is killed/reaped without requiring shell startup and pipe delivery within two seconds.",
+  "acceptance": [
+    "The test observes and owns the ready live-child phase before cleanup; exact ready line, SIGKILL and reaped assertions remain.",
+    "The test uses the established fixture-phase/deadlock guard contract rather than a two-second startup success window, without changing production cleanup budgets, adding retry, or ignoring the test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "macos",
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

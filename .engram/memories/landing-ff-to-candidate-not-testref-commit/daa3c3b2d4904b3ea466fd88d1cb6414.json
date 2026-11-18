@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "landing-ff-to-candidate-not-testref-commit",
+    "revision_id": "daa3c3b2d4904b3ea466fd88d1cb6414",
+    "previous": null,
+    "body_sha256": "71b627a6e397a31a3e7175574f2f59e61129a5daac594ef1c6ee7971016e7973",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T23:55:43.933161900Z"
+    }
+  },
+  "body": "Landing convention (Fable2, 2026-11-16, after w-707a landed as test-ref commit 0def9212 with a fingerprint-only message). When the test-ref commit and the author's candidate commit have the SAME gated tree and the same parent (current master), fast-forward master to the CANDIDATE commit. Master's history then carries the author's real subject and body. The test-ref FULL binds the tree, so both are valid gates for that tree; the candidate keeps the log readable. Never amend to fix a landed message."
+}

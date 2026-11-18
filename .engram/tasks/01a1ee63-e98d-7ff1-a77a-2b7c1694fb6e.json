@@ -1,0 +1,28 @@
+{
+  "id": "01a1ee63-e98d-7ff1-a77a-2b7c1694fb6e",
+  "external_ref": null,
+  "title": "Automatically recover a provable named sibling after claim release or root retirement",
+  "outcome": "An ordinary opening can recover an exactly confirmed focused sibling after the retained named root ends or loses its claim, without requiring the holder to name that sibling again.",
+  "acceptance": [
+    "Exercise release with unchanged held sibling focus and root retirement, including a remaining single named sibling.",
+    "Preserve ordinary unnamed and unresolved legacy-history behavior and offer an explicit refusal when exact proof is unavailable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "diagnosed-from-2c14",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

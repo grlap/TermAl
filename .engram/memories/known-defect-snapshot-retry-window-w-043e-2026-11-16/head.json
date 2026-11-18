@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "known-defect-snapshot-retry-window-w-043e-2026-11-16",
+  "head": {
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-16T22:27:16.023264700Z"
+    }
+  }
+}

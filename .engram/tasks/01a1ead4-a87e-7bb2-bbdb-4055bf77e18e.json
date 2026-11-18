@@ -1,0 +1,29 @@
+{
+  "id": "01a1ead4-a87e-7bb2-bbdb-4055bf77e18e",
+  "external_ref": null,
+  "title": "Align delegation worktree documentation and worker handoff with the Codex cleanup executor",
+  "outcome": "Worker parents remain accountable for their worktree cleanup while docs and product handoff direct Codex to execute removal under the shared rule.",
+  "acceptance": [
+    "docs/features/delegation-worktrees.md and src/delegation_worker_handoff.rs distinguish parent accountability from Codex directory/worktree execution and defer to the existing shared cleanup prerequisites and non-forced initial route.",
+    "The change adds no cleanup service, automated removal, executor switch, retry-after-denial or widened approval authority; required review/gate and exact authority-text coordination are carried without Markdown phrase-pinning tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

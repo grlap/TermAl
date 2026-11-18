@@ -1,0 +1,16 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "restart-one-way-backup-steps-2026-11-16",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2fcdb5fda9af47ceb7fce4c9af58da67",
+      "3d4c974009234fa08d7f23649d87b886",
+      "64d514b726c2443d8a92ebed9c43132f",
+      "cffc9fe97dc848efb0234477f1577991",
+      "b03fe9e40c134c71b33062e17b1488d7",
+      "ba1c3c3eff3b46c38437d269ea03004e"
+    ]
+  }
+}

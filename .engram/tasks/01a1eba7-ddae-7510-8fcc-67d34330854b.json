@@ -1,0 +1,30 @@
+{
+  "id": "01a1eba7-ddae-7510-8fcc-67d34330854b",
+  "external_ref": null,
+  "title": "Make coordinator reporting explicit after a cleanup policy refusal",
+  "outcome": "Agents report why a cleanup stopped when a command requests input, fails operationally or is refused by policy.",
+  "acceptance": [
+    "The shared cleanup rule explicitly requires stopping and reporting to the coordinator for all three outcomes and preserves the prohibition on rerouting a policy refusal.",
+    "The change follows the shared authority-text procedure and has no Markdown phrase tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "approvals",
+    "cleanup-docs",
+    "codex-runtime",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0ff58-5ae5-7970-bcaa-e2a5af1634f0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

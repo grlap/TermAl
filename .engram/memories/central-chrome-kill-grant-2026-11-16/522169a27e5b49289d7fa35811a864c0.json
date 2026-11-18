@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-chrome-kill-grant-2026-11-16",
+    "revision_id": "522169a27e5b49289d7fa35811a864c0",
+    "previous": null,
+    "body_sha256": "513186b40bfbdc65a5ce92425777bbd7b4697bedc2280b7e7dc7cd8750c0deb9",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T00:07:45.956584800Z"
+    }
+  },
+  "body": "Greg's grant: killing chrome.exe on Central (2026-11-16 00:07Z, relayed by Engram::Asistant, TermAl mailbox 588693a8 #1851), verbatim: „Nic nie ruszam. Nie jestem przy komputerze. Mogą ubić chrome.exe jak chcą.” Asistant's reading: the consent covers closing Chrome on Central when memory is needed for the work.\n\nScope as applied by Fable2 (coordinator):\n- Only chrome.exe, and only on Central. No other process, and no other app of Greg's (ChatGPT, Steam, Obsidian, Edge WebView, and so on).\n- Only when a required census fails (a reviewer spawn floor or a Cargo or Windows-gate floor) and freeing Chrome would close the gap.\n- Opus2, the Central resource coordinator who runs the census, performs it ONCE per need and records the time, the FV before and after, and the reason on the item it served. No loops, and no killing pre-emptively \"just in case\".\n- It grants nothing else: no other process kills, host stops, restarts or setting changes.\n\nAt grant time FV was 25,993,216 KiB and Chrome used about 3.2 GiB, so no kill was needed then."
+}

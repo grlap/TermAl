@@ -1,0 +1,36 @@
+{
+  "id": "01a1e211-6c7b-72b1-aad7-cfe3252819b0",
+  "external_ref": null,
+  "title": "Remove ten superseded source-root-binding author test refs after evidence retention",
+  "outcome": "Remove ten superseded source-root-binding author test refs after evidence retention",
+  "acceptance": [
+    "For each of the ten refs named by Fable2 message3291, recorded run evidence and original pusher identity are confirmed, and the remote ref is checked against the exact pushed commit.",
+    "Each matching ref is deleted with its explicit refspec and remote absence plus commit and UTC deletion time is recorded; a mismatched ref is left untouched, and any automatic-review refusal stops cleanup with the exact refusal recorded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "execution-observability",
+    "named-roots",
+    "review-medium"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1d6bd-7cb5-7f60-9b9f-4093c33dc14e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Deleted exactly the ten superseded own author-test refs assigned by Fable2 after confirming recorded run evidence, original pusher identity and full remote commit identity. Every explicit deletion push passed and exact remote absence was verified; full commit ids and UTC times are recorded. Independent acceptance evaluation 362e63d27409454c9ee696f461f3b802 passed2/2 at cut22 via delegation87c7e619/session18376. No code changes, other-ref deletion, landing or installation performed.",
+    "completed_at": "2026-11-16T02:04:47.734754400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

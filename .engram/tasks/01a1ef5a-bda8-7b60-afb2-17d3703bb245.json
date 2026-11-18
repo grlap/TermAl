@@ -1,0 +1,27 @@
+{
+  "id": "01a1ef5a-bda8-7b60-afb2-17d3703bb245",
+  "external_ref": null,
+  "title": "Source-root naming lease resolves a network path before validation refuses it",
+  "outcome": "Naming a network-path source root returns validation's network-share refusal without first resolving the path through the file system.",
+  "acceptance": [
+    "Source-root naming lease resolves a network path before validation refuses it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

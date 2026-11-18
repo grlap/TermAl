@@ -1,0 +1,31 @@
+{
+  "id": "01a1eb81-6ed4-75b1-9a67-7a962a6217d3",
+  "external_ref": null,
+  "title": "Named source root stays unapplied: an acknowledged predecessor runtime-turn capture never reaches durable report readback or a terminal outcome",
+  "outcome": "A named source root applies at the next opening once its predecessor captures have settled. A predecessor capture that cannot settle, for example because its report is lost or refused, reaches a terminal outcome within a bounded time and says why. A root session is never left with no supported way to confirm its binding.",
+  "acceptance": [
+    "Diagnosis recorded with file:line (src/engram_unadmitted_focus.rs:341 and the observation worker): why acknowledged capture runtime-turn-67a8108a-4624-4d2a-be3f-5d45725ff347 (session-12325, Engram::Coder-MacosFixSol) stayed waiting for durable report readback from about 20:05Z to 21:54Z. Name its relationship to the Engram binary swaps at 20:23Z and 21:11Z on Central, and to w-5fe431225670.",
+    "A fix or a recovery path, with a behavioral test: a predecessor capture that cannot reach durable readback reaches a terminal outcome within a bounded time, with its cause stated, and the pending named root then applies. Capture ordering is not weakened.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "engram-host-adapter",
+    "named-root",
+    "refusals"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

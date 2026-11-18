@@ -1,0 +1,27 @@
+{
+  "id": "01a1ef67-094f-7910-acc7-6c0684703bee",
+  "external_ref": null,
+  "title": "Registration view `bound` uses work_binding only, not the full verification-credit predicate",
+  "outcome": "The registration view's `bound` agrees with whether the registration can earn verification credit, and a run in a project with no Engram binding is not told to correct a claim that cannot apply.",
+  "acceptance": [
+    "Registration view `bound` uses work_binding only, not the full verification-credit predicate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "check-credit",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,37 @@
+{
+  "id": "01a1eaa3-01a0-7951-a123-34b0e8f26f99",
+  "external_ref": null,
+  "title": "A registered launcher run (--input commit) aborts before cargo when the project's Engram store refuses transiently",
+  "outcome": "A registered launcher run whose registration meets a transient Engram store refusal (work_projection_invalid or projection_repair_required during a repair) still executes its tests, keeps its evidence locally, and registers or recovers its verification once the store is ready. At minimum the refusal carries a named transient code the launcher can wait on, instead of aborting with an untyped HTTP 502 before any compile.",
+  "acceptance": [
+    "With the project store transiently refusing (typed transient code), a registered run executes, keeps complete local evidence, and later registers exactly once (no duplicate record, unchanged source-identity rules) when the store is ready; or it waits on a named transient code with a bounded, reported wait, never silently aborting as a test failure.",
+    "Behavioural tests: a transient refusal followed by a ready store gives exactly one registration with the run's real outcome; a permanent refusal gives a readable named refusal and no credited tests.",
+    "The review pair is clean and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "engram-host-adapter",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "A registered launcher run whose registration meets a project Engram store in repair (work_projection_invalid or projection_repair_required) no longer aborts with an untyped 502. The host keeps Engram's CLI refusal code (EngramTransportError.refusal_code). The shared classifier engram_store_transient (src/engram_store_transient.rs) recognises those codes. Registration refuses such a held read with a typed 503 code engram_store_transient before recording anything. The launcher prints each wait and resends the unchanged request (10/20/40 s, then 60 s, at most 15 min of pauses); on exhaustion it gives a named refusal. Any other refusal keeps its named 502. Landed as 633cffee (tree bc8f31a7) after DL560 FULL test-e3da59f9 PASS (Rust 8127/0, Vitest 5188/0, Node 563/0, equal sourceIds) and a review pair with no Medium or higher. The independent acceptance evaluation delegation-add5870e passed all 3 criteria. Six unfixed Lows are filed: w-e613153c33f4, w-47eb262f2b88, w-6576b35ccce5.",
+    "completed_at": "2026-11-18T07:57:01.094927800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

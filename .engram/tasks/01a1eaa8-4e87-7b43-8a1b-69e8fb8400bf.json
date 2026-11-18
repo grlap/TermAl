@@ -1,0 +1,27 @@
+{
+  "id": "01a1eaa8-4e87-7b43-8a1b-69e8fb8400bf",
+  "external_ref": null,
+  "title": "Delegation worktree sweeper: no test of background request coalescing, and no recovery from a panicking pass",
+  "outcome": "The background delegation-worktree sweeper's coalescing (running/again) is covered by a behavioural test, and a pass that panics or a thread that fails to spawn cannot leave the sweeper stuck with running=true so that no later request ever sweeps.",
+  "acceptance": [
+    "Delegation worktree sweeper: no test of background request coalescing, and no recovery from a panicking pass is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

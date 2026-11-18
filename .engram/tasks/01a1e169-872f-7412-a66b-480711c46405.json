@@ -1,0 +1,33 @@
+{
+  "id": "01a1e169-872f-7412-a66b-480711c46405",
+  "external_ref": null,
+  "title": "Builder v1: thin workRef+branch adapter script (branch → commit → existing typed test request via existing send; optional own author-test push) — no product change",
+  "outcome": "Builder v1: thin workRef+branch adapter script (branch → commit → existing typed test request via existing send; optional own author-test push) — no product change",
+  "acceptance": [
+    "A repo script, for example scripts/test-task.mjs, takes a work ref and a branch, plus a focused selection or the full mode, and an optional runner target. It resolves the branch once to an exact commit, constructs the EXISTING MailboxTestRequest, and sends it through the EXISTING `termal mailbox send --test-request-json`. The host's existing capture (requester, claim, named root, store) and the runner, registration, launcher, source_id and settlement are unchanged. It prints the sent message id and how to follow the outcome.",
+    "When the commit isn't yet on origin, the script may push exactly that commit, create-only, as refs/heads/author-test/<item>-<commit8> with an explicit refspec, under the existing author-test-refs rule (the author session pushing its own candidate). It requires the caller's explicit confirmation that the candidate is safe to publish and carries no secret. It never updates an existing ref, force-pushes, or pushes anything else.",
+    "Every refusal names the deciding check, the observed values and a remedy: branch not found or ambiguous, parent not on origin, ref already exists, no confirmation, no focused selection, unknown runner, or the host refusing for a missing claim or named root.",
+    "No Rust or product change. Behavioural tests for the script use fixtures (a temporary git repo and a stubbed termal CLI). There is no scheduler, no READY automation and no sole-credit-path change; those are v2 and later. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "builder-v1",
+    "greg-directed",
+    "process-simplification",
+    "refusal-reasons",
+    "remote-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0b1-c86c-79c3-bb16-6831e8936a44",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

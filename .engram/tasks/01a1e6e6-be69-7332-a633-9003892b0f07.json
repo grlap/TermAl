@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6e6-be69-7332-a633-9003892b0f07",
+  "external_ref": null,
+  "title": "Drive virtualized history-rest timer deterministically in viewport-fill regression",
+  "outcome": "The four viewport-fill parameter cases prove no history demand during movement and the correct demand after rest without racing host time or waiting a fixed260ms.",
+  "acceptance": [
+    "ui/src/panels/AgentSessionPanel.virtualization.test.tsx test 'fills %s history shown %s in the viewport once it rests, without reader input: %s' retains all four older/newer and partly/wholly cases and both pre-rest and post-rest assertions, using controlled timers and any relevant performance clock.",
+    "The test waits for a meaningful timer/state boundary rather than an arbitrary physical260ms; production rest/cooldown values and history demand behavior are unchanged without retry, skip or ignore."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "ui",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

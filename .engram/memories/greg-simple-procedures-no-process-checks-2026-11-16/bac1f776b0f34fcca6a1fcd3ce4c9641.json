@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-simple-procedures-no-process-checks-2026-11-16",
+    "revision_id": "bac1f776b0f34fcca6a1fcd3ce4c9641",
+    "previous": "044f6fd7117e4993b57b30ee9356c017",
+    "body_sha256": "bd5a47f53f39f1117a9f40881156dec2a8b6528a7a63805cba89abcb700525a7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T05:12:01.471904400Z"
+    }
+  },
+  "body": "Greg's words, VERBATIM, relayed by Fable2 (TermAl mailbox 4daa5b87 #6534, 2026-11-16T05:10Z) from Asistant #1890, at his request to pass them literally to authors:\n„jaki znowu konflikt, znowu hipoteza, ktore bedzie zrobiona zle\ni znowu sie wyjebie za pare godzin i bedziemy naprawiac tydzien\n\nprosilem o proste procedury a nie procedury sprawdzajace wszystko!\nWTF\nprzekaz doslownie autorom\n\nsprawdzanie procesow NIE BEDZIE DZIALAC WIARYGODNIE\"\n(Gloss: \"What conflict again, again a hypothesis that will be done wrong, and it will blow up again in a few hours and we'll be fixing it for a week. I asked for simple procedures, not procedures that check everything! WTF. Pass this literally to the authors. Checking processes WILL NOT WORK RELIABLY.\")\nFable2's application for Opus2: no process-list or census steps in restart, install or landing procedures. The C6 restart census Fable2 had added is withdrawn (memory restart-one-way-backup-steps-2026-11-16). For Opus2's own install procedure this means: no FreeVirtual or process gate in the install, swap or landing steps; keep those procedures simple.\n\nClarification from Fable2 (TermAl #6536, 2026-11-16T05:11Z): Greg's rule targets PROCESS listing, census and snapshots used as steps or evidence. A free-memory floor before a cargo build is a resource guard, not a process check. Whether to keep it on the install build is the integration owner's call; keep it if dropping it risks an out-of-memory build failure on Central. So Opus2 KEEPS the FreeVirtual floor before Central cargo builds, including the install release build, and drops only process-list or snapshot steps from restart, install and landing procedures."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "comovo-mac-after-sync-plan-2026-11-17",
+    "revision_id": "bdaa4dec93db48c9a8e58e520d85d71a",
+    "previous": null,
+    "body_sha256": "fc64ac45fb5014b5a66570f49344f4cdc4f4d2c7cfa1a87e7d504b12aa96d0fa",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T01:34:50.020789500Z"
+    }
+  },
+  "body": "Comovo on Mac: read-only facts and plan, from Kimi::Consultant (TermAl mailbox 852a55c9 #395, 2026-11-17 01:34Z), after Greg's word via Engram::Asistant #1942: \"Skończmy sync. Jak zadziała to zaczniemy testy na comovo. To nie zmienia planów.\"\n\nCURRENT STATE (read-only):\n- Comovo is the fit_friends project, with rincon-common as a submodule.\n- The Mac host (abf8bda6: arm64, 16 GiB RAM, about 52.9 GB free) has no registered fit_friends or rincon-common TermAl project. Its physical checkouts and toolchain are unknown.\n- Central fit_friends is on main at b39c0e1, with 56 STAGED PATHS TO PROTECT and an unmerged engram-migration branch.\n- Its Engram store is healthy, with 234 tasks; sync is OFF.\n- Stack: Dart ^3.12 and Flutter >=3.44. The Windows reference is Flutter 3.47.9 / Dart 3.13.7.\n\nPLAN, ONLY AFTER A WORKING ENGRAM SYNC:\n1. Clone with submodules and register the Mac project (TermAl side).\n2. Use the shipped Engram sync for tasks and memories.\n3. Run flutter doctor and check the toolchain.\n4. Do a small real Comovo task, with flutter test and the rincon-common dart test.\n\nDocker/Supabase integration stays off unless separately authorized.\n\nThere is NO extra FULL gate, new procedure or new Greg decision before development. Nothing happens now: no migration and no delay to P0."
+}

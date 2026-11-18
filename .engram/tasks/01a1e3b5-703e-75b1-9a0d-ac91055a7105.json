@@ -1,0 +1,30 @@
+{
+  "id": "01a1e3b5-703e-75b1-9a0d-ac91055a7105",
+  "external_ref": null,
+  "title": "Update the Kimi approval comparison row after removal of the title allowlist",
+  "outcome": "Update the Kimi approval comparison row after removal of the title allowlist",
+  "acceptance": [
+    "The Kimi row in docs/features/agent-integration-comparison.md describes title-independent ordinary permission asks with exactly one allow_once option and the manual question/plan exceptions, consistently with the integration document and source.",
+    "Documentation checks do not add tests that read Markdown for phrases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "docs",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "landing-needs-pre-landing-eval-2026-11-18",
+    "revision_id": "a51999b41f9e475b857afa08139f784c",
+    "previous": null,
+    "body_sha256": "7546f556f6edcf4a27bc4aa2b482bf54ff4959046b1dd2b02327f0915daf4242",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T07:41:21.746524300Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-18, my own miss on w-34b0e8f26f99 at 07:39Z). Before fast-forwarding master, check the item's acceptance criteria. If any criterion can only be met by the landing itself (committed, pushed, on master, installed, or \"the full gate passes on the exact landed input\"), condition 3 of the standing rule counts it as carried only when an independent acceptance evaluation of the FROZEN tree has already found every other criterion met. So: ask the owner for that pre-landing evaluation verdict (on the frozen tree, which equals the landing tree) and land only after it passes. A clean pair plus a passing exact FULL is NOT enough on its own. The item still completes only after a post-landing evaluation passes."
+}

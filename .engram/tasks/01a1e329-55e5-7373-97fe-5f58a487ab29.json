@@ -1,0 +1,28 @@
+{
+  "id": "01a1e329-55e5-7373-97fe-5f58a487ab29",
+  "external_ref": null,
+  "title": "Cover ambiguous and unavailable provider placement refusals",
+  "outcome": "Behavioral tests cover ambiguous multi-directory placement and unknown, network and unavailable-directory starts through the original provider boundary without fabricated completion or credit.",
+  "acceptance": [
+    "Representative ambiguous, unknown, network and unavailable placements expose the correct bounded refusal while leaving original authority and native credit unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "provider-placement",
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1e2ae-cd7d-7f20-bb97-eb544791d2ec",
+  "external_ref": null,
+  "title": "Codex exec with an explicit linked-worktree workdir once returned the main checkout's git state (HEAD and status): attribute it (Codex harness or TermAl) and fix it or document it",
+  "outcome": "Codex exec with an explicit linked-worktree workdir once returned the main checkout's git state (HEAD and status): attribute it (Codex harness or TermAl) and fix it or document it",
+  "acceptance": [
+    "The cause is attributed with evidence: the Codex harness's exec workdir handling, TermAl's Codex adapter or app-server integration (any cwd TermAl passes or rewrites), or git environment state such as GIT_DIR or GIT_WORK_TREE inherited by the shell. Each candidate is confirmed or excluded with file:line or a reproduction.",
+    "If TermAl is responsible, a fix with a behavioural test makes an exec with an explicit linked-worktree workdir always run there. If the cause is outside TermAl, a bounded upstream report and the agent workaround are documented in the relevant docs. No test reads the docs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "cross-project",
+    "worktrees"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

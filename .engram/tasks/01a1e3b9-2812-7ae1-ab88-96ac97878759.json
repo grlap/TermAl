@@ -1,0 +1,30 @@
+{
+  "id": "01a1e3b9-2812-7ae1-ab88-96ac97878759",
+  "external_ref": null,
+  "title": "Claude refusal fallback: a call whose tool_result_meta entry states no kind ran; confine the unanchored \"requested permissions\" match",
+  "outcome": "A Claude Bash command that ran and failed is never recorded as abandoned merely because its output mentions refusal-like wording: the refusal-wording fallback applies only where the CLI says nothing about whether the call ran, and the wording table is the single source of that fallback.",
+  "acceptance": [
+    "When a call's tool_result_meta entry exists without non_execution_kind and without a reject permission_decision, the call counts as having run: a behavioural test shows a Bash result 'Exit code 101' whose output contains 'requested permissions', with an entry carrying only its id, is recorded as a finished command, not abandoned.",
+    "The unanchored contains(\"requested permissions\") in is_permission_denial is removed or confined to results with no tool_result_meta entry, and CLAUDE_REFUSAL_WORDING alone decides the fallback; existing refusal-signal and unadmitted-denial tests stay green.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the landing input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

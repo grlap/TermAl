@@ -1,0 +1,30 @@
+{
+  "id": "01a1e6bd-3280-7a42-938b-7a4873f3bf19",
+  "external_ref": null,
+  "title": "Workspace watcher drops every event for a repository under a folder named target/dist/node_modules/etc.: ignore check matches absolute path components, not the part below the watched root",
+  "outcome": "The workspace watcher ignores build and VCS folders (.git, target, node_modules, dist, ...) only when they appear BELOW the watched root, so a repository that itself lives under a folder with one of those names gets normal file-change events.",
+  "acceptance": [
+    "Behavioral regression, failing first: a watched repository located under a parent folder named `target` (and, as a table case, `dist` and `node_modules`) receives its file-change events and pending candidates. A change inside <root>/target/ or <root>/node_modules/ BELOW the watched root is still ignored. The test proves both directions.",
+    "The fix in src/workspace_watch.rs (is_ignored_workspace_file_event_path, :432-453) evaluates only the components relative to the watched root, and src/workspace_watch_pending.rs:245-247 ingress uses that relative check. Production ignore semantics for in-repo build and VCS folders are unchanged.",
+    "A8D4-FULL-1's 15 watcher failures are shown to be explained by this (a discriminating focused check with the test temp under target/ versus elsewhere), and they pass with the fix. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "product-defect",
+    "test-stability",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

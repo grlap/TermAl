@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6f0-2c4c-74a2-b0bb-0646c5878ee5",
+  "external_ref": null,
+  "title": "Make stalled-outcome-poll dispatch test independent of the drain yield clock",
+  "outcome": "federation_outcome_stalled_poll_does_not_hold_wake_dispatch proves dispatch proceeds while the outcome poll is held using controlled drain time and explicit ownership phases.",
+  "acceptance": [
+    "The test retains its held outcome poll, second appended wake, owned dispatch-pass join and pending==0 assertion, with a controlled yield clock preventing incidental2s exhaustion before the second dispatch.",
+    "Production2s yielding, RPC isolation and outcome-poll ownership are unchanged; no retry, ignore or timeout inflation is added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

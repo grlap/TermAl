@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Naming a source root for a different held claim no longer re-targets the session's established work binding mid-turn. The running turn keeps the root it began with, and the named root takes effect at the next turn, with the change stamped and committed. The fix is the reviewed R24 contribution 3d6cd082, carried byte-identically onto master as 0dc6c384, so it adopts R24's clean review pair (all 27 paths have identical blobs, status and mode). Author check test-29d4a166: 619/0/0. Landing FULL 4093-FULL-1 test-1b819f8a: all 6 stages passed, with equal source ids. Landed on master 0dc6c384 at 02:46Z. Independent post-landing evaluation passed 2/2.",
+    "completed_at": "2026-11-16T04:39:30.844823200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

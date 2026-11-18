@@ -1,0 +1,29 @@
+{
+  "id": "01a1e655-d248-71a1-917a-ba6fcdc1e860",
+  "external_ref": null,
+  "title": "Default launcher temp creation skips the fresh Cargo target cache tag",
+  "outcome": "A fresh ignored Cargo target created for the launcher's default test temp receives CACHEDIR.TAG without weakening disk refusal, component link checks or source identity. The behavior for an unignored target is explicit, covered and documented.",
+  "acceptance": [
+    "A behavioral default-temp launcher witness in a fresh worktree checks the ignored target cache tag, command execution and clean source boundaries; explicit-temp and capacity-refusal controls still hold.",
+    "Creation of an unignored target is handled explicitly and the host-adapter documentation matches the implemented behavior. No test reads repository Markdown for phrases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cache",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

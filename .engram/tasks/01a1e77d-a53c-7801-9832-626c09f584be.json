@@ -1,0 +1,38 @@
+{
+  "id": "01a1e77d-a53c-7801-9832-626c09f584be",
+  "external_ref": null,
+  "title": "Attribute the loaded coordination-open time left unseparated by the canonical-schema phase diagnostic",
+  "outcome": "The remaining loaded coordination ensure time is attributed with bounded disposable-store evidence, separating historical canonical construction, record validation and transaction/database work without guessing CPU contention or reading live state.",
+  "acceptance": [
+    "The original test-aeb18444 at 99a74ce6 is reconciled quantitatively: 47.430950 s and 19.076371 s inside ensure were not separated by the recorded current-canonical and actual-schema probes, with nested phases and outside-ensure time distinguished.",
+    "Source tracing and, only where needed, focused disposable-store measurements identify the remaining work or explicitly bound what the retained evidence cannot decide; CPU contention is not claimed from wall time alone, and no synthetic load, retry, timeout increase or live-store access is introduced.",
+    "Any confirmed actionable defect is linked to its existing owner or filed with its concrete mechanism and evidence; the result distinguishes redundant work fixed by w-cf60bbf2c7e4 from unresolved loaded-time attribution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "diagnosed-from-cf60",
+    "performance",
+    "sqlite",
+    "startup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Reconciled historical coordination-open residuals and completed one natural-load/serial diagnostic pair on disposable stores. Historical canonical construction dominates the legacy path; current-store reopens build no historical schemas. New measured off-CPU time is substantial, but its exact kind and the old run's retrospective cause remain unresolved. No new defect beyond CF60 confirmed; existing cleanup and fixture-HOME owners are linked.",
+    "completed_at": "2026-11-17T15:19:17.384142700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

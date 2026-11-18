@@ -1,0 +1,28 @@
+{
+  "id": "01a1ed43-0d53-7671-a726-47eb262f2b88",
+  "external_ref": null,
+  "title": "A store-in-repair wait can drop earlier durability-pending registration evidence",
+  "outcome": "A registration that first got a validated durability-pending reply keeps that pending evidence through any later store-in-repair wait, so the run is never recorded as a plain failure while its earlier write is unconfirmed.",
+  "acceptance": [
+    "When a durability-pending reply precedes a store-transient reply for the same request, the wait either gives the pending evidence precedence or carries it onto the exhaustion error, and createRun records the registration as pending, not failed.",
+    "A behavioural test drives pending then store-transient replies to exhaustion and shows the pending evidence is kept."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

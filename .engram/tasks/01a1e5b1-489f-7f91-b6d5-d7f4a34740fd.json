@@ -1,0 +1,33 @@
+{
+  "id": "01a1e5b1-489f-7f91-b6d5-d7f4a34740fd",
+  "external_ref": null,
+  "title": "Evaluate constrained platform resolution for explicit Codex workspace write grants",
+  "outcome": "If explicit inside-workspace grants prove necessary, establish their extent without host traversal of untrusted aliases or mounts.",
+  "acceptance": [
+    "Document whether explicit inside-workspace additional grants are needed beyond ordinary native-capped asks, with concrete provider request evidence.",
+    "If implemented, use a kernel-constrained no-follow/no-mount boundary on supported platforms and behavioral tests for aliases, reparse points, mount traversal and concurrent replacement; never introduce a following pre-refusal host lookup."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "codex",
+    "greg-reported",
+    "kimi",
+    "sandbox",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e2bc-8881-7a30-a376-443e364ea498",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

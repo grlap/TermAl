@@ -1,0 +1,27 @@
+{
+  "id": "01a1efef-105e-70d0-a76c-e543b0c7f8dd",
+  "external_ref": null,
+  "title": "Recheck a delegation's worktree between follow-up admission and the turn's dispatch",
+  "outcome": "A follow-up admitted while its delegation's worktree was present does not start a runtime in that worktree if a person removed it between admission and the turn's dispatch; the turn is refused with the same reason as at admission.",
+  "acceptance": [
+    "Between follow-up admission and dispatch of the follow-up turn, the delegation's worktree owner check runs again; if the worktree is gone or no longer this delegation's own, the turn is not dispatched and the delegation reports the refusal reason. Shown by a behavioral test that removes the worktree after admission."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

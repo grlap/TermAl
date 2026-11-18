@@ -1,0 +1,28 @@
+{
+  "id": "01a1eeed-c1eb-7d22-a108-affc4826017f",
+  "external_ref": null,
+  "title": "docs/test.md: say when a registered run's verification record is not sent, and name host-local refusals and the capability pending reason",
+  "outcome": "docs/test.md's verification-record paragraphs match the sender. A registered, bound run gets a record only when it is eligible and the producer accepts it. Host-local terminal refusals (verification_command_too_long, an unreadable receipt, a failed receipt check, legacy_source_input_retired) show the host's own code, not Engram's. A record also stays pending while its Engram does not yet offer the verification route (CapabilityUnsupported). The claim-refusal test asserts the standalone lapse cause.",
+  "acceptance": [
+    "docs/test.md: say when a registered run's verification record is not sent, and name host-local refusals and the capability pending reason is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "check-credit",
+    "docs",
+    "low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

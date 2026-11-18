@@ -1,0 +1,39 @@
+{
+  "id": "01a1e548-cfd9-7e12-8d44-eb21094eba5a",
+  "external_ref": null,
+  "title": "Delegation worktrees default inside the source repository (Git-ignored), never under ~/.termal/delegations",
+  "outcome": "Every delegation worktree TermAl creates lives inside its own source repository, in a Git-ignored directory, together with its build output and test data. Nothing is created under the TermAl data directory. Removing it after the delegation ends is w-e91aa9129c63.",
+  "acceptance": [
+    "Behavioral regression: an isolated-worktree delegation with no explicit path creates its worktree at <source repo root>/.worktrees/d-<first 12 hex of the delegation id>, a Git-ignored directory agreed by both projects' coordinators, and nothing under the TermAl data dir. The path is portable (Windows, Linux, macOS) and documented. A repo where .worktrees/ is not ignored is refused with a bounded readable reason, never written outside the repo. On Windows, a worktree whose Git administrative directory path would exceed Git's 220-character limit is refused before git worktree add runs, with a bounded readable reason, and nothing is created.",
+    "An explicit worktree path is accepted only inside the source repository; a path outside it is refused with a bounded, readable reason naming the allowed location. No exception directory outside the repo exists.",
+    "docs/features describes the default location and the in-repo-only rule for explicit paths. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cleanup",
+    "delegations",
+    "disk",
+    "greg-directed",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Delegation worktrees now default to <source repo>/.worktrees/d-<12 hex>, inside the repository and Git-ignored, with explicit paths limited to ignored locations inside the repository and a Windows $GIT_DIR length refusal before creation. Landed as 007bf5bb (gate EB21-LOC7-FULL-1 test-caa4ab3b PASS; Linux test-f24ea274 and Windows legs PASS; round-3 review pair clean, Lows filed as w-39c05805be7e and w-8ef7d7b49bd4). The DL560 delegations listing stayed 42/42 on the landing FULL, confirming the leak is gone. Post-landing evaluation passed all 3 criteria. Automatic removal of ended worktrees continues in w-e91aa9129c63.",
+    "completed_at": "2026-11-17T15:34:39.282841400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

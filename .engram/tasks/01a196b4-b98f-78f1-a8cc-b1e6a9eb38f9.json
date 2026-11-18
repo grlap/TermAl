@@ -20,12 +20,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": "01a192f8-de97-78d1-ab7d-528f6c17064a",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1eb8b-1b5c-7753-aae1-9d0c6410d909",
+  "disposal_reason": "Continue as independent work after required preparatory parent completed; optional Low helper-gating follow-up retains its original review provenance and unchanged scope.",
   "completion": null
 }

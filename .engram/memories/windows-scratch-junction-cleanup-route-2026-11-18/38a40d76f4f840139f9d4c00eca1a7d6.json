@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "windows-scratch-junction-cleanup-route-2026-11-18",
+    "revision_id": "38a40d76f4f840139f9d4c00eca1a7d6",
+    "previous": null,
+    "body_sha256": "c62bc891dcee9fca63e4e1ff68dfe694ff2b72bc5e4fcee4b39b52bacc72867e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T05:51:27.356487800Z"
+    }
+  },
+  "body": "Windows scratch-folder cleanup when a junction is inside (Fable2, 2026-11-18 05:51Z, Opus2 #6730/#6731).\nLanes' private scratch homes (HOME and USERPROFILE redirected under the repo's .tmp) get a Windows-made INetCache junction. Non-forced Remove-Item then fails with \"hidden, system, or read only\", and lanes correctly stop.\nSupported NON-FORCED route: no -Force on any delete, and never follow a link. The executor is the owning Codex lane, after the usual path checks. For folder F:\n(1) `Get-ChildItem -LiteralPath F -Recurse -Force -Attributes ReparsePoint` lists the links without following them; here -Force only shows hidden entries. Note each Target.\n(2) For each link J, remove the link only: `cmd /c rmdir \"J\"`, with no /s and no /q. If an attribute blocks it, run `attrib -s -h -r /L \"J\"` first, where /L acts on the link itself.\n(3) Re-list; nothing may remain, otherwise STOP.\n(4) `attrib -r -h -s /s /d \"F\\*\"`, then `Remove-Item -LiteralPath \"F\" -Recurse -Confirm:$false`, without -Force.\n(5) Any refusal or error means stop and report.\nThis is an application of the shared Cleanup deletions rule, not a forced removal. It guards against following a junction into the real profile, which is the 2026-09-26 incident class."
+}

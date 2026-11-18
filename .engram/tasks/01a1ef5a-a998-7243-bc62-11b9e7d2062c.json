@@ -1,0 +1,27 @@
+{
+  "id": "01a1ef5a-a998-7243-bc62-11b9e7d2062c",
+  "external_ref": null,
+  "title": "Codex thread fork and orchestrator instance sessions take no delegation-worktree lease",
+  "outcome": "A session created by a Codex thread fork or as an orchestrator instance cannot be published inside a delegation worktree that the sweep has reserved or is removing.",
+  "acceptance": [
+    "Codex thread fork and orchestrator instance sessions take no delegation-worktree lease is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

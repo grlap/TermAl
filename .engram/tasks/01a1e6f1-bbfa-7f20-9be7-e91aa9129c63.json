@@ -1,0 +1,31 @@
+{
+  "id": "01a1e6f1-bbfa-7f20-9be7-e91aa9129c63",
+  "external_ref": null,
+  "title": "Record each delegation worktree's owner and refuse a follow-up whose worktree is gone or not its own, split out of w-eb21094eba5a",
+  "outcome": "Each isolated delegation worktree records which delegation created it, and a follow-up runs only in that worktree: once the worktree has been removed by hand, or its path holds anything else, the follow-up is refused and nothing is recreated there. TermAl removes no worktree; removal is by hand under AGENTS.md 'Cleanup deletions'. Automatic removal is w-ad06bf5de019.",
+  "acceptance": [
+    "When TermAl creates an isolated delegation worktree, on both the default path and the worker-base path, it records the creating delegation's id in the worktree's Git administrative directory. A failure to record it fails the creation and cleans up the worktree. Shown by a behavioral test.",
+    "A follow-up on an isolated delegation is admitted only when the worktree at its recorded path is a linked worktree that Git still links (its administrative directory has HEAD) and whose owner record names that delegation. This is checked before restoration and again immediately before the lock that admits the follow-up; no filesystem access happens under the state lock. Otherwise the follow-up is refused with a reason, and nothing is created at the path. Behavioral tests cover a worktree removed by hand, a worktree a person made at the path, one another delegation made there, and a half-removed one.",
+    "The docs and the worker handoff say that TermAl removes no worktree, that removal is by hand, and that a follow-up is refused once the worktree is gone. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cleanup",
+    "delegations",
+    "disk",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

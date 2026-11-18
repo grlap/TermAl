@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Recovered and completed the already-landed A+B rescan repair after fresh independent acceptance evaluation1031b1c74cd145b5a36760fa3d2ecad2 PASS4/4 (Claude18618, delegation-f620f775-4138-4af6-803f-eebf7fd7a662). A landed d523cae0d137a73bcf632ea3c249226fe5ad0ae3/tree4945165c on Nov15 22:18Z; B landed8ce5148bb08bbad4209d9fcdc343c82e588bba51/tree3bee158e on Nov16 00:24Z. Each had clean independent pair/no Medium+ and exact-tree FULL; existing Lows separately filed. No new repair/tests were needed or run during recovery. Authorized single post-restart HTTP trace on running5537064c:19 complete unchanged active-origin passes, compactionpopulation0 and compaction0/0/0.001ms; cold-first and idle-backstop samples absent, explicitly not mixed in. Remaining lockhold156.701/169.871/204.586ms belongs to open parentw-e297; no under100ms or controlledspeedup claim. Coordinator3154 accepted criterion4 report with these limits. Current evaluated read-only sourcebdd03e60/tree0b96 clean. Historical source obligations disclosed, not new native verification. Owned recovery worktree/evidence cleanup follows; earlier-holder retained roots/artifacts coordinated separately.",
+    "completed_at": "2026-11-17T14:02:37.182196600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

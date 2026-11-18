@@ -1,0 +1,29 @@
+{
+  "id": "01a1ea2c-def7-7aa1-b46c-96f414aa3b4c",
+  "external_ref": null,
+  "title": "Keep named source-root watcher scope alive while carried checks run after turn end",
+  "outcome": "A named source root below a parent build/VCS directory remains an independently selected watcher scope for the lifetime of its running carried checks, including after the initiating turn closes.",
+  "acceptance": [
+    "A behavioral test ends the initiating turn while a carried check still runs in a named root under target/ or node_modules/, then proves a real source edit still reaches the check fence and correct publication/attribution.",
+    "Build/VCS descendants below that named root remain ignored, and an unrelated ignored sibling remains suppressed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "7a48-followup",
+    "review-low",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a1e197-761b-7c51-bd52-f169b7a8cd19",
+  "external_ref": null,
+  "title": "Launcher reports a filtered node --test run as passed and eligible when only the file wrapper executed and zero named tests matched",
+  "outcome": "A focused launcher run of `node --test` with a name filter (--test-name-pattern or similar) is not classified as passed or eligible when no named test case executed: for example, when the target file is a registration-only module and Node counts only its file wrapper. The results say that zero named tests ran, with a distinct classification, as the cargo path already does for zero selected tests.",
+  "acceptance": [
+    "Launcher reports a filtered node --test run as passed and eligible when only the file wrapper executed and zero named tests matched is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

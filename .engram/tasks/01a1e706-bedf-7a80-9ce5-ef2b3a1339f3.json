@@ -1,0 +1,30 @@
+{
+  "id": "01a1e706-bedf-7a80-9ce5-ef2b3a1339f3",
+  "external_ref": null,
+  "title": "Improve keyboard navigation when focus leaves the workspace delete popup",
+  "outcome": "Keyboard navigation around a workspace delete confirmation follows a deliberate focus policy without leaving a stale floating confirmation or interfering with unrelated controls.",
+  "acceptance": [
+    "Tab and Shift+Tab from the workspace delete confirmation either follow a deliberate local cycle or close the confirmation with appropriate focus placement; confirm/cancel and pending-delete guards remain correct.",
+    "Behavioral keyboard coverage protects the chosen Tab/Shift+Tab policy and preserves outside-control usability and safe focus restoration."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "accessibility",
+    "greg-reported",
+    "review-follow-up",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": "01a1e6c7-910d-7e60-9b57-5dca71aec075",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1e77d-aa4f-7292-9055-421e6ebde254",
+  "disposal_reason": "Parent w-5dca71aec075 completed after independent PASS3/3; continue the separately filed nonblocking Low as independent work, preserving its original review provenance. No execution claimed.",
+  "completion": null
+}

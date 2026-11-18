@@ -1,0 +1,28 @@
+{
+  "id": "01a1ebd1-8115-72a1-92c6-e2f305843c55",
+  "external_ref": null,
+  "title": "Exercise Cursor Plan permissions through the production router",
+  "outcome": "The three existing Cursor Plan tests in src/tests/cursor.rs exercise real reader admission or are replaced by equivalent routed coverage for the same permission and tool identity cases.",
+  "acceptance": [
+    "The current Plan refusal and two unscoped control-plane tool identity cases use the production ACP reader or equivalent real-router tests, verify denial without a card, and pass the relevant focused tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "cursor",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

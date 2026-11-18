@@ -1,0 +1,28 @@
+{
+  "id": "01a1e64c-5190-7b80-b82e-f04afa3115ae",
+  "external_ref": null,
+  "title": "Delegation shutdown fence leaks when a detached child runtime is dropped on a commit-failure early return",
+  "outcome": "Every path that detaches a delegation child runtime either shuts it down (lifting its fence on success) or lifts or keeps the fence by an explicit, documented decision, so worktrees are not kept for the process lifetime by accident.",
+  "acceptance": [
+    "Each early return after detach_terminal_delegation_child_runtime_locked or detach_delegation_child_runtime_locked (follow-up gate and reservation, status/result refresh, cancel, mark_delegation_failed_after_start_error, kill_session's commit failure) either shuts the runtime down and lifts its fence, or keeps the fence on purpose with that case named in docs/features/delegation-worktrees.md.",
+    "A behavioural test covers one such commit-failure early return and asserts the fence state the decision requires."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

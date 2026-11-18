@@ -1,0 +1,30 @@
+{
+  "id": "01a1eb0e-1efa-7332-87dc-305ab2c6a5f6",
+  "external_ref": null,
+  "title": "Write the local refusal summary after its requester is deleted",
+  "outcome": "A retained local unclassified refusal remains readable through the run summary when the original requester was deleted, without redirecting a notice or reopening producer delivery.",
+  "acceptance": [
+    "With a present run directory and deleted requester, bounded presentation repair writes the final refusal mirror and summary exposes its retained reason; requester notice completion is independent of mirror completion.",
+    "Behavioral tests cover deletion before repair and after reload, a missing run directory and a recoverable mirror-write failure. They preserve no notice redirection, no producer route/send, no credit and bounded retry/retirement.",
+    "Focused checks cover affected consumers and helpers; the exact landing input passes the required full gate and independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

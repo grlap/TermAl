@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-no-root-change-in-eval-request-turn",
+  "head": {
+    "state": "active",
+    "chain": [
+      "999a4c0ed00648f2b055883d969d5c04"
+    ]
+  }
+}

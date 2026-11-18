@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "combined-test-stability-candidate-rule-2026-11-16",
+    "revision_id": "b39a506962754fb9a7107856e8c60594",
+    "previous": null,
+    "body_sha256": "71d1cad8f2c7cd944d3b45f9f4772a5cae83c752a14a9771168d1b445e00e5b7",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1e602-2fb6-7443-a06b-3c1a32a94158",
+      "work_ref": "w-3c1a32a94158"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T20:19:27.372830500Z"
+    }
+  },
+  "body": "Fable2 #6568 (2026-11-16 20:18Z), a ruling for the integration owner.\n1. 043E-FULL-1 was red (test-5512f3ff). Its only failure was vitest WorkPanel.details-visibility focus, filed as w-3c1a32a94158 and assigned to Sol-edfd. So w-043e does NOT land on that run, and there is no rerun to green.\n2. The same rule covers all three load-sensitive or unclassified test defects: w-043ee952978f, w-2b87f743dde6 and w-3c1a32a94158. A FULL that fails ONLY on one of them is recorded as that known defect, and its landing waits.\n3. Cut ONE combined test-stability candidate on master. It carries the test-side contributions of w-043e (pair already clean), w-2b87 (once its pair is clean) and w-3c1a (once its pair is clean), plus a product change only if w-3c1a proves to be a real focus race. Give it one fresh pair over the combined diff and ONE FULL, and land the three together.\n4. The queued product FULLs (443e, 5c8b, a8d4, eb21, 0308) then run on that new master. Each is first carried onto it and gets a focused leg on the carried tree.\n5. If one of the three takes much longer, combine the two that are ready instead of waiting; the timing is the integration owner's call.\n6. Opus3 keeps the 043e test ref and root until the combined candidate is cut, then deletes the ref as usual."
+}

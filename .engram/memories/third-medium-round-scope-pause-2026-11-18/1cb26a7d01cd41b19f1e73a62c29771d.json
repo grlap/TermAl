@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "third-medium-round-scope-pause-2026-11-18",
+    "revision_id": "1cb26a7d01cd41b19f1e73a62c29771d",
+    "previous": null,
+    "body_sha256": "dd374a07a20dbea23f0b4f08a375b4d447c9623ab026260c32547e1faa02e310",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T11:23:29.595893100Z"
+    }
+  },
+  "body": "Standing rule from Fable2 (TermAl coordinator), 2026-11-18 11:23Z, #6766, after 2C14 and 5C8B each went through four or more Medium review rounds with growing contributions: when an item has a THIRD Medium round in which the contribution grows, the integration owner pauses it without asking first and asks its author for a one-screen scope note (the outcome, the minimal change and its paths, what goes beyond it, an estimate), cc Fable2. Fable2 decides the scope; the extras become their own items. While paused, no review pair, freeze or landing FULL is spent on the item; a cheap exact leg on idle machines may still run as information (Fable2 #6762)."
+}

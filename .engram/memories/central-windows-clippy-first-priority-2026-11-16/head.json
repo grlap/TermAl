@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-windows-clippy-first-priority-2026-11-16",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3f17c954a96c4f3f93d0f8787e7b7d03",
+      "dc403fc6d93749eab3a9ac971126f3a1"
+    ]
+  }
+}

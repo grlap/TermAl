@@ -1,0 +1,31 @@
+{
+  "id": "01a1e293-8e31-7f62-b9c0-205c83ea2be9",
+  "external_ref": null,
+  "title": "Read-only delegation children are refused harmless Git read commands (git branch -r --contains, git diff | grep)",
+  "outcome": "A read-only (writePolicy readOnly) delegation child can run Git commands that only read, including `git branch -r --contains <commit>` and a `git diff ... | grep ...` pipeline, while every command that can mutate stays refused, decided per command.",
+  "acceptance": [
+    "A read-only delegation child running `git branch -r --contains <commit>` in a clean worktree is admitted and gets Git's output; a test shows it.",
+    "A read-only child running `git diff <a> <b> -- <path> | grep <pattern>` is admitted; a test shows it.",
+    "Mutating Git forms (for example `git branch -d`, `git commit`, `git push`, `git update-ref`, redirection into tracked files) stay refused for read-only children, with a test per class.",
+    "A refusal names the command and the rule that refused it, so the child can report it exactly."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "false-positive",
+    "read-only-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

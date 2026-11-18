@@ -1,0 +1,26 @@
+{
+  "id": "01a1ed43-2017-7621-bd00-6576b35ccce5",
+  "external_ref": null,
+  "title": "A launcher killed during the store-in-repair registration wait leaves its run unsettled",
+  "outcome": "A launch interrupted while waiting out a store in repair ends as a settled failed run (no stages, no registration), or the docs state that a launch may block up to about 15 minutes before RUN or STARTED and should run in background mode.",
+  "acceptance": [
+    "Either SIGINT or SIGTERM during the registration wait settles results.json as failed with no stages run and a reason naming the interrupted wait, shown by a behavioural test; or docs/test.md states that a launch may block that long before RUN/STARTED, including --detach launches, and should run in background mode."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

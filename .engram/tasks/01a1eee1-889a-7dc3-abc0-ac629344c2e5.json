@@ -1,0 +1,31 @@
+{
+  "id": "01a1eee1-889a-7dc3-abc0-ac629344c2e5",
+  "external_ref": null,
+  "title": "Distinguish an older focus-change capture failure from an already named successor",
+  "outcome": "A closing focus-change diagnostic accurately describes the disposition of its own turn and gives advice consistent with the current or already acknowledged successor root, preserving the earlier no-report outcome.",
+  "acceptance": [
+    "Recover or reproduce the closing/new-opening ordering behind the paired notice and source-basis banner, distinguishing an acknowledged name from root measurement on the later opening.",
+    "A behavioral regression verifies that a valid successor name does not receive stale advice to name it again after an older closing refusal, while a genuinely absent name still receives the remedy.",
+    "Keep the earlier turn's failure and evidence disposition attached to that turn."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "diagnostics",
+    "host-recording",
+    "named-root",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

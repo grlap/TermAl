@@ -1,0 +1,30 @@
+{
+  "id": "01a1eb70-2ce6-7ea2-bd4b-e6ce98d7c28b",
+  "external_ref": null,
+  "title": "After proven sync: how TermAl's cross-host work and procedures change now (Greg + Kimi)",
+  "outcome": "A short Polish report to Greg says, for TermAl together with Engram:\n- what changes in the cross-host split of work and procedures now that sync is proven (Comovo Windows to Mac; Engram DL560 to Central, where closing P unblocked D without a new evaluation);\n- what to stop doing;\n- the real current limits: manual export/git/import, local changes, local claims, evidence;\n- what waits for a one-command sync.\nIt proposes the smallest set of actions, each with an owner, with no new gates and no work stopped.",
+  "acceptance": [
+    "Kimi's read-only assessment is recorded on this item. It covers: safe to apply now / stop doing / current limits (manual export-git-import, local changes, local claims, evidence and verification records) / waits for one command. Each point cites its source (docs/features/git-task-sync.md, a trial note or a mailbox).",
+    "Both coordinators agree on a minimal action list with an owner per action, adding no new gate. A short Polish report reaches Greg via Engram::Asistant."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 1,
+  "labels": [
+    "cross-host",
+    "greg-directed",
+    "kimi",
+    "task-sync"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

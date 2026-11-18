@@ -1,0 +1,32 @@
+{
+  "id": "01a1eaa3-014c-7240-b030-5fe431225670",
+  "external_ref": null,
+  "title": "Runtime observations refused by a transient Engram store state (projection repair) exhaust 8 retries in about 4 minutes and are lost for good",
+  "outcome": "A runtime observation whose report preparation or delivery is refused by a transient Engram store state (projection_repair_required or work_projection_invalid during a post-install repair, or a temporarily unopenable store) is retained and retried until the store is ready, then reported with its checks eligible for credit, instead of becoming terminal \"not reported to Engram\" after a fixed retry budget.",
+  "acceptance": [
+    "Engram refusals that are transient by typed code (at least projection_repair_required and work_projection_invalid) are retryable without consuming the terminal attempt budget, or use a store-ready-gated wait, so an observation survives a repair window of at least 1 hour; permanent refusals still end terminal with the existing readable notice.",
+    "A behavioural test drives a closing job through transient store refusals longer than the current 8-attempt backoff, then a ready store, and shows the observation is reported once (no duplicate) with its checks credit-eligible; a second test shows a permanent refusal still ends terminal with a readable reason.",
+    "The review pair is clean and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "engram-host-adapter",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a1eaa3-01a0-7951-a123-34b0e8f26f99"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

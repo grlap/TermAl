@@ -1,0 +1,32 @@
+{
+  "id": "01a1e374-8307-7b71-b323-b2b057f117e7",
+  "external_ref": null,
+  "title": "Budget ACP approval previews across multiple diff entries and locations",
+  "outcome": "Budget ACP approval previews across multiple diff entries and locations",
+  "acceptance": [
+    "Multiple large ACP diff entries retain a bounded reviewable preview of each proposed After section and its file location; earlier Before content cannot consume the entire later-file budget.",
+    "Behavioral approval-card coverage demonstrates the multi-entry budget while retaining opaque decision IDs and existing total output bounds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "approvals",
+    "greg-reported",
+    "kimi",
+    "review-follow-up",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e295-a4d4-7000-a550-d06c40369f6c",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

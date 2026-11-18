@@ -1,12 +1,12 @@
 {
   "id": "01a1b3fe-8244-7dc1-a5ab-54e344118c05",
   "external_ref": null,
-  "title": "Intermittent mailbox read failures on a known, previously-read mailbox: transient 404 \"mailbox not found for this session\" and 410 readKeyExpired, both succeeding on immediate retry",
-  "outcome": "A root session's read of a mailbox it belongs to, and has read and acknowledged before, does not fail transiently. If a read is refused, the error names the real cause and says whether an identical retry is safe; a 404 is never returned for a mailbox the caller is a participant of.",
+  "title": "Preserve the initial wrong-ID mailbox refusal instead of turning a repeated read into readKeyExpired",
+  "outcome": "An initial keyed read refused because the mailbox is absent or the caller is not a participant returns the typed pre-page notEntered refusal and releases only its owning bridge intent; a repeated ordinary read preserves that cause rather than manufacturing readKeyExpired. Genuine expired/uncertain frozen reads keep their documented recovery semantics. The distinct unreproduced Nov 7 correct-ID participant-mailbox 404 remains open in w-ec6ad041bb96.",
   "acceptance": [
-    "The cause of the transient 404 'mailbox not found for this session' on a mailbox the caller participates in is identified and fixed, or the response is replaced by a typed retryable error, with a test reproducing the condition",
+    "The wrong-ID initial-read 404 'mailbox not found for this session' and its retained-key 410 on an identical ordinary read are identified and fixed by the typed pre-page refusal and owning-intent cleanup in bc5f240e, with a discriminating regression test. The distinct, unreproduced Nov 7 correct-ID participant-mailbox 404 is preserved as unresolved work in w-ec6ad041bb96 and is not claimed fixed by this item.",
     "The 410 readKeyExpired observed with no central restart is explained (which frozen page/key expired and why) and either prevented or documented as expected with its retry rule",
-    "Both reported calls below are accounted for in the item notes"
+    "The item notes account for the wrong-ID 404/410 path and explicitly distinguish the original Nov 7 ~03:10Z correct-ID 404 report, its unavailable raw input/result and its transfer to w-ec6ad041bb96. No claim that every failing call used a wrong ID, or that the correct-ID incident is resolved, remains as the accepted explanation."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed bc5f240e fixes the wrong-ID initial mailbox refusal/retained-key 410 path. Fresh independent revision-2 acceptance d274085389e0473cbbae6f0090594551 passes all 3 criteria. The unreproduced Nov 7 correct-ID participant-mailbox 404 remains OPEN in w-ec6ad041bb96.",
+    "completed_at": "2026-11-16T19:18:35.688981100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

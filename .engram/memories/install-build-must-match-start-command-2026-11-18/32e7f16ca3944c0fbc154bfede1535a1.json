@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "install-build-must-match-start-command-2026-11-18",
+    "revision_id": "32e7f16ca3944c0fbc154bfede1535a1",
+    "previous": null,
+    "body_sha256": "e6c86b3d83e8de53590f917df7f0847c8ea8c3f68352fbde0823cc23277b99ca",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T16:42:59.465439Z"
+    }
+  },
+  "body": "TermAl install lesson (Opus2, 2026-11-18). My install, cargo build --release --bin termal (sha a05fc94f), was rebuilt by Greg's start, cargo run --release, at restart: same source bf9bd691, new sha cae306ca, identical size. Cargo's fingerprint differed, by command, bin selection or environment. For future installs, build with the same invocation and environment the host start uses (cargo build --release, no --bin, from the same shell setup), or record the hash after the restart as the running hash. Also: the mailbox scripts use TERMAL_CLI = target/release/termal.exe. While that file is renamed aside during an install, point TERMAL_CLI at the backup exe."
+}

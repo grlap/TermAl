@@ -1,0 +1,30 @@
+{
+  "id": "01a1f035-6b9a-7db1-add3-4f8d8be0147a",
+  "external_ref": null,
+  "title": "Registered FULL with a passed clippy stage (and an unrun docs stage) gets no native verification: \"unclassified_stages ... clippy, docs\"",
+  "outcome": "A registered committed-input FULL whose stages TermAl does not classify (for example Engram's clippy and docs) either earns the native verification its recognized stages support, or is refused with a reason that names the exact stage and the correction. An unrecognized or unrun stage never silently withholds credit for the whole run without a defined rule.",
+  "acceptance": [
+    "The stage classification that produced \"unclassified_stages: completed run has no recognized check for clippy, docs; native verification was not granted\" is located by file and line, and the rule for unrecognized and for not-run stages is stated in the item note.",
+    "Clippy (cargo clippy ... -D warnings) is recognized as a lint-kind check, consistent with Greg's ruling that clippy must not block a check-in (2026-11-16): a passed clippy stage counts as lint evidence, and a clippy stage is not required for test or build credit. A docs stage that did not run neither grants nor blocks test or build credit; its absence is reported, not fatal. Shown by behavioural tests over a completed run with those stages.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "sync-path",
+    "verification-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

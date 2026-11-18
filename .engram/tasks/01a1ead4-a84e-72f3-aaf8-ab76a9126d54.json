@@ -1,0 +1,29 @@
+{
+  "id": "01a1ead4-a84e-72f3-aaf8-ab76a9126d54",
+  "external_ref": null,
+  "title": "Make the Codex cleanup feature doc point to the complete pre-removal prerequisites",
+  "outcome": "The feature doc cannot be read as a shorter alternative checklist to the shared cleanup rule.",
+  "acceptance": [
+    "The cleanup paragraph in docs/features/shared-codex-app-server.md includes terminal-run outcome recovery, frozen-input and unique-unpushed-change checks or clearly identifies its list as partial and defers to the full AGENTS.md rule.",
+    "The text preserves existing authorization, containment/link/retention/live/shared-resource and stop-after-failure rules, with required review/gate and authority-text process where applicable; no Markdown phrase tests are added."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

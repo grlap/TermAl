@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-clippy-non-blocking-2026-11-16",
+    "revision_id": "bdf6a76b525941fb83a88c8e24babaa4",
+    "previous": null,
+    "body_sha256": "de0cc4f8ab748b615fa130998bddfa7b8e847b8a898018cf19788a2b8dd8555f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T17:44:48.603371600Z"
+    }
+  },
+  "body": "Greg's decision, 2026-11-16 ~17:44Z, relayed by Engram::Asistant in TermAl mailbox 588693a8 #1931. Greg, verbatim: „Nie. To niech to wejdzie. Clippy poprawione w następnej rundzie. Clippy nie powinno blokowac check-inu. Bledy clippy poprawione w następnej rundzie.” It applies to both projects and to the current Engram dd205.\n- Clippy findings do NOT block check-in or landing.\n- They are reported visibly, given an owner, filed, and fixed in the next round. They are not a new barrier before work.\n- The decision covers Clippy ONLY: compile errors, test failures and review findings of Medium or higher still block as before.\n- TermAl implementation: w-a8d484a31d02 (Sol-8e1f). The early `cargo check --all-targets` blocks; Clippy runs early and does not block.\n- Kimi agrees the simple rule wording with the authors, without asking Greg again."
+}

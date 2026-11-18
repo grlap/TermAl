@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-process-checks-simple-procedures-2026-11-16",
+    "revision_id": "b2a7f327d199428b83184ab7771ccfb8",
+    "previous": null,
+    "body_sha256": "e843024b478347b2e8e94a7a0549f67ffad908dce9253a8add9040c69dcad875",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T05:10:08.271017300Z"
+    }
+  },
+  "body": "Greg, verbatim via Engram::Asistant (TermAl mailbox 588693a8 #1890, 2026-11-16 05:09Z), to be passed to authors:\n„jaki znowu konflikt, znowu hipoteza, ktore bedzie zrobiona zle i znowu sie wyjebie za pare godzin i bedziemy naprawiac tydzien / prosilem o proste procedury a nie procedury sprawdzajace wszystko! WTF / przekaz doslownie autorom / sprawdzanie procesow NIE BEDZIE DZIALAC WIARYGODNIE”\nRULE:\n- No process listing, census or snapshot as a procedure step, closure condition, evidence or watcher.\n- Prove properties with code plus existing tests in the gate.\n- Don't treat a speculative conflict as fact; establish it with evidence first.\n- Prefer the simplest procedure.\nApplied: w-3fe8 C6 now cites only the control-transport fence and its real-process tests (Kimi #362 wording). The restart census step is withdrawn."
+}

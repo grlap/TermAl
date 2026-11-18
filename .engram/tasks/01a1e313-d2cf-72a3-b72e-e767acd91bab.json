@@ -1,0 +1,31 @@
+{
+  "id": "01a1e313-d2cf-72a3-b72e-e767acd91bab",
+  "external_ref": null,
+  "title": "EO cleanup: reconcile dead protocol remnants and shared shutdown ownership",
+  "outcome": "No dead remnants of gated control remain: an operation TermAl never sends has no production enum variant or test-only module, retained fields that are always constant are removed or derived, and the fixture shares the production shutdown-owner sequence instead of copying it.",
+  "acceptance": [
+    "Either src/engram_verification_bind.rs and EngramControlRequest::VerificationBind are removed, or a doc states why the test-only contract is kept.",
+    "DelegationChildHold.attempts/held_since and EngramReclamationSession.enabled are removed or carry real values.",
+    "AppState and EOFixtureHost use one shared shutdown-owner stop sequence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "gating-removal-audited",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

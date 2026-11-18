@@ -1,0 +1,29 @@
+{
+  "id": "01a1e292-67f7-7e72-a935-d65de56542ec",
+  "external_ref": null,
+  "title": "Keep native-refusal presentation compatible across persisted remedy changes",
+  "outcome": "Keep native-refusal presentation compatible across persisted remedy changes",
+  "acceptance": [
+    "Persisted native-completion refusals remain readable after supported outcome/remedy presentation changes, using stable identifiers or deriving presentation at detail projection.",
+    "A behavioral persistence/reload control verifies supported older diagnostics retain their original closed cause without fabricated completion or credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "diagnostics",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

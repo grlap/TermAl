@@ -1,0 +1,28 @@
+{
+  "id": "01a1e58a-b63e-7473-bdef-736237cbfa48",
+  "external_ref": null,
+  "title": "Report the command-target mismatch instead of an unknown cwd at provider start",
+  "outcome": "A provider start with a known validated cwd but a mismatched validated command reports the actual deciding failure and a useful bounded remedy while retaining the existing refusal and credit guards.",
+  "acceptance": [
+    "A real provider-start regression with a known validated cwd and a mismatched command exposes an accurate bounded command-target refusal, preserves original custody, and produces no fabricated artifact association or credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "low",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

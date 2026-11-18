@@ -27,12 +27,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a1d3bf-d40d-76b2-bfeb-f82345ff320f",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed bounded detail-only native-completion refusal diagnostics without changing original completion, provider correlation, durable replay, remote qualification or credit. Independent postlanding evaluation c386398cf001411391a1c65bc7774e98 passed2/2 atcut736/revision1; complete3636B evaluatoroutput and both rationales consumed. Reviewedf05c contribution byte-identically adopted by landed3d984331 on25d92e85. Full gate test-f5e64837 passed all6stages on samefb6414c2tree/testref9ab36c83, all24diagnosticcontrolsPASS; author438selectedPASS. Lowfollowups remain their ownitems. Ownerpush09:25:26Z/readback and testrefdeletion09:25:29Z recorded; install/restart not claimed. Ownedroot/evidencecleanup follows. Minimal diagnostic-control baseline copied to open97R3evidence for exact83testselection, retaineduntil97closure. Prior done call with explicitcriterionlinks was refused by projectpolicy before completion; this call consumes the recorded independent evaluation directly with no manual links.",
+    "completed_at": "2026-11-16T09:45:56.611611100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

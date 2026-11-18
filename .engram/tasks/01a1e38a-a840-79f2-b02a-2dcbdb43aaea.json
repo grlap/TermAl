@@ -1,0 +1,38 @@
+{
+  "id": "01a1e38a-a840-79f2-b02a-2dcbdb43aaea",
+  "external_ref": null,
+  "title": "Re-arm completion-ready publication after background persistence becomes durable",
+  "outcome": "A notifier that runs before its completion is persisted retries promptly once original durable custody is available, preserving bounded attempts and ordinary fallback.",
+  "acceptance": [
+    "A behavioral control with the real asynchronous persist path shows an early not-durable notification attempt cannot emit a hint and later original durability prompts a bounded authenticated notification without waiting solely for the periodic fallback; original requester custody and bounded work remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "diagnostics",
+    "eo-critical",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "review-followup",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0ef-212e-70d0-aa69-97bc1f59bf56",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

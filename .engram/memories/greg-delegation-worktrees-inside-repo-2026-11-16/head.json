@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-delegation-worktrees-inside-repo-2026-11-16",
+  "head": {
+    "state": "active",
+    "chain": [
+      "2a133f0bb13f490796a0474c3081df2a",
+      "a946a304a2f64c61a5d3f9785bf35f82",
+      "5a4ae18c87c747a3811762ac0766e558"
+    ]
+  }
+}

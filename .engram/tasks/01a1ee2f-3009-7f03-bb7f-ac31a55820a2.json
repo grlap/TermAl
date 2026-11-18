@@ -1,0 +1,38 @@
+{
+  "id": "01a1ee2f-3009-7f03-bb7f-ac31a55820a2",
+  "external_ref": null,
+  "title": "Preserve provider artifact association for session roots with a separate Git directory",
+  "outcome": "A session whose own worktree uses a plain Git pointer file, such as a submodule or a separately stored Git directory, can associate its original launcher artifact using bounded Git metadata reads and exact original artifact custody.",
+  "acceptance": [
+    "Behavior tests use real session roots whose .git is a file outside the linked-worktree registry, and show the original launcher run associates after provider start.",
+    "A replaced, redirected or non-regular Git marker refuses association without following an unapproved directory. Association requires the original runtime, execution and request and grants no independent verification credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

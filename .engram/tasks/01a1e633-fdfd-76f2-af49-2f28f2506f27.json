@@ -1,0 +1,37 @@
+{
+  "id": "01a1e633-fdfd-76f2-af49-2f28f2506f27",
+  "external_ref": null,
+  "title": "Audit Rust and UI tests for remaining wall-clock bounds that fail under load (assert elapsed time, fixed deadlines, timer windows)",
+  "outcome": "Audit Rust and UI tests for remaining wall-clock bounds that fail under load (assert elapsed time, fixed deadlines, timer windows)",
+  "acceptance": [
+    "A recorded list, with file:line, of every test whose pass/fail depends on wall-clock time under load: an elapsed or median bound, a fixed deadline inside the code under test that the test races, or a 'not yet due' window. Each entry is classified as safe (the bound is a product requirement, or there is ample margin) or at-risk, with the reason.",
+    "Each at-risk test is filed as its own item that measures the real property (work done, ordering, an injected clock) instead of time. This audit does not change code itself.",
+    "Known cases already owned are cross-referenced and not re-filed: w-043ee952978f, w-2b87f743dde6, w-707ad5e437d5."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "gate",
+    "test-defect",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Completed the read-only Rust/UI wall-clock audit at clean 0def92129f520f040479bd4b58d5e272c9f9b649/tree374aedee7687a1757d70ab8417d4ed1af8fa8806: 1369 classified file:line entries in 55 durable census notes, 30 at-risk rows linked to 28 focused issues (26 new, two existing), with all three required known cases reconciled without duplicates. Independent Claude evaluation566c103973c84c41964eaab678e0e8d1, delegation9e0e8d07-abdd-4756-85dd-a6204ac4ddef/session18609, passed3/3 at cut298; full output and complete tracker verdict read. Evaluation is judgment with sampled source/census searches, not exhaustive rereading or independent follow-up-body verification. No source edits, tests or builds were performed for this audit. Report7ba651894c244e97b98a712647224b7e and riskcatalogf7fae443068a44d4aaebf8c24e748a30 remain lasting evidence. Owned root and temporary raw JSON indexes will now be removed after path and ownership checks.",
+    "completed_at": "2026-11-17T02:27:42.399514800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

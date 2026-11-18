@@ -1,0 +1,28 @@
+{
+  "id": "01a1eb50-938b-7592-97b0-8d4ec7f001c4",
+  "external_ref": null,
+  "title": "Request a delegation worktree sweep when a named source root ends by release, reclamation, capacity eviction or binding retain",
+  "outcome": "An ended delegation's worktree held only by a named source root is reclaimed as soon as that root ends by any path, not at the next unrelated event or boot.",
+  "acceptance": [
+    "Every path that removes a named source root (release in engram_named_root_release.rs, reclamation, capacity eviction, binding retain) requests a delegation worktree sweep pass after the removal is published.",
+    "A behavioural test shows that ending the last named root holding an ended clean delegation's worktree, by one of those paths, leads to the worktree's removal without another event."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

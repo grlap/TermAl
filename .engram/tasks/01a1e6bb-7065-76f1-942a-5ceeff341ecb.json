@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6bb-7065-76f1-942a-5ceeff341ecb",
+  "external_ref": null,
+  "title": "Fix TermAl's Clippy findings reported by the new advisory stage (5,837 at A8D4-FULL-1), next round",
+  "outcome": "Fix TermAl's Clippy findings reported by the new advisory stage (5,837 at A8D4-FULL-1), next round",
+  "acceptance": [
+    "The advisory Clippy report from a FULL on current master is triaged by lint code with counts, and the findings are fixed in bounded batches, each its own reviewed candidate, or a lint is explicitly allowed in config with a recorded reason. The bulk count trends to zero, and no batch changes behaviour beyond what its lint requires.",
+    "No batch weakens tests, and each batch passes the gate. Clippy stays advisory (non-blocking) per Greg's decision."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "clippy",
+    "greg-directed",
+    "next-round"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

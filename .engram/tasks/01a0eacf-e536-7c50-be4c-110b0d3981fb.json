@@ -39,12 +39,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1e295-a4d4-7000-a550-d06c40369f6c",
+  "disposal_reason": "Same defect class, fixed generally. w-d06c40369f6c removes Kimi's ordinary tool-title allowlist entirely, so auto-approve answers every ordinary single-allow request whatever the title, including CronDelete. Sol-a7bb's RED2 confirmed the general title-list defect, and GREEN1 candidate a84b8565 is frozen for its author run. Superseded by Fable2, coordinator.",
   "completion": null
 }

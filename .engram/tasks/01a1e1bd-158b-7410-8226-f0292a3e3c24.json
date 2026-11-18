@@ -1,0 +1,32 @@
+{
+  "id": "01a1e1bd-158b-7410-8226-f0292a3e3c24",
+  "external_ref": null,
+  "title": "Shorten the standard FULL (~53 min) without losing regression detection: measure the slowest Rust and launcher fixtures, then cut fixture cost, not cases",
+  "outcome": "Shorten the standard FULL (~53 min) without losing regression detection: measure the slowest Rust and launcher fixtures, then cut fixture cost, not cases",
+  "acceptance": [
+    "Before any change, a bounded focused measurement in a slot placed by the integration owner (no new FULL just for analysis) records the per-test and fixture-phase time of the named slow cases: the three journal-capacity loops, build_checks, node_checks, state_lock_parallel, the review_identity binary and its 10k-file case, and the dominant launcher fingerprint fixtures. The figures are recorded on this item and kept separate from estimates.",
+    "Production limits and every existing case are kept. The 1024-entry journal tests seed state directly through a test fixture and still exercise the real boundary transition, instead of lowering the limit; build_checks, node_checks and review_identity share or clone genuine fixtures where their setup repeats. The 10k-file case stays in the FULL.",
+    "Every changed test still fails on the defect it guards: for each, a recorded mutation or removal of the guarded behaviour makes it fail, as behavioural evidence, not text pinning.",
+    "A FULL on the exact landed tree passes and its recorded stage times are compared with the baseline FULLs (52.7, 54.0 and 54.6 min on Central), with the saving stated. Vitest pool or isolation changes and more Node concurrency are out of scope unless a measured focused comparison shows they keep coverage and contention unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "greg-directed",
+    "process-simplification",
+    "test-cost"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

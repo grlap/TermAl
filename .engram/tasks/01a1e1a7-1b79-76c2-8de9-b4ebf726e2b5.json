@@ -1,0 +1,29 @@
+{
+  "id": "01a1e1a7-1b79-76c2-8de9-b4ebf726e2b5",
+  "external_ref": null,
+  "title": "Reach causal pending keys with TEXT or BLOB retry order during a sustained numeric backlog",
+  "outcome": "A genuine original with a damaged retry-order type is eventually selected and repaired while a large numeric pending backlog remains.",
+  "acceptance": [
+    "A disposable regression with at least32 numeric pending keys and a genuine original whose retry order is TEXT or BLOB proves bounded selection, repair and exact settlement of that original.",
+    "Selection stays bounded and indexed while preserving original custody, metadata bytes, current authority checks and healthy-key progress."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-completion",
+    "review-low",
+    "scheduling"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

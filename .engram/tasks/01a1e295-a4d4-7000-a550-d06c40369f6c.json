@@ -1,0 +1,41 @@
+{
+  "id": "01a1e295-a4d4-7000-a550-d06c40369f6c",
+  "external_ref": null,
+  "title": "Auto-approve sessions across supported harnesses stall on tool permissions, and remaining cards show raw JSON",
+  "outcome": "All supported harnesses honor active auto-approve without needless approval cards, notifications or waits; sandbox restrictions remain independent and readable, and non-auto permission cards render readable content.",
+  "acceptance": [
+    "For each supported harness (Codex, Claude, Cursor, Gemini/agy, OpenCode, Kimi), the item records the harness's actual approval-mode setting in TermAl, how it propagates to the provider, and which tool-request classes reach TermAl as permission requests, with evidence (captured params or pinned source, and file:line).",
+    "With auto-approve active, no tool request that the mode grants produces an approval card, a notification or a wait, in any harness. That includes the Kimi Read under .git/worktrees in the session workdir. TermAl or the provider answers it according to the mode.",
+    "Sandbox stays a separate setting: its boundaries are enforced, and a request beyond a sandbox or another genuinely unmeetable constraint ends with a bounded, readable, actionable reason on the session, never a silent wait.",
+    "Any permission card that remains (non-auto modes) renders readable text, not raw JSON. The AskUserQuestion behaviour from w-65b096fb3238 is unchanged.",
+    "Behavioural tests from captured-shape fixtures per harness cover auto-approve answering, sandbox refusal with a reason, and the readable card. The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acp",
+    "approvals",
+    "greg-reported",
+    "kimi",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed the six-harness approval-mode fixes and readable permission cards in batch commit 8577f5ec. Cursor Plan now returns a bounded actionable refusal after handing off the rejection or cancellation, and the running mode is captured once at admission. The exact landed tree passed FULL, and the independent post-landing evaluation passed all five criteria.",
+    "completed_at": "2026-11-18T05:47:05.944783900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

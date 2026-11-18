@@ -1,0 +1,37 @@
+{
+  "id": "01a1e5c7-928c-78f3-97ca-ec6ad041bb96",
+  "external_ref": null,
+  "title": "Transient 404 'mailbox not found for this session' on a correct-id read of a participant's mailbox (2026-11-07), unreproduced",
+  "outcome": "not reproduced; the only candidate mechanism is unreachable in production as far as source shows. Preserve the original Nov7 report and unavailable raw input/result; improve only the typed refusal for a durable participant row marked departed, without host retry or re-admission.",
+  "acceptance": [
+    "The notes preserve the original 2026-11-07 correct-ID transient 404 report, the unavailable raw arguments/result, and its distinction from the wrong-ID/read-key defect fixed by bc5f240e. The bounded source investigation records: not reproduced; the only candidate mechanism is unreachable in production as far as source shows. No historical cause or fix is claimed.",
+    "A read refused because its existing durable participant row is marked departed returns a typed, readable participant_retired_during_read refusal. Unknown-mailbox/nonparticipant refusals, current authority fences, and frozen-page/receipt ownership remain distinct. The new refusal does not trigger automatic re-admission or retry; existing pre-read local-root repair is unchanged.",
+    "Observable regressions distinguish a departed participant from an unknown mailbox and an active participant, preserve the refusal across the applicable authenticated boundary, and verify that no hidden retry or replacement page is issued. Focused checks and the standing independent review pair and landing validation pass on the exact input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "mailbox",
+    "reliability",
+    "unreproduced"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed typed participant_retired_during_read diagnostics at1d8fd9172664e611ac55d3f4c95a6cf7d6160456/tree982278976b3093fdb0f40fc0b7d4bb2d8d6bbf4d. Independent post-landing evaluation53b754f1f6c0457a8734a7356370d147 read fully, fresh all3criteriaPASS. Preserves missing/active/authority/frozen-page/receipt distinctions and adds no automatic retry or re-admission. Historical Nov7 transient404 remains unreproduced with raw call input/result unavailable; no historical cause/fix claimed. Exact-tree remote focused310PASS, adopted independent whole10pair noMedium+, original full260001ac allstagesPASS and landing/readback evidence recorded. Hostlessremoteevidence disclosed; no native mailbox testcredit claimed, remaining no-action source-mutation obligations recordeduntested perowner1665. OptionalLowfollowupw-cb8b5a4392c2 remainsseparate. Install deferred tointegrationowner; cleanup follows closure.",
+    "completed_at": "2026-11-17T01:45:47.923658500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1e491-2489-7433-b8bf-cc6512131b41",
+  "external_ref": null,
+  "title": "Read-only Codex reviewer: `git diff` under exec_command never completes (likely a git pager waiting on closed stdin); set a non-interactive pager in the delegation environment",
+  "outcome": "Read-only Codex reviewer: `git diff` under exec_command never completes (likely a git pager waiting on closed stdin); set a non-interactive pager in the delegation environment",
+  "acceptance": [
+    "The cause is confirmed from TermAl's delegation-spawn environment and the Codex exec path: whether git starts a pager for a read-only exec and blocks on closed stdin. If TermAl doesn't control that environment, record that and document the workaround instead.",
+    "If TermAl spawns the child: read-only delegation children (Codex and Claude) get a non-interactive pager environment (for example GIT_PAGER=cat and PAGER=cat), so read-only git inspections complete without --no-pager. No other environment or permission change.",
+    "A behavioural test shows the spawned child's environment carries the non-interactive pager settings, or, if out of TermAl's control, that the docs carry the workaround. No test reads Markdown for phrases. The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "cross-project",
+    "delegations",
+    "read-only-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

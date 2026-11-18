@@ -1,0 +1,30 @@
+{
+  "id": "01a1eb0e-1d4e-7560-80e6-9c358403b726",
+  "external_ref": null,
+  "title": "Keep recovery-test transports and clocks attached after reload",
+  "outcome": "Unclassified-refusal recovery tests observe the transport and clock actually installed in the reloaded state, so their no-producer-send and retry assertions detect real regressions.",
+  "acceptance": [
+    "Each affected recovery fixture reinstalls the recording transport and, where timing is asserted, the scripted budget clock after load_state; assertions observe the active adapter after any second session setup.",
+    "Behavioral coverage proves that presentation repair after reload does not route or send a producer record and that advancing the installed clock controls the intended retry boundary. Existing mirror, rollback, missing-directory, deleted-owner and no-redirection checks retain their observable coverage.",
+    "Focused checks cover the affected helper callers; the exact landing input passes the required full gate and independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-followup",
+    "test-stability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

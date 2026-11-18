@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "install-build-must-match-start-command-2026-11-18",
+    "revision_id": "4e911e5b0225499299358e991537f46a",
+    "previous": "32e7f16ca3944c0fbc154bfede1535a1",
+    "body_sha256": "dac5cd291fe06d35d5e1d71c47f7b6dbe506ab987c001e29f381eaa487df5fe6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T16:43:18.392967500Z"
+    }
+  },
+  "body": "SUPERSEDED by the existing memory central-restart-cargo-run-rebuilds-exe (rev 4), which I should have read before the install. Greg starts every host with git pull plus cargo run --release, so an installed copy is always rebuilt or relinked. Same commit, different sha is EXPECTED; do not re-install to match. After a restart, verify from files only:\n- the checkout HEAD and that it is clean;\n- the sha256 and mtime of target/release/termal.exe;\n- that the host answers.\nName the build \"Greg's git pull + cargo run --release at HEAD X, sha Y\". No process checks (Greg, 2026-11-16).\n2026-11-18 instance: HEAD bf9bd691; the installed copy a05fc94f was rebuilt at 16:38:04Z to cae306ca.\nStill useful: the mailbox scripts use TERMAL_CLI = target/release/termal.exe. While that file is renamed aside during an install, point TERMAL_CLI at the backup exe."
+}

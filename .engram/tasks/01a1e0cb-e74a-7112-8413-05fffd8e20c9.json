@@ -5,7 +5,7 @@
   "outcome": "A remote run's native completion for a new causal test request is pulled and settled within a bounded time that does not grow with Central's total mailbox history.",
   "acceptance": [
     "A causal test request's native completion, once durably available on the runner, is pulled and settled within a bounded number of recovery ticks that is independent of the number of unrelated rows in mailbox_messages and mailbox_relay_intents. A behavioural test with a large unrelated history ahead of the request row (several thousand rows) asserts settlement within that bound.",
-    "The existing guarantees are kept: per-row malformed-row skips with bounded diagnostics (the w-0742 fix), idempotent saved-completion replay, original custody and selector checks, and no unindexed full-table scan per tick.",
+    "The existing authority and replay guarantees are kept: malformed pending rows retain their original custody and have bounded durable diagnostics while healthy pending keys progress; idempotent saved-completion replay and original custody/selector checks remain; recovery reads only the indexed durable pending set, with no ordinary-history sweep or unindexed full-table scan per tick.",
     "A pending request whose completion is not yet available is retried within the same bound once it becomes available. It is never skipped until a later full sweep.",
     "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact committed tree that lands."
   ],
@@ -29,12 +29,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed indexed durable causal-completion pending recovery as master/origin commit 7cdee39cd1eb62440a4fd1dd1879d47125fac92f, tree 7512173645dad9b139826ec671d5dcfe6b6cd5bf. Fresh independent evaluation 0aea41c8d789451e9fb0353f25643f42, session-18378 attempt 1, all four criteria PASS at cut 354; full verdict and complete 3510-byte output read and archived before completion. R2 Codex+Claude whole-27 review adopted by exact contribution equality; M1 closed, two Lows filed. Verified landing FULL six stages/three preflights and Windows72/0 on exact landed commit with settled host verification fff1a8a83d844b0dba548e38f2e28e85. FULL native/fingerprint controls remain explicitly reported-only as accepted by integration owner, with original launcher source pair and matching tree verified. All own author refs deleted; active carry root retained through this completion, then retired/cleaned. Shared failed/review source roots and raw evidence remain concretely held for open F823/97bc post-restart/live-admission attribution until those uses close. C7 FULL source hold may now be released to its owner. One-way coordination migration: older binaries refuse it; each affected host needs Greg's paired pre-migration store backup plus old executable for rollback. Install/restart and genuine live F823 credit remain separate, unclaimed.",
+    "completed_at": "2026-11-16T02:12:57.324761300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

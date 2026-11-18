@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-chrome-kill-log-2026-11-16",
+    "revision_id": "b196cde287ac43b58e8de57ea070fc9e",
+    "previous": null,
+    "body_sha256": "f7d1cf9e9523e6e34581c5c3cc0a4bf03470898a0973ed7f0ea0c8ca7587c35f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T03:58:40.119496400Z"
+    }
+  },
+  "body": "Central chrome.exe cleanup under Greg's grant (memory central-chrome-kill-grant-2026-11-16), performed by Opus2.\n- Use 1, 2026-11-16, for Engram::Merger's w-8732 focused step 3 (cold -j1 cargo test, floor 20,971,520 under rules-central-slot rev 17). The Merger's required census at 03:57:12Z read 20,090,040, below the floor.\n- At 03:58:20.89Z FreeVirtual read 20,610,524, with 28 chrome processes. Stop-Process -Name chrome was issued once.\n- At 03:58:21.43Z FreeVirtual read 29,388,388, with 21 chrome processes still exiting or left. No second kill was issued.\n- No test run was in progress on Central at the time. Only chrome.exe was touched, only on Central, and only once for this need.\n- The Merger was asked to record the same values on its Engram item w-8732."
+}

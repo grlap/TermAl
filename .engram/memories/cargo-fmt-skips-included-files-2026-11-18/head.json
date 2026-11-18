@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "cargo-fmt-skips-included-files-2026-11-18",
+  "head": {
+    "state": "active",
+    "chain": [
+      "72481f9331b749b5b4dee80399799a88"
+    ]
+  }
+}

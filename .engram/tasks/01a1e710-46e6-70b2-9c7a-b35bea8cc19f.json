@@ -1,0 +1,29 @@
+{
+  "id": "01a1e710-46e6-70b2-9c7a-b35bea8cc19f",
+  "external_ref": null,
+  "title": "Drive MCP running-to-terminal polling with a controlled wait clock",
+  "outcome": "delegation_mcp_wait_polls_until_terminal_then_fetches_result verifies polling order and terminal result retrieval without requiring the first loopback status round to finish within two physical seconds.",
+  "acceptance": [
+    "The test retains its running->completed script, exact two status calls plus result GET, timedOut=false and exact summary assertions while controlling wait deadline/poll progression.",
+    "Production wait budgets and at/past-deadline behavior remain unchanged without retries, ignore or increased timeout; preserve the existing zero-timeout first-status/result control."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "mcp",
+    "test-defect",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1ea2c-df2e-7813-9c7f-0e515b927107",
+  "external_ref": null,
+  "title": "Retain first watcher events for a newly selected root beneath an ignored parent before refresh",
+  "outcome": "The first real events in a newly selected nested source/workdir root are preserved even before the next timed watcher-scope refresh, while ignored build output remains suppressed at the current-state decision.",
+  "acceptance": [
+    "A behavioral test creates/selects a nested root below target/ or node_modules/, sends a source event before the next scope reconciliation, and verifies publication/attribution/check observation.",
+    "The implementation preserves ordinary ignored-descendant controls without adding a poller or a Git subprocess per event."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "7a48-followup",
+    "review-low",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

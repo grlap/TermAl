@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "comovo-mac-after-sync-plan-2026-11-17",
+    "revision_id": "afa6b103981845b091b96684f6969ccc",
+    "previous": "8bb6f87a7d5745bea8f7be5287b4f2dd",
+    "body_sha256": "50342b60ae05621e609a6da7f8222bfe8e0bb81dad2a48c0f09f3264693a67bb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T01:38:11.144818400Z"
+    }
+  },
+  "body": "Comovo on Mac: read-only facts and plan, from Kimi::Consultant (TermAl mailbox 852a55c9 #395, 2026-11-17 01:34Z), after Greg's word via Engram::Asistant #1942: \"Skończmy sync. Jak zadziała to zaczniemy testy na comovo. To nie zmienia planów.\"\n\nCURRENT STATE (read-only):\n- Comovo is the fit_friends project, with rincon-common as a submodule.\n- The Mac host (abf8bda6: arm64, 16 GiB RAM, about 52.9 GB free) has no registered fit_friends or rincon-common TermAl project. Its physical checkouts and toolchain are unknown.\n- Central fit_friends is on main at b39c0e1, with 56 STAGED PATHS TO PROTECT and an unmerged engram-migration branch.\n- Its Engram store is healthy, with 234 tasks; sync is OFF.\n- Stack: Dart ^3.12 and Flutter >=3.44. The Windows reference is Flutter 3.47.9 / Dart 3.13.7.\n\nPLAN, ONLY AFTER A WORKING ENGRAM SYNC:\n1. Clone with submodules and register the Mac project (TermAl side).\n2. Use the shipped Engram sync for tasks and memories.\n3. Run flutter doctor and check the toolchain.\n4. Do a small real Comovo task, with flutter test and the rincon-common dart test.\n\nDocker/Supabase integration stays off unless separately authorized.\n\nThere is NO extra FULL gate, new procedure or new Greg decision before development. Nothing happens now: no migration and no delay to P0.\n\nSupplement from Kimi #396 (01:35Z):\n- Repo: fit_friends is a separate repository, at C:\\github\\Personal\\fit_friends on Central (origin git@github.com:aolowko/fit_friends.git). Its submodules are rincon-common (git@github.com:aolowko/rincon-common.git) and comovo_assets.\n- Stack: Flutter/Dart with pub; Android uses Gradle, and iOS/macOS use Xcode and CocoaPods. Rust is used only for the rincon legal tooling, not for the app.\n- Tests:\n  - smoke check: `flutter test test/utils/date_utils_test.dart`;\n  - unit suite: `flutter test` (Windows evidence: 2133 pass, 29 skip);\n  - rincon-common/packages/common_core: `dart pub get`, then `dart test`.\n- Existing Central coverage: TermAl project-3, Comovo::Opus (session-16758) and Comovo::Worker.\n- Suggested Mac path (a convention only): /Users/greg/GitHub/Personal/fit_friends.\n\nUpdate from Engram::Fable (ebe242f7 #8170, 01:37Z). This also answered Greg via 43498a6e #1415.\n\nCorrection: the Mac DOES have /Users/greg/GitHub/Personal/fit_friends, on main at b39c0e11, the same commit as Central.\n\nEngram builds on each host:\n- Central has engram a4313ecc. It does task and memory export/import to the .engram-data folder.\n- The Mac has an OLD engram, 8bbf9d60, without memory exchange, and no store.\n- Built-in Git exchange returns UnsupportedPlatform off Windows. w-6bba fixes that. Until then, the manual git fetch / merge --ff-only / push of engram-data works on both hosts (docs/skills/engram-use).\n\nMinimum usable path. It needs NO FULL and takes about 1-2 h, mostly the Mac release build.\n1. Mac: install engram from master, then `engram init`.\n2. Central: enable, then data-init engram-data, then `export --include-memories`, commit, and push to private fit_friends.\n3. Mac: data-init, fetch, then `import --empty-basis`.\n\nOwners: the Mac runner, and Comovo's session on Central.\n\nNeeds Greg's word (asked in #1415): (a) installing on the Mac; (b) pushing engram-data to fit_friends.\n\nComes later: dd205, w-6ea6 (single command), w-6bba, evidence exchange, EO cleanup."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-standalone-rustfmt-edition-2024",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a1a0eb2c59864836979430e1837b9ebd"
+    ]
+  }
+}

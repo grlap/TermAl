@@ -1,0 +1,29 @@
+{
+  "id": "01a1e292-6a33-7280-b31b-6d6610cdde70",
+  "external_ref": null,
+  "title": "Assert artifact-refusal clearing in the durable original observation",
+  "outcome": "Assert artifact-refusal clearing in the durable original observation",
+  "acceptance": [
+    "The original-locator recovery test observes the original associated observation directly and after actual reload, proving its artifact refusal is absent after genuine association.",
+    "Removing the production observation-clear behavior makes the behavioral control fail while original identity and no-credit assertions remain intact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "criteria-proposed",
+    "diagnostics",
+    "review-followup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

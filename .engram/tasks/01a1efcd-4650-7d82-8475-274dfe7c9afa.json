@@ -1,0 +1,27 @@
+{
+  "id": "01a1efcd-4650-7d82-8475-274dfe7c9afa",
+  "external_ref": null,
+  "title": "A detached worker killed during its startup confirmation leaves a summary that does not say no stage ran",
+  "outcome": "When a detached run's worker exits (an OS kill or a fatal runtime error) during its startup confirmation, before it can save a failure, the run's refusal and later summary say that no stage ran and why, instead of only the close status and UNKNOWN.",
+  "acceptance": [
+    "A detached worker killed during its startup confirmation leaves a summary that does not say no stage ran is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

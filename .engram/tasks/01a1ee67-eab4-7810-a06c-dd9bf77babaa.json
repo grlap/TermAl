@@ -1,0 +1,39 @@
+{
+  "id": "01a1ee67-eab4-7810-a06c-dd9bf77babaa",
+  "external_ref": null,
+  "title": "Expand selected-provider relay and native settlement coverage",
+  "outcome": "Provider-path behavior tests exercise native pull, readback, one durable settlement and exact receipt replay for selected requests, including supported separate Git-directory roots.",
+  "acceptance": [
+    "Exercise real host and relay custody for selected focused and full cases and ensure receipt replay preserves the original request and terminal facts.",
+    "State which receipts are scripted. A scripted destination receipt does not establish actual verification credit.",
+    "Coordinate the separate Git-directory compatibility behavior with the existing work item w-ac31a55820a2."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1e329-5522-73c0-86d1-f70a3d53129b",
+  "external_ref": null,
+  "title": "Reject network Git metadata targets during automatic provider placement",
+  "outcome": "Automatic provider placement cannot follow a local .git gitdir, commondir or backlink onto a network path and block the event reader or start network authentication.",
+  "acceptance": [
+    "A disposable local Git-metadata fixture naming a network target is refused before that target is accessed, while a genuine local registered linked worktree still places successfully."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "provider-placement",
+    "review-low",
+    "security"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

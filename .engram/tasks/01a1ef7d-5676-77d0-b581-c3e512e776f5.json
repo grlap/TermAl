@@ -1,0 +1,27 @@
+{
+  "id": "01a1ef7d-5676-77d0-b581-c3e512e776f5",
+  "external_ref": null,
+  "title": "Hold the delegation worktree fence until a pending shared Codex turn start settles",
+  "outcome": "A delegation child's worktree fence is held until a shared Codex turn/start that went out without a turn id has settled, and any turn it started has been confirmed stopped; only then can the worktree be reclaimed.",
+  "acceptance": [
+    "Hold the delegation worktree fence until a pending shared Codex turn start settles is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

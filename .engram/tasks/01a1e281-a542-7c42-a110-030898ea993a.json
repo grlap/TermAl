@@ -1,0 +1,39 @@
+{
+  "id": "01a1e281-a542-7c42-a110-030898ea993a",
+  "external_ref": null,
+  "title": "A registered focused committed-input run (registered-but-not-indexed) completes PASS, but no native verification record reaches Engram",
+  "outcome": "A registered focused committed-input run (registered-but-not-indexed) completes PASS, but no native verification record reaches Engram",
+  "acceptance": [
+    "The cause is identified from source and the run's retained artifacts, and recorded on this item, for why run test-d021a679-baad-4e9e-881b-921db48f7474 got no native verification record while step 1 on the same root did (record 8157db6d33d242d0b3e7a3ef49bcf2c0).",
+    "A registered committed-input run either produces its native verification record after delivery, or the host records a bounded, readable reason on the run and to the requester saying why credit was not granted (for example: claim, root, input eligibility, index or delivery state). It is never silently uncredited.",
+    "Behavioural tests cover the identified cause, including the registered-but-not-indexed path that is later delivered, and existing credited runs are unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "host-recording",
+    "refusal-reasons"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed 66f12977ad58b05bcafd1ba262f67e4d0a728f99 on origin/master. Finished generic runs with unclassified stages now retain a bounded final refusal on the run and notify the original requester. Recognized and native declared runs retain their credit paths. Both exact focused legs passed 271 tests each, the exact landed tree passed the full gate, the adopted independent review pair has no Medium-or-higher finding, and independent evaluation 12496a24f0db4586af30464f4f9dbcaa passed all four criteria on this commit and tree. The Windows native verification record is ed1230b2d08d473582b342af4388fa7a. Holder evidence: historical cause fb9f7436d2a549f393f30c3f5f8ded0b, exact focused 6562348ad22a4bdfb56dfb31b72df294, full and landing f7ae29109c9f4f0c8f8c619bead9f316, R8/identical carry baf137758e0d44f9b70cfab30e83e88a and 6c3eb0d4e453436cb70df9a7e19a9c71.",
+    "completed_at": "2026-11-17T23:54:23.245505200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1eb35-3c45-79c3-b20f-8a040170631a",
+  "external_ref": null,
+  "title": "Describe the full local-refusal change in its successor commit message",
+  "outcome": "The next integration candidate for the local unclassified-refusal contribution has a commit message describing the complete change, while the existing candidate remains immutable.",
+  "acceptance": [
+    "When the required fresh candidate is created at the integration owner's placement, its subject and body describe the complete local-refusal recovery contribution and its relevant behavior rather than only formatting.",
+    "The new candidate preserves the reviewed contribution exactly, proven by no-renames raw path/status/mode/pre- and post-blob equality with the reviewed input; no amend, rebase or history rewrite is used."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": "independent_session",
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "commit-history",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

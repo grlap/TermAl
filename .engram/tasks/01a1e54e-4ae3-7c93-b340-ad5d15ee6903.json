@@ -1,0 +1,31 @@
+{
+  "id": "01a1e54e-4ae3-7c93-b340-ad5d15ee6903",
+  "external_ref": null,
+  "title": "Clarify the repo-folder rule: all work physically inside the repository folder, with no profile-located worktree exception; add the practical procedure to the existing coder-test-execution skill",
+  "outcome": "The always-loaded instructions say unambiguously that every file an agent or TermAl creates for work goes physically inside the right repository's folder: isolated worktrees, build output, test data and scratch. A Git worktree located elsewhere, such as under the user profile, is not inside the repository even though it links to the repo's .git. The existing coder-test-execution skill gives the practical procedure. The instructions' existing permitted tool and install writes stay unchanged, and no new exception is added.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md 'Work only in the repository folder' state the physical-location rule without the ambiguous 'including worktrees TermAl creates for delegated sessions' reading (CLAUDE.md:306, AGENTS.md:381 at 5537064c). TEST RUNS are not an outside-the-repo allowance: tests keep all their data, fake HOME, stores, fixtures, worktrees and artifacts inside the repo (e.g. target/), never the production ~/.termal, the real HOME or the system temp folder. The real ~/.termal is for the running product only. The remaining permitted tool writes (the running TermAl product, Engram store home, Cargo and npm caches) are kept in meaning, no new exception is added, and the edit contains no Greg quotes.",
+    "The existing skill .claude/skills/coder-test-execution/SKILL.md and its .agents copy give the practical procedure: where worktrees, target/, test homes and scratch go (.tmp/, target/, and .worktrees/delegation-<id> once w-eb21094eba5a lands), and what to do when a tool or test would write outside the repo (stop and report, never decide an exception). The procedure does not restate authority.",
+    "The wording was compared independently against Engram's instructions and the actual host and test behavior by Kimi::Consultant, and agreed with Engram's coordinator. The change carries an independent review pair with no outstanding Medium-or-higher finding and lands through the standing rule."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "disk",
+    "greg-directed",
+    "instructions",
+    "skills"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

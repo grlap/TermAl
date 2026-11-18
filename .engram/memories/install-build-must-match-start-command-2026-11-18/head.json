@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "install-build-must-match-start-command-2026-11-18",
+  "head": {
+    "state": "active",
+    "chain": [
+      "32e7f16ca3944c0fbc154bfede1535a1",
+      "4e911e5b0225499299358e991537f46a"
+    ]
+  }
+}

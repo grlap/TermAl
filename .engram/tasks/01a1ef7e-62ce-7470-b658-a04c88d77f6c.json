@@ -1,0 +1,32 @@
+{
+  "id": "01a1ef7e-62ce-7470-b658-a04c88d77f6c",
+  "external_ref": null,
+  "title": "Move benchmark-like (timing-threshold) tests out of the test suite into a separate benchmark run that keeps its results",
+  "outcome": "The maintained test suite checks behaviour only: no test passes or fails on wall-clock duration or throughput. Costly performance measurements run separately as benchmarks whose results are kept for comparison over time. Starts only after the current sync work lands.",
+  "acceptance": [
+    "An inventory lists every test in the TermAl Rust, Node and Vitest suites that asserts on elapsed time, throughput or a timing deadline as its subject (not a bounded wait for an event), with file, test name and what it measures.",
+    "Each listed test is either converted to a deterministic behavioural assertion (for example, a count of operations or lock-held work) or moved to a separate benchmark entry point outside the full gate, with the reason recorded per test.",
+    "The benchmark entry point records its results durably (machine, commit, metric values) so runs can be compared over time, and docs/test.md describes how to run it and where results are kept.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "after-sync",
+    "benchmarks",
+    "greg-directed",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

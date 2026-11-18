@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-test-temp-default-main-target-t-2026-11-16",
+    "revision_id": "11f5db0f3d7c4c6e994d56c651a3ab78",
+    "previous": null,
+    "body_sha256": "4d16efdc14c6682a751b4bb25500526c36b7c15c815b28d5999edea62fe05137",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T23:41:13.283638100Z"
+    }
+  },
+  "body": "Convention, decided by Fable2 on 2026-11-16 ~23:45Z for w-a8d484a31d02 and w-26abac74c80a. TermAl's default test user temp is <MAIN checkout root>/target/t/<short run id>, with the main checkout resolved through the git common dir, NOT the worktree's own target/. An explicit TERMAL_TEST_USER_TEMP overrides it within the in-repo rule.\nReasons:\n(1) It is inside the repo and under target/, matching Greg's repo-only rule, the w-ad5d wording and Engram's target/tmp/engram.\n(2) It is short and independent of the author worktree's depth. Git for Windows refuses a $GIT_DIR over 220 characters: the old <worktree>/target/tmp/termal projected 218/243/247 characters under .tmp/wt-*, and Sol-d50d saw \"'$GIT_DIR' too big\" at 194/219.\n(3) It is outside the inspected worktree, which satisfies Engram's source end-of-line guard.\n(4) A per-run subfolder avoids collisions.\nWindows legs at a realistic author-worktree depth are required before landing changes that touch it. Open question at the time of writing: A8D4-FULL-1's 15 watcher failures, possibly the watcher filtering fixtures under an ignored target/ (Sol-8e1f diagnosing). If the watcher filters by an absolute path component, that is a product bug."
+}

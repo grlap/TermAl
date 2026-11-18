@@ -1,0 +1,29 @@
+{
+  "id": "01a1eb99-bd7a-7b63-afef-71847eef5e76",
+  "external_ref": null,
+  "title": "Use the authorized canonical parent ID for retained review discovery",
+  "outcome": "An HTTP parent identifier accepted by the existing normalization rules returns the same retained identities as the canonical parent path. An encoded trailing space does not produce a false custody corruption error or change authorization.",
+  "acceptance": [
+    "Use the authorized canonical parent ID for retained review discovery is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "greg-directed",
+    "refusals",
+    "review-custody"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1eb26-0f67-7ea3-abd7-2f5fb5691ed2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

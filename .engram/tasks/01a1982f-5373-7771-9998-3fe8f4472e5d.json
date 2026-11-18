@@ -7,9 +7,9 @@
     "No ordinary model turn, queue progression, Resume or wake calls or waits on turn_evaluate, turn_begin, a grant, or any gated settlement or recovery; the turnGatedControl ON path and its setting no longer exist, and no stored or imported setting can reactivate gating",
     "Host-observed execution, source-change and test-run evidence is still recorded to Engram after the fact through an existing non-blocking observation or verification route, and claim association keeps working; worktree association moves onto the existing ordinary binding, so nothing needs a control session",
     "Turn-gating code (grant retention, retained or unknown-head recovery, admission and bind retry, containment, settlement and rebind) is DELETED from TermAl, not disabled or kept for compatibility, without erasing historical evidence, unknown prior-operation records, queued user content or ordinary delivery protections; Stop, reset, provider ownership, exact delivery, transport authorization, file and tool permissions and durable-write safety are unchanged",
-    "TermAl's source contains no call to Engram's turn operations (turn evaluate, turn begin, turn complete, the control-session bind used for turn admission, settlement, rebind or recovery), shown by a source search cited on the item and by tests, so that Engram's deletion of those operations cannot break any TermAl path, and contains no use of routing_token or any other field removed from the control-session wire, shown by the same cited source search",
+    "TermAl's source contains no call to Engram's turn operations (turn evaluate, turn begin, turn complete, the control-session bind used for turn admission, settlement, rebind or recovery), shown by a source search cited on the item and by tests, so that Engram's deletion of those operations cannot break any TermAl path, and contains no use of routing_token or any other field removed from the control-session wire, shown by the same cited source search. Passive decoding of retained historical records, redaction of legacy values, test fixtures and assertions that such a field is absent are not use: nothing TermAl sends or requires on the wire carries the field.",
     "Focused tests cover ordinary dispatch, queue, Resume, wake and reset with legacy retained state present; the review pair and the full gate pass on the landing input",
-    "After the coordinated cutover and actual TermAl restart, the running removal build records ordinary turn outcomes and source/check facts, ordinary named-root binding, registered verification and test-credit results through Engram's active ordinary writer for Codex, Claude, Cursor, Gemini, OpenCode and Kimi; the evidence names the running builds and actual per-harness results. Before a session opens --work-session, its former same-session control child and descendants are confirmed exited; no legacy/new child overlap or connection-token fencing race is accepted.",
+    "After the coordinated cutover and actual TermAl restart, the running removal build records ordinary turn outcomes and source/check facts, ordinary named-root binding, registered verification and test-credit results through Engram's active ordinary writer for Codex, Claude, Cursor, Gemini, OpenCode and Kimi; the evidence names the running builds and actual per-harness results.",
     "The documentation item w-2aa5a4a19772 is completed against this item's final landed input",
     "A project-level Execution Observability ON/OFF setting replaces the gated-control setting; it controls only non-blocking host observation and never gates a turn"
   ],
@@ -25,12 +25,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Execution Observability replaces per-turn gating. Ordinary model turns, queue progression, Resume and wakes never call or wait on turn_evaluate, turn_begin, a grant or gated settlement. The turnGatedControl path and its setting are deleted; historical records stay as passive data. TermAl sends no Engram turn operation and no routing_token. The project-level executionObservability ON/OFF setting controls only non-blocking host observation. After the cutover restart, the running removal build (491dd015) recorded ordinary outcomes, named-root binding, registered verification and credit for Codex, Claude, Cursor, Gemini, OpenCode and Kimi. All 11 post-landing review Mediums are closed. The final landed input is master 0dc6c384, whose FULL test-1b819f8a passed. The documentation item w-2aa5a4a19772 is complete. The independent evaluation (delegation-656b43a4, Codex) passed all 8 criteria at revision 21, where C6's control-child sentence had been deleted on Greg's word (Fable2 #5444).",
+    "completed_at": "2026-11-16T06:37:43.500062Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

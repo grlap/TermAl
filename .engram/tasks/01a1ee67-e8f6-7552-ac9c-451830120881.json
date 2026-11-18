@@ -1,0 +1,38 @@
+{
+  "id": "01a1ee67-e8f6-7552-ac9c-451830120881",
+  "external_ref": null,
+  "title": "Route delayed Codex command END by original execution across reused item IDs",
+  "outcome": "An addressed delayed Codex END settles the original measured or observation-only execution and releases its writer, even when a newer command reuses the item ID.",
+  "acceptance": [
+    "Real router cases cover exact late measured and observation-only completion across turn close and key reuse.",
+    "A duplicate or ambiguous successor terminal cannot release the predecessor writer or attach an artifact to it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

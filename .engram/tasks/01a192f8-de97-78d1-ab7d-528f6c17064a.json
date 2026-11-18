@@ -22,7 +22,7 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a192eb-84ea-78d0-9910-7e7cc49528b9",
   "child_requirement": "required",
   "prerequisites": [
@@ -31,5 +31,12 @@
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed resident session-row per-row COW through existing SharedSequence owner; preserved array/order/stamps/rollback and summary behavior. Four deterministic fixtures, exact carried Linux236pass, clean independent Codex/Claude review pair, exact-tree FULL6/6pass. Independent post-landing evaluation bafb554bd6214da899afd7f7139dd6d9 passed4/4 at1ba2/treec623. Local admission-only TypeScript Build096d7749 passed eligible; no Rust coverage attributed to it. No off-lock or latency improvement claimed; parent summary-performance work remains open.",
+    "completed_at": "2026-11-17T22:01:41.521658300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

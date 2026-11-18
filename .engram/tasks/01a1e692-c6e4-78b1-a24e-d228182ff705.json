@@ -1,0 +1,29 @@
+{
+  "id": "01a1e692-c6e4-78b1-a24e-d228182ff705",
+  "external_ref": null,
+  "title": "Record delegation worktree retention in a host-owned field instead of parsing result notes",
+  "outcome": "Whether a delegation's worktree is kept is decided from a host-owned record that a child cannot write, and recording it does not change a signed reviewer result.",
+  "acceptance": [
+    "The sweep's 'already retained' decision reads a host-owned field or attempt marker, not result.notes, so a child's own 'Notes:' line cannot suppress inspection.",
+    "Recording a retention reason does not change the terminal result that review-custody retention signs; a reviewer follow-up after a retention gets no spurious custody conflict.",
+    "Behavioural tests cover a child note imitating the retention prefix and a reviewer delegation with an isolated worktree that is retained."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a1e6b4-eed4-7411-b307-7dbecc735bfe",
+  "external_ref": null,
+  "title": "Committed-input focused run in a claimed, named Engram source root gets no host verification record: stays registered-but-not-indexed (registration-only), item undeclared",
+  "outcome": "A passing `--input commit` focused run, started in the named source root of an item the session has claimed and focused, is indexed by the host and delivered as a verification_record to that item. Or the host states, on the run and to the session, exactly why it was not attributed and what to do, never a silent registration-only end with no credit.",
+  "acceptance": [
+    "Read-only original intake verifies all nine retained run files against the attributed byte/SHA-256 manifest, and records the exact original run/request identity, dd205 work/run/claim revision and fence, named root, equal source_id endpoints, passed counts and RECEIVED receipt/verification record id; the misleading registration-only/item labels are explained from the exact incident launcher source.",
+    "An attributed exact-id Engram read confirms verification record 164787ec1fe2439793fc9404cd981e42 on w-dd205a1454a3 for the original run and binding, or records an explicit contrary result; no rerun or new test is used to replace the incident evidence.",
+    "The investigation records its evidence-based disposition and any separate discoverability follow-up without claiming a product fix or new test credit. No TermAl source change is landed; code review and a landing full gate are not applicable to this read-only disposition. Raw intake artifacts and the unused investigation worktree are cleaned after their last serving task closes, with retained facts in the tracker."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "host-recording",
+    "sync-critical"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Read-only investigation completed: NOT a TermAl defect. Original run test-50eeb351 was bound to dd205 revision14/claimfence19/namedrootgeneration3935, produced22passing checks and a received receipt naming native verification164787ec1fe2439793fc9404cd981e42. All9 original files independently byte/SHA256 verified; Merger exact-id lookup confirmed record received/applied with2obligation matches and must_show_remaining=0. Sticky launch registration-only and absent optional --item explain misleading labels. No source edits, test rerun, fix, landing or new credit claim. Independent Claude18582 evaluation56aac78e4b45459fad795ef08dae07f4 at2026-11-16T23:53:01.028073Z, cut45/rev2, fresh3/3PASS; full2531B output consumed complete. Acceptance evaluator command glob refusal recovered with explicit paths; attempted reviewer submissionAttempt lookup is inapplicable to acceptance result (404), then unpinned native acceptance output retrieved complete, no claimed reviewer resultId. Coordinator exact-wording concurrence1fd7431783ef47aa8bdfd15e3328b857 and dispositionc5cedbf2915d4168ba15d1fe895f4c91; original intakee9696a9f20af4d1bb4cfed7ef8dcca1f. Direct Merger21/mailbox-message-af98282c-17e1-4278-9a68-5afce419aa46 at23:50:24.888308600Z repeats already-evaluated Fable relay: exact record query succeeds, prior host-credit-absent conclusion premature, no TermAl receive defect, does not settle pending Mac FULL. This direct confirmation was fully processed/ACKbe1d0759-ed67-44fe-9631-37d864570ca1 without altering evaluator evidence basis. No TermAl discoverability follow-up perFable3361; Engram owns search. After this close, remove only path-checked unused7DBE worktree and copied intake; lasting fullhashes/binding/receipt/evidence remain in tracker. The no-action assumed_missing_baseline obligation is disclosed, no test fabricated to cover it.",
+    "completed_at": "2026-11-16T23:53:47.173391600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

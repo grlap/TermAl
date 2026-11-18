@@ -1,0 +1,38 @@
+{
+  "id": "01a1f01d-0836-7551-88c1-f481e456e150",
+  "external_ref": null,
+  "title": "Bound repeated pinned linked-artifact reads and preserve refresh grace",
+  "outcome": "Linked refresh reuses safe prior data on unchanged bound inputs and preserves visibility on transient failures without accepting a replacement artifact.",
+  "acceptance": [
+    "Deterministic counts show unchanged terminal linked runs avoid repeated pinned file reads, and unchanged active paths reuse safe reads after physical identity validation.",
+    "A transient read failure preserves existing visibility as intended, while a different physical identity, request, or result cannot settle the original run."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,41 @@
+{
+  "id": "01a1e2bc-8881-7a30-a376-443e364ea498",
+  "external_ref": null,
+  "title": "Enforce the active Codex sandbox as a hard cap on host automatic permission grants",
+  "outcome": "Codex automatic host answers preserve the running turn's configured sandbox; beyond-cap grants end with bounded actionable refusal, without approval cards or waits.",
+  "acceptance": [
+    "Record the native Codex approval protocol semantics and behavioral regressions for requested permissions, command sandbox/network access and file grant roots against the running turn's actual sandbox, including a later-turn setting mismatch.",
+    "Ordinary asks that add no access beyond the running native sandbox are automatically answered. Explicit network or additional write grants that exceed that cap, or whose safe extent cannot be established without following untrusted filesystem paths, are refused without approval cards or waits, with a bounded readable reason identifying the active sandbox, requested access and setting remedy. Full access, read-only delegation, Stop/stale ownership and genuine questions retain their existing meaning.",
+    "The parent carries independent paired review without outstanding Medium-or-higher findings and an exact-input full gate for the landed contribution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acp",
+    "approvals",
+    "codex",
+    "greg-reported",
+    "kimi",
+    "sandbox",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1e295-a4d4-7000-a550-d06c40369f6c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed active-turn Codex sandbox cap with bounded refusal and zero host lookup of permission paths. Independent postlanding evaluation eefe1b904dac4baf924d17083d127f16 recorded3/3 PASS at22694bbd/tree9009; native registered182/0/0 Testa85af3c1, paired Codex+Claude review and exact-tree FULL passed.",
+    "completed_at": "2026-11-17T15:17:55.800817600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

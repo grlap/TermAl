@@ -1,0 +1,28 @@
+{
+  "id": "01a1e329-5572-7f12-b6c9-9a1adad5999e",
+  "external_ref": null,
+  "title": "Make provider placement refusals accurate for non-Git and plain outside directories",
+  "outcome": "A non-Git project's subdirectory and a plain outside directory receive accurate placement and remedies rather than an incorrect restore-Git-metadata instruction.",
+  "acceptance": [
+    "Provider starts in a non-Git session subdirectory and a plain outside-repository directory expose accurate factual placement or an accurate bounded refusal without fabricating association or credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "provider-placement",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

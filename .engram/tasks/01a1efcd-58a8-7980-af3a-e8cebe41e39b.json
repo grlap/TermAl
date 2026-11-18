@@ -1,0 +1,27 @@
+{
+  "id": "01a1efcd-58a8-7980-af3a-e8cebe41e39b",
+  "external_ref": null,
+  "title": "A file-system failure while recording a registration outcome names the wrong cause in the launcher summary",
+  "outcome": "When saving the run's records fails around registration (request.json after a durable registration, or the failure result after a refusal), the launcher's summary names that write failure as the cause, not a refused registration or a launch stopped while registering.",
+  "acceptance": [
+    "A file-system failure while recording a registration outcome names the wrong cause in the launcher summary is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "check-credit",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

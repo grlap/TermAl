@@ -1,0 +1,29 @@
+{
+  "id": "01a1eb99-bd37-75b2-83d4-dc0ba05feb1f",
+  "external_ref": null,
+  "title": "Make retained review identities discoverable during an active follow-up",
+  "outcome": "An authorized parent can retrieve earlier confirmed review identities while the current attempt is queued, held or running. Existing current-result availability and exact-read authorization are preserved, and the exact_identity_required hint names a usable discovery route.",
+  "acceptance": [
+    "Make retained review identities discoverable during an active follow-up is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "greg-directed",
+    "refusals",
+    "review-custody"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1eb26-0f67-7ea3-abd7-2f5fb5691ed2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

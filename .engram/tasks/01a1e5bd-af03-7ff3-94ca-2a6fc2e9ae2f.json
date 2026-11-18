@@ -1,0 +1,31 @@
+{
+  "id": "01a1e5bd-af03-7ff3-94ca-2a6fc2e9ae2f",
+  "external_ref": null,
+  "title": "Reconcile the test-execution skill's project-specific examples with its generic-skill claim",
+  "outcome": "The canonical coder-test-execution skill consistently describes its scope without contradicting its own project-specific location examples; the Claude forwarding wrapper stays canonical.",
+  "acceptance": [
+    "Resolve the contradiction between the canonical skill's TermAl-specific location example and its closing 'No project names or commands are hardcoded here' claim, preserving the repository's existing permissions and forwarding wrapper.",
+    "Any instruction wording change follows exact coordinator concurrence, Greg notice, independent review and the standing landing rule; no instruction-file phrase tests are introduced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "disk",
+    "greg-directed",
+    "instructions",
+    "review-followup",
+    "skills"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e54e-4ae3-7c93-b340-ad5d15ee6903",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

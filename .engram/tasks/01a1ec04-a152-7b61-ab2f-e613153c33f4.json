@@ -1,0 +1,28 @@
+{
+  "id": "01a1ec04-a152-7b61-ab2f-e613153c33f4",
+  "external_ref": null,
+  "title": "A store-in-repair registration refusal can mark an overlapping identical registration failed",
+  "outcome": "A typed pre-insertion refusal (engram_store_transient 503) never publishes a registration failure for a run whose identical POST is concurrently being registered.",
+  "acceptance": [
+    "When a held-claim read is refused as a store in repair before any registration row exists, the failure-publication step does not add the run to registration_failures, even if an overlapping identical POST inserted the row meanwhile; its diagnostic trace is kept.",
+    "A behavioural test interleaves a repair-refused handler with a healthy identical registration and shows the run is never reported as a failed registration."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "scope-note-after-repeated-medium-rounds-2026-11-18",
+    "revision_id": "3095e974ea144ebfa6ef213368eeef86",
+    "previous": null,
+    "body_sha256": "1a06456f0bfd8c47ccfda1285b22c46b8949a780f7a22d0a50aac35d935d31e0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T11:23:25.248100100Z"
+    }
+  },
+  "body": "Coordinator practice (Fable2 to Opus2, 2026-11-18 11:24Z, 4daa5b87 #6766). When an item has a third round of Medium review findings and its contribution grows each round, Opus2 pauses its fix rounds and asks the author for a one-screen scope note, cc Fable2. The note gives (1) the item's outcome and the smallest change on master that meets it, with its paths; an explicit, honest why-not notice is acceptable where the outcome allows one; (2) each part beyond that in one line, to be filed as its own item before READY; (3) an estimate. Fable2 decides scope. Free test runners may still run exact legs as information; the pair, freeze and FULL wait. Origin: w-2c14 went through five Medium rounds and grew from 12 to 29 paths, and the approved minimal scope was about 7 paths (11:18Z). 5C8B (Sol-c593) went through four rounds, growing to 37 paths, and was paused at 11:24Z."
+}

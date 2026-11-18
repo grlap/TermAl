@@ -1,0 +1,29 @@
+{
+  "id": "01a1e623-fec1-70f1-9584-f6bedc0e6ef9",
+  "external_ref": null,
+  "title": "Delegation worktree sweep: behavioural tests through real detach, shutdown and boot paths, plus refusal and junction cases",
+  "outcome": "The worktree sweep's race and refusal guarantees are proven through the production paths that set them, not by editing private state.",
+  "acceptance": [
+    "A test drives a real child runtime detach and its shutdown (cancel or finish) and shows the worktree fenced until that shutdown succeeds, and kept when it fails.",
+    "Tests cover the boot sweep request and the background coalescing of requests that arrive during a pass.",
+    "Tests cover refusal of an explicit worktree path under the repository's .git, in an unignored directory inside the repository, and through a symlink or junction that escapes it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

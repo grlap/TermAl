@@ -23,12 +23,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": "01a1982f-5373-7771-9998-3fe8f4472e5d",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1e313-cbe2-7583-9ac3-4792f7456684",
+  "disposal_reason": "Continue as independent work. The parent EO epic w-3fe8f4472e5d is completed (evaluation 05018cd1, 8/8). This optional reconcile wasn't needed for EO closure (Opus3's reconciliation) and remains a P3 cleanup.",
   "completion": null
 }

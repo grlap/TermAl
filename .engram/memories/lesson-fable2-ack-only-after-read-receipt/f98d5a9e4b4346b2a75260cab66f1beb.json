@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-fable2-ack-only-after-read-receipt",
+    "revision_id": "f98d5a9e4b4346b2a75260cab66f1beb",
+    "previous": null,
+    "body_sha256": "970999e2b0abda53b1413654e79b878d03e3fb4267a12c352ea745fe346c6ce3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-17T00:21:29.894892400Z"
+    }
+  },
+  "body": "Lesson (Fable2, 2026-11-16/17, a repeated slip, three times). Never call termal_acknowledge_mailbox in the SAME parallel batch as termal_read_mailbox, and never with a placeholder receipt. The receipt only exists in the read result, so a parallel or placeholder ack is refused with 400 (\"receipt was not issued to this participant\"). Always read first, then acknowledge in a later call with the exact receipt from that read."
+}

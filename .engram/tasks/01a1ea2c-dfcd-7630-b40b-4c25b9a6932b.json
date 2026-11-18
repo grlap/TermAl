@@ -1,0 +1,29 @@
+{
+  "id": "01a1ea2c-dfcd-7630-b40b-4c25b9a6932b",
+  "external_ref": null,
+  "title": "Add discriminating watcher drain filtering coverage after ingress had no known roots",
+  "outcome": "A behavioral witness proves the current-state drain filters ignored descendants that were conservatively retained by ingress with an empty root cache, without publishing, attributing or notifying Engram about them.",
+  "acceptance": [
+    "Ingest target/, node_modules/ and .git descendant file events into an empty-root pending structure, assert they are retained, then drain against a known session root.",
+    "The drain produces no publication, no active-turn file change and no Engram workspace-change observation for those ignored descendants; an ordinary source control stays observable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "7a48-followup",
+    "review-low",
+    "workspace-watch"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

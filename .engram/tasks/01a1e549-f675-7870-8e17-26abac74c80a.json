@@ -1,0 +1,35 @@
+{
+  "id": "01a1e549-f675-7870-8e17-26abac74c80a",
+  "external_ref": null,
+  "title": "TermAl tests write only inside the repository (e.g. target/): never the production ~/.termal, the real HOME, or the system temp folder",
+  "outcome": "No test writes under the real TermAl data dir. Isolated-worktree delegations created by tests land under the test's own temporary home and are removed with it.",
+  "acceptance": [
+    "Audit, recorded with file:line: every test path that writes outside the repository is listed. That includes the isolated-worktree leak (src/tests/delegations.rs:1631 through resolve_termal_data_dir) and system-temp writers such as termal/tests/run-*, launcher-fixture-* and termal-test-state-* under %LOCALAPPDATA%/Temp/termal, the latest seen 2026-11-16 10:59Z.",
+    "Shared-owner fix: test data dirs, fake HOME, stores, fixtures, worktrees and temp roots resolve inside the repo for Rust, Node launcher and UI tests: by default under <main checkout root>/target/t/<short run id>, with the main checkout resolved through the Git common dir, and an explicit TERMAL_TEST_USER_TEMP overrides it. Under test, resolving the real home or the system temp root is refused rather than silently used; the containment check accepts a path inside the main checkout root or inside the worktree.",
+    "Behavioral proof: a test run with HOME, USERPROFILE, TMP, TEMP and TMPDIR pointed at sentinel directories that the test controls leaves those sentinels empty, and the test's data lands under the repo. The proof never reads the real ~/.termal.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "delegations",
+    "disk",
+    "greg-directed",
+    "greg-reported",
+    "test-isolation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [
+    "01a1e6bd-3280-7a42-938b-7a4873f3bf19"
+  ],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1e5cb-29d7-7f60-a961-45f6775032b2",
+  "external_ref": null,
+  "title": "Snapshot retry-backoff assertion should reject a no-backoff timestamp independently of scheduling delay",
+  "outcome": "The older_turn_in_retry fixture in src/tests/engram_source_root_selection_snapshot.rs proves a retry backoff was applied with a check that a no-backoff regression cannot pass, whatever the host load.",
+  "acceptance": [
+    "A regression that writes retry_at = now (no backoff) on the first failed closing-result install fails the fixture even when the test thread is descheduled for over a second between recording the reference time and the install writing retry_at.",
+    "The fixture still passes deterministically under concurrent test load: no assertion compares retry_at with a wall-clock reading taken after the install.",
+    "No new diagnostics or logging are added; the change is limited to test code or a test-only seam."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "engram-host-adapter",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

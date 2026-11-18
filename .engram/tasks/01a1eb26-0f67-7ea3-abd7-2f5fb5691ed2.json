@@ -1,0 +1,37 @@
+{
+  "id": "01a1eb26-0f67-7ea3-abd7-2f5fb5691ed2",
+  "external_ref": null,
+  "title": "Original-review read: put the exact resultId in the parent's compact packet and have exact_identity_required name where to find it",
+  "outcome": "A non-parent reader can find the exact submissionAttempt and resultId of an original review from the parent's compact packet. When it omits them, the 400 exact_identity_required says where to find them. The exact-identity guard itself is unchanged.",
+  "acceptance": [
+    "The parent's compact delegation packet includes the resultId for each retained submission attempt (guard at src/delegation_review_attempts.rs:957-961, unchanged).",
+    "The 400 exact_identity_required message names the cause and where to read the resultId. A behavioral test shows a non-parent read succeeding with the identity taken from the packet, and still refused without it.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "greg-directed",
+    "refusals"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed in 8577f5ec. The parent’s compact delegation result exposes each confirmed retained review identity, including recuts, and the exact-identity refusal points readers to those IDs. The independent-reader access guard is unchanged.",
+    "completed_at": "2026-11-18T05:43:17.621104Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

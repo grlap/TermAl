@@ -1,0 +1,29 @@
+{
+  "id": "01a1e737-ba9f-7e90-b5a8-cefbcdc7fbb2",
+  "external_ref": null,
+  "title": "Make Codex RPC error-status mapping test independent of its one-second response deadline",
+  "outcome": "Make Codex RPC error-status mapping test independent of its one-second response deadline",
+  "acceptance": [
+    "codex_rpc_timeout_and_transport_are_host_errors_but_rejection_is_bad_request deterministically receives each injected typed error before mapping it, using an owned response phase or a pure mapping boundary instead of racing a one-second RPC wait.",
+    "Preserve INTERNAL_SERVER_ERROR for Timeout/Transport and BAD_REQUEST for JsonRpc rejection; retain meaningful real timeout coverage without production timeout inflation, retry or weaker status assertions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "tests",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1e6fe-011a-71e0-a8de-38279616c562",
+  "external_ref": null,
+  "title": "Freeze native-scroll lease time in stale-focus microtask regression",
+  "outcome": "The stale-focus microtask test proves a newer wheel owner survives older focus work without requiring a physical120ms lease to remain live.",
+  "acceptance": [
+    "ui/src/message-stack-scroll-sync.test.ts test 'does not let a stale focus microtask overwrite a newer input' keeps real microtask ordering and exact wheel/down ownership assertion while controlling performance.now across the await.",
+    "The production lease duration, stale-focus fencing and input priority are unchanged; no timeout increase, retry or ignore."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "test-defect",
+    "ui",
+    "wall-clock-audit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-delegation-worktrees-inside-repo-2026-11-16",
+    "revision_id": "a946a304a2f64c61a5d3f9785bf35f82",
+    "previous": "2a133f0bb13f490796a0474c3081df2a",
+    "body_sha256": "a2e673e0380a51b69bc376306cff314fbb22f264df513af332a8f29364b72c16",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1e548-cfd9-7e12-8d44-eb21094eba5a",
+      "work_ref": "w-eb21094eba5a"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T17:00:20.539049200Z"
+    }
+  },
+  "body": "Greg's direction, 2026-11-16 ~16:58Z, relayed by Engram::Asistant in TermAl mailbox 588693a8 #1915. Greg, verbatim: „Jakis koszmar. Przeciez mamy reguly aby uzywac tylko katalogu repo.” This came after ~40 GiB was found under ~/.termal/delegations: TermAl's default isolated-worktree location, never cleaned up, plus 1,134 worktrees leaked there by tests.\nThe rule: delegation worktrees, their target/ and all test data are created INSIDE the right repository, never by default in ~/.termal/delegations, and host tests never write to the real ~/.termal.\nINTERIM, until w-eb21094eba5a lands: anyone spawning an isolated-worktree worker delegation passes an explicit worktree path inside the source repo's .tmp/. The no-path default is forbidden. Read-only delegations create no worktree.\nExisting folders there are deleted or moved only with Greg's word and an owner check: TermAl's by Opus2, Engram's by Engram::Fable's team. Fix owners: Opus3 for w-eb21 and w-26abac74c80a.\n\nCORRECTION, 2026-11-16 ~17:00Z. The interim \"explicit path inside .tmp/\" is IMPOSSIBLE: the running host refuses any isolated-worktree path inside the source repo (src/delegations.rs:4664-4670, found by Opus3). The interim rule is now: NO isolated-worktree delegations at all until w-eb21094eba5a lands. Authors work as root sessions in their own in-repo .tmp/wt-* worktrees. Engram follows the same rule. The default agreed for the fix is <source repo root>/.worktrees/delegation-<id>."
+}

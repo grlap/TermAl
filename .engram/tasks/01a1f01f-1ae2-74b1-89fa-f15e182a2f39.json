@@ -1,0 +1,27 @@
+{
+  "id": "01a1f01f-1ae2-74b1-89fa-f15e182a2f39",
+  "external_ref": null,
+  "title": "Delegation worktree owner check: read .git once by taking the validated admin dir from the Git boundary",
+  "outcome": "The follow-up owner check reads the worktree's .git marker once: the Git boundary's link validation returns the validated administrative directory, and the owner record is read from that same directory, so the owner can never come from an admin dir that was not validated.",
+  "acceptance": [
+    "Delegation worktree owner check: read .git once by taking the validated admin dir from the Git boundary is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

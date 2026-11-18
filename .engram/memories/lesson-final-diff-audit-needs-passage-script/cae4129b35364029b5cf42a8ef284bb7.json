@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-final-diff-audit-needs-passage-script",
+    "revision_id": "cae4129b35364029b5cf42a8ef284bb7",
+    "previous": null,
+    "body_sha256": "eee9fbf3762f30013bbe28085bfd178edd983f83ab1908891fd6bdea54b9ba47",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T17:16:14.605552600Z"
+    }
+  },
+  "body": "Lesson (Fable2, 2026-11-16, Engram w-2e8b audit). Audit (c), a coordinator's final-diff audit under review-changes section 6, is not complete with only the identity check and a by-eye word-for-word check. It also needs the PASSAGE SCRIPT result. For each added or altered sentence and heading (taken from the word-diff, whitespace normalised, list and quote markers removed), the script looks it up as an exact string in the concurred text. Each removed passage needs a judgement that a concurrence names it as removed. Record, per passage, the governing concurrence message and the Greg-notice message. I missed the script in my first #538 report, and the author asked for it (#541).\nHow to do it without reopening the holder's root: read the pre- and post-images from the Git object DB (`git --no-optional-locks -C <main repo> show <base>:<path>` and `<commit>:<path>`), and run a small node script in TermAl .tmp/ against a file holding the concurred text. My script: .tmp/fable2/audit-2e8b/passages.mjs. Copy it for the next audit, then remove the audit's scratch."
+}

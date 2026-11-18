@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-simple-procedures-no-process-checks-2026-11-16",
+    "revision_id": "044f6fd7117e4993b57b30ee9356c017",
+    "previous": null,
+    "body_sha256": "a6581ddfecde6825cd830f40646894d60d99236aaa9b18b9da1cf314462576ac",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T05:10:45.553554800Z"
+    }
+  },
+  "body": "Greg's words, VERBATIM, relayed by Fable2 (TermAl mailbox 4daa5b87 #6534, 2026-11-16T05:10Z) from Asistant #1890, at his request to pass them literally to authors:\n„jaki znowu konflikt, znowu hipoteza, ktore bedzie zrobiona zle\ni znowu sie wyjebie za pare godzin i bedziemy naprawiac tydzien\n\nprosilem o proste procedury a nie procedury sprawdzajace wszystko!\nWTF\nprzekaz doslownie autorom\n\nsprawdzanie procesow NIE BEDZIE DZIALAC WIARYGODNIE\"\n(Gloss: \"What conflict again, again a hypothesis that will be done wrong, and it will blow up again in a few hours and we'll be fixing it for a week. I asked for simple procedures, not procedures that check everything! WTF. Pass this literally to the authors. Checking processes WILL NOT WORK RELIABLY.\")\nFable2's application for Opus2: no process-list or census steps in restart, install or landing procedures. The C6 restart census Fable2 had added is withdrawn (memory restart-one-way-backup-steps-2026-11-16). For Opus2's own install procedure this means: no FreeVirtual or process gate in the install, swap or landing steps; keep those procedures simple."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1eb50-b3c6-7003-8936-73c1d38048af",
+  "external_ref": null,
+  "title": "Cover the delegation worktree link fence with a Windows junction test",
+  "outcome": "The lease and reservation fence through a link into a delegation worktree is exercised on Windows (junction), not only on Unix (symlink).",
+  "acceptance": [
+    "A cfg(windows) test creates a junction into an ended delegation's worktree and shows that creation through it is refused while the worktree is reserved, and that a lease through it keeps the worktree from being reserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "delegations",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

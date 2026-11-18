@@ -1,0 +1,29 @@
+{
+  "id": "01a1e73d-999a-7ea2-909c-f382ec1e7a08",
+  "external_ref": null,
+  "title": "Isolate retry-budget exhaustion from the first HTTP response’s one-second race",
+  "outcome": "Isolate retry-budget exhaustion from the first HTTP response’s one-second race",
+  "acceptance": [
+    "delegation_mcp_bridge_stops_replaying_when_the_overall_budget_cannot_fund_a_retry deterministically obtains the typed503 rejection before applying an exhausted replay budget, using a logical budget/owned transport seam.",
+    "Retain exactly one request, zero replay sleeps and typed SERVICE_UNAVAILABLE assertions; do not inflate production budgets, retry the test or accept a transport timeout as equivalent."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "mcp",
+    "tests",
+    "timing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

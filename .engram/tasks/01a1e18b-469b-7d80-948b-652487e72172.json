@@ -1,0 +1,28 @@
+{
+  "id": "01a1e18b-469b-7d80-948b-652487e72172",
+  "external_ref": null,
+  "title": "Deterministic results.json refusals (directory, symlink, deleted after a good read) are re-read every rescan and republish state",
+  "outcome": "A run whose results.json is deterministically refused no longer makes every idle test-run rescan republish state. The refused cases are: the path is a directory, the path is a symlink (refused by review_freeze_file_observed), or results that vanished after an earlier good read (Missing with read_failures > 0). In each case the rescan either keeps a stable entry while nothing changes, or the history projection compares those entries by content instead of Arc identity. Transient I/O failures still recover on the next pass.",
+  "acceptance": [
+    "A focused test shows that an unchanged rescan over an indexed run whose results.json is a directory, a symlink, or vanished after a good read neither advances the state revision nor publishes a new test-run projection, while a transient read failure is still read again on the next pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "pre-existing",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

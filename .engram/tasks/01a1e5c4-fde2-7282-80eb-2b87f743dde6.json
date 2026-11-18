@@ -1,0 +1,46 @@
+{
+  "id": "01a1e5c4-fde2-7282-80eb-2b87f743dde6",
+  "external_ref": null,
+  "title": "Recovery-lock hold-bound test fails under concurrent host load: root_recovery_active_batch_holds_stay_bounded (median 53 ms > 50 ms)",
+  "outcome": "The recovery-lock hold contract in src/tests/engram_root_recovery_lock.rs is verified in a way that a full-suite run on a shared host cannot fail through CPU contention alone, while still catching a real regression in how long recover_engram_authority_batch_until holds the state lock.",
+  "acceptance": [
+    "The recovery-lock regression measures actual recovery work and lock ownership across empty and active batches as session and journal inventories grow, and fails on unbounded or cross-table planning work performed while StateInner is held without depending on elapsed time.",
+    "The deterministic oracle has a behavioral regression control and retains checks for canonical read counts, owner/reader revalidation, unrelated journal preservation and retained-run disposition; production recovery semantics and budgets remain unchanged.",
+    "Relevant recovery/authority tests pass on the candidate, the independent Codex+Claude review pair has no outstanding in-scope Medium+, and the exact integration FULL and landing evidence are recorded."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Landed the deterministic recovery-work and lock-ownership regression on master65a11f06. Fresh independent evaluation265863082d7b4aabaf6d989284a2e3a3 passed all3 criteria on exact65/TREE091; native registered authority checkf9b8 passed236/0, clean independent whole4/whole7 pairs and exact-tree combinedFULL/landing recorded. Original failed closure1 retained with confirmed Git scratch-prefix environment diagnosis; corrected setup passed without source/test/timeout change. Deferred coverage Low remains independentP3 w-1b8621a44568. Cleanup follows completion.",
+    "completed_at": "2026-11-17T00:03:40.311359700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-no-root-change-in-eval-request-turn",
+    "revision_id": "999a4c0ed00648f2b055883d969d5c04",
+    "previous": null,
+    "body_sha256": "2d635aca767cc1e2d22702d46e651f2210cfbb24ec996bc97508d1d594f8522b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T16:24:30.652983500Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-11-16, my own miss on w-78d488660ee9, evaluation delegation-bdf4da90 voided). Never change the named source root (git switch, checkout or edits) in the same turn as termal_evaluate_acceptance. The host records the turn's source change when the turn ends, after the request's evidence basis, and Engram then refuses the evaluator's submission: \"a source change observed without admission at run-feed position N+1 occurred after evidence basis N, making this evaluation void\". That wastes the evaluator slot. Move the root or edit in one turn; request the evaluation in a LATER turn with no source change."
+}

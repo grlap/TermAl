@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-verification-record-lookup-by-id",
+    "revision_id": "97a4fac0bab34d1880af5d0ed79a11ec",
+    "previous": null,
+    "body_sha256": "5748e82edc333fe4f28df8b51ab2b7c23f3278cb415789e7dedf621558e3aee6",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T23:50:09.705348200Z"
+    }
+  },
+  "body": "Lesson (Fable2, 2026-11-16, w-7dbecc735bfe). A host verification_record delivered to an Engram item may NOT appear in the item's ordinary notes window or in Engram text search by run id. Before concluding \"no host credit\", read it by its record id: `engram work show <item> --note <record id>`. That returns the record and its obligation assessment. Get the record id from the run's retained engram-verification-record.json and its state file (RECEIVED plus a receipt). The launcher's summary labels `item: undeclared` (no --item passed) and the sticky `registered-but-not-indexed` / `registration-only` do NOT mean no credit. Engram::Merger's dd205 report turned out to be no defect for exactly these reasons."
+}

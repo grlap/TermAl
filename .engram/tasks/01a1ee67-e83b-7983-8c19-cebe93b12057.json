@@ -1,0 +1,38 @@
+{
+  "id": "01a1ee67-e83b-7983-8c19-cebe93b12057",
+  "external_ref": null,
+  "title": "Associate provider launcher RUN locators from split streamed output",
+  "outcome": "A valid launcher RUN locator split across Codex output deltas associates with its exact original provider observation, including when no measured check exists.",
+  "acceptance": [
+    "Exercise a split locator through the native router with a real original observation and exact launcher artifact.",
+    "Duplicate/conflicting starts, mismatched or ambiguous provenance, and overflow do not attach a locator or grant credit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "lesson-no-mail-bodies-in-shell-strings-2026-11-16",
+    "revision_id": "e1cc6b2e5e8541e2b7e77cf471bef4fb",
+    "previous": null,
+    "body_sha256": "26a728f9eba6ec9fb0babf2a975412a7e79515e694b080b4700f69ed6dac560a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-16T11:00:47.779525900Z"
+    }
+  },
+  "body": "Lesson (incident self-reported by Termal::Opus2, TermAl mailbox 4daa5b87 #6544, 2026-11-16 at about 10:54Z). Opus2 composed a mailbox message body with a shell printf whose DOUBLE-QUOTED text contained a command in backticks (the launcher full command). The shell executed it: an unrequested full-launcher run, test-22d27ac5, started in the TermAl MAIN checkout on Central. Opus2 stopped its own tool command, confirmed the run had stopped advancing, and settled it with the launcher's recover (interrupted, no rerun). About 6 min of unplanned Central load; no source changed and no other session touched.\nRULE for every agent: never put message bodies, notes or any free text containing commands inside a shell string (double quotes expand backticks and $()). Write the text with the file tool, or use a quoted heredoc (<<'EOF'), or pass it as a tool argument. Reject backticks before any shell-based send."
+}

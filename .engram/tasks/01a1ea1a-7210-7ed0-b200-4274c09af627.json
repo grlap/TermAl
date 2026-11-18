@@ -1,0 +1,29 @@
+{
+  "id": "01a1ea1a-7210-7ed0-b200-4274c09af627",
+  "external_ref": null,
+  "title": "A second claim that names an already-sighted worktree never gets its own named-root sighting, so its acceptance evaluation refuses",
+  "outcome": "Each claim that names a source root gets a measured named-root sighting for its own root generation, even when another claim held by the same session already named and sighted the same worktree path, so termal_evaluate_acceptance works for every such claim without needing a separate worktree per item.",
+  "acceptance": [
+    "The cause is established from source: why a claim naming a worktree already sighted for another claim of the same session receives no sighting for its own root generation.",
+    "A behavioural test names one worktree for two claims, focuses each in turn, and shows that each claim receives a sighting at its own generation and that acceptance evaluation is admitted for both.",
+    "The review pair is clean and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

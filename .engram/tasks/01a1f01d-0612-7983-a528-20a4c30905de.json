@@ -1,0 +1,38 @@
+{
+  "id": "01a1f01d-0612-7983-a528-20a4c30905de",
+  "external_ref": null,
+  "title": "Keep managed detached observations Running until their launcher is acknowledged",
+  "outcome": "Legacy persistence repair preserves a managed detached run's original Running phase until its attributable END or own terminal boundary.",
+  "acceptance": [
+    "A deterministic START → persistence step → END fixture shows the managed detached observation stays Running before the END and advances only through its own execution context.",
+    "Existing ordinary detached repair and linked artifact settlement remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

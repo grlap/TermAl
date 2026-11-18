@@ -1,0 +1,40 @@
+{
+  "id": "01a1e2a8-7e47-78a1-b337-724f8b36a85f",
+  "external_ref": null,
+  "title": "Honor Gemini/agy automatic approval mode for incoming ordinary ACP permission requests",
+  "outcome": "Incoming ordinary ACP asks honor the selected Gemini/agy automatic mode without manual cards, while real input and independently enforced constraints remain explicit.",
+  "acceptance": [
+    "Record the actual Gemini/agy approval-mode mapping at new/resume/reconnect and a captured-shape ordinary incoming ACP permission regression that discriminates Yolo from Default/Plan.",
+    "An ordinary incoming permission granted by the selected automatic mode receives exactly one opaque one-time answer without an approval card/notification/wait; genuine input, Stop/stale identity and enforced constraints remain bounded and explicit.",
+    "The parent carries independent paired review without outstanding Medium-or-higher findings and an exact-input full gate for the landed contribution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "acp",
+    "approvals",
+    "gemini",
+    "greg-reported",
+    "kimi",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": "01a1e295-a4d4-7000-a550-d06c40369f6c",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "Gemini/agy incoming ACP requests honor active Yolo with one opaque one-time answer, preserving manual choices and bounded Stop/stale/read-only/pending-mode outcomes. Landed on master as0417c8ea after the adopted whole-contribution review pair and exact-tree FULL.",
+    "completed_at": "2026-11-16T14:38:48.794126300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
+}

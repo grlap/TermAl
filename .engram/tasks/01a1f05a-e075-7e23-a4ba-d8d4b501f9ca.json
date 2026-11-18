@@ -1,0 +1,30 @@
+{
+  "id": "01a1f05a-e075-7e23-a4ba-d8d4b501f9ca",
+  "external_ref": null,
+  "title": "Mailbox native-route miss names its cause and keeps a bounded diagnostic (first step for the transient mailbox 404)",
+  "outcome": "When a mailbox read or ACK falls through from the exact native lookup to the domain or central route and then 404s, the error is typed (native_mailbox_route_miss) and names the native lookup's outcome, the caller and mailbox key, the coordination store and the server instance. A bounded in-memory record of recent fall-throughs is readable through the existing diagnostics route. Routing semantics are unchanged.",
+  "acceptance": [
+    "A read or ACK whose native lookup misses and whose fallback then 404s returns the typed native_mailbox_route_miss error naming the observed lookup outcome, caller and mailbox key, coordination store and server instance, with no message bodies, receipts or secrets. Shown by a behavioural test that also shows a clean listed read and an ACK with the original receipt still work.",
+    "GET /api/diagnostics/mailbox-relay-wakes returns nativeRouteMisses with at most 64 recent read and ACK fall-throughs, held in memory, without bodies or receipts. Shown by a behavioural test.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1f03a-2371-7921-beb7-38d0c01f3065",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

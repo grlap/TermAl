@@ -1,0 +1,24 @@
+{
+  "id": "01a1e16c-5240-70f1-9c8c-e1e89084c087",
+  "external_ref": null,
+  "title": "Remote runner cannot read its relay mailbox after a context recovery (404 via tool, 410 readKeyExpired via CLI)",
+  "outcome": "After a context recovery, a remote runner session can still read its relay mailbox with the Integration owner through a supported, documented route. A stale read key is refused with an instruction that names the working fresh-read call, and the MCP tool resolves the relay mailbox it lists.",
+  "acceptance": [
+    "Remote runner cannot read its relay mailbox after a context recovery (404 via tool, 410 readKeyExpired via CLI) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
