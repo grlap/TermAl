@@ -67,6 +67,11 @@ pub(crate) enum EngramRecorderObservation<'a> {
 }
 
 impl EngramHost<'_> {
+    /// Retires a proven current command's writer without touching carried writers.
+    pub(crate) fn retire_current_command_writer(record: &mut SessionRecord, key: &str) {
+        engram_retire_command_writer(&mut record.engram, key);
+    }
+
     /// Presents a native run's withheld-credit diagnostic under the state lock.
     pub(crate) fn native_run_withheld(record: &mut SessionRecord, line: String) {
         engram_publish_check_notice(
@@ -89,10 +94,21 @@ impl EngramHost<'_> {
         provenance: &EngramObservationProvenance,
         observation: EngramRecorderObservation<'_>,
     ) {
+        self.observe_with_provider(session_id, provenance, observation, None);
+    }
+
+    pub(crate) fn observe_with_provider(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        observation: EngramRecorderObservation<'_>,
+        provider: Option<&TestRunProviderFrame>,
+    ) {
         match observation {
             EngramRecorderObservation::CommandStarted { key, ran, cwd } => {
-                self.state
-                    .note_engram_command_started(session_id, provenance, key, ran, cwd);
+                self.state.note_engram_command_started_with_provider(
+                    session_id, provenance, key, ran, cwd, provider,
+                );
             }
             EngramRecorderObservation::CommandDescribed { key, ran, cwd } => {
                 self.state
@@ -106,20 +122,23 @@ impl EngramHost<'_> {
                 exit,
                 runtime_output_cut,
             } => {
-                self.state.note_engram_command_finished_reported(
-                    session_id,
-                    provenance,
-                    key,
-                    command,
-                    reported_command,
-                    output,
-                    exit,
-                    runtime_output_cut,
-                );
+                self.state
+                    .note_engram_command_finished_reported_with_provider(
+                        session_id,
+                        provenance,
+                        key,
+                        command,
+                        reported_command,
+                        output,
+                        exit,
+                        runtime_output_cut,
+                        provider,
+                    );
             }
             EngramRecorderObservation::CommandAbandoned { key } => {
-                self.state
-                    .note_engram_command_abandoned(session_id, provenance, key);
+                self.state.note_engram_command_abandoned_with_provider(
+                    session_id, provenance, key, provider,
+                );
             }
             EngramRecorderObservation::WorkspaceEdit { target } => {
                 self.state

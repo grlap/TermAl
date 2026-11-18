@@ -5,6 +5,48 @@
 // guess by PID/time/command similarity, scan processes, mint verification or
 // final host proof, or manufacture a launcher registration ACK.
 
+struct TestRunLinkedArtifactSource {
+    run_id: String,
+    layout: delegation_git_boundary::ProviderLinkedWorktree,
+    directory_identity: FederationImageFileIdentity,
+}
+
+fn test_run_linked_artifact_sources(
+    inner: &StateInner,
+) -> BTreeMap<String, Option<TestRunLinkedArtifactSource>> {
+    let mut sources = BTreeMap::new();
+    for execution in inner
+        .test_run_observations
+        .index()
+        .linked_artifact_executions()
+    {
+        let Some(row) = inner.test_run_observations.get(execution) else {
+            continue;
+        };
+        let (Some(context), Some(artifact)) =
+            (row.linked_artifact_context(), row.artifact.as_ref())
+        else {
+            continue;
+        };
+        let TestRunExecutionPlacement::Linked(layout) = &context.placement else {
+            continue;
+        };
+        let source = context
+            .artifact_directory_identity
+            .as_ref()
+            .map(|identity| TestRunLinkedArtifactSource {
+                run_id: artifact.run_id.clone(),
+                layout: layout.clone(),
+                directory_identity: identity.clone(),
+            });
+        sources
+            .entry(test_run_path_key(&artifact.run_directory))
+            .and_modify(|ambiguous| *ambiguous = None)
+            .or_insert(source);
+    }
+    sources
+}
+
 #[cfg(test)]
 thread_local! {
     static TEST_TEST_RUN_TERMINAL_RETENTION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -191,6 +233,15 @@ impl AppState {
                 if let Some(artifact) = &mut row.artifact {
                     artifact.terminal_digest = Some(digest);
                 }
+                if let Some(context) = row.execution_context.as_mut()
+                    && context.phase == TestRunExecutionPhase::LauncherReported
+                    && let (Some(ended_at), Some(exit)) = (&terminal.ended_at, terminal.exit_code)
+                {
+                    context.phase = TestRunExecutionPhase::Terminal {
+                        ended_at: ended_at.clone(),
+                        outcome: TestRunExecutionOutcome::Exited(exit),
+                    };
+                }
                 row.summary.state = terminal.state;
                 row.summary.ended_at = terminal.ended_at;
                 row.summary.exit_code = terminal.exit_code;
@@ -230,6 +281,21 @@ impl AppState {
         output: &str,
         output_cut: bool,
     ) {
+        self.observe_test_command_artifact_at(
+            session_id, provenance, key, line, output, output_cut, None,
+        );
+    }
+
+    fn observe_test_command_artifact_at(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        line: &str,
+        output: &str,
+        output_cut: bool,
+        execution_id: Option<&str>,
+    ) {
         if output_cut {
             return;
         }
@@ -246,20 +312,36 @@ impl AppState {
                 return;
             };
             let runtime_identity = test_run_runtime_identity(&inner.sessions[index], provenance);
-            let mut rows = inner.test_run_observations.values().filter(|row| {
-                row.summary.owner_session_id.as_deref() == Some(session_id)
-                    && row.runtime_identity == runtime_identity
-                    && row.runtime_identity.is_some()
-                    && row.tool_identity == tool_identity
-                    && row.command_fingerprint == fingerprint
-            });
-            let Some(row) = rows.next().cloned() else {
-                return;
-            };
-            if rows.next().is_some() {
-                return;
+            if let Some(id) = execution_id {
+                let Some(row) = inner.test_run_observations.get(id).filter(|row| {
+                    row.managed_provider_execution()
+                        && row.summary.owner_session_id.as_deref() == Some(session_id)
+                        && row.runtime_identity.is_some()
+                        && row.runtime_identity == runtime_identity
+                        && row.turn_generation == inner.sessions[index].active_turn_generation
+                        && row.tool_identity == tool_identity
+                        && row.command_fingerprint == fingerprint
+                }) else {
+                    return;
+                };
+                row.clone()
+            } else {
+                let mut rows = inner.test_run_observations.values().filter(|row| {
+                    row.summary.owner_session_id.as_deref() == Some(session_id)
+                        && row.runtime_identity == runtime_identity
+                        && row.runtime_identity.is_some()
+                        && row.tool_identity == tool_identity
+                        && row.command_fingerprint == fingerprint
+                        && !row.managed_provider_execution()
+                });
+                let Some(row) = rows.next().cloned() else {
+                    return;
+                };
+                if rows.next().is_some() {
+                    return;
+                }
+                row
             }
-            row
         };
         // Native runs already own their original reservation and artifact.
         // Console locators, previews and persisted-output metadata cannot
@@ -343,28 +425,54 @@ impl AppState {
             refuse(ArtifactWorktreeUnavailable, &[(WorktreePresent, false)]);
             return;
         }
-        let Some(expected_parent) =
-            EngramHost::run_artifact_directory(FsPath::new(&row.summary.worktree))
-        else {
-            refuse(ArtifactRootUnavailable, &[(ArtifactRootAvailable, false)]);
-            return;
+        let (canonical, pinned) = match row
+            .execution_context
+            .as_ref()
+            .map(|context| &context.placement)
+        {
+            Some(TestRunExecutionPlacement::Linked(layout)) => {
+                let Ok(pinned) = layout.open_run(&directory, run_id) else {
+                    refuse(ArtifactDirectoryMismatch, &[(DirectoryMatches, false)]);
+                    return;
+                };
+                (pinned.path().to_path_buf(), Some(pinned))
+            }
+            Some(TestRunExecutionPlacement::Refused(_)) => return,
+            Some(TestRunExecutionPlacement::Ordinary) | None => {
+                let Some(expected_parent) =
+                    EngramHost::run_artifact_directory(FsPath::new(&row.summary.worktree))
+                else {
+                    refuse(ArtifactRootUnavailable, &[(ArtifactRootAvailable, false)]);
+                    return;
+                };
+                let Ok(expected_parent) = fs::canonicalize(expected_parent) else {
+                    refuse(ArtifactRootUnavailable, &[(ArtifactRootResolved, false)]);
+                    return;
+                };
+                let Ok(canonical) = fs::canonicalize(&directory) else {
+                    refuse(ArtifactDirectoryUnavailable, &[(DirectoryResolved, false)]);
+                    return;
+                };
+                if canonical != expected_parent.join(run_id) {
+                    refuse(ArtifactDirectoryMismatch, &[(DirectoryMatches, false)]);
+                    return;
+                }
+                (canonical, None)
+            }
         };
-        let Ok(expected_parent) = fs::canonicalize(expected_parent) else {
-            refuse(ArtifactRootUnavailable, &[(ArtifactRootResolved, false)]);
-            return;
+        let disk = match &pinned {
+            Some(pinned) => TestRunDisk::read_provider_directory(pinned),
+            None => TestRunDisk::read(&canonical, None),
         };
-        let Ok(canonical) = fs::canonicalize(&directory) else {
-            refuse(ArtifactDirectoryUnavailable, &[(DirectoryResolved, false)]);
-            return;
-        };
-        if canonical != expected_parent.join(run_id) {
-            refuse(ArtifactDirectoryMismatch, &[(DirectoryMatches, false)]);
-            return;
-        }
-        let Some(disk) = TestRunDisk::read(&canonical, None) else {
+        let Some(disk) = disk else {
             refuse(ArtifactRequestUnavailable, &[(RequestReadable, false)]);
             return;
         };
+        let directory_identity = disk.provider_directory_identity.clone();
+        if pinned.is_some() && directory_identity.is_none() {
+            refuse(ArtifactDirectoryMismatch, &[(DirectoryMatches, false)]);
+            return;
+        }
         if disk.run_id != run_id
             || disk.owner.as_deref() != Some(session_id)
             || test_run_path_key(&disk.worktree) != test_run_path_key(&row.summary.worktree)
@@ -432,9 +540,39 @@ impl AppState {
             run_id: run_id.to_owned(),
             run_directory: test_run_display_path(&canonical),
             request_identity: disk.request_identity.clone(),
-            terminal_digest: None,
+            terminal_digest: pinned
+                .as_ref()
+                .and_then(|_| disk.results.as_ref())
+                .filter(|results| results.terminal_state.is_some())
+                .and_then(|results| results.digest.strip_prefix("sha256:").map(str::to_owned)),
         };
+        if let Some(pinned) = &pinned
+            && let Some(TestRunExecutionPlacement::Linked(layout)) = row
+                .execution_context
+                .as_ref()
+                .map(|context| &context.placement)
+        {
+            let still_bound = layout
+                .open_run(&directory, run_id)
+                .and_then(|current| current.same_directory(pinned))
+                .unwrap_or(false);
+            if !still_bound {
+                refuse(ArtifactDirectoryMismatch, &[(DirectoryMatches, false)]);
+                return;
+            }
+        }
+        drop(pinned);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if directory_identity.is_some()
+            && inner.find_session_index(session_id).is_none_or(|index| {
+                let session = &inner.sessions[index];
+                session.active_turn_generation != row.turn_generation
+                    || test_run_runtime_identity(session, &EngramObservationProvenance::Ambient)
+                        != row.runtime_identity
+            })
+        {
+            return;
+        }
         if inner
             .test_run_observations
             .get(&row.execution_id)
@@ -451,6 +589,9 @@ impl AppState {
             return;
         }
         updated.artifact = Some(artifact);
+        if let Some(context) = &mut updated.execution_context {
+            context.artifact_directory_identity = directory_identity;
+        }
         updated.native_completion_refusal = None;
         inner
             .test_run_observations

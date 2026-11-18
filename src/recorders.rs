@@ -469,11 +469,15 @@ trait SessionRecorderAccess {
     /// Reports an observation to the Engram sink, with the provenance the
     /// recorder holds for the frame it is applying.
     fn observe(&mut self, observation: EngramRecorderObservation<'_>) {
+        let frame = self.recorder_state_mut().provider_test_frame.clone();
         let provenance = self.recorder_state_mut().observation_provenance.clone();
         let session_id = self.session_id().to_owned();
-        self.state()
-            .engram_host()
-            .observe(&session_id, &provenance, observation);
+        self.state().engram_host().observe_with_provider(
+            &session_id,
+            &provenance,
+            observation,
+            frame.as_ref(),
+        );
     }
 }
 

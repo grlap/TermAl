@@ -35,6 +35,8 @@ struct TestRunCommandObservation {
     grant_identity: Option<String>,
     command_fingerprint: String,
     turn_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    execution_context: Option<TestRunExecutionContext>,
     observed_at: String,
     summary: TestRunSummary,
     work_binding: Option<EngramControlWorkBinding>,
@@ -69,6 +71,358 @@ struct TestRunCommandObservation {
     // applied by the producer. This is a settlement phase, not credit.
     #[serde(default)]
     declared_verdict_pending: bool,
+}
+
+/// Frame-local facts from the native router. In particular, `item` never
+/// contains the transcript's command-text fallback.
+#[derive(Clone, Debug)]
+struct TestRunProviderFrame {
+    runtime: RuntimeToken,
+    generation: u64,
+    turn: Option<String>,
+    item: Option<String>,
+    cwd: Option<String>,
+    declined: bool,
+}
+
+type TestRunProviderTurnKey = (String, String, u64);
+type TestRunProviderItemKey = (String, String, String, Option<String>);
+
+enum TestRunProviderEnd {
+    Ordinary,
+    Refused,
+    Managed,
+    Associate(String),
+}
+
+enum TestRunProviderEndAddress {
+    Ordinary,
+    Exact,
+    Ambiguous,
+}
+
+fn test_run_provider_turn_identity(thread: &str, turn: &str) -> String {
+    sha256_hex(format!("{}:{thread}{turn}", thread.len()).as_bytes())
+}
+
+/// The observation already owns execution, runtime, generation and item
+/// identity. This context adds the native turn and immutable placement
+/// facts captured at that same start.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct TestRunExecutionContext {
+    native_turn: Option<String>,
+    command_identity: String,
+    reported_cwd: Option<String>,
+    placement: TestRunExecutionPlacement,
+    phase: TestRunExecutionPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    artifact_directory_identity: Option<FederationImageFileIdentity>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum TestRunExecutionPlacement {
+    Ordinary,
+    Linked(delegation_git_boundary::ProviderLinkedWorktree),
+    Refused(TestRunExecutionRefusal),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum TestRunExecutionPhase {
+    /// Regular observations use the original ordinary/declared lifecycle.
+    Ordinary,
+    Running,
+    LauncherReported,
+    Terminal {
+        ended_at: String,
+        outcome: TestRunExecutionOutcome,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum TestRunExecutionOutcome {
+    Exited(i64),
+    LauncherStarted,
+    Unknown(TestRunExecutionRefusal),
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum TestRunExecutionRefusal {
+    ItemIdentityUnavailable,
+    TurnIdentityUnavailable,
+    OutsideRepository,
+    TargetUnconfirmed,
+    ConflictingStart,
+    CompletionMismatch,
+    Declined,
+    MissingExit,
+    RuntimeEnded,
+    MonitoringInterrupted,
+}
+
+impl TestRunExecutionRefusal {
+    fn message(self) -> &'static str {
+        match self {
+            Self::ItemIdentityUnavailable => {
+                "Provider association refused: the provider did not report a stable command item id."
+            }
+            Self::TurnIdentityUnavailable => {
+                "Provider association refused: the native command start could not be attributed to an owned turn."
+            }
+            Self::OutsideRepository => {
+                "Provider placement refused: the command cwd is outside the session repository's registered worktrees or its Git layout cannot be verified."
+            }
+            Self::TargetUnconfirmed => {
+                "Provider placement refused: the command target could not be confirmed in the reported worktree."
+            }
+            Self::ConflictingStart => {
+                "Provider association refused: repeated starts for the same item disagree on the original command or cwd."
+            }
+            Self::CompletionMismatch => {
+                "Provider association refused: the command completion differs from its original start."
+            }
+            Self::Declined => {
+                "Provider association refused: the command was declined before execution."
+            }
+            Self::MissingExit => {
+                "Provider association refused: the owned turn ended without an attributable numeric command exit."
+            }
+            Self::RuntimeEnded => {
+                "Provider association refused: the runtime ended before the original command reported an attributable exit."
+            }
+            Self::MonitoringInterrupted => {
+                "Provider association refused: monitoring of the original command was stopped."
+            }
+        }
+    }
+}
+
+impl TestRunExecutionContext {
+    fn at_start(
+        frame: &TestRunProviderFrame,
+        line: &str,
+        command: &EngramCheckCommand,
+        workdir: &FsPath,
+    ) -> Option<(Self, String)> {
+        let cwd = frame.cwd.as_deref();
+        // Ordinary, addressable runs still have the same placement and
+        // lifecycle as the existing session-root provider path.
+        let start_refusal = if frame.declined {
+            Some(TestRunExecutionRefusal::Declined)
+        } else if frame.item.is_none() {
+            Some(TestRunExecutionRefusal::ItemIdentityUnavailable)
+        } else {
+            None
+        };
+        if cwd.is_none() && command.directory.is_none() && start_refusal.is_none() {
+            return None;
+        }
+        let (placement, worktree, outcome) = if let Some(reason) = start_refusal {
+            (
+                TestRunExecutionPlacement::Refused(reason),
+                String::new(),
+                Some(reason),
+            )
+        } else if let Some(target) =
+            engram_check_worktree_from(command, workdir, Some(&[cwd.map(str::to_owned)]), None)
+        {
+            (
+                TestRunExecutionPlacement::Ordinary,
+                test_run_display_path(&target.root),
+                None,
+            )
+        } else if frame.turn.is_none() {
+            let reason = TestRunExecutionRefusal::TurnIdentityUnavailable;
+            (
+                TestRunExecutionPlacement::Refused(reason),
+                String::new(),
+                Some(reason),
+            )
+        } else {
+            let resolve = || {
+                // A recognised one-call directory overrides the provider's
+                // reported process cwd just as it does for ordinary checks.
+                let directory = match command.directory.as_deref() {
+                    Some(directory) => engram_resolve_shell_move(None, directory)
+                        .map(PathBuf::from)
+                        .ok_or(TestRunExecutionRefusal::TargetUnconfirmed)?,
+                    None => workdir.join(cwd.ok_or(TestRunExecutionRefusal::TargetUnconfirmed)?),
+                };
+                let linked =
+                    delegation_git_boundary::ProviderLinkedWorktree::resolve(workdir, &directory)
+                        .map_err(|_| TestRunExecutionRefusal::OutsideRepository)?;
+                let directory = directory
+                    .to_str()
+                    .ok_or(TestRunExecutionRefusal::TargetUnconfirmed)?;
+                engram_check_worktree_in(command, &linked.root, Some(directory), None)
+                    .ok_or(TestRunExecutionRefusal::TargetUnconfirmed)?;
+                Ok(linked)
+            };
+            match resolve() {
+                Ok(linked) => {
+                    let worktree = test_run_display_path(&linked.root);
+                    (TestRunExecutionPlacement::Linked(linked), worktree, None)
+                }
+                Err(reason) => (
+                    TestRunExecutionPlacement::Refused(reason),
+                    String::new(),
+                    Some(reason),
+                ),
+            }
+        };
+        let phase = if let Some(reason) = outcome {
+            TestRunExecutionPhase::Terminal {
+                ended_at: test_run_timestamp(),
+                outcome: TestRunExecutionOutcome::Unknown(reason),
+            }
+        } else if matches!(placement, TestRunExecutionPlacement::Ordinary) {
+            TestRunExecutionPhase::Ordinary
+        } else {
+            TestRunExecutionPhase::Running
+        };
+        Some((
+            Self {
+                native_turn: frame.turn.clone(),
+                command_identity: sha256_hex(line.as_bytes()),
+                reported_cwd: cwd.map(|cwd| sha256_hex(cwd.as_bytes())),
+                placement,
+                phase,
+                artifact_directory_identity: None,
+            },
+            worktree,
+        ))
+    }
+
+    fn managed(&self) -> bool {
+        !matches!(self.phase, TestRunExecutionPhase::Ordinary)
+    }
+
+    fn running(&self) -> bool {
+        self.phase == TestRunExecutionPhase::Running
+    }
+
+    fn refusal(&self) -> Option<TestRunExecutionRefusal> {
+        match self.phase {
+            TestRunExecutionPhase::Terminal {
+                outcome: TestRunExecutionOutcome::Unknown(reason),
+                ..
+            } => Some(reason),
+            _ => match self.placement {
+                TestRunExecutionPlacement::Refused(reason) => Some(reason),
+                _ => None,
+            },
+        }
+    }
+}
+
+impl TestRunCommandObservation {
+    fn managed_provider_execution(&self) -> bool {
+        self.execution_context
+            .as_ref()
+            .is_some_and(TestRunExecutionContext::managed)
+    }
+
+    fn open_provider_turn_key(&self) -> Option<TestRunProviderTurnKey> {
+        self.execution_context
+            .as_ref()
+            .filter(|context| context.running())?;
+        Some((
+            self.summary.owner_session_id.clone()?,
+            self.runtime_identity.clone()?,
+            self.turn_generation,
+        ))
+    }
+
+    fn linked_artifact_context(&self) -> Option<&TestRunExecutionContext> {
+        self.artifact.as_ref()?;
+        self.execution_context.as_ref().filter(|context| {
+            matches!(context.placement, TestRunExecutionPlacement::Linked(_))
+        })
+    }
+
+    fn unbound_placement_refusal(&self) -> bool {
+        self.validated_unbound
+            && self.runtime_identity.is_some()
+            && self.work_binding.is_none()
+            && self.source_root.is_none()
+            && self.grant_identity.is_none()
+            && self.evidence.is_empty()
+            && self.artifact.is_none()
+            && self.declared_binding.is_none()
+            && self.declared_native.is_none()
+            && self.final_unbound_proof.is_none()
+            && self.summary.state == TestRunState::Unknown
+            && self.execution_context.as_ref().is_some_and(|context| {
+                matches!((&context.placement, &context.phase), (
+                    TestRunExecutionPlacement::Refused(placement),
+                    TestRunExecutionPhase::Terminal {
+                        outcome: TestRunExecutionOutcome::Unknown(outcome), ..
+                    }
+                ) if placement == outcome)
+            })
+    }
+
+    fn provider_item_key(&self) -> Option<TestRunProviderItemKey> {
+        let context = self
+            .execution_context
+            .as_ref()
+            .filter(|context| context.managed())?;
+        Some((
+            self.summary.owner_session_id.clone()?,
+            self.runtime_identity.clone()?,
+            self.tool_identity.clone(),
+            context.native_turn.clone(),
+        ))
+    }
+
+    fn project_execution_context(&mut self) {
+        let Some(context) = &self.execution_context else {
+            return;
+        };
+        if context.phase == TestRunExecutionPhase::LauncherReported {
+            test_run_observation_launch_unconfirmed(self);
+            return;
+        }
+        if let TestRunExecutionPhase::Terminal { ended_at, outcome } = &context.phase {
+            self.summary.ended_at = Some(ended_at.clone());
+            self.summary.exit_code = match outcome {
+                TestRunExecutionOutcome::Exited(code) => Some(*code),
+                _ => None,
+            };
+            self.summary.state = match outcome {
+                TestRunExecutionOutcome::Exited(0) => TestRunState::Passed,
+                TestRunExecutionOutcome::Exited(_) => TestRunState::Failed,
+                _ => TestRunState::Unknown,
+            };
+        }
+        if let Some(reason) = context.refusal() {
+            self.summary.error = Some(reason.message().to_owned());
+        }
+    }
+
+    fn finish_execution_context(&mut self, outcome: TestRunExecutionOutcome) -> bool {
+        let Some(context) = self
+            .execution_context
+            .as_mut()
+            .filter(|context| context.running())
+        else {
+            return false;
+        };
+        context.phase = if outcome == TestRunExecutionOutcome::LauncherStarted {
+            TestRunExecutionPhase::LauncherReported
+        } else {
+            TestRunExecutionPhase::Terminal {
+                ended_at: test_run_timestamp(),
+                outcome,
+            }
+        };
+        self.project_execution_context();
+        true
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -149,6 +503,9 @@ fn test_run_observation_boot(row: &mut TestRunCommandObservation) {
     // A known terminal execution is a durable fact. An ended provider row
     // whose declared verdict was not yet applied is still outstanding.
     if row.summary.ended_at.is_none() || row.declared_verdict_pending {
+        row.finish_execution_context(TestRunExecutionOutcome::Unknown(
+            TestRunExecutionRefusal::RuntimeEnded,
+        ));
         row.monitoring_interrupted_at
             .get_or_insert_with(test_run_timestamp);
         row.summary.state = TestRunState::Unknown;
@@ -263,18 +620,11 @@ enum TestCommandOriginalStart {
 
 impl TestRunCommandOrigin {
     fn execution_id(&self) -> String {
-        format!(
-            "observed-{}",
-            sha256_hex(
-                format!(
-                    "{}:{:?}:{}:{}",
-                    self.session_id,
-                    self.runtime_identity,
-                    self.turn_generation,
-                    self.tool_identity
-                )
-                .as_bytes()
-            )
+        test_run_execution_id(
+            &self.session_id,
+            self.runtime_identity.as_ref(),
+            self.turn_generation,
+            &self.tool_identity,
         )
     }
     fn capture(
@@ -332,6 +682,25 @@ impl TestRunCommandOrigin {
     }
 }
 
+fn test_run_execution_id(
+    session_id: &str,
+    runtime_identity: Option<&String>,
+    turn_generation: u64,
+    tool_identity: &str,
+) -> String {
+    format!(
+        "observed-{}",
+        sha256_hex(
+            format!("{session_id}:{runtime_identity:?}:{turn_generation}:{tool_identity}")
+                .as_bytes()
+        )
+    )
+}
+
+fn test_run_token_identity(runtime: &RuntimeToken) -> String {
+    sha256_hex(format!("{runtime:?}").as_bytes())
+}
+
 impl std::fmt::Debug for TestRunObservationPersistence {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -351,10 +720,283 @@ fn test_run_runtime_identity(
     }?;
     // Runtime tokens and provider tool keys remain host-private. Only opaque
     // hashes participate in the durable identity and no token reaches the UI.
-    Some(sha256_hex(format!("{runtime:?}").as_bytes()))
+    Some(test_run_token_identity(&runtime))
 }
 
 impl AppState {
+    fn refuse_conflicting_provider_start(
+        &self,
+        session_id: &str,
+        frame: &TestRunProviderFrame,
+        line: Option<&str>,
+    ) -> bool {
+        let Some(item) = &frame.item else {
+            return false;
+        };
+        let runtime = test_run_token_identity(&frame.runtime);
+        let id = test_run_execution_id(session_id, Some(&runtime), frame.generation, item);
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return false;
+        };
+        let record = &inner.sessions[index];
+        if record.runtime.runtime_token().as_ref() != Some(&frame.runtime)
+            || record.active_turn_generation != frame.generation
+        {
+            return false;
+        }
+        let Some(context) = inner
+            .test_run_observations
+            .get(&id)
+            .and_then(|row| row.execution_context.as_ref())
+            .filter(|context| context.managed())
+        else {
+            return false;
+        };
+        let inconsistent = context.running()
+            && frame.turn.is_some()
+            && context.native_turn == frame.turn
+            && (line.is_none_or(|line| sha256_hex(line.as_bytes()) != context.command_identity)
+                || frame.cwd.as_ref().map(|cwd| sha256_hex(cwd.as_bytes()))
+                    != context.reported_cwd);
+        if inconsistent {
+            self.transition_provider_execution_locked(
+                &mut inner,
+                &id,
+                TestRunExecutionOutcome::Unknown(TestRunExecutionRefusal::ConflictingStart),
+                false,
+            );
+        }
+        true
+    }
+
+    fn transition_provider_execution_locked(
+        &self,
+        inner: &mut StateInner,
+        execution_id: &str,
+        outcome: TestRunExecutionOutcome,
+        can_finalize: bool,
+    ) -> bool {
+        let changed = inner
+            .test_run_observations
+            .update(execution_id, |row| {
+                if !row.finish_execution_context(outcome) {
+                    return None;
+                }
+                if can_finalize && matches!(outcome, TestRunExecutionOutcome::Exited(_)) {
+                    row.final_unbound_proof =
+                        test_run_final_unbound_identity(row).map(|terminal_identity| {
+                            TestRunFinalUnboundProof {
+                                version: 1,
+                                terminal_identity,
+                            }
+                        });
+                }
+                Some(row.clone())
+            })
+            .flatten();
+        let Some(row) = changed else { return false };
+        self.persist_test_command_observation_locked(inner, row);
+        true
+    }
+
+    fn finish_provider_execution(
+        &self,
+        session_id: &str,
+        frame: &TestRunProviderFrame,
+        key: &str,
+        line: Option<&str>,
+        exit: Option<EngramCommandExit>,
+    ) -> TestRunProviderEnd {
+        let Some(item) = &frame.item else {
+            return TestRunProviderEnd::Refused;
+        };
+        let runtime = test_run_token_identity(&frame.runtime);
+        let execution_id =
+            test_run_execution_id(session_id, Some(&runtime), frame.generation, item);
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(row) = inner.test_run_observations.get(&execution_id) else {
+            return if inner
+                .test_run_compacted
+                .index()
+                .execution(&execution_id)
+                .any(|key| {
+                    inner.test_run_compacted.get(key).is_some_and(|retained| {
+                        retained.observations.iter().any(|row| {
+                            row.execution_id == execution_id && row.managed_provider_execution()
+                        })
+                    })
+                }) {
+                TestRunProviderEnd::Managed
+            } else {
+                TestRunProviderEnd::Ordinary
+            };
+        };
+        let Some(context) = row
+            .execution_context
+            .as_ref()
+            .filter(|context| context.managed())
+        else {
+            return TestRunProviderEnd::Ordinary;
+        };
+        let Some(index) = inner.find_session_index(session_id) else {
+            return TestRunProviderEnd::Managed;
+        };
+        let session = &inner.sessions[index];
+        if session.active_turn_generation != frame.generation
+            || session.runtime.runtime_token().as_ref() != Some(&frame.runtime)
+            || frame.turn.is_none()
+            || context.native_turn != frame.turn
+            || !context.running()
+            || (!frame.declined && exit == Some(EngramCommandExit::NotFinished))
+        {
+            return TestRunProviderEnd::Managed;
+        }
+        let same_command = line
+            .is_some_and(|line| sha256_hex(line.as_bytes()) == context.command_identity)
+            && frame.cwd.as_ref().is_none_or(|cwd| {
+                context.reported_cwd.as_ref() == Some(&sha256_hex(cwd.as_bytes()))
+            });
+        let outcome = if frame.declined {
+            TestRunExecutionOutcome::Unknown(TestRunExecutionRefusal::Declined)
+        } else if !same_command {
+            TestRunExecutionOutcome::Unknown(TestRunExecutionRefusal::CompletionMismatch)
+        } else {
+            match exit {
+                Some(EngramCommandExit::Code(_)) if row.launch_only => {
+                    TestRunExecutionOutcome::LauncherStarted
+                }
+                Some(EngramCommandExit::Code(code)) => TestRunExecutionOutcome::Exited(code),
+                _ => TestRunExecutionOutcome::Unknown(TestRunExecutionRefusal::MissingExit),
+            }
+        };
+        let attach = matches!(context.placement, TestRunExecutionPlacement::Linked(_))
+            && !matches!(outcome, TestRunExecutionOutcome::Unknown(_));
+        let can_finalize = test_run_can_finalize_unbound(&inner, index, row);
+        if same_command && (frame.declined || matches!(exit, Some(EngramCommandExit::Code(_)))) {
+            // This proven frame can retire its current writer. It cannot
+            // retire an earlier measured Codex writer that reused the key.
+            EngramHost::retire_current_command_writer(&mut inner.sessions[index], key);
+        }
+        if self.transition_provider_execution_locked(
+            &mut inner,
+            &execution_id,
+            outcome,
+            can_finalize,
+        ) && attach
+        {
+            TestRunProviderEnd::Associate(execution_id)
+        } else {
+            TestRunProviderEnd::Managed
+        }
+    }
+
+    fn provider_abandon_owns_observation(
+        &self,
+        session_id: &str,
+        frame: &TestRunProviderFrame,
+    ) -> bool {
+        let Some(item) = &frame.item else { return true };
+        let runtime = test_run_token_identity(&frame.runtime);
+        let id = test_run_execution_id(session_id, Some(&runtime), frame.generation, item);
+        self.inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_run_observations
+            .get(&id)
+            .is_some_and(TestRunCommandObservation::managed_provider_execution)
+    }
+
+    fn close_provider_execution_turn(
+        &self,
+        session_id: &str,
+        runtime: &RuntimeToken,
+        generation: u64,
+    ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
+        let session = &inner.sessions[index];
+        if session.active_turn_generation != generation
+            || session.runtime.runtime_token().as_ref() != Some(runtime)
+        {
+            return;
+        }
+        let turn = (
+            session_id.to_owned(),
+            test_run_token_identity(runtime),
+            generation,
+        );
+        let executions: Vec<_> = inner
+            .test_run_observations
+            .index()
+            .open_provider_turn(&turn)
+            .cloned()
+            .collect();
+        for id in executions {
+            self.transition_provider_execution_locked(
+                &mut inner,
+                &id,
+                TestRunExecutionOutcome::Unknown(TestRunExecutionRefusal::MissingExit),
+                false,
+            );
+        }
+    }
+
+    fn provider_item_end_address(
+        &self,
+        session_id: &str,
+        runtime: &RuntimeToken,
+        thread: &str,
+        turn: Option<&str>,
+        item: &str,
+        current_turn: bool,
+    ) -> TestRunProviderEndAddress {
+        let runtime_identity = test_run_token_identity(runtime);
+        let tool_identity = sha256_hex(item.as_bytes());
+        let address = (
+            session_id.to_owned(),
+            runtime_identity.clone(),
+            tool_identity.clone(),
+            turn.map(|turn| test_run_provider_turn_identity(thread, turn)),
+        );
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let live = inner.test_run_observations.index();
+        let retained = inner.test_run_compacted.index();
+        if live.owns_provider_item(&address) || retained.owns_provider_item(&address) {
+            return if turn.is_some() {
+                TestRunProviderEndAddress::Exact
+            } else {
+                TestRunProviderEndAddress::Ambiguous
+            };
+        }
+        let current_managed = current_turn
+            && inner.find_session_index(session_id).is_some_and(|index| {
+                let session = &inner.sessions[index];
+                let execution = test_run_execution_id(
+                    session_id,
+                    Some(&runtime_identity),
+                    session.active_turn_generation,
+                    &tool_identity,
+                );
+                session.runtime.runtime_token().as_ref() == Some(runtime)
+                    && inner
+                        .test_run_observations
+                        .get(&execution)
+                        .is_some_and(TestRunCommandObservation::managed_provider_execution)
+            });
+        let unaddressed = (address.0, address.1, address.2, None);
+        if current_managed
+            || live.contains_provider_address(&unaddressed)
+            || retained.contains_provider_address(&unaddressed)
+        {
+            TestRunProviderEndAddress::Ambiguous
+        } else {
+            TestRunProviderEndAddress::Ordinary
+        }
+    }
+
     fn interrupt_test_run_monitoring(
         &self,
         run_id: &str,
@@ -386,23 +1028,29 @@ impl AppState {
                 && row.summary.interrupted
                 && row.monitoring_interrupted_at.is_some()
                 && row.summary.error.as_deref() == Some(detail.as_str());
-            if row.summary.ended_at.is_some()
-                || (!duplicate && (row.summary.interrupted
-                    || !matches!(row.summary.state, TestRunState::Running | TestRunState::Unknown)))
+            if !duplicate && (row.summary.ended_at.is_some()
+                || row.summary.interrupted
+                || !matches!(row.summary.state, TestRunState::Running | TestRunState::Unknown))
             {
                 return Err(ApiError::conflict("execution already has a terminal or monitoring disposition"));
             }
             let expected = if duplicate {
                 row.clone()
             } else {
-                let row = inner.test_run_observations.update(run_id, |row| {
-                    row.summary.state = TestRunState::Unknown;
-                    row.summary.interrupted = true;
-                    row.monitoring_interrupted_at = Some(test_run_timestamp());
-                    row.summary.error = Some(detail.clone());
-                    // ended_at/exit_code/evidence and the runtime remain untouched.
-                    row.clone()
-                }).expect("observation checked under the same state lock");
+                let row = inner
+                    .test_run_observations
+                    .update(run_id, |row| {
+                        row.finish_execution_context(TestRunExecutionOutcome::Unknown(
+                            TestRunExecutionRefusal::MonitoringInterrupted,
+                        ));
+                        row.summary.state = TestRunState::Unknown;
+                        row.summary.interrupted = true;
+                        row.monitoring_interrupted_at = Some(test_run_timestamp());
+                        row.summary.error = Some(detail.clone());
+                        // No workload exit or new evidence is inferred here.
+                        row.clone()
+                    })
+                    .expect("observation checked under the same state lock");
                 self.persist_test_command_observation_locked(&mut inner, row.clone());
                 row
             };
@@ -529,6 +1177,7 @@ impl AppState {
                         && row.runtime_identity.is_some()
                         && row.tool_identity == tool
                         && row.summary.ended_at.is_none()
+                        && !row.managed_provider_execution()
                         && match provenance {
                             EngramObservationProvenance::Runtime { turn_generation, .. } => {
                                 row.turn_generation == *turn_generation
@@ -627,10 +1276,42 @@ impl AppState {
         worktree: &str, started_at: &str, declared: Option<&EngramDeclaredBinding>,
         native: Option<DeclaredRunReservation>,
     ) {
+        self.observe_test_command_start_with_context(
+            origin, command, worktree, started_at, declared, native, None,
+        );
+    }
+
+    fn observe_test_command_start_with_context(
+        &self,
+        origin: TestRunCommandOrigin,
+        command: &EngramCheckCommand,
+        worktree: &str,
+        started_at: &str,
+        declared: Option<&EngramDeclaredBinding>,
+        native: Option<DeclaredRunReservation>,
+        provider: Option<(&TestRunProviderFrame, TestRunExecutionContext)>,
+    ) {
         if command.kind != EngramVerificationKind::Test {
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let mut origin = origin;
+        if let Some((frame, _)) = &provider {
+            let Some(index) = inner.find_session_index(&origin.session_id) else {
+                return;
+            };
+            let record = &inner.sessions[index];
+            if record.runtime.runtime_token().as_ref() != Some(&frame.runtime)
+                || record.active_turn_generation != frame.generation
+            {
+                return;
+            }
+            origin.tool_identity = match &frame.item {
+                Some(item) => item.clone(),
+                None => sha256_hex(Uuid::new_v4().as_bytes()),
+            };
+        }
+        let execution_id = origin.execution_id();
         let TestRunCommandOrigin {
             session_id,
             project_id,
@@ -642,26 +1323,25 @@ impl AppState {
             source_root,
             validated_unbound,
         } = origin;
-        let execution_id = format!(
-            "observed-{}",
-            sha256_hex(
-                format!("{session_id}:{runtime_identity:?}:{turn_generation}:{tool_identity}")
-                    .as_bytes()
-            )
-        );
         if inner.test_run_observations.contains_key(&execution_id)
-            || inner.test_run_compacted.index().execution(&execution_id).next().is_some()
+            || inner
+                .test_run_compacted
+                .index()
+                .execution(&execution_id)
+                .next()
+                .is_some()
         {
             return;
         }
         let launch_only = native.is_none() && EngramHost::is_launch_only(command, EngramCommandExit::Code(0));
-        let observation = TestRunCommandObservation {
+        let mut observation = TestRunCommandObservation {
             execution_id: execution_id.clone(),
             runtime_identity,
             tool_identity,
             grant_identity,
             command_fingerprint: EngramHost::check_fingerprint(command),
             turn_generation,
+            execution_context: provider.map(|(_, context)| context),
             observed_at: test_run_timestamp(),
             work_binding,
             source_root,
@@ -711,6 +1391,7 @@ impl AppState {
                 detail_version: None,
             },
         };
+        observation.project_execution_context();
         inner
             .test_run_observations
             .insert(execution_id, observation.clone());
@@ -786,6 +1467,7 @@ impl AppState {
                     && row.tool_identity == tool_identity
                     && turn.is_none_or(|turn| row.turn_generation == turn)
                     && row.summary.ended_at.is_none()
+                    && !row.managed_provider_execution()
             })
             .map(|row| row.execution_id.clone())
             .collect();
@@ -1144,6 +1826,9 @@ impl AppState {
             .collect();
         for id in stale {
             let Some(row) = inner.test_run_observations.update(&id, |row| {
+                row.finish_execution_context(TestRunExecutionOutcome::Unknown(
+                    TestRunExecutionRefusal::RuntimeEnded,
+                ));
                 row.summary.state = TestRunState::Unknown;
                 row.summary.interrupted = true;
                 row.monitoring_interrupted_at = Some(test_run_timestamp());
@@ -1247,6 +1932,7 @@ fn test_run_observation_risk(
         test_run_evidence_impact(inner, row)
     } else {
         (test_run_final_unbound_valid(row)
+            || row.unbound_placement_refusal()
             || (row.summary.ended_at.is_none()
                 && !row.launch_only
                 && row.artifact.is_none()
@@ -1320,6 +2006,8 @@ fn test_run_observation_summary(
     if row.evidence.is_empty() && summary.registration.restart_would_void_evidence == Some(false) {
         summary.registration.restart_evidence_reason = if test_run_final_unbound_valid(row) {
             "Final host proof confirms no work binding or outstanding verification report."
+        } else if row.unbound_placement_refusal() {
+            "The original placement was refused without work tracking or a verification report."
         } else {
             "Current host observation validates an execution without work tracking."
         }
@@ -1359,6 +2047,14 @@ fn test_run_observation_matches_run(
             && test_run_path_key(&run.worktree) == test_run_path_key(&row.summary.worktree)
             && artifact.run_id == run.run_id
             && test_run_path_key(&artifact.run_directory) == test_run_path_key(&run.run_dir)
+            && row.linked_artifact_context().is_none_or(|context| {
+                disk.map_or_else(
+                    || artifact.terminal_digest.is_some(),
+                    |disk| context.artifact_directory_identity.as_ref().is_some_and(|identity| {
+                        disk.provider_directory_identity.as_ref() == Some(identity)
+                    }),
+                )
+            })
             && if let Some(digest) = &artifact.terminal_digest {
                 test_run_terminal_digest_matches(run.detail_version.as_deref(), digest)
             } else {

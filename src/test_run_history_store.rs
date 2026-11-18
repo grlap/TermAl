@@ -11,7 +11,7 @@ mod test_run_history_store {
     use super::{
         EngramAuthorityStoreKey, PersistMetadataStamp, PersistTracked, TestRunCausalKey,
         TestRunCommandObservation, TestRunCompacted, TestRunEvidenceAssociation,
-        TestRunRegistration, test_run_causal_key,
+        TestRunProviderItemKey, TestRunProviderTurnKey, TestRunRegistration, test_run_causal_key,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::ops::Deref;
@@ -416,6 +416,25 @@ mod test_run_history_store {
         check: BTreeMap<TestRunCheckBucket, BTreeSet<String>>,
         summary_run: BTreeMap<String, BTreeSet<String>>,
         artifact_run: BTreeMap<String, BTreeSet<String>>,
+        provider_item: BTreeMap<TestRunProviderItemKey, BTreeSet<String>>,
+        open_provider_turn: BTreeMap<TestRunProviderTurnKey, BTreeSet<String>>,
+        linked_artifact: BTreeSet<String>,
+    }
+
+    fn owns_provider_item(
+        index: &BTreeMap<TestRunProviderItemKey, BTreeSet<String>>,
+        address: &TestRunProviderItemKey,
+    ) -> bool {
+        if address.3.is_some() {
+            return index.contains_key(address);
+        }
+        // Without a native turn an item can name any managed start with
+        // this key in the original runtime. Do not hand it to an ordinary
+        // carried owner as if the managed starts were absent.
+        index
+            .range(address.clone()..)
+            .next()
+            .is_some_and(|(key, _)| key.0 == address.0 && key.1 == address.1 && key.2 == address.2)
     }
 
     impl RowIndex<TestRunCommandObservation> for TestRunObservationIndex {
@@ -434,8 +453,17 @@ mod test_run_history_store {
             }
             add_member(&mut self.check, check_bucket(row), key);
             add_member(&mut self.summary_run, row.summary.run_id.clone(), key);
+            if let Some(address) = row.provider_item_key() {
+                add_member(&mut self.provider_item, address, key);
+            }
+            if let Some(turn) = row.open_provider_turn_key() {
+                add_member(&mut self.open_provider_turn, turn, key);
+            }
             if let Some(artifact) = &row.artifact {
                 add_member(&mut self.artifact_run, artifact.run_id.clone(), key);
+            }
+            if row.linked_artifact_context().is_some() {
+                self.linked_artifact.insert(key.to_owned());
             }
         }
 
@@ -454,8 +482,17 @@ mod test_run_history_store {
             }
             remove_member(&mut self.check, &check_bucket(row), key);
             remove_member(&mut self.summary_run, &row.summary.run_id, key);
+            if let Some(address) = row.provider_item_key() {
+                remove_member(&mut self.provider_item, &address, key);
+            }
+            if let Some(turn) = row.open_provider_turn_key() {
+                remove_member(&mut self.open_provider_turn, &turn, key);
+            }
             if let Some(artifact) = &row.artifact {
                 remove_member(&mut self.artifact_run, &artifact.run_id, key);
+            }
+            if row.linked_artifact_context().is_some() {
+                self.linked_artifact.remove(key);
             }
         }
     }
@@ -476,6 +513,21 @@ mod test_run_history_store {
         pub(super) fn artifact_run(&self, run_id: &str) -> impl Iterator<Item = &String> {
             members(&self.artifact_run, run_id)
         }
+        pub(super) fn linked_artifact_executions(&self) -> impl Iterator<Item = &String> {
+            self.linked_artifact.iter()
+        }
+        pub(super) fn owns_provider_item(&self, address: &TestRunProviderItemKey) -> bool {
+            owns_provider_item(&self.provider_item, address)
+        }
+        pub(super) fn contains_provider_address(&self, address: &TestRunProviderItemKey) -> bool {
+            self.provider_item.contains_key(address)
+        }
+        pub(super) fn open_provider_turn(
+            &self,
+            key: &TestRunProviderTurnKey,
+        ) -> impl Iterator<Item = &String> {
+            members(&self.open_provider_turn, key)
+        }
     }
 
     /// Candidate indexes over compacted proofs, keyed by actual map key.
@@ -485,6 +537,7 @@ mod test_run_history_store {
         lifecycle: BTreeMap<TestRunLifecycleKey, BTreeSet<String>>,
         summary_run: BTreeMap<String, BTreeSet<String>>,
         execution: BTreeMap<String, BTreeSet<String>>,
+        provider_item: BTreeMap<TestRunProviderItemKey, BTreeSet<String>>,
     }
 
     impl RowIndex<TestRunCompacted> for TestRunCompactedIndex {
@@ -501,6 +554,9 @@ mod test_run_history_store {
                     );
                 }
                 add_member(&mut self.execution, observation.execution_id.clone(), key);
+                if let Some(address) = observation.provider_item_key() {
+                    add_member(&mut self.provider_item, address, key);
+                }
             }
             add_member(&mut self.summary_run, row.summary.run_id.clone(), key);
         }
@@ -518,6 +574,9 @@ mod test_run_history_store {
                     );
                 }
                 remove_member(&mut self.execution, &observation.execution_id, key);
+                if let Some(address) = observation.provider_item_key() {
+                    remove_member(&mut self.provider_item, &address, key);
+                }
             }
             remove_member(&mut self.summary_run, &row.summary.run_id, key);
         }
@@ -535,6 +594,12 @@ mod test_run_history_store {
         }
         pub(super) fn execution(&self, execution_id: &str) -> impl Iterator<Item = &String> {
             members(&self.execution, execution_id)
+        }
+        pub(super) fn owns_provider_item(&self, address: &TestRunProviderItemKey) -> bool {
+            owns_provider_item(&self.provider_item, address)
+        }
+        pub(super) fn contains_provider_address(&self, address: &TestRunProviderItemKey) -> bool {
+            self.provider_item.contains_key(address)
         }
     }
 
