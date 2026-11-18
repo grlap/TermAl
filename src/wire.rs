@@ -115,6 +115,12 @@ enum ApiErrorKind {
     GitDocumentTooLarge,
     /// A local session lookup or remote-session-target resolution missed.
     LocalSessionMissing,
+    /// A bounded structured readiness refusal; no policy or store identity
+    /// was admitted. Kept local for observation retry classification.
+    EngramStoreReadinessRefusal {
+        code: &'static str,
+        refusal_kind: Option<&'static str>,
+    },
     /// A known launch lacks durable identity needed to admit a run wait.
     TestRunWaitRegistrationUnavailable,
     RemoteConnectionUnavailable,

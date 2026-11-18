@@ -1053,6 +1053,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             | ApiErrorKind::FederationInvalidBinding
             | ApiErrorKind::FederationExecutorAssociationRetired
             | ApiErrorKind::EngramStoreTransient
+            | ApiErrorKind::EngramStoreReadinessRefusal { .. }
             | ApiErrorKind::FederationBoundSessions,
         ) => None,
         None if error.status.is_server_error() => {

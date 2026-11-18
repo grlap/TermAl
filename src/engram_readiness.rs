@@ -151,12 +151,18 @@ fn run_engram_readiness_within(
         ));
     }
     if !output.status.success() {
-        return Err(ApiError::bad_request(format!(
+        let mut error = ApiError::bad_request(format!(
             "Engram readiness unavailable or refused ({}); no Full Audit fallback: {} {}",
             output.status,
             engram_diagnostic_excerpt(&output.stdout),
             engram_diagnostic_excerpt(&output.stderr),
-        )));
+        ));
+        if output.status.code() == Some(1)
+            && let Some((code, refusal_kind)) = engram_readiness_store_refusal(&output.stdout)
+        {
+            error = error.with_kind(ApiErrorKind::EngramStoreReadinessRefusal { code, refusal_kind });
+        }
+        return Err(error);
     }
     if output.stdout.len() > ENGRAM_DIAGNOSTIC_REPORT_LIMIT {
         return Err(ApiError::bad_request(
@@ -167,6 +173,28 @@ fn run_engram_readiness_within(
         "Engram readiness returned an unsupported or invalid receipt: {}; update the binary, no Full Audit fallback",
         engram_diagnostic_excerpt(error.to_string().as_bytes()),
     )))
+}
+
+// Read refusal fields only from the bounded v1 envelope. Diagnostic prose,
+// malformed output and unrecognized phases cannot grant retries.
+fn engram_readiness_store_refusal(bytes: &[u8]) -> Option<(&'static str, Option<&'static str>)> {
+    if bytes.len() > ENGRAM_DIAGNOSTIC_REPORT_LIMIT { return None; }
+    let value: Value = serde_json::from_slice(bytes).ok()?;
+    if value["schema_version"] != 1 || value["scope"] != "readiness"
+        || value["ready"] != false || value["mutation_enabled"] != false
+        || value["full_audit"] != "not_run"
+    { return None; }
+    if value["code"] == "store_open_refused" {
+        let kind = match (value["phase"].as_str()?, value["kind"].as_str()?) {
+            ("open", "busy") => "busy",
+            ("open" | "path", "io") => "io",
+            _ => return None,
+        };
+        return Some(("store_open_refused", Some(kind)));
+    }
+    ENGRAM_STORE_TRANSIENT_CODES.iter().copied()
+        .find(|code| Some(*code) == value["code"].as_str())
+        .map(|code| (code, None))
 }
 
 // Re-read routing after the process returns; the command's assertion alone is
