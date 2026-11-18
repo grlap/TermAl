@@ -116,6 +116,11 @@ fn test_run_compact_is_installed_with(
 fn test_run_compacted_summary(inner: &impl TestRunProjectionSource, row: &TestRunCompacted) -> TestRunSummary {
     let index = inner.projection_index();
     let mut summary = row.summary.clone();
+    // Minimal retention discards arbitrary error text. Reconstruct only the
+    // original closed placement refusal, as the live projection does.
+    if let Some(refusal) = row.observations.iter().find_map(|row| row.placement_refusal) {
+        summary.error = Some(refusal.message().to_owned());
+    }
     summary.registration.history_compacted = Some(row.compacted);
     summary.registration.artifact_unavailable = if !row.compacted && !index.scanned_once {
         None

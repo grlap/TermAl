@@ -852,14 +852,25 @@ struct SessionRecorderState {
     // Frame-local native execution proof; an ambient/replayed event cannot
     // acquire a new turn's opening snapshot.
     native_tool_provenance: Option<EngramObservationProvenance>,
+    // An item can report a native turn before the handshake proves it. Keep
+    // the report as an exclusion fence for the start, with no authority.
+    codex_start_turn_digest: Option<String>,
+    codex_command_completion: Option<CodexCommandCompletion>,
     /// Commands whose message a turn reset keeps: a Claude subagent's tool
     /// calls still pending across the root turn's reset, so their late
     /// results update the same card.
     kept_command_keys: HashSet<String>,
 }
 
+enum CodexCommandCompletion {
+    TranscriptOnly,
+    Proven(String),
+}
+
 fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
     recorder_state.native_tool_provenance = None;
+    recorder_state.codex_start_turn_digest = None;
+    recorder_state.codex_command_completion = None;
     let kept = &recorder_state.kept_command_keys;
     recorder_state
         .command_messages

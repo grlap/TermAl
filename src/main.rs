@@ -1273,6 +1273,7 @@ include!("test_run_phase_trace.rs");
 #[cfg(test)]
 include!("test_run_history_probe.rs");
 include!("test_run_history_store.rs");
+include!("test_run_provider_placement.rs");
 include!("test_run_observations.rs");
 include!("test_run_overview.rs");
 include!("test_run_transport_projection.rs");

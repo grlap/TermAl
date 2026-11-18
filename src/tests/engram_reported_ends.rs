@@ -292,6 +292,7 @@ fn a_legacy_carried_terminal_requires_its_exact_item_thread_and_terminal_state()
                 Some(THREAD),
                 &rejected,
                 rejected.pointer("/params/msg/item").unwrap(),
+                None,
             ),
             "{rejected:#}"
         );

@@ -27,12 +27,35 @@ fn test_run_artifact_observation_matches_snapshot(
     &identity == expected
 }
 
+// The active Codex stream has an exact start. Keep that binding across the
+// off-lock filesystem read, including when the locator is refused.
+struct TestRunArtifactStreamStart<'a> {
+    runtime: &'a RuntimeToken,
+    observation: &'a TestRunCommandObservation,
+}
+
+impl TestRunArtifactStreamStart<'_> {
+    fn is_current(&self, inner: &StateInner) -> bool {
+        self.observation
+            .summary
+            .owner_session_id
+            .as_deref()
+            .and_then(|owner| inner.find_session_index(owner))
+            .is_some_and(|index| {
+                let record = &inner.sessions[index];
+                record.active_turn_generation == self.observation.turn_generation
+                    && record.runtime.runtime_token().as_ref() == Some(self.runtime)
+            })
+    }
+}
+
 impl AppState {
     fn retain_test_command_artifact_refusal(
         &self,
         expected: &TestRunCommandObservation,
         code: TestRunNativeCompletionRefusalCode,
         facts: &[(TestRunNativeCompletionFact, bool)],
+        stream_start: Option<&TestRunArtifactStreamStart<'_>>,
     ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(current) = inner.test_run_observations.get(&expected.execution_id) else {
@@ -41,6 +64,7 @@ impl AppState {
         // An off-lock callback cannot rewrite a newer row or an established
         // association, including the exact image held by a receipt's fence.
         if current.artifact.is_some()
+            || stream_start.is_some_and(|start| !start.is_current(&inner))
             || !test_run_artifact_observation_matches_snapshot(current, expected)
         {
             return;
@@ -233,6 +257,18 @@ impl AppState {
         if output_cut {
             return;
         }
+        self.associate_test_command_artifact(session_id, provenance, key, line, output, None);
+    }
+
+    fn associate_test_command_artifact(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        line: &str,
+        output: &str,
+        stream_start: Option<&TestRunArtifactStreamStart<'_>>,
+    ) {
         let Some(command) = EngramHost::recognized_check(line)
             .filter(|command| command.simple && EngramHost::launcher_arguments(command).is_some())
         else {
@@ -240,37 +276,84 @@ impl AppState {
         };
         let fingerprint = EngramHost::check_fingerprint(&command);
         let tool_identity = sha256_hex(key.as_bytes());
+        let codex_finish = match provenance {
+            EngramObservationProvenance::Runtime { token: token @ RuntimeToken::Codex(_), turn_generation } => {
+                Some((token, *turn_generation))
+            }
+            _ => None,
+        };
         let row = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
             let runtime_identity = test_run_runtime_identity(&inner.sessions[index], provenance);
-            let mut rows = inner.test_run_observations.values().filter(|row| {
+            let matches_command = |row: &TestRunCommandObservation| {
                 row.summary.owner_session_id.as_deref() == Some(session_id)
                     && row.runtime_identity == runtime_identity
                     && row.runtime_identity.is_some()
                     && row.tool_identity == tool_identity
                     && row.command_fingerprint == fingerprint
-            });
-            let Some(row) = rows.next().cloned() else {
-                return;
             };
-            if rows.next().is_some() {
-                return;
+            if let Some(start) = stream_start {
+                if !start.is_current(&inner) {
+                    return;
+                }
+                let Some(row) = inner
+                    .test_run_observations
+                    .get(&start.observation.execution_id)
+                    .filter(|row| {
+                        matches_command(row)
+                            && start.observation.same_start(row)
+                            && row.summary.ended_at.is_none()
+                    })
+                else {
+                    return;
+                };
+                row.clone()
+            } else if let Some((token, generation)) = codex_finish {
+                let record = &inner.sessions[index];
+                if record.active_turn_generation != generation || !record.runtime.matches_runtime_token(token) {
+                    return;
+                }
+                let id = test_run_execution_id(session_id, &runtime_identity, generation, &tool_identity);
+                let Some(row) = inner.test_run_observations.get(&id).filter(|row| matches_command(row)) else {
+                    return;
+                };
+                row.clone()
+            } else {
+                // An unattributed caller still has to
+                // identify one original observation without guessing a turn.
+                let mut rows = inner
+                    .test_run_observations
+                    .values()
+                    .filter(|row| matches_command(row));
+                let Some(row) = rows.next().cloned() else {
+                    return;
+                };
+                if rows.next().is_some() {
+                    return;
+                }
+                row
             }
-            row
         };
+        // Keep a proven terminal caller's exact runtime and execution fence
+        // during off-lock checks just as for a live stream.
+        let finish_start = codex_finish.map(|(runtime, _)| TestRunArtifactStreamStart {
+            runtime, observation: &row,
+        });
+        let stream_start = stream_start.or(finish_start.as_ref());
         // Native runs already own their original reservation and artifact.
         // Console locators, previews and persisted-output metadata cannot
         // replace that association.
-        if row.declared_native.is_some() {
+        if row.declared_native.is_some() || row.placement_refusal.is_some() {
             return;
         }
         use TestRunNativeCompletionFact::*;
         use TestRunNativeCompletionRefusalCode::*;
-        let refuse =
-            |code, facts: &[_]| self.retain_test_command_artifact_refusal(&row, code, facts);
+        let refuse = |code, facts: &[_]| {
+            self.retain_test_command_artifact_refusal(&row, code, facts, stream_start);
+        };
         let mut locators = std::collections::BTreeSet::new();
         for line in output.lines() {
             let line = line.trim();
@@ -343,24 +426,30 @@ impl AppState {
             refuse(ArtifactWorktreeUnavailable, &[(WorktreePresent, false)]);
             return;
         }
-        let Some(expected_parent) =
-            EngramHost::run_artifact_directory(FsPath::new(&row.summary.worktree))
-        else {
+        let Some(expected_parent) = test_run_provider_artifact_directory(
+            FsPath::new(&row.summary.worktree),
+            row.provider_git.as_ref(),
+        ) else {
             refuse(ArtifactRootUnavailable, &[(ArtifactRootAvailable, false)]);
             return;
         };
-        let Ok(expected_parent) = fs::canonicalize(expected_parent) else {
-            refuse(ArtifactRootUnavailable, &[(ArtifactRootResolved, false)]);
-            return;
-        };
-        let Ok(canonical) = fs::canonicalize(&directory) else {
-            refuse(ArtifactDirectoryUnavailable, &[(DirectoryResolved, false)]);
-            return;
-        };
-        if canonical != expected_parent.join(run_id) {
+        let expected = expected_parent.join(run_id);
+        if !test_run_same_git_path(
+            &normalize_user_facing_path(&directory),
+            &normalize_user_facing_path(&expected),
+        ) {
             refuse(ArtifactDirectoryMismatch, &[(DirectoryMatches, false)]);
             return;
         }
+        if identity_no_links(&expected_parent).is_err() {
+            refuse(ArtifactRootUnavailable, &[(ArtifactRootResolved, false)]);
+            return;
+        }
+        if identity_no_links(&expected).is_err() {
+            refuse(ArtifactDirectoryUnavailable, &[(DirectoryResolved, false)]);
+            return;
+        }
+        let canonical = expected;
         let Some(disk) = TestRunDisk::read(&canonical, None) else {
             refuse(ArtifactRequestUnavailable, &[(RequestReadable, false)]);
             return;
@@ -435,10 +524,11 @@ impl AppState {
             terminal_digest: None,
         };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        if inner
-            .test_run_observations
-            .get(&row.execution_id)
-            .is_none_or(|current| !test_run_artifact_observation_matches_snapshot(current, &row))
+        if stream_start.is_some_and(|start| !start.is_current(&inner))
+            || inner
+                .test_run_observations
+                .get(&row.execution_id)
+                .is_none_or(|current| !test_run_artifact_observation_matches_snapshot(current, &row))
         {
             return;
         }

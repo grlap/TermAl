@@ -651,11 +651,35 @@ fn handle_shared_codex_app_server_message(
         *completed_turn_id = None;
         *turn_started = false;
     }
-    recorder_state.native_tool_provenance = (matches!(method, "item/started" | "item/completed") && *turn_started
-        && !*turn_id_provisional && event_turn_id.is_some() && event_turn_id == turn_id.as_deref())
+    let completion_item = match method {
+        "item/completed" => message.pointer("/params/item"),
+        "codex/event/item_completed" => message.pointer("/params/msg/item"),
+        _ => None,
+    };
+    let command_completion = completion_item.filter(|item| {
+        matches!(item.get("type").and_then(Value::as_str), Some("commandExecution" | "CommandExecution"))
+    });
+    let proven_turn = event_turn_id.filter(|event_turn| {
+        *turn_started
+            && !*turn_id_provisional
+            && Some(*event_turn) == turn_id.as_deref()
+            && message_thread_id.is_some()
+            && message_thread_id == thread_id.as_deref()
+    });
+    recorder_state.native_tool_provenance = (matches!(method, "item/started" | "item/completed" | "codex/event/item_completed")
+        && proven_turn.is_some())
         .then_some(*active_turn_generation).flatten().map(|turn_generation| EngramObservationProvenance::Runtime {
             token: runtime_token.clone(), turn_generation,
         });
+    recorder_state.codex_command_completion = command_completion.map(|item| {
+        match (proven_turn, recorder_state.native_tool_provenance.as_ref(), item.get("id").and_then(Value::as_str)) {
+            (Some(turn), Some(_), Some(_)) => CodexCommandCompletion::Proven(sha256_hex(turn.as_bytes())),
+            _ => CodexCommandCompletion::TranscriptOnly,
+        }
+    });
+    recorder_state.codex_start_turn_digest = event_turn_id
+        .filter(|event_turn| method == "item/started" && Some(*event_turn) == turn_id.as_deref())
+        .map(|event_turn| sha256_hex(event_turn.as_bytes()));
     let mut recorder = BorrowedSessionRecorder::new(state, &session_id, recorder_state);
     trace_shared_codex_event(
         "route",
@@ -767,6 +791,7 @@ fn handle_shared_codex_app_server_notification(
     pending_turn_start_request_id: &mut Option<String>,
     turn_started_watchdog_cancel_tx: &mut Option<mpsc::Sender<()>>,
     turn_started_before_response: &mut bool,
+    turn_id_provisional: bool,
     turn_state: &mut CodexTurnState,
     thread_sessions: &SharedCodexThreadMap,
     recorder: &mut impl TurnRecorder,
@@ -1048,25 +1073,38 @@ fn handle_shared_codex_app_server_notification(
                     turn_state.remote_compaction_progressed = true;
                 }
                 handle_codex_app_server_item_started(item, recorder)?;
-                if let (Some(key), Some(event_turn)) = (item.get("id").and_then(Value::as_str), event_turn_id)
+                if !turn_id_provisional
+                    && let (Some(key), Some(event_turn)) = (item.get("id").and_then(Value::as_str), event_turn_id)
                     && item.get("type").and_then(Value::as_str) == Some("commandExecution")
                     && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
                     && turn_id.as_deref() == Some(event_turn)
-                    && turn_state.launcher_output.len() < ENGRAM_TURN_CHECK_LIMIT
-                    && let Some(output) = state.capture_codex_launcher_output(
-                        session_id, runtime_token, runtime_generation, key)
+                    && (turn_state.launcher_output.len() < ENGRAM_TURN_CHECK_LIMIT
+                        || turn_state.launcher_output.contains_key(key))
                 {
+                    let output = state.capture_codex_launcher_output(
+                        session_id, runtime_token, runtime_generation,
+                        CodexLauncherStart {
+                            native_turn_id: event_turn,
+                            key,
+                            line: item.get("command").and_then(Value::as_str).unwrap_or(""),
+                            cwd: item.get("cwd").and_then(Value::as_str),
+                        },
+                    );
                     match turn_state.launcher_output.entry(key.to_owned()) {
-                        std::collections::hash_map::Entry::Vacant(entry) => { entry.insert(output); }
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            if let Some(output) = output { entry.insert(output); }
+                        }
                         std::collections::hash_map::Entry::Occupied(mut entry) => {
-                            if !entry.get().same_start(&output.check) { entry.get_mut().invalid = true; }
+                            if output.as_ref().is_none_or(|output| !entry.get().same_origin(output)) {
+                                entry.get_mut().invalid = true;
+                            }
                         }
                     }
                 }
             }
         }
         "item/commandExecution/outputDelta" => {
-            if *turn_started
+            if *turn_started && !turn_id_provisional
                 && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
                 && turn_id.is_some()
                 && shared_codex_event_turn_id(message) == turn_id.as_deref()
@@ -1074,6 +1112,7 @@ fn handle_shared_codex_app_server_notification(
                     message.pointer("/params/itemId").and_then(Value::as_str),
                     message.pointer("/params/delta").and_then(Value::as_str))
                 && let Some(output) = turn_state.launcher_output.get_mut(key)
+                && turn_id.as_deref().is_some_and(|turn| output.matches_native_turn(turn))
             {
                 state.observe_codex_launcher_output(session_id, runtime_token, runtime_generation, output, delta);
             }
@@ -1085,6 +1124,7 @@ fn handle_shared_codex_app_server_notification(
             if let Some(key) = item.get("id").and_then(Value::as_str)
                 && item.get("type").and_then(Value::as_str) == Some("commandExecution")
                 && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
+                && !turn_id_provisional
                 && turn_id.is_some() && shared_codex_event_turn_id(message) == turn_id.as_deref()
                 && EngramHost::codex_command_exit(item) != EngramCommandExit::NotFinished
             {
@@ -1114,13 +1154,16 @@ fn handle_shared_codex_app_server_notification(
             // test its turn's close carried under exactly this item's id takes
             // it as its end whichever turn it names, and it is dropped from
             // the transcript, as an end of a turn no longer running is.
-            if take_shared_codex_late_command_end(
-                state,
-                session_id,
-                session_thread_id.as_deref(),
-                message,
-                item,
-            ) {
+            if !turn_id_provisional && (!*turn_started || turn_id.is_some())
+                && take_shared_codex_late_command_end(
+                    state,
+                    session_id,
+                    session_thread_id.as_deref(),
+                    message,
+                    item,
+                    runtime_generation.filter(|_| *turn_started),
+                )
+            {
                 trace_shared_codex_event(
                     "drop",
                     method,
@@ -1290,16 +1333,19 @@ fn handle_shared_codex_app_server_notification(
             // The legacy completion can name a turn older than the visible
             // one too. Give its exact carried item the same terminal handoff
             // as the typed event before applying transcript turn filtering.
-            if let Some(item) = message.pointer("/params/msg/item") {
-                if take_shared_codex_late_command_end(
+            if !turn_id_provisional
+                && (!*turn_started || turn_id.is_some())
+                && let Some(item) = message.pointer("/params/msg/item")
+                && take_shared_codex_late_command_end(
                     state,
                     session_id,
                     session_thread_id.as_deref(),
                     message,
                     item,
-                ) {
-                    return Ok(());
-                }
+                    runtime_generation.filter(|_| *turn_started),
+                )
+            {
+                return Ok(());
             }
             handle_shared_codex_event_item_completed(
                 message,
@@ -1464,6 +1510,7 @@ fn take_shared_codex_late_command_end(
     session_thread_id: Option<&str>,
     message: &Value,
     item: &Value,
+    active_generation: Option<u64>,
 ) -> bool {
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
     if !matches!(
@@ -1484,7 +1531,9 @@ fn take_shared_codex_late_command_end(
         return false;
     };
     let exit = EngramHost::codex_command_exit(item);
-    if exit == EngramCommandExit::NotFinished {
+    if exit == EngramCommandExit::NotFinished
+        || !state.codex_has_unique_late_command_owner(session_id, key, active_generation)
+    {
         return false;
     }
     let output = item

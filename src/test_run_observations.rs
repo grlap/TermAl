@@ -34,6 +34,10 @@ struct TestRunCommandObservation {
     tool_identity: String,
     grant_identity: Option<String>,
     command_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reported_cwd_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    codex_turn_digest: Option<String>,
     turn_generation: u64,
     observed_at: String,
     summary: TestRunSummary,
@@ -46,6 +50,10 @@ struct TestRunCommandObservation {
     evidence: Vec<TestRunEvidenceAssociation>,
     #[serde(default)]
     artifact: Option<TestRunObservedArtifact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    placement_refusal: Option<TestRunPlacementRefusal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_git: Option<TestRunProviderGitPlacement>,
     // Kept separately from start-placement diagnostics. Only the original
     // provider event's later artifact correlation may update this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,6 +77,41 @@ struct TestRunCommandObservation {
     // applied by the producer. This is a settlement phase, not credit.
     #[serde(default)]
     declared_verdict_pending: bool,
+}
+
+impl TestRunCommandObservation {
+    fn same_start(&self, other: &Self) -> bool {
+        self.execution_id == other.execution_id
+            && self.runtime_identity == other.runtime_identity
+            && self.tool_identity == other.tool_identity
+            && self.command_fingerprint == other.command_fingerprint
+            && self.reported_cwd_digest == other.reported_cwd_digest
+            && self.codex_turn_digest == other.codex_turn_digest
+            && self.turn_generation == other.turn_generation
+            && self.summary.owner_session_id == other.summary.owner_session_id
+            && self.summary.project_id == other.summary.project_id
+            && self.summary.started_at == other.summary.started_at
+            && self.summary.worktree == other.summary.worktree
+            && self.provider_git == other.provider_git
+            && self.validated_unbound == other.validated_unbound
+            && self.work_binding == other.work_binding
+            && self.source_root == other.source_root
+            && self.grant_identity == other.grant_identity
+    }
+}
+
+fn test_run_reported_cwd_digest(cwd: Option<&str>) -> Option<String> {
+    cwd.map(|directory| sha256_hex(directory.as_bytes()))
+}
+
+fn test_run_execution_id(
+    session_id: &str,
+    runtime_identity: &Option<String>,
+    turn_generation: u64,
+    tool_identity: &str,
+) -> String {
+    let identity = format!("{session_id}:{runtime_identity:?}:{turn_generation}:{tool_identity}");
+    format!("observed-{}", sha256_hex(identity.as_bytes()))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -228,6 +271,8 @@ struct TestRunCommandOrigin {
     project_id: Option<String>,
     runtime_identity: Option<String>,
     tool_identity: String,
+    reported_cwd_digest: Option<String>,
+    codex_turn_digest: Option<String>,
     turn_generation: u64,
     grant_identity: Option<String>,
     work_binding: Option<EngramControlWorkBinding>,
@@ -263,18 +308,11 @@ enum TestCommandOriginalStart {
 
 impl TestRunCommandOrigin {
     fn execution_id(&self) -> String {
-        format!(
-            "observed-{}",
-            sha256_hex(
-                format!(
-                    "{}:{:?}:{}:{}",
-                    self.session_id,
-                    self.runtime_identity,
-                    self.turn_generation,
-                    self.tool_identity
-                )
-                .as_bytes()
-            )
+        test_run_execution_id(
+            &self.session_id,
+            &self.runtime_identity,
+            self.turn_generation,
+            &self.tool_identity,
         )
     }
     fn capture(
@@ -295,6 +333,8 @@ impl TestRunCommandOrigin {
             project_id: record.session.project_id.clone(),
             runtime_identity: test_run_runtime_identity(record, provenance),
             tool_identity: sha256_hex(key.as_bytes()),
+            reported_cwd_digest: None,
+            codex_turn_digest: None,
             turn_generation: match provenance {
                 EngramObservationProvenance::Runtime { turn_generation, .. } => *turn_generation,
                 EngramObservationProvenance::Claude(origin) => match &origin.origin {
@@ -586,19 +626,16 @@ impl AppState {
         if command.kind != EngramVerificationKind::Test {
             return TestCommandOriginalStart::ThisTurn;
         }
-        let worktree = engram_check_worktree_from(
+        let placement = test_run_provider_worktree(
             command,
             FsPath::new(&pending.workdir),
             places.as_deref(),
-            None,
-        )
-        .map(|target| test_run_display_path(&target.root))
-        .unwrap_or_default();
+        );
         let id = pending.origin.execution_id();
         self.observe_test_command_start(
             pending.origin,
             command,
-            &worktree,
+            placement,
             &pending.started_at,
             declared.as_ref().map(|(_, _, binding)| binding),
         );
@@ -615,40 +652,44 @@ impl AppState {
         &self,
         origin: TestRunCommandOrigin,
         command: &EngramCheckCommand,
-        worktree: &str,
+        placement: Result<TestRunProviderPlacement, TestRunPlacementRefusal>,
         started_at: &str,
         declared: Option<&EngramDeclaredBinding>,
     ) {
-        self.observe_test_command_start_with_native(origin, command, worktree, started_at, declared, None);
+        let (worktree, provider_git, refusal) = match placement {
+            Ok(placement) => (placement.worktree, placement.git, None),
+            Err(refusal) => (String::new(), None, Some(refusal)),
+        };
+        self.observe_test_command_start_with_native(
+            origin, command, &worktree, started_at, declared, None, refusal, provider_git,
+        );
     }
 
     fn observe_test_command_start_with_native(
         &self, origin: TestRunCommandOrigin, command: &EngramCheckCommand,
         worktree: &str, started_at: &str, declared: Option<&EngramDeclaredBinding>,
         native: Option<DeclaredRunReservation>,
+        placement_refusal: Option<TestRunPlacementRefusal>,
+        provider_git: Option<TestRunProviderGitPlacement>,
     ) {
         if command.kind != EngramVerificationKind::Test {
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let execution_id = origin.execution_id();
         let TestRunCommandOrigin {
             session_id,
             project_id,
             runtime_identity,
             tool_identity,
+            reported_cwd_digest,
+            codex_turn_digest,
             turn_generation,
             grant_identity,
             work_binding,
             source_root,
             validated_unbound,
         } = origin;
-        let execution_id = format!(
-            "observed-{}",
-            sha256_hex(
-                format!("{session_id}:{runtime_identity:?}:{turn_generation}:{tool_identity}")
-                    .as_bytes()
-            )
-        );
         if inner.test_run_observations.contains_key(&execution_id)
             || inner.test_run_compacted.index().execution(&execution_id).next().is_some()
         {
@@ -661,12 +702,16 @@ impl AppState {
             tool_identity,
             grant_identity,
             command_fingerprint: EngramHost::check_fingerprint(command),
+            reported_cwd_digest,
+            codex_turn_digest,
             turn_generation,
             observed_at: test_run_timestamp(),
             work_binding,
             source_root,
             validated_unbound,
             monitoring_interrupted_at: None,
+            placement_refusal,
+            provider_git,
             final_unbound_proof: None,
             declared_verdict_pending: false,
             evidence: Vec::new(),
@@ -707,7 +752,7 @@ impl AppState {
                 started_at: Some(started_at.to_owned()),
                 ended_at: None,
                 exit_code: None,
-                error: None,
+                error: placement_refusal.map(|refusal| refusal.message().to_owned()),
                 detail_version: None,
             },
         };
@@ -747,6 +792,36 @@ impl AppState {
             inner, session_id, provenance, key, exit, unknown_detail, false)
     }
 
+    fn codex_command_completion_matches_start(
+        &self,
+        session_id: &str,
+        provenance: Option<&EngramObservationProvenance>,
+        key: &str,
+        turn_digest: &str,
+    ) -> bool {
+        let Some(provenance @ EngramObservationProvenance::Runtime { token, turn_generation }) = provenance else {
+            return false;
+        };
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return false;
+        };
+        let record = &inner.sessions[index];
+        if record.active_turn_generation != *turn_generation
+            || !record.runtime.matches_runtime_token(token)
+        {
+            return false;
+        }
+        let id = test_run_execution_id(
+            session_id, &test_run_runtime_identity(record, provenance),
+            *turn_generation, &sha256_hex(key.as_bytes()),
+        );
+        let row_turn = inner.test_run_observations.get(&id).and_then(|row| row.codex_turn_digest.as_deref());
+        let pending_turn = inner.test_runs.unclassified_commands.get(&id)
+            .and_then(|pending| pending.origin.codex_turn_digest.as_deref());
+        [row_turn, pending_turn].into_iter().flatten().all(|original| original == turn_digest)
+    }
+
     fn observe_test_command_end_locked_with_declared_phase(
         &self,
         inner: &mut StateInner,
@@ -762,13 +837,6 @@ impl AppState {
         };
         let runtime_identity = test_run_runtime_identity(&inner.sessions[index], provenance);
         let tool_identity = sha256_hex(key.as_bytes());
-        if exit != Some(EngramCommandExit::NotFinished) {
-            inner.test_runs.unclassified_commands.retain(|_, pending| {
-                !(pending.origin.session_id == session_id
-                    && pending.origin.runtime_identity == runtime_identity
-                    && pending.origin.tool_identity == tool_identity)
-            });
-        }
         let turn = match provenance {
             EngramObservationProvenance::Runtime { turn_generation, .. } => Some(*turn_generation),
             EngramObservationProvenance::Claude(origin) => match &origin.origin {
@@ -777,6 +845,14 @@ impl AppState {
             },
             EngramObservationProvenance::Ambient => None,
         };
+        if exit != Some(EngramCommandExit::NotFinished) {
+            inner.test_runs.unclassified_commands.retain(|_, pending| {
+                !(pending.origin.session_id == session_id
+                    && pending.origin.runtime_identity == runtime_identity
+                    && pending.origin.tool_identity == tool_identity
+                    && turn.is_none_or(|turn| pending.origin.turn_generation == turn))
+            });
+        }
         let matches: Vec<String> = inner
             .test_run_observations
             .values()
@@ -1267,6 +1343,9 @@ fn test_run_observation_summary(
     row: &TestRunCommandObservation,
 ) -> TestRunSummary {
     let mut summary = row.summary.clone();
+    if let Some(refusal) = row.placement_refusal {
+        summary.error = Some(refusal.message().to_owned());
+    }
     summary.registration.registration_state = Some("hostObserved".to_owned());
     summary.registration.tracking_provenances = vec!["hostObserved".to_owned()];
     summary.registration.start_time_origin = Some("hostCommandStart".to_owned());

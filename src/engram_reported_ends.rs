@@ -691,6 +691,41 @@ fn engram_carried_start_provenance(check: &EngramTurnCheck) -> EngramRootCapture
 }
 
 impl AppState {
+    fn codex_has_unique_late_command_owner(
+        &self,
+        session_id: &str,
+        key: &str,
+        active_generation: Option<u64>,
+    ) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return false;
+        };
+        let record = &inner.sessions[index];
+        let Some(runtime) = record.runtime.runtime_token() else {
+            return false;
+        };
+        if !record.engram.running_codex_tests.iter().any(|test| test.key == key && test.runtime == runtime) {
+            return false;
+        }
+        let identity = test_run_runtime_identity(record, &EngramObservationProvenance::Ambient);
+        let tool = sha256_hex(key.as_bytes());
+        if let Some(generation) = active_generation {
+            let id = test_run_execution_id(session_id, &identity, generation, &tool);
+            if inner.test_run_observations.contains_key(&id)
+                || inner.test_runs.unclassified_commands.contains_key(&id)
+                || record.engram.running_command_keys.contains_key(key)
+            {
+                return false;
+            }
+        }
+        inner.test_run_observations.values().filter(|row| {
+            row.summary.owner_session_id.as_deref() == Some(session_id)
+                && row.runtime_identity == identity
+                && row.tool_identity == tool
+        }).take(2).count() <= 1
+    }
+
     /// Codex reported, for `session_id`'s thread, the end of the command its
     /// item `key` names, `command` with `output` and `exit`, whichever turn
     /// it names. A Codex test still running under that key since its turn

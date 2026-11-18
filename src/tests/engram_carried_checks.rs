@@ -142,9 +142,10 @@ fn linked_unbound_launch_cannot_lend_its_run(description_only: bool) {
             .clone()
     };
     assert_eq!(old.summary.started_at.as_deref(), Some(at(0).as_str()));
-    assert!(
-        old.summary.worktree.is_empty(),
-        "location observation cannot widen credit eligibility"
+    assert_eq!(
+        engram_exact_path_key(FsPath::new(&old.summary.worktree)),
+        engram_exact_path_key(&b),
+        "the actual linked location is visible independently of credit eligibility"
     );
     assert!(old.work_binding.is_none() && old.source_root.is_none());
     assert!(old.artifact.is_none() && old.evidence.is_empty() && old.final_unbound_proof.is_none());

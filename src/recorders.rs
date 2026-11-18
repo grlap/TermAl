@@ -466,14 +466,46 @@ trait SessionRecorderAccess {
     /// (streaming id, command upsert map, parallel-agents upsert map).
     fn recorder_state_mut(&mut self) -> &mut SessionRecorderState;
 
+    fn accepts_command_completion(&mut self, key: &str) -> bool {
+        let recorder = self.recorder_state_mut();
+        match &recorder.codex_command_completion {
+            None => true,
+            Some(CodexCommandCompletion::TranscriptOnly) => false,
+            Some(CodexCommandCompletion::Proven(turn_digest)) => {
+                let turn_digest = turn_digest.clone();
+                let provenance = recorder.native_tool_provenance.clone();
+                self.state().codex_command_completion_matches_start(
+                    self.session_id(), provenance.as_ref(), key, &turn_digest,
+                )
+            }
+        }
+    }
+
     /// Reports an observation to the Engram sink, with the provenance the
     /// recorder holds for the frame it is applying.
     fn observe(&mut self, observation: EngramRecorderObservation<'_>) {
-        let provenance = self.recorder_state_mut().observation_provenance.clone();
+        let recorder = self.recorder_state_mut();
+        // A proven Codex start addresses this turn even when an older
+        // launch with the same item key is still open. Ambient callers keep
+        // the observation owner's conservative original-start lookup.
+        let use_native = matches!(&observation, EngramRecorderObservation::CommandStarted { .. })
+            || (matches!(recorder.codex_command_completion, Some(CodexCommandCompletion::Proven(_)))
+                && matches!(&observation, EngramRecorderObservation::CommandFinished { .. }
+                    | EngramRecorderObservation::CommandAbandoned { .. }));
+        let provenance = if use_native {
+            recorder.native_tool_provenance.as_ref().unwrap_or(&recorder.observation_provenance)
+        } else {
+            &recorder.observation_provenance
+        }.clone();
+        let codex_turn_digest = recorder.codex_start_turn_digest.clone();
         let session_id = self.session_id().to_owned();
-        self.state()
-            .engram_host()
-            .observe(&session_id, &provenance, observation);
+        let host = self.state().engram_host();
+        match (observation, codex_turn_digest) {
+            (EngramRecorderObservation::CommandStarted { key, ran, cwd }, Some(digest)) => {
+                host.observe_codex_command_start(&session_id, &provenance, key, ran, cwd, digest);
+            }
+            (observation, _) => host.observe(&session_id, &provenance, observation),
+        }
     }
 }
 
@@ -1019,6 +1051,9 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
         .clone();
 
     state.upsert_command_message(&session_id, &message_id, command, output, status)?;
+    if !recorder.accepts_command_completion(key) {
+        return Ok(());
+    }
     // A Running reply is not an end. A simple launcher's explicit
     // NotFinished reply may still contain its RUN locator; the observation
     // owner preserves that nonterminal exit and the original invocation.
@@ -1389,7 +1424,9 @@ impl TurnRecorder for SessionRecorder {
     }
 
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
-        self.observe(EngramRecorderObservation::CommandAbandoned { key });
+        if self.accepts_command_completion(key) {
+            self.observe(EngramRecorderObservation::CommandAbandoned { key });
+        }
         Ok(())
     }
 
@@ -1548,7 +1585,9 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
     }
 
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
-        self.observe(EngramRecorderObservation::CommandAbandoned { key });
+        if self.accepts_command_completion(key) {
+            self.observe(EngramRecorderObservation::CommandAbandoned { key });
+        }
         Ok(())
     }
 
