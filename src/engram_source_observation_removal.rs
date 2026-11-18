@@ -67,13 +67,17 @@ fn source_observation_terminal_removal_notice(inner: &StateInner, sessions: &[St
 }
 
 fn source_observation_removal_set(inner: &StateInner, session_id: &str) -> Vec<String> {
+    let mut catalog = inner.delegation_catalog_children.lock().expect("catalog child index poisoned");
+    catalog.ensure_ready(&inner.delegations);
+    let mut seen = HashSet::from([session_id]);
     let mut sessions = vec![session_id.to_owned()];
     let mut cursor = 0;
     while cursor < sessions.len() {
-        for delegation in &inner.delegations {
-            if delegation.parent_session_id == sessions[cursor]
-                && !sessions.contains(&delegation.child_session_id)
-            {
+        for &position in catalog.parent_positions.get(&sessions[cursor]).into_iter().flatten() {
+            #[cfg(test)]
+            note_persist_delegation_visit();
+            let delegation = &inner.delegations[position];
+            if seen.insert(delegation.child_session_id.as_str()) {
                 sessions.push(delegation.child_session_id.clone());
             }
         }
@@ -95,14 +99,18 @@ fn source_observation_removal_blocker(inner: &StateInner, sessions: &[String]) -
 fn retain_source_observation_removal_locked(inner: &mut StateInner, sessions: &[String]) {
     for session_id in sessions {
         let Some(index) = inner.find_session_index(session_id) else { continue; };
-        let notice = runtime_observation_terminal_removal_notice(&inner.sessions[index]);
-        let record = &mut inner.sessions[index];
-        record.hidden = false;
-        record.engram.observation_delete_requested = true;
-        record.set_auto_dispatch_blocked(true);
-        record.session.preview = notice.unwrap_or_else(|| SOURCE_OBSERVATION_DELETE_RETAINED.to_owned());
-        inner.stamp_session_at_index(index);
+        retain_source_observation_removal_at(inner, index);
     }
+}
+
+fn retain_source_observation_removal_at(inner: &mut StateInner, index: usize) {
+    let notice = runtime_observation_terminal_removal_notice(&inner.sessions[index]);
+    let record = &mut inner.sessions[index];
+    record.hidden = false;
+    record.engram.observation_delete_requested = true;
+    record.set_auto_dispatch_blocked(true);
+    record.session.preview = notice.unwrap_or_else(|| SOURCE_OBSERVATION_DELETE_RETAINED.to_owned());
+    inner.stamp_session_at_index(index);
 }
 
 impl StateInner {
@@ -114,40 +122,61 @@ impl StateInner {
         true
     }
 
-    /// Runs on every general commit, so its work must not grow with the
-    /// product of hidden sessions and delegations. A hidden session is
-    /// retained exactly when its delegated subtree holds a removal duty; the
-    /// duties are found in one pass and their ancestors in one walk, and only
-    /// those hidden sessions take the per-session retention below. Retention
-    /// changes visibility and dispatch markers, never the reports, jobs,
-    /// traces or binding owners the duty reads, so the duty set is fixed for
-    /// the whole pass and the order of hidden sessions is preserved.
+    /// A hidden session is retained when there is a removal duty in its
+    /// subtree. Track visibility and duty from touched records, including
+    /// in-memory ownership changes that intentionally do not stamp a row.
     fn retain_hidden_source_observation_sessions(&mut self) {
-        if !self.delegation_inventory_complete() { return; }
-        let duty: Vec<&str> = self.sessions.iter()
-            .filter(|record| runtime_observation_has_removal_duty(record)
-                || record.engram.source_root_bind_owner.is_some())
-            .map(|record| record.session.id.as_str())
-            .collect();
-        if duty.is_empty() { return; }
-        let mut parents: HashMap<&str, Vec<&str>> = HashMap::new();
-        for delegation in &self.delegations {
-            parents.entry(delegation.child_session_id.as_str())
-                .or_default()
-                .push(delegation.parent_session_id.as_str());
+        self.refresh_persist_session_index();
+        let index = &self.persist_session_index;
+        if !self.delegation_inventory_complete() {
+            self.persist_session_index.checked_retention = None;
+            return;
         }
-        let mut covering: HashSet<&str> = duty.iter().copied().collect();
-        let mut frontier = duty;
-        while let Some(session_id) = frontier.pop() {
-            for parent in parents.get(session_id).into_iter().flatten() {
-                if covering.insert(parent) { frontier.push(parent); }
+        let cut = self.delegations.len();
+        if index.hidden.is_empty() || index.removal_duties.is_empty()
+            || index.checked_retention == Some(cut)
+        {
+            return;
+        }
+
+        let mut hidden: Vec<_> = {
+            let mut catalog = self.delegation_catalog_children.lock().expect("catalog child index poisoned");
+            catalog.ensure_ready(&self.delegations);
+            let mut frontier: Vec<_> = index.removal_duties.iter()
+                .map(|&position| index.slots[position].id.as_str())
+                .collect();
+            let mut visited: HashSet<_> = frontier.iter().copied().collect();
+            let mut hidden = Vec::new();
+            while let Some(session_id) = frontier.pop() {
+                if let Some(&position) = index.positions.get(session_id) {
+                    if index.hidden.contains(&position) {
+                        hidden.push(position);
+                    }
+                }
+                for &position in catalog.child_positions.get(session_id).into_iter().flatten() {
+                    #[cfg(test)]
+                    note_persist_delegation_visit();
+                    let parent = self.delegations[position].parent_session_id.as_str();
+                    if visited.insert(parent) {
+                        frontier.push(parent);
+                    }
+                }
+            }
+            hidden
+        };
+        hidden.sort_unstable();
+        for position in hidden {
+            let subtree = source_observation_removal_set(self, &self.sessions[position].session.id);
+            for session_id in subtree {
+                if let Some(position) = self.persist_session_position(&session_id) {
+                    #[cfg(test)]
+                    note_persist_session_visit();
+                    retain_source_observation_removal_at(self, position);
+                }
             }
         }
-        let hidden: Vec<String> = self.sessions.iter()
-            .filter(|record| record.hidden && covering.contains(record.session.id.as_str()))
-            .map(|record| record.session.id.clone())
-            .collect();
-        for session_id in hidden { self.defer_source_observation_removal(&session_id); }
+        self.refresh_persist_session_index();
+        self.persist_session_index.checked_retention = Some(cut);
     }
 }
 

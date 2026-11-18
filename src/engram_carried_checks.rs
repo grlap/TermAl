@@ -1950,7 +1950,28 @@ impl AppState {
             .collect::<Vec<_>>();
         let mut diagnostics = Vec::new();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        for record in inner.sessions.iter_mut() {
+        let watching = |check: &EngramTurnCheck| {
+            let root = &check.target.root;
+            let key = engram_path_key(root);
+            cargo_candidates.iter().any(|(worktree, _)| {
+                engram_worktrees_may_hold(std::slice::from_ref(worktree), &key)
+            }) || placed.iter().any(|(worktree, path, _, _, ancestor_only)| {
+                (!*ancestor_only || workspace_subtree_contains(path, root))
+                    && engram_worktrees_may_hold(std::slice::from_ref(worktree), &key)
+            })
+        };
+        let eligible_turn_check = |check: &EngramTurnCheck| {
+            check.end.is_none()
+                && check.watcher_fence.is_none()
+                && engram_check_is_launcher_full(&check.command)
+        };
+        for (_, record) in inner.sessions.matching_mut(|record| {
+            record.engram.carried_checks.iter().any(|carried| {
+                carried.fence.is_none() && watching(&carried.check)
+            }) || record.engram.active_turn_checks.iter().any(|check| {
+                eligible_turn_check(check) && watching(check)
+            })
+        }) {
             for (worktree, candidate) in &cargo_candidates {
                 // A Cargo sibling is judged by `target/` at terminal
                 // settlement, whenever it was notified, so it takes no
@@ -1984,9 +2005,7 @@ impl AppState {
                     }
                 }
                 for check in &mut record.engram.active_turn_checks {
-                    if check.end.is_none()
-                        && check.watcher_fence.is_none()
-                        && engram_check_is_launcher_full(&check.command)
+                    if eligible_turn_check(check)
                         && engram_worktrees_may_hold(
                             std::slice::from_ref(worktree),
                             &engram_path_key(&check.target.root),
@@ -2053,9 +2072,7 @@ impl AppState {
                     if *ancestor_only && !workspace_subtree_contains(path, &check.target.root) {
                         continue;
                     }
-                    if check.end.is_none()
-                        && check.watcher_fence.is_none()
-                        && engram_check_is_launcher_full(&check.command)
+                    if eligible_turn_check(check)
                         && engram_worktrees_may_hold(
                             std::slice::from_ref(worktree),
                             &engram_path_key(&check.target.root),

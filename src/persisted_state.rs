@@ -642,12 +642,13 @@ impl PersistedState {
             test_run_waits: self.test_run_waits.into(),
             remote_test_run_facts: self.remote_test_run_facts.into(),
             delegation_waits: self.delegation_waits.into(),
-            delegation_mutation_stamps: BTreeMap::new(),
+            delegation_mutation_stamps: DelegationMutationStamps::default(),
             delegation_catalog_children: Mutex::new(delegation_catalog_children),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
             workspace_layouts: self.workspace_layouts.into(),
             sessions: sessions.into(),
+            persist_session_index: PersistSessionIndex::default(),
             quarantined_persisted_session_ids: self.quarantined_persisted_session_ids,
             quarantined_persisted_delegation_ids: self.quarantined_persisted_delegation_ids,
             // Mutation stamps are in-memory only — start at `0` on each
@@ -660,6 +661,7 @@ impl PersistedState {
             remote_settings_persist_dirty: false,
             remote_delta_persist_dirty: false,
         };
+        inner.refresh_persist_session_index();
         // Loading consumes durable carried-launch markers into a one-time
         // restart notice. Persist their removal even for an otherwise Idle
         // session; untouched rows remain outside the first persist delta.

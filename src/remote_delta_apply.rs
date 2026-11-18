@@ -1631,7 +1631,7 @@ impl AppState {
                         remote_sessions_by_id.as_ref(),
                     ) {
                         inner.next_session_number = rollback_state.0;
-                        inner.sessions = rollback_state.1;
+                        inner.restore_session_rows(rollback_state.1);
                         inner.orchestrator_instances = rollback_state.2.into();
                         return Err(err);
                     }

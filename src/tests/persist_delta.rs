@@ -48,6 +48,192 @@ fn make_persist_delta_test_delegation(
     }
 }
 
+#[test]
+fn persist_delta_visits_only_dirty_rows_with_large_retained_history() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let state = test_app_state();
+    let workdir = state.default_workdir.clone();
+    let mut inner = state.inner.lock().unwrap();
+    let parent = inner
+        .create_session(Agent::Codex, None, workdir.clone(), None, None)
+        .session
+        .id;
+    let mut changed_session = String::new();
+    for index in 0..4096 {
+        let child = inner
+            .create_session(Agent::Codex, None, workdir.clone(), None, None)
+            .session
+            .id;
+        // Hidden history is especially important here. Its observation-duty
+        // check used to visit the entire session inventory on an idle tick.
+        inner.sessions[index + 1].hidden = index != 4095;
+        let id = format!("history-{index}");
+        inner
+            .delegations
+            .push(make_persist_delta_test_delegation(&id, &parent, &child));
+        inner.mark_delegation_mutated(index);
+        changed_session = child;
+    }
+    // Exercise the second watcher pass with an open launcher check in an
+    // unrelated root, so its early return for zero open checks cannot mask
+    // a full inventory enrollment.
+    let unrelated = PathBuf::from(&workdir).join("unrelated-check-root");
+    inner.sessions[0]
+        .engram
+        .active_turn_checks
+        .push(EngramTurnCheck {
+            host_turn_ref: "watcher-fixture".to_owned(),
+            key: "full".to_owned(),
+            sequence: 0,
+            command: engram_check_command("node scripts/test-launcher.mjs full").unwrap(),
+            declared: None,
+            target: EngramCheckTarget {
+                root: unrelated.clone(),
+                directory: unrelated,
+                common_dir_key: None,
+            },
+            toolchain: EngramToolchainCapture::settled(None),
+            started_at: stamp_now(),
+            started_order: None,
+            sandbox: None,
+            start_basis: Arc::default(),
+            overlapped: false,
+            overlap_cause: None,
+            fenced_by_outstanding: None,
+            watcher_fence: None,
+            watcher_provenance: None,
+            watcher_cargo_candidates: Vec::new(),
+            watcher_exempted: None,
+            runtime_output_cut: false,
+            end: None,
+            ended_at: None,
+            keyed_by_line: false,
+        });
+    drop(inner);
+    let initial = collect_persist_delta_from_shared_state(&state.inner, 0);
+    assert_eq!(initial.removed_session_ids.len(), 4095);
+    assert_eq!(initial.changed_delegations.unwrap().len(), 4096);
+    let watermark = initial.watermark;
+
+    let events = [WorkspaceFileChangeEvent {
+        path: PathBuf::from(&workdir)
+            .join("unrelated-watcher-event.txt")
+            .to_string_lossy()
+            .into_owned(),
+        kind: WorkspaceFileChangeKind::Modified,
+        root_path: None,
+        session_id: None,
+        mtime_ms: None,
+        size_bytes: None,
+    }];
+    PERSIST_ROW_VISITS.with(|count| count.set((0, 0)));
+    PERSIST_KEYED_ROW_READS.with(|count| count.set((0, 0)));
+    state.record_file_change_captures(&events);
+    state.note_engram_workspace_file_changes(&events);
+    {
+        let inner = state.inner.lock().unwrap();
+        assert!(
+            inner.sessions[0].engram.active_turn_checks[0]
+                .watcher_fence
+                .is_none()
+        );
+        assert_eq!(inner.sessions.tracked_slot_count(), Some(0));
+    }
+    let idle = collect_persist_delta_from_shared_state(&state.inner, watermark);
+    assert!(idle.changed_sessions.is_empty());
+    assert!(idle.changed_delegations.is_none());
+    assert!(idle.removed_session_ids.is_empty());
+    assert_eq!(PERSIST_ROW_VISITS.with(std::cell::Cell::get), (0, 0));
+    assert_eq!(PERSIST_KEYED_ROW_READS.with(std::cell::Cell::get), (0, 0));
+
+    trim_persisted_session_tails_from_shared_state(
+        &state.inner,
+        watermark,
+        &[changed_session.clone()],
+    );
+    let (session_visits, delegation_visits) = PERSIST_ROW_VISITS.with(std::cell::Cell::get);
+    assert!(session_visits <= 1 && delegation_visits == 0);
+    assert_eq!(
+        state.inner.lock().unwrap().sessions.tracked_slot_count(),
+        Some(0)
+    );
+    PERSIST_ROW_VISITS.with(|count| count.set((0, 0)));
+    PERSIST_KEYED_ROW_READS.with(|count| count.set((0, 0)));
+    let idle_after_trim = collect_persist_delta_from_shared_state(&state.inner, watermark);
+    assert!(idle_after_trim.changed_sessions.is_empty());
+    assert_eq!(PERSIST_ROW_VISITS.with(std::cell::Cell::get), (0, 0));
+    assert_eq!(PERSIST_KEYED_ROW_READS.with(std::cell::Cell::get), (0, 0));
+
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let changed = inner.find_session_index(&changed_session).unwrap();
+        for preview in ["superseded", "latest"] {
+            inner.session_mut_by_index(changed).unwrap().session.preview = preview.to_owned();
+        }
+        inner.delegations[4095].title = "Latest delegation".to_owned();
+        inner.mark_delegation_mutated(4095);
+    }
+    let mut plan_reads = (0, 0);
+    let changed = collect_persist_delta_from_shared_state_with_first_plan_hook(
+        &state.inner,
+        watermark,
+        || plan_reads = PERSIST_KEYED_ROW_READS.with(std::cell::Cell::get),
+    );
+    let (sessions, delegations) = PERSIST_ROW_VISITS.with(std::cell::Cell::get);
+    assert!(
+        sessions <= 4 && delegations <= 3,
+        "visits: {sessions}, {delegations}"
+    );
+    let (session_reads, delegation_reads) = PERSIST_KEYED_ROW_READS.with(std::cell::Cell::get);
+    assert!(session_reads > plan_reads.0 && delegation_reads > plan_reads.1);
+    assert_eq!(changed.changed_sessions.len(), 1);
+    assert_eq!(changed.changed_sessions[0].session.id, changed_session);
+    assert_eq!(changed.changed_sessions[0].session.preview, "latest");
+    let delegations = changed.changed_delegations.unwrap();
+    assert_eq!(delegations.len(), 1);
+    assert_eq!(delegations[0].id, "history-4095");
+    assert_eq!(delegations[0].title, "Latest delegation");
+    assert!(changed.removed_session_ids.is_empty());
+    assert!(changed.removed_delegation_ids.is_empty());
+    assert!(changed.deferred_session_ids.is_empty());
+    assert!(changed.deferred_delegation_ids.is_empty());
+}
+
+#[test]
+fn persist_delta_retains_hidden_ancestor_after_an_unstamped_removal_duty() {
+    let mut inner = StateInner::new();
+    let parent = inner
+        .create_session(Agent::Codex, None, "/tmp".into(), None, None)
+        .session
+        .id;
+    let child = inner
+        .create_session(Agent::Codex, None, "/tmp".into(), None, None)
+        .session
+        .id;
+    inner.session_mut(&parent).unwrap().hidden = true;
+    inner.delegations.push(make_persist_delta_test_delegation(
+        "protected",
+        &parent,
+        &child,
+    ));
+    inner.mark_delegation_mutated(0);
+    let initial = inner.collect_persist_delta(0);
+    assert_eq!(initial.removed_session_ids, vec![parent.clone()]);
+
+    let child_position = inner.find_session_index(&child).unwrap();
+    inner.sessions[child_position].engram.source_root_bind_owner = Some(Uuid::new_v4());
+    assert_eq!(inner.last_mutation_stamp, initial.watermark);
+
+    let delta = inner.collect_persist_delta(initial.watermark);
+    assert!(delta.removed_session_ids.is_empty());
+    assert_eq!(delta.changed_sessions.len(), 2);
+    assert_eq!(delta.changed_sessions[0].session.id, parent);
+    assert_eq!(delta.changed_sessions[1].session.id, child);
+    assert!(inner.sessions[0].engram.observation_delete_requested);
+    assert!(inner.sessions[1].engram.observation_delete_requested);
+    assert!(inner.find_visible_session_index(&parent).is_some());
+}
+
 fn seed_postcommit_trim_session(
     inner: &mut StateInner,
     status: SessionStatus,

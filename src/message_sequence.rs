@@ -4,12 +4,25 @@ mod message_sequence {
     // Every mutable access detaches that row. Runtime handles retain their
     // existing sharing; this does not freeze their interior state.
     // No mutable Vec or slice escapes this boundary.
-    #[derive(Clone, Debug)]
+    #[derive(Debug)]
     pub(super) struct SharedSequence<E> {
         bodies: Vec<Arc<E>>,
+        // Session persistence opts into slot tracking. None means that no
+        // keyed view has been built, or a structural change invalidated it.
+        touched_slots: Option<BTreeSet<usize>>,
     }
 
     type SharedIter<'a, E> = std::iter::Map<std::slice::Iter<'a, Arc<E>>, fn(&Arc<E>) -> &E>;
+
+    impl<E> Clone for SharedSequence<E> {
+        fn clone(&self) -> Self {
+            // Slot tracking belongs to the live sequence and its keyed view.
+            Self {
+                bodies: self.bodies.clone(),
+                touched_slots: None,
+            }
+        }
+    }
 
     #[cfg(test)]
     thread_local! {
@@ -33,7 +46,10 @@ mod message_sequence {
 
     impl<E> Default for SharedSequence<E> {
         fn default() -> Self {
-            Self { bodies: Vec::new() }
+            Self {
+                bodies: Vec::new(),
+                touched_slots: None,
+            }
         }
     }
 
@@ -51,26 +67,49 @@ mod message_sequence {
             &mut self,
             mut predicate: impl FnMut(&E) -> bool,
         ) -> impl DoubleEndedIterator<Item = (usize, &mut E)> {
+            let touched = &mut self.touched_slots;
             self.bodies
                 .iter_mut()
                 .enumerate()
                 .filter(move |(_, body)| predicate(body))
-                .map(|(index, body)| (index, Arc::make_mut(body)))
+                .map(move |(index, body)| {
+                    note_slot(touched, index);
+                    (index, Arc::make_mut(body))
+                })
         }
         pub(super) fn iter_mut(
             &mut self,
         ) -> impl DoubleEndedIterator<Item = &mut E> + ExactSizeIterator {
-            self.bodies.iter_mut().map(Arc::make_mut)
+            let touched = &mut self.touched_slots;
+            self.bodies.iter_mut().enumerate().map(move |(index, body)| {
+                note_slot(touched, index);
+                Arc::make_mut(body)
+            })
         }
         #[cfg(test)]
         pub(super) fn last_mut(&mut self) -> Option<&mut E> {
-            self.bodies.last_mut().map(Arc::make_mut)
+            self.get_mut(self.len().checked_sub(1)?)
         }
         pub(super) fn get(&self, index: usize) -> Option<&E> {
             self.bodies.get(index).map(Arc::as_ref)
         }
         pub(super) fn get_mut(&mut self, index: usize) -> Option<&mut E> {
-            self.bodies.get_mut(index).map(Arc::make_mut)
+            let body = self.bodies.get_mut(index)?;
+            note_slot(&mut self.touched_slots, index);
+            Some(Arc::make_mut(body))
+        }
+
+        pub(super) fn take_touched_slots(&mut self) -> Option<BTreeSet<usize>> {
+            self.touched_slots.replace(BTreeSet::new())
+        }
+
+        #[cfg(test)]
+        pub(super) fn tracked_slot_count(&self) -> Option<usize> {
+            self.touched_slots.as_ref().map(BTreeSet::len)
+        }
+
+        pub(super) fn invalidate_slots(&mut self) {
+            self.touched_slots = None;
         }
         pub(super) fn first(&self) -> Option<&E> {
             self.get(0)
@@ -79,13 +118,17 @@ mod message_sequence {
             self.bodies.last().map(Arc::as_ref)
         }
         pub(super) fn push(&mut self, message: E) {
+            note_slot(&mut self.touched_slots, self.bodies.len());
             self.bodies.push(Arc::new(message));
         }
         pub(super) fn insert(&mut self, index: usize, message: E) {
             self.bodies.insert(index, Arc::new(message));
+            self.invalidate_slots();
         }
         pub(super) fn remove(&mut self, index: usize) -> E {
-            into_value(self.bodies.remove(index))
+            let removed = self.bodies.remove(index);
+            self.invalidate_slots();
+            into_value(removed)
         }
         #[cfg(test)]
         pub(super) fn observe_shared_body_clones<T>(operation: impl FnOnce() -> T) -> (T, usize) {
@@ -106,7 +149,11 @@ mod message_sequence {
             (result, count)
         }
         pub(super) fn retain(&mut self, mut predicate: impl FnMut(&E) -> bool) {
+            let before = self.len();
             self.bodies.retain(|body| predicate(body));
+            if self.len() != before {
+                self.invalidate_slots();
+            }
         }
         #[cfg(test)]
         pub(super) fn shares_body(&self, index: usize, other: &Self, other_index: usize) -> bool {
@@ -127,17 +174,23 @@ mod message_sequence {
         }
         pub(super) fn clear(&mut self) {
             self.bodies.clear();
+            self.invalidate_slots();
         }
         pub(super) fn truncate(&mut self, len: usize) {
+            if len < self.len() {
+                self.invalidate_slots();
+            }
             self.bodies.truncate(len);
         }
         #[cfg(test)]
         pub(super) fn swap(&mut self, a: usize, b: usize) {
             self.bodies.swap(a, b);
+            self.invalidate_slots();
         }
         #[cfg(test)]
         pub(super) fn reverse(&mut self) {
             self.bodies.reverse();
+            self.invalidate_slots();
         }
         pub(super) fn window(&self, range: impl std::ops::RangeBounds<usize>) -> Self {
             use std::ops::Bound;
@@ -153,6 +206,7 @@ mod message_sequence {
             };
             Self {
                 bodies: self.bodies[start..end].to_vec(),
+                touched_slots: None,
             }
         }
     }
@@ -165,12 +219,17 @@ mod message_sequence {
         fn from_iter<T: IntoIterator<Item = E>>(messages: T) -> Self {
             Self {
                 bodies: messages.into_iter().map(Arc::new).collect(),
+                touched_slots: None,
             }
         }
     }
     impl<E: Clone + 'static> Extend<E> for SharedSequence<E> {
         fn extend<T: IntoIterator<Item = E>>(&mut self, messages: T) {
+            let start = self.len();
             self.bodies.extend(messages.into_iter().map(Arc::new));
+            if let Some(touched) = &mut self.touched_slots {
+                touched.extend(start..self.bodies.len());
+            }
         }
     }
     impl<E> std::ops::Index<usize> for SharedSequence<E> {
@@ -181,6 +240,7 @@ mod message_sequence {
     }
     impl<E: Clone> std::ops::IndexMut<usize> for SharedSequence<E> {
         fn index_mut(&mut self, index: usize) -> &mut E {
+            note_slot(&mut self.touched_slots, index);
             Arc::make_mut(&mut self.bodies[index])
         }
     }
@@ -195,6 +255,9 @@ mod message_sequence {
         type Item = &'a mut E;
         type IntoIter = std::iter::Map<std::slice::IterMut<'a, Arc<E>>, fn(&mut Arc<E>) -> &mut E>;
         fn into_iter(self) -> Self::IntoIter {
+            if let Some(touched) = &mut self.touched_slots {
+                touched.extend(0..self.bodies.len());
+            }
             self.bodies.iter_mut().map(Arc::make_mut)
         }
     }
@@ -218,6 +281,12 @@ mod message_sequence {
             deserializer: D,
         ) -> std::result::Result<Self, D::Error> {
             Vec::<E>::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    fn note_slot(touched: &mut Option<BTreeSet<usize>>, index: usize) {
+        if let Some(touched) = touched {
+            touched.insert(index);
         }
     }
 }

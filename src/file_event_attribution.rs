@@ -101,13 +101,9 @@ struct FileChangeOwnerCapture {
 }
 
 impl FileChangeOwnerCapture {
-    fn from_record(record: &mut SessionRecord, captured_at: std::time::Instant) -> Self {
+    fn from_record(record: &SessionRecord, captured_at: std::time::Instant) -> Self {
         let scope = FileChangeTrackingScope::for_tracking(record);
-        let tracking = record.file_change_tracking.get_or_insert_with(|| {
-            // Older/manual tracking setups have no prompt anchor. They still
-            // acquire a non-reused process-local lifetime on first capture.
-            Arc::new(FileChangeTrackingLifetime::new(None))
-        });
+        let tracking = record.file_change_tracking.as_ref().expect("capture owner has a lifetime");
         Self {
             session_id: record.session.id.clone(),
             tracking: Arc::clone(tracking),
@@ -380,7 +376,8 @@ impl AppState {
         let mut owners = Vec::new();
         let project_roots = inner.projects.iter().filter(|project| project.remote_id == LOCAL_REMOTE_ID)
             .map(|project| normalize_user_facing_path(FsPath::new(&project.root_path))).collect::<Vec<_>>();
-        for record in &mut inner.sessions {
+        for index in 0..inner.sessions.len() {
+            let record = &inner.sessions[index];
             diagnostic.visited_sessions += 1;
             if !record.is_local_session() || record.hidden {
                 continue;
@@ -390,12 +387,19 @@ impl AppState {
                     .active_turn_file_change_grace_deadline
                     .is_some_and(|deadline| now <= deadline)
             {
-                record.active_turn_file_change_grace_deadline = None;
+                if record.active_turn_file_change_grace_deadline.is_some() {
+                    inner.sessions[index].active_turn_file_change_grace_deadline = None;
+                }
                 continue;
             }
             diagnostic.eligible_sessions += 1;
-            // Direct access: runtime bookkeeping must not stamp persist inputs.
-            owners.push(FileChangeOwnerCapture::from_record(record, now));
+            if record.file_change_tracking.is_none() {
+                // Older/manual tracking setups acquire a process-local
+                // lifetime on first capture. This does not stamp the row.
+                inner.sessions[index].file_change_tracking =
+                    Some(Arc::new(FileChangeTrackingLifetime::new(None)));
+            }
+            owners.push(FileChangeOwnerCapture::from_record(&inner.sessions[index], now));
         }
         diagnostic.scan_inclusive = scan_started.elapsed();
         let capture_held = held_started.elapsed();
