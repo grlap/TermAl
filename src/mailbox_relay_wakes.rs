@@ -1234,6 +1234,12 @@ async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Re
         None =>
             json!({ "available": false, "reason": "state_lock_busy" }),
     };
+    let native_route_misses = state
+        .mailbox_store
+        .native_route_misses
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
     Ok(Json(json!({
         "serverInstanceId": state.server_instance_id,
         "pendingHomeWakes": pending,
@@ -1245,5 +1251,11 @@ async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Re
         "causalCompletionPending": causal_pending,
         "causalCompletionReady": state.federation_executor_wake_signal.causal_ready.lock().expect("ready mutex poisoned").diagnostic(),
         "federationDurability": durability,
+        "nativeRouteMisses": {
+            "coordinationStoreId": state.mailbox_store.coordination_store_id,
+            "records": native_route_misses,
+            "limit": NATIVE_MAILBOX_ROUTE_MISS_LIMIT,
+            "resetOnRestart": true,
+        },
     })))
 }

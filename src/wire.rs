@@ -104,6 +104,8 @@ enum ApiErrorKind {
     FederationMailboxReadConflict,
     /// The initial read selected no page because the mailbox was not visible.
     FederationMailboxReadNotFound,
+    /// A public domain mailbox 404 after the original native route missed.
+    NativeMailboxRouteMiss,
     /// Retirement is observed, not inferred from a missing row. Only the
     /// initial capture boundary can certify that no page was selected.
     MailboxParticipantRetiredDuringRead { before_page: bool },
@@ -331,6 +333,13 @@ impl IntoResponse for ApiError {
                 "code": "participant_retired_during_read",
                 "effect": if before_page { "notEntered" } else { "unknown" },
             }))).into_response();
+        }
+        if self.kind == Some(ApiErrorKind::NativeMailboxRouteMiss) {
+            return (
+                self.status,
+                Json(json!({ "error": self.message, "code": "native_mailbox_route_miss" })),
+            )
+                .into_response();
         }
         if let Some(deadline) = self.durability_deadline
             && let Some(operation) = deadline.operation

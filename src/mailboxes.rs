@@ -337,6 +337,8 @@ struct MailboxDispatchFinalization {
 
 struct MailboxStore {
     path: PathBuf,
+    coordination_store_id: Option<String>,
+    native_route_misses: Mutex<VecDeque<NativeMailboxRouteMiss>>,
     federation_reads: Mutex<FederationMailboxReadCache>,
     federation_read_intents: Mutex<HashMap<String, FederationMailboxClientRead>>,
     /// Invalidates optimistic zero-unread coverage reads on a new append.
@@ -1866,9 +1868,10 @@ async fn read_mailbox(
             .await
             .map(Json);
     }
-    if !state
-        .owns_original_mailbox_resource(&session_id, &mailbox_id, false)
-        .await?
+    let original = state
+        .lookup_original_mailbox_resource(&session_id, &mailbox_id, false)
+        .await?;
+    if original != OriginalMailboxLookup::Member
         && state
             .federation_mailbox_actor_if_bound(&session_id)?
             .is_some()
@@ -1876,14 +1879,17 @@ async fn read_mailbox(
         return state
             .read_federation_mailbox(
                 &session_id,
-                mailbox_id,
+                mailbox_id.clone(),
                 request.after_sequence,
                 request.limit,
                 request.issue_receipt,
                 request.read_key,
             )
             .await
-            .map(Json);
+            .map(Json)
+            .map_err(|error| {
+                state.describe_mailbox_route_miss(error, "read", &session_id, &mailbox_id, original)
+            });
     }
     if request.read_key.is_some() {
         return Err(ApiError::conflict(
@@ -1923,9 +1929,10 @@ async fn read_mailbox_message(
             .await
             .map(Json);
     }
-    if !state
-        .owns_original_mailbox_resource(&session_id, &message_id, true)
+    if state
+        .lookup_original_mailbox_resource(&session_id, &message_id, true)
         .await?
+        != OriginalMailboxLookup::Member
         && state
             .federation_mailbox_actor_if_bound(&session_id)?
             .is_some()
@@ -1961,9 +1968,10 @@ async fn acknowledge_mailbox(
             .await
             .map(Json);
     }
-    if !state
-        .owns_original_mailbox_resource(&session_id, &mailbox_id, false)
-        .await?
+    let original = state
+        .lookup_original_mailbox_resource(&session_id, &mailbox_id, false)
+        .await?;
+    if original != OriginalMailboxLookup::Member
         && state
             .federation_mailbox_actor_if_bound(&session_id)?
             .is_some()
@@ -1986,12 +1994,21 @@ async fn acknowledge_mailbox(
             .federation_mailbox_operation(
                 &session_id,
                 FederationMailboxOperation::Acknowledge {
-                    mailbox_id,
+                    mailbox_id: mailbox_id.clone(),
                     receipt,
                 },
             )
             .await
-            .map(Json);
+            .map(Json)
+            .map_err(|error| {
+                state.describe_mailbox_route_miss(
+                    error,
+                    "acknowledge",
+                    &session_id,
+                    &mailbox_id,
+                    original,
+                )
+            });
     }
     let summary = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
@@ -2117,6 +2134,8 @@ impl MailboxStore {
             })?;
         Ok(Self {
             path: path.to_path_buf(),
+            coordination_store_id: mailbox_relay_store_id(&connection).ok(),
+            native_route_misses: Mutex::default(),
             federation_reads: Mutex::new(FederationMailboxReadCache::default()),
             federation_read_intents: Mutex::new(HashMap::new()),
             connection: Mutex::new(Some(connection)),
@@ -2144,6 +2163,8 @@ impl MailboxStore {
     fn disabled_for_tests() -> Self {
         Self {
             path: PathBuf::new(),
+            coordination_store_id: None,
+            native_route_misses: Mutex::default(),
             federation_reads: Mutex::new(FederationMailboxReadCache::default()),
             federation_read_intents: Mutex::new(HashMap::new()),
             connection: Mutex::new(None),
