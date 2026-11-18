@@ -157,6 +157,16 @@ local execution, advances a human read/ACK cursor, or infers credit from PASS.
 Settled rows never issue another origin RPC; pending frozen operations recover
 without rereading the origin. Missing capability stays unsent and pending.
 
+Provider observations retain the actual command worktree when it is the
+session root or another registered worktree of the same Git repository. This
+placement is a fact, not permission to credit that worktree: named-root and
+original execution authority checks still decide credit. Foreground Codex
+RUN output can attach the original launcher artifact even without an Engram
+check. An unsupported placement keeps its execution visible and reports the
+deciding check and remedy in the observed run's error field; it produces no
+artifact association or completion. A copied `.git` file is not a registered
+worktree.
+
 Settlement adds one nullable `test_request_settlement_json` column to each of
 `mailbox_messages` and `mailbox_relay_intents`, through the existing atomic
 coordination migration. The reader floor becomes

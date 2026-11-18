@@ -1295,6 +1295,18 @@ impl AppState {
         ran: Option<&str>,
         cwd: Option<&str>,
     ) {
+        self.note_engram_command_started_with_turn(session_id, provenance, key, ran, cwd, None);
+    }
+
+    fn note_engram_command_started_with_turn(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+        native_turn_digest: Option<String>,
+    ) {
         // Observe this command's boundary before off-lock target/capture work.
         // The launcher still must start at or after this correlated event.
         let started_at = engram_command_started_at();
@@ -1334,7 +1346,7 @@ impl AppState {
             child,
             turn_generation,
             unresolved_writers,
-            test_run_origin,
+            mut test_run_origin,
         ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -1391,6 +1403,8 @@ impl AppState {
                 TestRunCommandOrigin::capture(&inner, index, provenance, key),
             )
         };
+        test_run_origin.reported_cwd_digest = test_run_reported_cwd_digest(cwd);
+        test_run_origin.codex_turn_digest = native_turn_digest;
         if ran.is_none() {
             self.remember_unclassified_test_command(test_run_origin.clone(), workdir.clone(), started_at.clone(), places.clone());
         }
@@ -1485,16 +1499,18 @@ impl AppState {
             // The same start's validated target is also the observation's
             // source. A named linked root must not be resolved again as the
             // session worktree, nor lent to a different command.
-            let observed_root = match target.as_ref() {
+            let placement = match target.as_ref() {
                 Some((_, validated_command, target)) => (validated_command == command)
-                    .then(|| test_run_display_path(&target.root)),
-                None => engram_check_worktree_from(
-                    command, FsPath::new(&workdir), places.as_deref(), None,
-                ).map(|target| test_run_display_path(&target.root)),
-            }.unwrap_or_default();
+                    .then(|| test_run_display_path(&target.root))
+                    .ok_or(TestRunPlacementRefusal::DirectoryUnknown),
+                None => test_run_provider_worktree(
+                    command, FsPath::new(&workdir), places.as_deref(),
+                ),
+            };
+            let observed_root = placement.as_deref().unwrap_or_default();
             let declared_binding = declared.as_ref().map(|(_, _, binding)| binding)
                 .or_else(|| visibility_declared.as_ref().map(|(_, _, binding)| binding));
-            self.observe_test_command_start(test_run_origin, command, &observed_root, &started_at, declared_binding);
+            self.observe_test_command_start(test_run_origin, command, observed_root, &started_at, declared_binding, placement.as_ref().err().copied());
         }
         #[cfg(test)]
         TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {

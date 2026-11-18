@@ -128,6 +128,25 @@ impl EngramHost<'_> {
         }
     }
 
+    pub(crate) fn observe_codex_command_start(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+        native_turn_digest: String,
+    ) {
+        self.state.note_engram_command_started_with_turn(
+            session_id,
+            provenance,
+            key,
+            ran,
+            cwd,
+            Some(native_turn_digest),
+        );
+    }
+
     /// The user wrote at `path` through TermAl itself: a file save, a Git
     /// file action, a terminal command starting or ending.
     pub(crate) fn host_write(&self, path: &FsPath) {

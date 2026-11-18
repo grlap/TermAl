@@ -48,12 +48,21 @@ fn linked_launch_marker_and_relaunch(binding_missing: bool, one_call: bool) {
         "stages": [{"name": "rust-tests", "state": "unrun"}],
     })).unwrap()).unwrap();
     assert!(engram_terminal_record_digest(&earlier).is_none());
+    let request_bytes = fs::read(earlier.join("request.json")).unwrap();
+    let request: Value = serde_json::from_slice(&request_bytes).unwrap();
     turn.state.observe_test_command_artifact(&turn.session_id,
         &current_command_provenance(&turn), "uncredited", &command,
         &format!("RUN {}", earlier.display()), false);
-    assert_original_execution_identity(&turn, &original);
-    assert!(original.summary.worktree.is_empty(),
-        "truthful B location alone cannot turn this explicit locator into credit eligibility");
+    let attached = assert_original_execution_custody(&turn, &original);
+    assert_eq!(engram_exact_path_key(FsPath::new(&original.summary.worktree)), directory,
+        "the original execution records B without acquiring B's credit authority");
+    let artifact = attached.artifact.as_ref().expect("the original explicit locator associates");
+    assert_eq!(artifact.run_id, run_id);
+    assert_eq!(engram_exact_path_key(FsPath::new(&artifact.run_directory)),
+        engram_exact_path_key(&fs::canonicalize(&earlier).unwrap()));
+    assert_eq!(artifact.request_identity.as_deref(),
+        Some(test_run_registration_identity(&request).unwrap().as_str()));
+    assert!(artifact.terminal_digest.is_none(), "a running artifact is not terminal proof");
     turn.record_mut(|record| {
         record.engram.work_binding = binding;
         record.engram.unadmitted_active_turn = trace;
@@ -69,9 +78,14 @@ fn linked_launch_marker_and_relaunch(binding_missing: bool, one_call: bool) {
     });
     assert_carried_ambiguity(&turn);
     turn.record(|record| assert!(record.engram.carried_checks[0].run_directory.is_none()));
-    assert_original_execution_identity(&turn, &original);
+    let after_relaunch = assert_original_execution_custody(&turn, &original);
+    assert_eq!(after_relaunch.artifact, attached.artifact,
+        "later binding and relaunch cannot replace the original explicit artifact");
+    assert_eq!(fs::read(earlier.join("request.json")).unwrap(), request_bytes);
     assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
     assert_carried_ambiguity(&turn);
+    let after_finish = assert_original_execution_custody(&turn, &original);
+    assert_eq!(after_finish.artifact, attached.artifact);
     drop(clock);
 }
 

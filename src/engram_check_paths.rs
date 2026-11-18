@@ -94,7 +94,9 @@ fn engram_worktree_root_path(workdir: &FsPath) -> PathBuf {
     let path = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
     let root = path
         .ancestors()
-        .find(|ancestor| ancestor.join(".git").exists())
+        // Recognize the boundary by its marker without following the marker
+        // itself. The reader of Git metadata decides whether it is usable.
+        .find(|ancestor| fs::symlink_metadata(ancestor.join(".git")).is_ok())
         .unwrap_or(&path);
     std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
 }

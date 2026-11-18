@@ -48,6 +48,7 @@ fn diagnostic_during_settlement(stale: bool) {
         if stale { &before } else { &settled },
         TestRunNativeCompletionRefusalCode::ArtifactDirectoryMismatch,
         &[(TestRunNativeCompletionFact::DirectoryMatches, false)],
+        None,
     );
     {
         let inner = fixture.state.inner.lock().unwrap();

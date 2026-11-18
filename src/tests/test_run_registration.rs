@@ -10,6 +10,9 @@ mod causal_request;
 #[path = "test_run_selected_provider.rs"]
 pub(in crate::tests) mod selected_provider;
 
+#[path = "test_run_provider_placement.rs"]
+mod provider_placement;
+
 #[path = "test_run_causal_completion_fixture.rs"]
 pub(in crate::tests) mod causal_completion_fixture;
 

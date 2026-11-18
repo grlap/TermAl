@@ -3,11 +3,76 @@
 // are neither an executed remote test nor verification credit.
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::tests) enum SelectedProviderWorktree {
+    Session,
+    LinkedStart,
+    LinkedArtifact,
+    SessionStream,
+    LinkedStream,
+}
+
+pub(super) const PROVIDER_THREAD: &str = "selected-provider-thread";
+pub(super) const PROVIDER_TURN: &str = "selected-provider-turn";
+
+// Use the ordinary native event router with disposable session maps; this
+// supplies provider frames, never a replacement observation or completion.
+pub(super) fn codex_provider_dispatch(
+    state: AppState,
+    runner: String,
+    provenance: EngramObservationProvenance,
+    turn_id: &str,
+) -> impl Fn(Value) {
+    codex_provider_dispatch_for_turn(state, runner, provenance, Some(turn_id))
+}
+
+pub(super) fn codex_provider_dispatch_for_turn(
+    state: AppState,
+    runner: String,
+    provenance: EngramObservationProvenance,
+    turn_id: Option<&str>,
+) -> impl Fn(Value) {
+    let EngramObservationProvenance::Runtime {
+        token: RuntimeToken::Codex(runtime),
+        turn_generation,
+    } = provenance
+    else {
+        panic!("Codex provider fixture")
+    };
+    let sessions = SharedCodexSessions::new();
+    sessions.lock().unwrap().insert(
+        runner.clone(),
+        SharedCodexSessionState {
+            thread_id: Some(PROVIDER_THREAD.to_owned()),
+            turn_id: turn_id.map(str::to_owned),
+            turn_started: turn_id.is_some(),
+            pending_turn_start_request_id: turn_id.is_none().then(|| "open-turn".to_owned()),
+            active_turn_generation: Some(turn_generation),
+            ..SharedCodexSessionState::default()
+        },
+    );
+    let threads = Arc::new(Mutex::new(HashMap::from([(
+        PROVIDER_THREAD.to_owned(),
+        runner,
+    )])));
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let (input, commands) = mpsc::channel();
+    move |message: Value| {
+        let _keep_channel = &commands;
+        handle_shared_codex_app_server_message(
+            &message, &state, &runtime, &pending, &sessions, &threads, &input,
+        )
+        .unwrap();
+    }
+}
+
 pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
     state: AppState,
     mode: MailboxTestMode,
+    placement: SelectedProviderWorktree,
     select: F,
-) where
+) -> TestRunRegistration
+where
     F: FnOnce(String) -> Fut,
     Fut: std::future::Future<Output = String>,
 {
@@ -26,6 +91,51 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
         project_id,
     };
     let runner = running_owner(&fixture, "selected-provider-runtime");
+    let command_root = if matches!(
+        placement,
+        SelectedProviderWorktree::Session | SelectedProviderWorktree::SessionStream
+    ) {
+        fixture.root.clone()
+    } else {
+        run_git_test_command(
+            &fixture.root,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "fixture root",
+            ],
+        );
+        let linked = fixture.root.with_file_name("selected-provider-linked");
+        run_git_test_command(
+            &fixture.root,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "--detach",
+                linked.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        assert_ne!(
+            fs::canonicalize(&fixture.root).unwrap(),
+            fs::canonicalize(&linked).unwrap(),
+        );
+        assert_eq!(
+            fs::canonicalize(test_runs_git_common_dir(&fixture.root).unwrap()).unwrap(),
+            fs::canonicalize(test_runs_git_common_dir(&linked).unwrap()).unwrap(),
+            "the explicit command cwd is another worktree of the session's repository",
+        );
+        linked
+    };
     let provenance = {
         let mut inner = fixture.state.inner.lock().unwrap();
         inner
@@ -56,7 +166,7 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
             "node scripts/test-launcher.mjs full --input commit --request-message-id {selector}"
         ),
     };
-    let cwd = test_run_display_path(&fs::canonicalize(&fixture.root).unwrap());
+    let cwd = test_run_display_path(&fs::canonicalize(&command_root).unwrap());
     let key = "selected-provider-tool";
     fixture.state.engram_host().observe(
         &runner,
@@ -81,12 +191,35 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
             "the real selector-bearing provider start must create one observation, even with Engram disabled"
         );
         assert!(rows[0].runtime_identity.is_some());
+        if !matches!(
+            placement,
+            SelectedProviderWorktree::Session | SelectedProviderWorktree::SessionStream
+        ) {
+            assert!(rows[0].work_binding.is_none());
+            assert!(rows[0].source_root.is_none());
+            assert!(rows[0].grant_identity.is_none());
+            assert_ne!(
+                test_run_path_key(
+                    &inner.sessions[inner.find_session_index(&runner).unwrap()]
+                        .session
+                        .workdir
+                ),
+                test_run_path_key(&cwd),
+            );
+        }
+        if placement == SelectedProviderWorktree::LinkedStart {
+            assert_eq!(
+                test_run_path_key(&rows[0].summary.worktree),
+                test_run_path_key(&cwd),
+                "provider visibility retains the actual linked worktree without granting local credit",
+            );
+        }
         rows[0].execution_id.clone()
     };
 
     let id = format!("test-{}", Uuid::new_v4());
     let mut request = full_request(
-        &fs::canonicalize(&fixture.root).unwrap(),
+        &fs::canonicalize(&command_root).unwrap(),
         &test_run_timestamp(),
     );
     request["owner"] = json!(runner);
@@ -98,12 +231,12 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
     if mode == MailboxTestMode::Focused {
         request["stages"] = json!([{ "name": "focused" }]);
     }
-    let directory = write_run(
-        &fixture.runs_dir(),
-        &id,
-        request,
-        Some(running_results(Some(717))),
-    );
+    let runs_dir = if placement == SelectedProviderWorktree::Session {
+        fixture.runs_dir()
+    } else {
+        EngramHost::run_artifact_directory(&command_root).unwrap()
+    };
+    let directory = write_run(&runs_dir, &id, request, Some(running_results(Some(717))));
     let (status, ack): (StatusCode, Value) = request_json(
         &app_router(fixture.state.clone()),
         Request::builder()
@@ -133,6 +266,167 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
         assert!(registration.native_completion.is_none());
     }
     let locator = format!("RUN {}", test_run_display_path(&directory));
+    let streaming = matches!(
+        placement,
+        SelectedProviderWorktree::SessionStream | SelectedProviderWorktree::LinkedStream
+    );
+    if streaming {
+        let EngramObservationProvenance::Runtime {
+            token,
+            turn_generation,
+        } = &provenance
+        else {
+            panic!("runtime-owned provider fixture");
+        };
+        let start = CodexLauncherStart {
+            native_turn_id: PROVIDER_TURN,
+            key,
+            line: &command,
+            cwd: Some(&cwd),
+        };
+        assert!(
+            fixture
+                .state
+                .capture_codex_launcher_output(&runner, token, Some(turn_generation + 1), start,)
+                .is_none()
+        );
+        assert!(
+            fixture
+                .state
+                .capture_codex_launcher_output(
+                    &runner,
+                    token,
+                    Some(*turn_generation),
+                    CodexLauncherStart {
+                        key: "another-item",
+                        ..start
+                    },
+                )
+                .is_none()
+        );
+        let mut invalid = fixture
+            .state
+            .capture_codex_launcher_output(&runner, token, Some(*turn_generation), start)
+            .expect("original unbound launcher stream");
+        fixture.state.observe_codex_launcher_output(
+            &runner,
+            token,
+            Some(*turn_generation),
+            &mut invalid,
+            &"x".repeat(256 * 1024 + 1),
+        );
+        assert!(
+            fixture.state.inner.lock().unwrap().test_run_observations[&observed]
+                .artifact
+                .is_none()
+        );
+        let mut output = fixture
+            .state
+            .capture_codex_launcher_output(&runner, token, Some(*turn_generation), start)
+            .unwrap();
+        // Rejected ingress must not contribute even a partial line to the
+        // original stream. A later genuine split RUN still has to associate.
+        let before = fixture.state.inner.lock().unwrap().test_run_observations[&observed].clone();
+        fixture.state.observe_codex_launcher_output(
+            &runner,
+            token,
+            Some(turn_generation + 1),
+            &mut output,
+            "stale prefix ",
+        );
+        fixture.state.observe_codex_launcher_output(
+            &runner,
+            &RuntimeToken::Codex("another-runtime".to_owned()),
+            Some(*turn_generation),
+            &mut output,
+            "foreign prefix ",
+        );
+        assert_eq!(
+            fixture.state.inner.lock().unwrap().test_run_observations[&observed],
+            before
+        );
+        if placement == SelectedProviderWorktree::LinkedStream {
+            // The linked case also traverses the real native Codex event
+            // router. Duplicate starts must preserve the original buffer as
+            // the same observation gains its artifact.
+            let dispatch = codex_provider_dispatch(
+                fixture.state.clone(),
+                runner.clone(),
+                provenance.clone(),
+                PROVIDER_TURN,
+            );
+            let start = json!({"method":"item/started","params":{
+                "threadId":PROVIDER_THREAD,"turnId":PROVIDER_TURN,
+                "item":{"type":"commandExecution","id":key,"command":command,
+                    "cwd":cwd,"status":"inProgress"}}});
+            dispatch(start.clone());
+            let mut delta = json!({"method":"item/commandExecution/outputDelta","params":{
+                "threadId":PROVIDER_THREAD,"turnId":PROVIDER_TURN,"itemId":key,"delta":"RU"}});
+            for (field, wrong) in [
+                ("threadId", "another-thread"),
+                ("turnId", "another-turn"),
+                ("itemId", "another-item"),
+            ] {
+                let mut foreign = delta.clone();
+                foreign["params"][field] = json!(wrong);
+                foreign["params"]["delta"] = json!("foreign prefix ");
+                dispatch(foreign);
+            }
+            dispatch(delta.clone());
+            dispatch(start.clone());
+            assert!(
+                fixture.state.inner.lock().unwrap().test_run_observations[&observed]
+                    .artifact
+                    .is_none()
+            );
+            delta["params"]["delta"] = json!(format!("{}\n", &locator[2..]));
+            dispatch(delta.clone());
+            let original_artifact = fixture.state.inner.lock().unwrap().test_run_observations
+                [&observed]
+                .artifact
+                .clone();
+            assert!(original_artifact.is_some());
+            dispatch(start);
+            delta["params"]["delta"] = json!(format!("{locator}\n"));
+            dispatch(delta);
+            assert_eq!(
+                fixture.state.inner.lock().unwrap().test_run_observations[&observed].artifact,
+                original_artifact
+            );
+        } else {
+            fixture.state.observe_codex_launcher_output(
+                &runner,
+                token,
+                Some(*turn_generation),
+                &mut output,
+                "RU",
+            );
+            assert!(
+                fixture.state.inner.lock().unwrap().test_run_observations[&observed]
+                    .artifact
+                    .is_none()
+            );
+            fixture.state.observe_codex_launcher_output(
+                &runner,
+                token,
+                Some(*turn_generation),
+                &mut output,
+                &format!("{}\n", &locator[2..]),
+            );
+        }
+        let inner = fixture.state.inner.lock().unwrap();
+        assert!(
+            inner.sessions[inner.find_session_index(&runner).unwrap()]
+                .engram
+                .active_turn_checks
+                .is_empty(),
+            "streaming visibility cannot manufacture a mediated check"
+        );
+        let row = &inner.test_run_observations[&observed];
+        assert!(
+            row.work_binding.is_none() && row.source_root.is_none() && row.grant_identity.is_none()
+        );
+    }
     fixture.state.engram_host().observe(
         &runner,
         &provenance,
@@ -140,19 +434,27 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
             key,
             command: &command,
             reported_command: Some(&command),
-            output: &locator,
+            output: if streaming { "" } else { &locator },
             exit: Some(EngramCommandExit::NotFinished),
             runtime_output_cut: false,
         },
     );
-    assert_eq!(
-        fixture.state.inner.lock().unwrap().test_run_observations[&observed]
-            .artifact
-            .as_ref()
-            .unwrap()
-            .run_id,
-        id
-    );
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        let row = &inner.test_run_observations[&observed];
+        let artifact = row.artifact.as_ref().expect(
+            "the original RUN locator must attach the linked worktree's exact request artifact",
+        );
+        assert_eq!(artifact.run_id, id);
+        assert_eq!(
+            artifact.run_directory,
+            test_run_display_path(&fs::canonicalize(&directory).unwrap())
+        );
+        assert_eq!(
+            artifact.request_identity,
+            Some(inner.test_run_registrations[&id].request_identity.clone())
+        );
+    }
 
     let source = json!({
         "commit": "a".repeat(40), "tree": "b".repeat(40),
@@ -177,7 +479,7 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
             key,
             command: &command,
             reported_command: Some(&command),
-            output: &locator,
+            output: if streaming { "" } else { &locator },
             exit: Some(EngramCommandExit::Code(0)),
             runtime_output_cut: false,
         },
@@ -219,6 +521,7 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
         registration.verification_record.is_none(),
         "producer facts do not mint local credit"
     );
+    registration
 }
 
 #[test]

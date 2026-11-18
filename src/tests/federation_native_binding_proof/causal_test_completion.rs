@@ -3,7 +3,9 @@ use super::*;
 use crate::tests::test_runs::test_run_registration::causal_completion_fixture::{
     compact, finish, producer,
 };
-use crate::tests::test_runs::test_run_registration::selected_provider::selected_provider_completion;
+use crate::tests::test_runs::test_run_registration::selected_provider::{
+    SelectedProviderWorktree, selected_provider_completion,
+};
 
 pub(super) struct Handles(Vec<AppState>);
 impl Drop for Handles {
@@ -148,10 +150,17 @@ async fn wire(
 }
 
 async fn selected_provider_over_relay(mode: MailboxTestMode) {
+    selected_provider_over_relay_at(mode, SelectedProviderWorktree::Session).await;
+}
+
+async fn selected_provider_over_relay_at(
+    mode: MailboxTestMode,
+    placement: SelectedProviderWorktree,
+) {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::production_shape().await;
     let (mut server, handles) = connect(&fixture).await;
-    selected_provider_completion(fixture.satellite.clone(), mode, |runner| {
+    selected_provider_completion(fixture.satellite.clone(), mode, placement, |runner| {
         let fixture = &fixture;
         async move {
             let key = "selected-provider-relay";
@@ -220,6 +229,42 @@ async fn focused_relay_selector_records_provider_and_native_completion_with_engr
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_relay_selector_records_provider_and_native_completion_with_engram_disabled() {
     selected_provider_over_relay(MailboxTestMode::Full).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn linked_worktree_provider_start_retains_factual_root_without_local_credit() {
+    selected_provider_over_relay_at(
+        MailboxTestMode::Focused,
+        SelectedProviderWorktree::LinkedStart,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn linked_worktree_run_locator_attaches_original_artifact_and_native_completion() {
+    selected_provider_over_relay_at(
+        MailboxTestMode::Full,
+        SelectedProviderWorktree::LinkedArtifact,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn same_root_streamed_locator_retains_original_native_completion_without_a_grant() {
+    selected_provider_over_relay_at(
+        MailboxTestMode::Focused,
+        SelectedProviderWorktree::SessionStream,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn linked_worktree_streamed_locator_retains_original_native_completion_without_a_grant() {
+    selected_provider_over_relay_at(
+        MailboxTestMode::Focused,
+        SelectedProviderWorktree::LinkedStream,
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
