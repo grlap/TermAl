@@ -1865,6 +1865,7 @@ struct StateInner {
     remote_session_transcript_applied_revisions: HashMap<String, HashMap<String, u64>>,
     /// Session records carry the serializable session plus runtime-only state.
     sessions: SessionSequence,
+    persist_session_index: PersistSessionIndex,
     /// Durable session rows isolated during startup validation.
     ///
     /// These records are deliberately absent from `sessions` so corrupted
@@ -1950,7 +1951,7 @@ struct StateInner {
     /// Runtime-only mutation stamps for delegation rows. The background persist
     /// worker compares these with its watermark to upsert only delegation rows
     /// that changed since the last successful write.
-    delegation_mutation_stamps: BTreeMap<String, u64>,
+    delegation_mutation_stamps: DelegationMutationStamps,
     /// Maintains bounded native-catalog child exclusion without status churn.
     delegation_catalog_children: Mutex<FederationCatalogChildren>,
     /// Runtime-only delegation tombstones drained by the persist thread and
@@ -2034,6 +2035,7 @@ impl StateInner {
             remote_snapshot_applied_revisions: HashMap::new(),
             remote_session_transcript_applied_revisions: HashMap::new(),
             sessions: SessionSequence::default(),
+            persist_session_index: PersistSessionIndex::default(),
             quarantined_persisted_session_ids: BTreeSet::new(),
             orchestrator_instances: PersistTracked::default(),
             delegations: Vec::new(),
@@ -2068,7 +2070,7 @@ impl StateInner {
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_inventory: DelegationInventoryState::Ready,
             delegation_waits: PersistTracked::default(),
-            delegation_mutation_stamps: BTreeMap::new(),
+            delegation_mutation_stamps: DelegationMutationStamps::default(),
             delegation_catalog_children: Mutex::new(FederationCatalogChildren::default()),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),

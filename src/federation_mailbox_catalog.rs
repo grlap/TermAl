@@ -13,11 +13,18 @@ const FEDERATION_CATALOG_PAGE: usize = 32;
 // Cold bulk fixture lookup and test-only vector removal may rebuild O(n) here;
 // production lookup is warm and production does not remove delegation rows.
 struct FederationCatalogChildren {
-    by_delegation: BTreeMap<String, (String, usize)>,
+    by_delegation: BTreeMap<String, DelegationCatalogPosition>,
     children: BTreeMap<String, usize>,
     child_positions: BTreeMap<String, BTreeSet<usize>>,
+    parent_positions: BTreeMap<String, BTreeSet<usize>>,
     scan: Option<usize>,
     progress: usize,
+}
+
+struct DelegationCatalogPosition {
+    parent: String,
+    child: String,
+    index: usize,
 }
 
 impl FederationCatalogChildren {
@@ -25,7 +32,9 @@ impl FederationCatalogChildren {
     fn from_records(rows: &[DelegationRecord]) -> Self {
         let mut index = Self::default();
         for (position, row) in rows.iter().enumerate() {
-            index.observe(&row.id, &row.child_session_id, position);
+            #[cfg(test)]
+            note_persist_delegation_visit();
+            index.observe(row, position);
         }
         index
     }
@@ -36,44 +45,74 @@ impl FederationCatalogChildren {
 
     fn removed_at(&mut self, position: usize) {
         if let Some(id) = self.by_delegation.iter()
-            .find_map(|(id, (_, at))| (*at == position).then(|| id.clone())) {
+            .find_map(|(id, at)| (at.index == position).then(|| id.clone())) {
             self.remove(&id);
         }
         self.child_positions.clear();
-        for (child, at) in self.by_delegation.values_mut() {
-            if *at > position { *at -= 1; }
-            self.child_positions.entry(child.clone()).or_default().insert(*at);
+        self.parent_positions.clear();
+        for at in self.by_delegation.values_mut() {
+            if at.index > position { at.index -= 1; }
+            self.child_positions.entry(at.child.clone()).or_default().insert(at.index);
+            self.parent_positions.entry(at.parent.clone()).or_default().insert(at.index);
         }
         if let Some(scan) = self.scan.as_mut() {
             if position < *scan { *scan -= 1; }
         }
     }
 
-    fn observe(&mut self, id: &str, child: &str, position: usize) {
-        if self.by_delegation.get(id).is_some_and(|(old, at)| old == child && *at == position) { return; }
-        self.remove(id);
-        self.by_delegation.insert(id.to_owned(), (child.to_owned(), position));
-        *self.children.entry(child.to_owned()).or_default() += 1;
-        self.child_positions.entry(child.to_owned()).or_default().insert(position);
+    /// Returns whether this row changed the indexed relationship.
+    fn observe(&mut self, row: &DelegationRecord, position: usize) -> bool {
+        if self.by_delegation.get(&row.id).is_some_and(|at|
+            at.child == row.child_session_id && at.parent == row.parent_session_id && at.index == position)
+        {
+            return false;
+        }
+        self.remove(&row.id);
+        self.by_delegation.insert(row.id.clone(), DelegationCatalogPosition {
+            parent: row.parent_session_id.clone(),
+            child: row.child_session_id.clone(),
+            index: position,
+        });
+        *self.children.entry(row.child_session_id.clone()).or_default() += 1;
+        self.child_positions.entry(row.child_session_id.clone()).or_default().insert(position);
+        self.parent_positions.entry(row.parent_session_id.clone()).or_default().insert(position);
+        true
     }
 
     fn remove(&mut self, id: &str) {
-        if let Some((child, position)) = self.by_delegation.remove(id) {
-            if let Some(positions) = self.child_positions.get_mut(&child) {
-                positions.remove(&position);
-                if positions.is_empty() { self.child_positions.remove(&child); }
-            }
-            if let Some(count) = self.children.get_mut(&child) {
+        if let Some(at) = self.by_delegation.remove(id) {
+            Self::remove_position(&mut self.child_positions, &at.child, at.index);
+            Self::remove_position(&mut self.parent_positions, &at.parent, at.index);
+            if let Some(count) = self.children.get_mut(&at.child) {
                 *count -= 1;
-                if *count == 0 { self.children.remove(&child); }
+                if *count == 0 { self.children.remove(&at.child); }
             }
+        }
+    }
+
+    fn remove_position(
+        by_session: &mut BTreeMap<String, BTreeSet<usize>>,
+        session: &str,
+        position: usize,
+    ) {
+        if let Some(positions) = by_session.get_mut(session) {
+            positions.remove(&position);
+            if positions.is_empty() {
+                by_session.remove(session);
+            }
+        }
+    }
+
+    fn ensure_ready(&mut self, rows: &[DelegationRecord]) {
+        if !self.ready(rows.len()) {
+            *self = Self::from_records(rows);
         }
     }
 
     fn delegation_for_child(&mut self, rows: &[DelegationRecord], child: &str) -> Option<usize> {
         // Boot publishes a complete index; production insertion/removal keeps
         // it current. Direct bulk fixture construction may start cold.
-        if !self.ready(rows.len()) { *self = Self::from_records(rows); }
+        self.ensure_ready(rows);
         let position = *self.child_positions.get(child)?.first()?;
         if rows.get(position).is_some_and(|row| row.child_session_id == child) {
             return Some(position);
@@ -85,11 +124,11 @@ impl FederationCatalogChildren {
     }
 
     fn delegation_by_id(&mut self, rows: &[DelegationRecord], id: &str) -> Option<usize> {
-        if !self.ready(rows.len()) { *self = Self::from_records(rows); }
-        let position = self.by_delegation.get(id)?.1;
+        self.ensure_ready(rows);
+        let position = self.by_delegation.get(id)?.index;
         if rows.get(position).is_some_and(|row| row.id == id) { return Some(position); }
         *self = Self::from_records(rows);
-        self.by_delegation.get(id).map(|(_, position)| *position)
+        self.by_delegation.get(id).map(|at| at.index)
     }
 
     // Direct bulk construction can start cold. Production insertions update
@@ -101,7 +140,7 @@ impl FederationCatalogChildren {
         let start = self.scan.unwrap_or(0).min(rows.len());
         let end = start.saturating_add(FEDERATION_CATALOG_SCAN).min(rows.len());
         for (offset, row) in rows[start..end].iter().enumerate() {
-            self.observe(&row.id, &row.child_session_id, start + offset);
+            self.observe(row, start + offset);
         }
         self.progress = self.progress.saturating_add(end - start);
         if end == rows.len() { self.scan = None; None }

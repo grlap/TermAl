@@ -47,7 +47,154 @@ fn generated_session_name(agent: Agent, session_id: &str) -> String {
         .unwrap_or_else(|| format!("{} session", agent.name()))
 }
 
+/// The two orders serve different readers: materialization rechecks a key,
+/// while selection only visits entries newer than the writer's watermark.
+#[derive(Default)]
+struct DelegationMutationStamps {
+    by_id: HashMap<String, u64>,
+    by_stamp: BTreeSet<(u64, String)>,
+}
+
+impl DelegationMutationStamps {
+    fn insert(&mut self, id: String, stamp: u64) {
+        self.remove(&id);
+        self.by_id.insert(id.clone(), stamp);
+        self.by_stamp.insert((stamp, id));
+    }
+
+    fn remove(&mut self, id: &str) {
+        if let Some(stamp) = self.by_id.remove(id) {
+            self.by_stamp.remove(&(stamp, id.to_owned()));
+        }
+    }
+
+    fn get(&self, id: &str) -> Option<&u64> {
+        self.by_id.get(id)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
+
+    fn after(&self, watermark: u64) -> impl Iterator<Item = &(u64, String)> {
+        watermark
+            .checked_add(1)
+            .into_iter()
+            .flat_map(|first| self.by_stamp.range((first, String::new())..))
+    }
+}
+
+#[derive(Default)]
+struct PersistSessionIndex {
+    positions: HashMap<String, usize>,
+    slots: Vec<PersistSessionSlot>,
+    by_stamp: BTreeSet<(u64, usize)>,
+    hidden: BTreeSet<usize>,
+    removal_duties: BTreeSet<usize>,
+    checked_retention: Option<usize>,
+}
+
+struct PersistSessionSlot {
+    id: String,
+    stamp: u64,
+}
+
+impl PersistSessionIndex {
+    fn observe(&mut self, index: usize, record: &SessionRecord) {
+        #[cfg(test)]
+        note_persist_session_visit();
+        let id = &record.session.id;
+        let stamp = record.mutation_stamp;
+        if let Some(slot) = self.slots.get_mut(index) {
+            if slot.id != *id {
+                self.positions.remove(&slot.id);
+                self.positions.insert(id.clone(), index);
+                slot.id.clone_from(id);
+                self.checked_retention = None;
+            }
+            if slot.stamp != stamp {
+                self.by_stamp.remove(&(slot.stamp, index));
+                slot.stamp = stamp;
+            }
+        } else {
+            self.positions.insert(id.clone(), index);
+            self.slots.push(PersistSessionSlot {
+                id: id.clone(),
+                stamp,
+            });
+        }
+        if stamp != 0 {
+            self.by_stamp.insert((stamp, index));
+        }
+        let visibility_changed = if record.hidden {
+            self.hidden.insert(index)
+        } else {
+            self.hidden.remove(&index)
+        };
+        let duty_changed = if runtime_observation_has_removal_duty(record)
+            || record.engram.source_root_bind_owner.is_some()
+        {
+            self.removal_duties.insert(index)
+        } else {
+            self.removal_duties.remove(&index)
+        };
+        if visibility_changed || duty_changed {
+            self.checked_retention = None;
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PERSIST_ROW_VISITS: std::cell::Cell<(usize, usize)> =
+        const { std::cell::Cell::new((0, 0)) };
+}
+
+#[cfg(test)]
+fn note_persist_session_visit() {
+    PERSIST_ROW_VISITS.with(|count| {
+        let (sessions, delegations) = count.get();
+        count.set((sessions + 1, delegations));
+    });
+}
+
+#[cfg(test)]
+fn note_persist_delegation_visit() {
+    PERSIST_ROW_VISITS.with(|count| {
+        let (sessions, delegations) = count.get();
+        count.set((sessions, delegations + 1));
+    });
+}
+
 impl StateInner {
+    fn refresh_persist_session_index(&mut self) {
+        if let Some(touched) = self.sessions.take_touched_slots() {
+            for index in touched {
+                if let Some(record) = self.sessions.get(index) {
+                    self.persist_session_index.observe(index, record);
+                }
+            }
+        } else {
+            self.persist_session_index = PersistSessionIndex::default();
+            for (index, record) in self.sessions.iter().enumerate() {
+                self.persist_session_index.observe(index, record);
+            }
+        }
+    }
+
+    fn restore_session_rows(&mut self, sessions: SessionSequence) {
+        self.sessions = sessions;
+        self.sessions.invalidate_slots();
+        self.refresh_persist_session_index();
+    }
+
+    fn persist_session_position(&self, id: &str) -> Option<usize> {
+        let position = *self.persist_session_index.positions.get(id)?;
+        self.sessions
+            .get(position)
+            .filter(|record| record.session.id == id)
+            .map(|_| position)
+    }
     /// Appends a new [`Project`] record to `self.projects` and
     /// returns a clone. The public `AppState::create_project` in
     /// `session_crud.rs` handles remote proxying, workdir
@@ -398,8 +545,14 @@ impl StateInner {
     fn mark_delegation_mutated(&mut self, delegation_index: usize) -> Option<u64> {
         let record = self.delegations.get(delegation_index)?;
         let delegation_id = record.id.clone();
-        self.delegation_catalog_children.get_mut().expect("catalog child index poisoned")
-            .observe(&delegation_id, &record.child_session_id, delegation_index);
+        let topology_changed = self
+            .delegation_catalog_children
+            .get_mut()
+            .expect("catalog child index poisoned")
+            .observe(record, delegation_index);
+        if topology_changed {
+            self.persist_session_index.checked_retention = None;
+        }
         Some(self.mark_delegation_id_mutated(delegation_id))
     }
 
@@ -411,6 +564,7 @@ impl StateInner {
 
     fn record_removed_delegation(&mut self, delegation_id: String) {
         self.delegation_catalog_children.get_mut().expect("catalog child index poisoned").remove(&delegation_id);
+        self.persist_session_index.checked_retention = None;
         let stamp = self.next_mutation_stamp();
         self.delegation_mutation_stamps.remove(&delegation_id);
         self.removed_delegation_ids.insert(delegation_id, stamp);
@@ -616,6 +770,7 @@ impl StateInner {
             return None;
         }
         let record = self.sessions.remove(index);
+        self.refresh_persist_session_index();
         // Its outstanding Claude work outlives it, in the same section.
         self.orphan_claude_work(&record.session.id, &record.claude_outstanding);
         EngramHost::reconcile_orphaned_claude_work(self, &record.session.id);
@@ -656,6 +811,9 @@ impl StateInner {
             }
             retained
         });
+        if !removed_ids.is_empty() {
+            self.refresh_persist_session_index();
+        }
         // Their outstanding Claude work outlives them, in the same section.
         for (session_id, work) in &orphaned {
             self.orphan_claude_work(session_id, work);
@@ -695,10 +853,17 @@ impl StateInner {
         let retry_removed_ids = if complete { std::mem::take(&mut self.removed_session_ids) } else { Vec::new() };
         let retry_removed_delegation_ids = if complete { std::mem::take(&mut self.removed_delegation_ids) } else { BTreeMap::new() };
         let mut removed_ids = retry_removed_ids.clone();
-        for record in &self.sessions {
-            if record.mutation_stamp <= watermark {
-                continue;
-            }
+        let mut changed_positions: Vec<_> = watermark
+            .checked_add(1)
+            .into_iter()
+            .flat_map(|first| self.persist_session_index.by_stamp.range((first, 0)..))
+            .map(|&(_, position)| position)
+            .collect();
+        changed_positions.sort_unstable();
+        for position in changed_positions {
+            #[cfg(test)]
+            note_persist_session_visit();
+            let record = &self.sessions[position];
             if record.hidden && complete {
                 // A session that changed and is now hidden must not
                 // stay in SQLite, so ensure any prior visible row is
@@ -712,21 +877,24 @@ impl StateInner {
                 });
             }
         }
-        let changed_delegations = self
-            .delegations
-            .iter()
-            .filter(|_| complete)
-            .filter_map(|delegation| {
-                let mutation_stamp = self
-                    .delegation_mutation_stamps
-                    .get(&delegation.id)
-                    .copied()?;
-                (mutation_stamp > watermark).then(|| PersistDelegationCandidate {
-                    delegation_id: delegation.id.clone(),
-                    mutation_stamp,
-                })
+        let mut changed_delegations = complete
+            .then_some(())
+            .into_iter()
+            .flat_map(|()| self.delegation_mutation_stamps.after(watermark))
+            .filter_map(|(mutation_stamp, id)| {
+                #[cfg(test)]
+                note_persist_delegation_visit();
+                let position = self.indexed_delegation(id)?;
+                Some((
+                    position,
+                    PersistDelegationCandidate {
+                        delegation_id: id.clone(),
+                        mutation_stamp: *mutation_stamp,
+                    },
+                ))
             })
             .collect::<Vec<_>>();
+        changed_delegations.sort_unstable_by_key(|(position, _)| *position);
         let removed_delegation_ids = retry_removed_delegation_ids
             .iter()
             .filter_map(|(delegation_id, stamp)| {
@@ -738,12 +906,52 @@ impl StateInner {
             metadata: PersistedState::metadata_delta_from_inner(self),
             changed_sessions,
             removed_session_ids: removed_ids,
-            changed_delegations,
+            changed_delegations: changed_delegations
+                .into_iter()
+                .map(|(_, row)| row)
+                .collect(),
             removed_delegation_ids,
             drained_delegation_tombstones: retry_removed_delegation_ids,
             drained_explicit_tombstones: retry_removed_ids,
             watermark: self.last_mutation_stamp,
         }
+    }
+
+    fn materialize_persist_session(
+        &self,
+        candidate: &PersistSessionCandidate,
+    ) -> PersistCandidateMaterialization<PersistedSessionRecord> {
+        #[cfg(test)]
+        note_persist_session_visit();
+        let Some(position) = self.persist_session_position(&candidate.session_id) else {
+            return PersistCandidateMaterialization::Changed;
+        };
+        let record = &self.sessions[position];
+        if record.hidden || record.mutation_stamp != candidate.mutation_stamp {
+            return PersistCandidateMaterialization::Changed;
+        }
+        let mut persisted = PersistedSessionRecord::from_record(record);
+        persisted.persist_prompt_history = candidate.persist_prompt_history;
+        PersistCandidateMaterialization::Snapshot(persisted)
+    }
+
+    fn materialize_persist_delegation(
+        &self,
+        candidate: &PersistDelegationCandidate,
+    ) -> PersistCandidateMaterialization<DelegationRecord> {
+        #[cfg(test)]
+        note_persist_delegation_visit();
+        let Some(position) = self.indexed_delegation(&candidate.delegation_id) else {
+            return PersistCandidateMaterialization::Changed;
+        };
+        if self
+            .delegation_mutation_stamps
+            .get(&candidate.delegation_id)
+            != Some(&candidate.mutation_stamp)
+        {
+            return PersistCandidateMaterialization::Changed;
+        }
+        PersistCandidateMaterialization::Snapshot(self.delegations[position].clone())
     }
 
     /// Materializes a persist plan against this state value.
@@ -755,39 +963,8 @@ impl StateInner {
     fn materialize_persist_delta(&self, plan: PersistDeltaPlan) -> PersistDelta {
         materialize_persist_delta_plan(
             plan,
-            |candidate| {
-                let Some(record) = self
-                    .sessions
-                    .iter()
-                    .find(|record| record.session.id == candidate.session_id)
-                else {
-                    return PersistCandidateMaterialization::Changed;
-                };
-                if record.hidden || record.mutation_stamp != candidate.mutation_stamp {
-                    return PersistCandidateMaterialization::Changed;
-                }
-                let mut persisted = PersistedSessionRecord::from_record(record);
-                persisted.persist_prompt_history = candidate.persist_prompt_history;
-                PersistCandidateMaterialization::Snapshot(persisted)
-            },
-            |candidate| {
-                let Some(delegation) = self
-                    .delegations
-                    .iter()
-                    .find(|delegation| delegation.id == candidate.delegation_id)
-                else {
-                    return PersistCandidateMaterialization::Changed;
-                };
-                if self
-                    .delegation_mutation_stamps
-                    .get(&candidate.delegation_id)
-                    .copied()
-                    != Some(candidate.mutation_stamp)
-                {
-                    return PersistCandidateMaterialization::Changed;
-                }
-                PersistCandidateMaterialization::Snapshot(delegation.clone())
-            },
+            |candidate| self.materialize_persist_session(candidate),
+            |candidate| self.materialize_persist_delegation(candidate),
         )
     }
 
@@ -814,7 +991,13 @@ impl StateInner {
         watermark: u64,
         session_id: &str,
     ) -> Option<(MessageSequence, HashMap<String, usize>)> {
-        let index = self.find_session_index(session_id)?;
+        let index = match self.persist_session_position(session_id) {
+            Some(position) => position,
+            None => {
+                self.refresh_persist_session_index();
+                self.persist_session_position(session_id)?
+            }
+        };
         let record = &mut self.sessions[index];
         if record.mutation_stamp > watermark
             || matches!(
@@ -1130,7 +1313,7 @@ fn retain_unpersisted_session_changes(
             continue;
         }
         let mut state = inner.lock().expect("state mutex poisoned");
-        let Some(index) = state.find_session_index(&captured.session.id) else { continue };
+        let Some(index) = state.persist_session_position(&captured.session.id) else { continue };
         if state.sessions[index].hidden { continue; }
         if state.sessions[index].mutation_stamp <= delta.watermark {
             // No successor change is overwritten, and no rejected content is
@@ -1226,41 +1409,10 @@ fn collect_persist_delta_pass_from_shared_state(
     materialize_persist_delta_plan(
         plan,
         |candidate| {
-            persist_collect_locked(inner, |state| {
-                let Some(record) = state
-                    .sessions
-                    .iter()
-                    .find(|record| record.session.id == candidate.session_id)
-                else {
-                    return PersistCandidateMaterialization::Changed;
-                };
-                if record.hidden || record.mutation_stamp != candidate.mutation_stamp {
-                    return PersistCandidateMaterialization::Changed;
-                }
-                let mut persisted = PersistedSessionRecord::from_record(record);
-                persisted.persist_prompt_history = candidate.persist_prompt_history;
-                PersistCandidateMaterialization::Snapshot(persisted)
-            })
+            persist_collect_locked(inner, |state| state.materialize_persist_session(candidate))
         },
         |candidate| {
-            persist_collect_locked(inner, |state| {
-                let Some(delegation) = state
-                    .delegations
-                    .iter()
-                    .find(|delegation| delegation.id == candidate.delegation_id)
-                else {
-                    return PersistCandidateMaterialization::Changed;
-                };
-                if state
-                    .delegation_mutation_stamps
-                    .get(&candidate.delegation_id)
-                    .copied()
-                    != Some(candidate.mutation_stamp)
-                {
-                    return PersistCandidateMaterialization::Changed;
-                }
-                PersistCandidateMaterialization::Snapshot(delegation.clone())
-            })
+            persist_collect_locked(inner, |state| state.materialize_persist_delegation(candidate))
         },
     )
 }

@@ -48,6 +48,104 @@ fn make_persist_delta_test_delegation(
     }
 }
 
+#[test]
+fn persist_delta_visits_only_dirty_rows_with_large_retained_history() {
+    let mut inner = StateInner::new();
+    let workdir = "/tmp".to_owned();
+    let parent = inner
+        .create_session(Agent::Codex, None, workdir.clone(), None, None)
+        .session
+        .id;
+    let mut changed_session = String::new();
+    for index in 0..4096 {
+        let child = inner
+            .create_session(Agent::Codex, None, workdir.clone(), None, None)
+            .session
+            .id;
+        // Hidden history is especially important here. Its observation-duty
+        // check used to visit the entire session inventory on an idle tick.
+        inner.sessions[index + 1].hidden = index != 4095;
+        let id = format!("history-{index}");
+        inner
+            .delegations
+            .push(make_persist_delta_test_delegation(&id, &parent, &child));
+        inner.mark_delegation_mutated(index);
+        changed_session = child;
+    }
+    let shared = StateMutex::new(inner);
+    let initial = collect_persist_delta_from_shared_state(&shared, 0);
+    assert_eq!(initial.removed_session_ids.len(), 4095);
+    assert_eq!(initial.changed_delegations.unwrap().len(), 4096);
+    let watermark = initial.watermark;
+
+    PERSIST_ROW_VISITS.with(|count| count.set((0, 0)));
+    let idle = collect_persist_delta_from_shared_state(&shared, watermark);
+    assert!(idle.changed_sessions.is_empty());
+    assert!(idle.changed_delegations.is_none());
+    assert!(idle.removed_session_ids.is_empty());
+    assert_eq!(PERSIST_ROW_VISITS.with(std::cell::Cell::get), (0, 0));
+
+    {
+        let mut inner = shared.lock().unwrap();
+        let changed = inner.find_session_index(&changed_session).unwrap();
+        for preview in ["superseded", "latest"] {
+            inner.session_mut_by_index(changed).unwrap().session.preview = preview.to_owned();
+        }
+        inner.delegations[4095].title = "Latest delegation".to_owned();
+        inner.mark_delegation_mutated(4095);
+    }
+    let changed = collect_persist_delta_from_shared_state(&shared, watermark);
+    // Session reconciliation, selection and materialization each visit the
+    // same key once. Delegation stamps are updated at mutation time.
+    assert_eq!(PERSIST_ROW_VISITS.with(std::cell::Cell::get), (3, 2));
+    assert_eq!(changed.changed_sessions.len(), 1);
+    assert_eq!(changed.changed_sessions[0].session.id, changed_session);
+    assert_eq!(changed.changed_sessions[0].session.preview, "latest");
+    let delegations = changed.changed_delegations.unwrap();
+    assert_eq!(delegations.len(), 1);
+    assert_eq!(delegations[0].id, "history-4095");
+    assert_eq!(delegations[0].title, "Latest delegation");
+    assert!(changed.removed_session_ids.is_empty());
+    assert!(changed.removed_delegation_ids.is_empty());
+    assert!(changed.deferred_session_ids.is_empty());
+    assert!(changed.deferred_delegation_ids.is_empty());
+}
+
+#[test]
+fn persist_delta_retains_hidden_ancestor_after_an_unstamped_removal_duty() {
+    let mut inner = StateInner::new();
+    let parent = inner
+        .create_session(Agent::Codex, None, "/tmp".into(), None, None)
+        .session
+        .id;
+    let child = inner
+        .create_session(Agent::Codex, None, "/tmp".into(), None, None)
+        .session
+        .id;
+    inner.session_mut(&parent).unwrap().hidden = true;
+    inner.delegations.push(make_persist_delta_test_delegation(
+        "protected",
+        &parent,
+        &child,
+    ));
+    inner.mark_delegation_mutated(0);
+    let initial = inner.collect_persist_delta(0);
+    assert_eq!(initial.removed_session_ids, vec![parent.clone()]);
+
+    let child_position = inner.find_session_index(&child).unwrap();
+    inner.sessions[child_position].engram.source_root_bind_owner = Some(Uuid::new_v4());
+    assert_eq!(inner.last_mutation_stamp, initial.watermark);
+
+    let delta = inner.collect_persist_delta(initial.watermark);
+    assert!(delta.removed_session_ids.is_empty());
+    assert_eq!(delta.changed_sessions.len(), 2);
+    assert_eq!(delta.changed_sessions[0].session.id, parent);
+    assert_eq!(delta.changed_sessions[1].session.id, child);
+    assert!(inner.sessions[0].engram.observation_delete_requested);
+    assert!(inner.sessions[1].engram.observation_delete_requested);
+    assert!(inner.find_visible_session_index(&parent).is_some());
+}
+
 fn seed_postcommit_trim_session(
     inner: &mut StateInner,
     status: SessionStatus,
