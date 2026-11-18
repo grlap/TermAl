@@ -1,0 +1,28 @@
+{
+  "id": "01a1f0e4-8d5b-7f33-8250-50e8cd43f554",
+  "external_ref": null,
+  "title": "Clarify cross-provider Windows launch blocking while an exact failed launch is retained",
+  "outcome": "The launch admission scope and retry behavior are explicit when an unconfirmed cleanup affects a different provider. A pending owner remains reachable and containment stays fail-closed.",
+  "acceptance": [
+    "Clarify cross-provider Windows launch blocking while an exact failed launch is retained is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "runtime",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

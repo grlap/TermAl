@@ -1,0 +1,31 @@
+{
+  "id": "01a1f0e1-b6b4-7ba2-921a-af8b4534ee1a",
+  "external_ref": null,
+  "title": "Committed-input registration times out at the first launch after a fresh named-root generation (registration-timeout, nativeWaitReady=false): no host credit",
+  "outcome": "An authorized foreground committed-input launch registers within its deadline under normal Central load, or, if registration genuinely cannot complete, the launch says why and the host can still settle credit for the run once registration is confirmed, rather than losing credit to a timeout.",
+  "acceptance": [
+    "The cause of the registration-timeout at 2026-11-18 22:55:52Z (test-f9f12371) is identified with file and line, including whether the host's registration handler waited on the state lock or the persistence writer (see parent w-e2972bb21221 and the deferred w-ee1cc0cf84bf), and stated in the item note.",
+    "Either registration completes within its deadline under the load described here, shown deterministically (counted lock or writer work, not wall-clock timing, per Greg's no-timing rule), or a timed-out registration that later confirms is settled for credit exactly once, shown by a behavioural test.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock",
+    "verification-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Not a TermAl defect. Kimi::Consultant's read-only diagnosis (noted here) shows the timeout is Engram's launcher's single 8 s client budget aborting before TermAl's host answers its held-claims read for a fresh named root. TermAl's own launcher already has the fix (e81c9787). Tracked in Engram as w-3247e91deb99 (P1).",
+  "completion": null
+}

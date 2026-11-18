@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed at master 22f5779a (tree 4f829e93), fast-forwarded and pushed by Opus2. The pushed_at below is Opus2's landing announcement (#1758), an upper bound. Each isolated delegation worktree records which delegation created it, and a follow-up runs only in that worktree, checked off the state lock before restoration and again just before the admitting lock. The post-landing independent evaluation passed all 3 criteria. Evidence:\n- Round 11's clean review pair, adopted by the byte-identical carry.\n- The DL560 landing FULL test-d1037b89 on the same tree.\n- The Windows focused run test-99bf9f6a, 24/0, verification record afb9d2a0.\nLanding report: isolated delegations still running when the restart installs this build lose follow-ups; their work stays in the worktree. Automatic removal is w-ad06bf5de019. The filed Lows are w-e543b0c7f8dd, w-f15e182a2f39 (fixed by the exact link check), w-f89ac55bd364, w-c00630179bd3 and w-d8bfc4a1619e.",
+    "completed_at": "2026-11-18T22:27:03.516494100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

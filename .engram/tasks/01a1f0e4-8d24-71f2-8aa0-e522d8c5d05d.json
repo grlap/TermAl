@@ -1,0 +1,28 @@
+{
+  "id": "01a1f0e4-8d24-71f2-8aa0-e522d8c5d05d",
+  "external_ref": null,
+  "title": "Document shared Codex and dedicated runtime job ownership in the launch module",
+  "outcome": "The runtime-process-tree header states that suspended launch, exact job assignment, launch guard and failed-launch retention are shared, and distinguishes shared waiter's last-handle cleanup from the dedicated per-session confirmed cleanup lease.",
+  "acceptance": [
+    "Document shared Codex and dedicated runtime job ownership in the launch module is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-followup",
+    "runtime",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

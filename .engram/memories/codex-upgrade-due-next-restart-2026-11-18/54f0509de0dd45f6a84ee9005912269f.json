@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "codex-upgrade-due-next-restart-2026-11-18",
+    "revision_id": "54f0509de0dd45f6a84ee9005912269f",
+    "previous": "7c81998793894d598e26768ed08782cc",
+    "body_sha256": "87fa925c99da8bd34a175b7a3a65dd9ba57bfbbaf0bc0d01af9cf03f73a26eb7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T22:27:51.527148400Z"
+    }
+  },
+  "body": "Due at the NEXT TermAl restart (Fable2, 2026-11-18 16:47Z, after the 16:38Z restart to bf9bd691). Codex CLI versions differ:\n- Central: 0.167.1 (npm global; Greg's npm i -g @openai/codex@0.169.0 step was not run);\n- DL560: 0.166.0 at /usr/local/bin/codex;\n- Mac: 0.169.0 at /opt/homebrew/bin.\nNothing is urgent: gpt-6.2-sol already works on 0.167.1. Put the Central npm step, and the DL560 upgrade if Greg wants it, into the next \"restart now\" message, because Windows locks codex.exe while TermAl runs. Installing software needs Greg's word. Delete this memory once the versions match after a restart.\nRestart facts to reuse:\n- Greg starts every host with git pull plus cargo run --release, which rebuilds the exe (memory central-restart-cargo-run-rebuilds-exe), so verify from files and API only;\n- Opus2 now builds installs with Greg's exact command.\n\nFor the next restart's landing report: TermAl master now includes E91A (22f5779a, delegation worktree owner record). Running isolated delegations lose follow-ups after the restart that installs that build, while their work stays in the worktree (Opus3 #5596). Say this in the \"restart now\" message."
+}
