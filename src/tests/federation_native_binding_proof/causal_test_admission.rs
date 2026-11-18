@@ -10,6 +10,7 @@ mod completion_ready_notification_custody;
 mod completion_ready_recovery;
 mod completion_ready_scheduling;
 mod scan;
+mod selected_provider;
 
 fn source() -> Value {
     json!({"commit":"a".repeat(40),"tree":"b".repeat(40),"submodules":[],"changes":[]})

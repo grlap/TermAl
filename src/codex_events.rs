@@ -656,6 +656,9 @@ fn handle_shared_codex_app_server_message(
         .then_some(*active_turn_generation).flatten().map(|turn_generation| EngramObservationProvenance::Runtime {
             token: runtime_token.clone(), turn_generation,
         });
+    recorder_state.codex_start_turn_digest = event_turn_id
+        .filter(|event_turn| method == "item/started" && Some(*event_turn) == turn_id.as_deref())
+        .map(|event_turn| sha256_hex(event_turn.as_bytes()));
     let mut recorder = BorrowedSessionRecorder::new(state, &session_id, recorder_state);
     trace_shared_codex_event(
         "route",
@@ -767,6 +770,7 @@ fn handle_shared_codex_app_server_notification(
     pending_turn_start_request_id: &mut Option<String>,
     turn_started_watchdog_cancel_tx: &mut Option<mpsc::Sender<()>>,
     turn_started_before_response: &mut bool,
+    turn_id_provisional: bool,
     turn_state: &mut CodexTurnState,
     thread_sessions: &SharedCodexThreadMap,
     recorder: &mut impl TurnRecorder,
@@ -1048,25 +1052,38 @@ fn handle_shared_codex_app_server_notification(
                     turn_state.remote_compaction_progressed = true;
                 }
                 handle_codex_app_server_item_started(item, recorder)?;
-                if let (Some(key), Some(event_turn)) = (item.get("id").and_then(Value::as_str), event_turn_id)
+                if !turn_id_provisional
+                    && let (Some(key), Some(event_turn)) = (item.get("id").and_then(Value::as_str), event_turn_id)
                     && item.get("type").and_then(Value::as_str) == Some("commandExecution")
                     && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
                     && turn_id.as_deref() == Some(event_turn)
-                    && turn_state.launcher_output.len() < ENGRAM_TURN_CHECK_LIMIT
-                    && let Some(output) = state.capture_codex_launcher_output(
-                        session_id, runtime_token, runtime_generation, key)
+                    && (turn_state.launcher_output.len() < ENGRAM_TURN_CHECK_LIMIT
+                        || turn_state.launcher_output.contains_key(key))
                 {
+                    let output = state.capture_codex_launcher_output(
+                        session_id, runtime_token, runtime_generation,
+                        CodexLauncherStart {
+                            native_turn_id: event_turn,
+                            key,
+                            line: item.get("command").and_then(Value::as_str).unwrap_or(""),
+                            cwd: item.get("cwd").and_then(Value::as_str),
+                        },
+                    );
                     match turn_state.launcher_output.entry(key.to_owned()) {
-                        std::collections::hash_map::Entry::Vacant(entry) => { entry.insert(output); }
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            if let Some(output) = output { entry.insert(output); }
+                        }
                         std::collections::hash_map::Entry::Occupied(mut entry) => {
-                            if !entry.get().same_start(&output.check) { entry.get_mut().invalid = true; }
+                            if output.as_ref().is_none_or(|output| !entry.get().same_origin(output)) {
+                                entry.get_mut().invalid = true;
+                            }
                         }
                     }
                 }
             }
         }
         "item/commandExecution/outputDelta" => {
-            if *turn_started
+            if *turn_started && !turn_id_provisional
                 && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
                 && turn_id.is_some()
                 && shared_codex_event_turn_id(message) == turn_id.as_deref()
@@ -1074,6 +1091,7 @@ fn handle_shared_codex_app_server_notification(
                     message.pointer("/params/itemId").and_then(Value::as_str),
                     message.pointer("/params/delta").and_then(Value::as_str))
                 && let Some(output) = turn_state.launcher_output.get_mut(key)
+                && turn_id.as_deref().is_some_and(|turn| output.matches_native_turn(turn))
             {
                 state.observe_codex_launcher_output(session_id, runtime_token, runtime_generation, output, delta);
             }

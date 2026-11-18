@@ -469,11 +469,25 @@ trait SessionRecorderAccess {
     /// Reports an observation to the Engram sink, with the provenance the
     /// recorder holds for the frame it is applying.
     fn observe(&mut self, observation: EngramRecorderObservation<'_>) {
-        let provenance = self.recorder_state_mut().observation_provenance.clone();
+        let recorder = self.recorder_state_mut();
+        // A proven Codex start addresses this turn even when an older
+        // launch with the same item key is still open. Ambient callers keep
+        // the observation owner's conservative original-start lookup.
+        let is_start = matches!(&observation, EngramRecorderObservation::CommandStarted { .. });
+        let provenance = if is_start {
+            recorder.native_tool_provenance.as_ref().unwrap_or(&recorder.observation_provenance)
+        } else {
+            &recorder.observation_provenance
+        }.clone();
+        let codex_turn_digest = recorder.codex_start_turn_digest.clone();
         let session_id = self.session_id().to_owned();
-        self.state()
-            .engram_host()
-            .observe(&session_id, &provenance, observation);
+        let host = self.state().engram_host();
+        match (observation, codex_turn_digest) {
+            (EngramRecorderObservation::CommandStarted { key, ran, cwd }, Some(digest)) => {
+                host.observe_codex_command_start(&session_id, &provenance, key, ran, cwd, digest);
+            }
+            (observation, _) => host.observe(&session_id, &provenance, observation),
+        }
     }
 }
 
