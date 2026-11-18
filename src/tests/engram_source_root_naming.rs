@@ -5246,6 +5246,69 @@ fn the_naming_route_answers_with_the_handlers_statuses() {
 }
 
 #[test]
+fn watcher_keeps_queued_removal_of_a_named_root_below_a_build_directory() {
+    for rename in [false, true] {
+        let label = if rename {
+            "named-watch-root-rename"
+        } else {
+            "named-watch-root-delete"
+        };
+        let claimed = EOCheckedTurn::idle(label, true);
+        let original = naming_worktree(&claimed.root);
+        let nested = claimed.root.join("target").join("project");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        run_git_test_command(
+            &claimed.root,
+            &[
+                "worktree",
+                "move",
+                original.to_str().unwrap(),
+                nested.to_str().unwrap(),
+            ],
+        );
+        let nested = normalize_user_facing_path(&fs::canonicalize(&nested).unwrap());
+        request_naming(&claimed, label, Some(&nested), vec![naming_claim(label)]).unwrap();
+        claimed.begin("Observe changes in the named nested root.");
+        let scopes = collect_workspace_file_watch_scopes(&claimed.state);
+        assert!(
+            scopes.iter().any(|scope| scope.root_path == nested),
+            "the real named source root participates in scope selection"
+        );
+        let kind = if rename {
+            NotifyEventKind::Modify(notify::event::ModifyKind::Name(
+                notify::event::RenameMode::From,
+            ))
+        } else {
+            NotifyEventKind::Remove(notify::event::RemoveKind::Folder)
+        };
+        let mut pending = WorkspacePendingChanges::default();
+        pending.watch_roots = scopes.iter().map(|scope| scope.root_path.clone()).collect();
+        pending.ingest(
+            Ok(NotifyEvent::new(kind).add_path(nested.clone())),
+            EngramHost::watcher_arrival_now(),
+            std::time::Instant::now(),
+        );
+        let batch = pending.take();
+        assert_eq!(batch.len(), 1, "ingress retains the named root removal");
+        if rename {
+            fs::rename(&nested, claimed.root.join("moved-project")).unwrap();
+        } else {
+            fs::remove_dir_all(&nested).unwrap();
+        }
+        assert!(!nested.exists(), "the named root disappears before drain");
+        let publication = claimed.state.process_workspace_dirty_batch(batch);
+        assert!(
+            publication.iter().any(|change| {
+                change.path == nested.to_string_lossy()
+                    && change.kind == WorkspaceFileChangeKind::Subtree
+            }),
+            "queued named-root removal must survive drain (rename={rename})"
+        );
+        claimed.end();
+    }
+}
+
+#[test]
 fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_it() {
     // The named root lies under another session's workdir, so the watcher
     // routes its events to that session's scope and marks the unscoped copy
