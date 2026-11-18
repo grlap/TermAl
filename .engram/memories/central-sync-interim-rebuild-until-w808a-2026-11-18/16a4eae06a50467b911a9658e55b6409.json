@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-sync-interim-rebuild-until-w808a-2026-11-18",
+    "revision_id": "16a4eae06a50467b911a9658e55b6409",
+    "previous": null,
+    "body_sha256": "5ba13ba3e5d61fc4cdfe6527f56c8dd83561cab84980a395544bbfffa80be56a",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-808add714773"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T21:05:09.203327700Z"
+    }
+  },
+  "body": "TermAl Central engram-data sync, INTERIM procedure (Engram::Fable #1295, 2026-11-18), valid until Engram w-808add714773 lands and while Central is TermAl's only writer:\n1. Fetch.\n2. If FETCH_HEAD equals HEAD, skip the import. Otherwise fast-forward and import, and report the import's time.\n3. Export with --rebuild: `engram task-sync export .engram-data/.engram --include-memories --rebuild --json`. Measured at 33 s, 391 git starts.\n4. Commit with explicit paths, then fast-forward push to origin engram-data, after the disclosure scan.\n\nDo NOT run the plain incremental export (without --rebuild). On the installed build (a3907339) it spawns one `git cat-file blob` per task: at least 5,526 git starts and over 300 s. A killed run leaves .engram/project.json half-written, so restore it from HEAD.\n\nKeep the installed build; do not roll back. The fix vehicle is likely 45FE R10 (Git-side reads by diff); its pair is sync-critical. The last pushed engram-data commit is 0af52537. target/task-sync/central-imported-commit.txt and basis-0af52537.json are current."
+}

@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-sync-interim-rebuild-until-w808a-2026-11-18",
+    "revision_id": "fd817b9948f9406bbe806c47ee3227ac",
+    "previous": "8af4ace22c7042ebb5053809e39b045e",
+    "body_sha256": "a30084058a4e70c2a43b777f953fb43776d024b17e5e03ec24d21d4624fbeb52",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-808add714773"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-18T21:06:40.335745800Z"
+    }
+  },
+  "body": "TermAl Central engram-data sync, coordinator ruling (Engram::Fable #1299, 2026-11-18 21:06Z, cc Merger). It settles the Merger's #1432 hold. Valid until Engram's w-808add714773 fix is INSTALLED, and while Central is TermAl's only writer.\n\nThe --rebuild route is allowed whenever TermAl needs a sync (after a TermAl push, or a \"sync due\"):\n1. Fetch.\n2. If FETCH_HEAD equals HEAD, skip the import. Otherwise fast-forward and import, timed.\n3. `engram task-sync export .engram-data/.engram --include-memories --rebuild --json`. Measured at 33 s, 391 git starts.\n4. Commit with explicit paths, then fast-forward push to origin engram-data, after the disclosure scan.\n\nOnly the PLAIN incremental export (without --rebuild) is forbidden. On build a3907339 it spawns one git cat-file blob per task: at least 5,526 git starts and over 300 s. A killed run leaves .engram/project.json half-written, so restore it from HEAD.\n\nAfter the fix lands, the Merger will request a fresh named Central measurement.\nKeep the installed build. Last pushed: 0af52537. target/task-sync/central-imported-commit.txt and basis-0af52537.json are current."
+}
