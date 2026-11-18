@@ -1666,9 +1666,9 @@ fn engram_verification_record_send(
                     .as_deref()
                     .is_some_and(|code| ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS.contains(&code)) =>
         {
-            rejected(format!(
-                "Engram refused it: {}",
-                error.code.as_deref().unwrap_or("no code")
+            rejected(engram_verification_record_refusal_detail(
+                error.code.as_deref(),
+                error.refused_field.as_deref(),
             ))
         }
         // Any other answer, transient (a deadline, a busy or unavailable
@@ -1683,6 +1683,25 @@ fn engram_verification_record_send(
         Err(error) => pending(EngramVerificationRecordPending::TransportFailed {
             error_kind: format!("{:?}", error.kind),
         }),
+    }
+}
+
+/// The detail kept for a definite refusal: Engram's code alone, which says
+/// nothing private. A refusal of the record's claim binding also names its
+/// usual cause and what avoids it, because the run cannot be credited again:
+/// Engram refuses a record whose claim, fence or run moved after
+/// registration, and a claim that lapsed and was taken again has a new fence.
+fn engram_verification_record_refusal_detail(code: Option<&str>, field: Option<&str>) -> String {
+    let refused = format!("Engram refused it: {}", code.unwrap_or("no code"));
+    if field == Some("claim") {
+        format!(
+            "{refused} (field: claim): the claim was recovered under a new fence before the record \
+             was sent, or it lapsed, a handoff of it was pending, or the claim or its run moved \
+             after registration; keep the claim live until the record lands, and offer no handoff \
+             of it until then"
+        )
+    } else {
+        refused
     }
 }
 

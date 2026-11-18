@@ -852,7 +852,7 @@ fn exchange_engram_control_frame_with_limit(
             Ok(result)
         }
         EngramControlResponse::Error { error } => {
-            Err(EngramTransportError::remote(error.into_body()))
+            Err(error.into_transport_error())
         }
     }
 }

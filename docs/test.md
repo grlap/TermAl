@@ -1123,14 +1123,34 @@ registration, or whose record is not eligible, earns no credit, whatever its
 stages say. Only a root session holding the claim can name its root; a
 delegated session is measured in its workdir and has no named root.
 
+Credit rests on the host tracking the run from its start, so a finished run is
+never registered afterwards and a passed run is not rerun only for credit: a
+run that was registered and bound gets its record without a rerun. While the
+record's route is held (the initiating session is gone, the project has no
+Engram connection, or its store is not the registration's) or its send fails
+transiently or without a definite answer, it stays pending and the same
+frozen record is sent once the route is back, under the same key. A definite
+refusal is final, as below.
+
 A terminal verification refusal is stored beside the run in
 `engram-verification-record-state.json`. The launcher `summary` shows that
-refusal separately from the native test verdict, including Engram's returned
-field and reason when supplied. A passing test can therefore still have a
+refusal separately from the native test verdict, as `verification: rejected:`
+with Engram's refusal code and, for a refusal of the `claim` field, fixed
+host text naming its causes and correction; Engram's own message and reason
+are never shown. A passing test can therefore still have a
 rejected verification record. Both the run command and each check command
 have Engram's 8192 UTF-8 byte limit; a longer command is reported as
 `verification_command_too_long`, with its field and byte count. Commands and
 their fingerprints are preserved, and a terminal refusal is not resent.
+Engram refuses a record whose claim, fence or run moved after registration
+(field `claim`). The usual cause is a claim that lapsed and was taken again,
+which gives it a new fence, but Engram refuses the same way for a claim that
+lapsed and was not taken again, for a claim whose handoff is pending, and for
+a claim or run that moved without a lapse. That refusal's detail names these
+causes: the claim was recovered under a new fence before the record was sent,
+or it lapsed, a handoff of it was pending, or the claim or its run moved after
+registration. It adds the correction: keep the claim live until the record
+lands, and offer no handoff of it until then.
 
 Retained Commit-format verification bodies are retired locally before any
 route read or send, with `legacy_source_input_retired`. Their original bytes remain readable;

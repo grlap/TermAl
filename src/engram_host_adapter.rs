@@ -792,6 +792,31 @@ struct EngramControlErrorWire {
 }
 
 impl EngramControlErrorWire {
+    /// The field a registered-verification refusal names: a plain label
+    /// (lowercase ASCII letters, digits, `_` and `.`, at most 64 bytes),
+    /// never its reason or any other detail.
+    fn verification_refused_field(&self) -> Option<String> {
+        if self.code != "verification_record_refused" {
+            return None;
+        }
+        let field = self.details.get("field").and_then(Value::as_str)?;
+        (!field.is_empty()
+            && field.len() <= 64
+            && field
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'.'))
+        .then(|| field.to_owned())
+    }
+
+    /// The transport error this answer is, with its refused field kept as a
+    /// typed label beside the message.
+    fn into_transport_error(self) -> EngramTransportError {
+        let refused_field = self.verification_refused_field();
+        let mut error = EngramTransportError::remote(self.into_body());
+        error.refused_field = refused_field;
+        error
+    }
+
     fn into_body(self) -> EngramControlErrorBody {
         let message = match self.reason {
             Some(reason) if !reason.trim().is_empty() => {
@@ -838,6 +863,10 @@ struct EngramTransportError {
     /// unchanged. Read by `engram_store_transient`.
     refusal_code: Option<String>,
     message: String,
+    /// The request field a registered-verification refusal names
+    /// (`verification_record_refused` with `details.field`), as a safe label
+    /// kept out of `message` (`EngramControlErrorWire::into_transport_error`).
+    refused_field: Option<String>,
     /// The process this call meant to run never started, so it cannot have
     /// written anything. Only a failed spawn says so: every later failure
     /// leaves a write's outcome open. It also marks Engram control as
@@ -868,6 +897,7 @@ impl EngramTransportError {
             code: Some("control_binding_unavailable".to_owned()),
             refusal_code: None,
             message: message.into(),
+            refused_field: None,
             process_never_started: true,
             request_never_sent: false,
             control_process: None,
@@ -881,6 +911,7 @@ impl EngramTransportError {
             code: Some("deadline_exceeded".to_owned()),
             refusal_code: None,
             message: message.into(),
+            refused_field: None,
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
@@ -902,6 +933,7 @@ impl EngramTransportError {
             code: Some("control_unavailable".to_owned()),
             refusal_code: None,
             message: message.into(),
+            refused_field: None,
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
@@ -950,6 +982,7 @@ impl EngramTransportError {
             code: Some("unknown_control_schema".to_owned()),
             refusal_code: None,
             message: message.into(),
+            refused_field: None,
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
@@ -963,6 +996,7 @@ impl EngramTransportError {
             code: Some(error.code),
             refusal_code: None,
             message: error.message,
+            refused_field: None,
             process_never_started: false,
             request_never_sent: false,
             control_process: None,
