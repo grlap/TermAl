@@ -2168,6 +2168,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         runtime_output_cut: false,
         ended_at: None,
         keyed_by_line: false,
+        codex_address: None,
         end: Some(EngramTurnCheckEnd {
             declared: None,
             exit: EngramCommandExit::Code(0),
@@ -2238,6 +2239,7 @@ pub(super) fn finished_check(
         runtime_output_cut: false,
         ended_at: None,
         keyed_by_line: false,
+        codex_address: None,
         end: Some(EngramTurnCheckEnd {
             declared: None,
             exit: EngramCommandExit::Code(0),
