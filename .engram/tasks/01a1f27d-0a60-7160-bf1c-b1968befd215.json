@@ -1,0 +1,27 @@
+{
+  "id": "01a1f27d-0a60-7160-bf1c-b1968befd215",
+  "external_ref": null,
+  "title": "Keep Human promotion and rejection settlement off the synchronous writer fallback",
+  "outcome": "Actual persistence sender disconnection produces bounded prompt settlement without a full-state SQLite writer wait under StateInner and keeps unsent and uncertain delivery distinct.",
+  "acceptance": [
+    "Exercise actual send disconnection on promotion and terminal settlement with phase-driven coverage, preserving the existing durable handoff guarantees and showing no synchronous writer fallback from those paths."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "persistence",
+    "prompt-queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

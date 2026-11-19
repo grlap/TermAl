@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-sync-scan-must-gate-push-2026-11-19",
+    "revision_id": "b5cbec1e0a7646aea0e05a7532aea770",
+    "previous": null,
+    "body_sha256": "3c6cff09d1657cf535967d39f65290f57cfdf29347101db76f6f3c277a348d5c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T04:10:57.635584Z"
+    }
+  },
+  "body": "Termal::Opus2 engram-data sync procedure fix (2026-11-19). In my one-shot sync command the disclosure grep printed a match, and the chain still went on to commit and push. The construction was `grep ... || echo \"scan clean\"` followed by `git add ... && git commit ... && push`, and a match does not stop that chain.\n\nThis time the match was a false positive: the word \"secrets\" in task text (\"no message bodies, receipts or secrets\"), checked after the fact.\n\nFrom now on, run the scan alone first. Only when it prints nothing does a separate command commit and push. Any match is inspected before any commit."
+}

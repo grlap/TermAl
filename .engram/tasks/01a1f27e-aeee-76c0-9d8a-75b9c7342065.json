@@ -1,0 +1,38 @@
+{
+  "id": "01a1f27e-aeee-76c0-9d8a-75b9c7342065",
+  "external_ref": null,
+  "title": "Explain a retained Human persistence deadline and support explicit Resume",
+  "outcome": "When an ordinary Human prompt's initial persistence acknowledgement misses its deadline, the same unpromoted prompt stays queued and the pause explains why. Existing explicit Resume delivers it exactly once.",
+  "acceptance": [
+    "An initial ordinary Human persistence acknowledgement Deadline preserves the unpromoted envelope and displays “Persistence acknowledgement missed its deadline. Resume the queued prompt.” A newer pause, Stop or turn decision keeps its own state and explanation.",
+    "With injected time, an ordinary Human intake expires without a provider command. After the late acknowledgement, the existing explicit Resume and its ordinary promotion acknowledgement produce one provider command and one transcript entry for the original prompt ID. The queue empties and a second Resume emits no duplicate.",
+    "The independent whole-contribution review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "interim",
+    "persistence",
+    "prompt-queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1f14c-3214-74b2-ba2b-8846f09ecf90",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

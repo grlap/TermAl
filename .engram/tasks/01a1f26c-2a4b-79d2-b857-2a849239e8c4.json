@@ -1,0 +1,33 @@
+{
+  "id": "01a1f26c-2a4b-79d2-b857-2a849239e8c4",
+  "external_ref": null,
+  "title": "Git status panel: show submodules as marked, expandable folders with pointer vs. inner-change state",
+  "outcome": "In the Git status panel (ui/src/panels/GitStatusPanel.tsx, git-status-tree.ts), a changed submodule (gitlink, mode 160000) appears as a folder-like row with an unmistakable submodule marker, never as a plain file row. Expanding it lists the concrete changed files, each labelled by its source: (1) files changed between the gitlink's old and new commit (the pointer move), shown even when the submodule's worktree is clean; (2) local modified or staged files inside the submodule; (3) untracked files inside it. When the data cannot be shown (the submodule is not checked out, or a commit is not available locally), the row says why in the UI. An empty list never stands for \"no changes\". The existing actions on the submodule row (stage, unstage, the submodule diff) keep working unchanged.",
+  "acceptance": [
+    "A changed submodule in the staged or unstaged list renders as a distinct, marked submodule folder row, not a plain file row, in both sections. Ordinary files and folders render exactly as before.",
+    "Expanding the row lists concrete changed files in labelled groups: files changed between the gitlink's old and new commit (pointer move, listed even when the submodule worktree is clean), local modified or staged files inside the submodule, and untracked files inside it. Only the groups that apply are shown. The inner listing is read-only, with no stage or discard actions on inner files.",
+    "When a list cannot be produced (submodule not checked out, or the old or new commit not present locally), the row shows an explicit explanation in the UI, and an empty list is never displayed as if there were no changes.",
+    "Existing actions on the submodule row (stage, unstage and the existing submodule diff) behave exactly as before.",
+    "Behavioural tests cover: a pointer-only change with a clean submodule worktree (files between the commits listed), inner modified content, inner untracked content, an uninitialized submodule, and a commit missing locally. They run in the UI (vitest) and, for the backend payload, in cargo tests. `cd ui && npx tsc --noEmit` is clean.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "git",
+    "greg-requested",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

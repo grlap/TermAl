@@ -1,0 +1,29 @@
+{
+  "id": "01a1f23b-04d1-7e40-b68b-3dcad088ed90",
+  "external_ref": null,
+  "title": "Retain display-only test location for a validated one-call command",
+  "outcome": "An executed supported one-call command with a validated absolute directory can display its location when opening attribution is withheld, even without a separate runtime cwd. Display does not add proof or credit.",
+  "acceptance": [
+    "An executed one-call command reports the validated local directory in test history under a withheld opening.",
+    "The stored proof worktree and claim and source authority remain empty."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

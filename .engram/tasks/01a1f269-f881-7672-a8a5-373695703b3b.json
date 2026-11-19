@@ -1,0 +1,29 @@
+{
+  "id": "01a1f269-f881-7672-a8a5-373695703b3b",
+  "external_ref": null,
+  "title": "Recognize linked-worktree declared tests in an unbound live observation trace",
+  "outcome": "An ordinary live observation trace without a cached binding can retain a local declared-only verdict from the independently reported linked execution location without granting proof or credit.",
+  "acceptance": [
+    "An unbound traced opening whose runtime reports linked B retains the declared test and its verdict when session workdir A has no declaration.",
+    "No proof worktree, native reservation, attribution to a claim, or producer check is created."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

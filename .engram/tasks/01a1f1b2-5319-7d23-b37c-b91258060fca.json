@@ -4,7 +4,7 @@
   "title": "Add Greg's no-watcher wait-ownership rule to the coder-test-execution skill",
   "outcome": "TermAl's existing .agents/skills/coder-test-execution/SKILL.md carries the same no-watcher wait-ownership rule as Engram's copy (Engram w-95ce01a476e8), verbatim, as one added step.",
   "acceptance": [
-    "One step is added to .agents/skills/coder-test-execution/SKILL.md with this text, verbatim: \"Every wait names one session to wake and the exact result. The producer sends that result directly to the waiter; no polling. Never wait for a conditional resource state: LAUNCH NOW, or its current holder sends END directly to the named next waiter. No watcher; a coordinator assigns any unnamed wait immediately.\" No other change to the skill.",
+    "One step is added to .agents/skills/coder-test-execution/SKILL.md with this text, verbatim: \"Every wait names one session to wake, the exact result, and what delivers it directly to the waiter: the host's own completion (a test-run wait or a delegation wait) or a named session; no polling. Never wait for a conditional resource state: LAUNCH NOW (start at once), or its current holder sends END (its message that the resource is free) directly to the named next waiter. A foreground run the turn itself waits on is not a wait on another session. No watcher; a coordinator assigns any unnamed wait immediately.\" No other change to the skill.",
     "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
   ],
   "acceptance_bindings": [],

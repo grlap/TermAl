@@ -1,0 +1,29 @@
+{
+  "id": "01a1f211-439b-7611-9551-91b61ef7192f",
+  "external_ref": null,
+  "title": "Preserve a restored closing outcome for its exact still-held owner after cached focus changes",
+  "outcome": "A restored attributed closing job can deliver its original still-held owner's outcome when the session cache now points to a different claim. Source and checks are withheld when their original scope cannot be re-proved.",
+  "acceptance": [
+    "A restored selected job keeps A's outcome under a populated B cache when A remains exactly held.",
+    "The closely matched lost-owner case refuses delivery, and the stale attributed source and checks remain withheld."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

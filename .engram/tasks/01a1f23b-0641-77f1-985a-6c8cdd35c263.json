@@ -1,0 +1,29 @@
+{
+  "id": "01a1f23b-0641-77f1-985a-6c8cdd35c263",
+  "external_ref": null,
+  "title": "Distinguish incomplete held-claim reads from lost closing ownership",
+  "outcome": "A scoped closing whose exact owner is absent from an incomplete held page waits for proof or retries without publishing to another claim. A definitive lost owner still causes terminal refusal.",
+  "acceptance": [
+    "An omitted exact opening owner on an incomplete held read does not cause an immediate terminal failure.",
+    "A later exact held result can preserve the outcome, and definitive owner loss still refuses delivery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

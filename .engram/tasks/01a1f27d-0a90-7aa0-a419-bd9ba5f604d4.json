@@ -1,0 +1,28 @@
+{
+  "id": "01a1f27d-0a90-7aa0-a419-bd9ba5f604d4",
+  "external_ref": null,
+  "title": "Preserve a parked Human intake's explicit Resume surface when an idle runtime exits",
+  "outcome": "An idle runtime exit does not release a queue parked by a Human intake deadline or replace its actionable reason before the user can Resume.",
+  "acceptance": [
+    "An event-driven idle-exit test shows the original parked Human envelope remains owned and actionable. An explicit Resume uses the same ID exactly once, and unrelated idle exits retain their existing behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "prompt-queue",
+    "runtime"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

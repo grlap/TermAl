@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed on origin/master in 7c582a5d4e084f1670e5540b2448a1aa06c82728, tree cf8f25c3ea855964e3699f3793ee041527982ae4. Registered FULL recognizes exact completed Clippy/doc-link Lint from observed argv, reports unsupported executed stages by name, and keeps genuinely unrun docs at NotRun without minting evidence or withholding supported Test and Build credit. Windows registered focused run test-9e8f9fcd-694c-4a50-8b39-02fdf2011fce passed all six behavior tests at that clean commit. Independent R2 pair re-reviewed both Medium fixes with none outstanding. The combined DL560 FULL run test-950007f5-64cc-4f52-a29b-85ecde2f11a7 passed on the identical landed tree. The fresh independent post-landing evaluation 828ad690fd3844e883d68c463100d04a passed all three criteria on the exact landed source. Optional legacy closing-baseline follow-up remains filed separately.",
+    "completed_at": "2026-11-19T04:11:29.192304200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

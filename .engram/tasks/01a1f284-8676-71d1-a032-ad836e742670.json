@@ -1,0 +1,29 @@
+{
+  "id": "01a1f284-8676-71d1-a032-ad836e742670",
+  "external_ref": null,
+  "title": "Parked-worker regression test: bounded exit guard and deterministic early-timer coverage",
+  "outcome": "parked_observation_worker_inspects_once_per_wake_and_claims_only_due_work cannot hang on a missing shutdown wake and fails if a short periodic poll is reintroduced.",
+  "acceptance": [
+    "The shutdown assertion waits for a worker-exited event under the existing bounded deadlock guard before joining, and fixture cleanup releases the park on failure.",
+    "The test verifies the requested park duration through a scheduler seam or a scripted wait, so a worker that waits min(due, 100 ms) fails it deterministically.",
+    "No new assertion rests on wall-clock duration; a two-vendor review has no Medium or higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

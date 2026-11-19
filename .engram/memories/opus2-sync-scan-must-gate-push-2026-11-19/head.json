@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-sync-scan-must-gate-push-2026-11-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "b5cbec1e0a7646aea0e05a7532aea770"
+    ]
+  }
+}

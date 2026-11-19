@@ -1,0 +1,27 @@
+{
+  "id": "01a1f27d-09c8-7b42-9983-7f796d5963d5",
+  "external_ref": null,
+  "title": "Make provably unsent Human promotions resumable after exact rejection",
+  "outcome": "A proven-unsent Human dispatch restores the same resumable queue envelope, while uncertain delivery remains blocked from replay.",
+  "acceptance": [
+    "Promotion-ACK failure and synchronous provider enqueue rejection are both exercised through explicit Resume. Proven-unsent identity is preserved and delivered at most once; an ambiguous control still refuses replay."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "persistence",
+    "prompt-queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

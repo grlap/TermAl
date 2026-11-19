@@ -1,0 +1,28 @@
+{
+  "id": "01a1f21a-847d-75e3-8b6b-9ffd895bfb37",
+  "external_ref": null,
+  "title": "Decide bounded replay for qualified readiness I/O refusals of prepared reports",
+  "outcome": "Resolve how prepared observation delivery handles qualified readiness store_open_refused with kind io, with an explicit policy that reflects recoverable and permanent producer failures.",
+  "acceptance": [
+    "Establish which producer I/O failures may recover and record the delivery policy for those and permanent failures.",
+    "The host and documentation implement the agreed policy while retaining the exact original request and readable redacted terminal diagnostics. Deterministic cases cover the selected behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "engram-host-adapter",
+    "observation-delivery"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

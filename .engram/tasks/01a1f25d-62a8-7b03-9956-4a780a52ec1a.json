@@ -1,0 +1,28 @@
+{
+  "id": "01a1f25d-62a8-7b03-9956-4a780a52ec1a",
+  "external_ref": null,
+  "title": "docs/test.md: say a launch stopped before its run directory leaves no per-run artifact, not 'nothing on disk'",
+  "outcome": "The interrupted-launch paragraph in docs/test.md describes the pre-run-directory case accurately: no per-run artifact or registration, while a shared review-runs parent may exist.",
+  "acceptance": [
+    "docs/test.md no longer says a launch stopped before its run directory 'leaves nothing on disk'; it says no per-run artifact or registration remains, noting that a first launch in a worktree may already have created the shared review-runs parent (scripts/test-launcher.mjs recursive mkdir).",
+    "A two-vendor review of the change has no Medium or higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

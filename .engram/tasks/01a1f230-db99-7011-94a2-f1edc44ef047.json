@@ -1,0 +1,29 @@
+{
+  "id": "01a1f230-db99-7011-94a2-f1edc44ef047",
+  "external_ref": null,
+  "title": "docs/test.md: state the source-owner 429 action in the committed-input refusal list",
+  "outcome": "The launcher paragraph in docs/test.md that lists committed-input refusals before a run directory exists (around lines 1176-1181 at master 7c582a5d: \"unavailable, refused or malformed source-owner metadata\", and so on) also states what to do about an HTTP 429 refusal of the source-owner probe. The host allows two probes at once (ENGRAM_SOURCE_OWNER_PERMITS); the refusal leaves no per-run artifact or registration; the launching session reports it to its coordinator, who decides when to launch again. The wording matches the interrupted-before-first-record entry that w-f1559f4bd64c lands.",
+  "acceptance": [
+    "The committed-input refusal list in docs/test.md states the action for an HTTP 429 source-owner probe refusal, consistent with the interrupted-before-first-record entry: no per-run artifact or registration, reported to the coordinator, who decides when to launch again, no unowned timed wait.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "launcher",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

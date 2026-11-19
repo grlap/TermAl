@@ -1,0 +1,28 @@
+{
+  "id": "01a1f214-0cdb-7030-abf6-bdf3b9de9d10",
+  "external_ref": null,
+  "title": "Define LAUNCH NOW / END and the foreground-wait case in the coder-test-execution skill's step 7",
+  "outcome": "Step 7 of .agents/skills/coder-test-execution/SKILL.md says what LAUNCH NOW and END mean, and that a foreground run the turn itself waits on (step 4) is not a wait on another session. The text stays identical to Engram's copy, through one joint edit agreed with Engram's coordinator.",
+  "acceptance": [
+    "Step 7 defines LAUNCH NOW and END and states how it relates to step 4's foreground route, in one sentence identical in TermAl's and Engram's copies, with no other change to the skill.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "low-from-review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

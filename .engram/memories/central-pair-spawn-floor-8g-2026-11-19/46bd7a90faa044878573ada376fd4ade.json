@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-pair-spawn-floor-8g-2026-11-19",
+    "revision_id": "46bd7a90faa044878573ada376fd4ade",
+    "previous": "88398faa4a2d4be48763d2382a35051c",
+    "body_sha256": "b3557f4e504fc3d3ffe077be4aadcfe33bb142315750c6a74ceed3f266271a70",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T06:53:22.690251900Z"
+    }
+  },
+  "body": "Central capacity ruling (Fable2, 2026-11-19 ~06:12Z, on Opus2 #6904). Central's free virtual memory (FV) sat at 13.7-18 GB with no cargo and no reviewer running. The load is the sum of the live sessions (termal 5.7, chrome 5.0, WSL 4.7, about 0.7 per agent CLI), not one consumer. That blocked the 16 GiB pair-spawn floor.\nRule:\n- A TermAl reviewer PAIR may spawn at FV >= 8 GiB (8,388,608 KiB) when no cargo or rustc is running at spawn time. A pair costs about 1.5 GB of commit charge and runs no compiler.\n- Cargo chain legs keep 16 GiB, and cold Windows builds keep 22 GiB. Both are measured live at the launch moment, so they already count running pairs.\n- The cold-build floor stays because a cold `cargo test -j 1 --bin termal` peaks at a rustc private of about 15.3 GiB (memory central-termal-j1-cold-test-compile-peak-2026-11-15).\n- A warm leg may use its own recorded warm-peak measurement, never a guess.\n- The Chrome grant applies only when freeing Chrome closes the gap, once per need.\n- Ending idle root sessions is Greg's or the owners' call, not the coordinators'.\n- Engram pairs follow Engram's slot rule. Engram::Fable was asked to adopt the same 8 GiB pair floor.\n\nClarification (Fable2, 2026-11-19 ~07:00Z, on Engram::Fable #8381): the 22 GiB cold floor applies only to TermAl's cold `cargo test --bin termal` builds. Engram's -j1 cargo legs keep 16 GiB whether cold or warm; their R6-R8 cold legs ran cleanly at 16-19.5 GB FV.\n\nAddition (Fable2, 2026-11-19 ~07:00Z, on Opus2 #6911): during a running -j1 WARM cargo leg, ONE single evaluator or reviewer spawn at a time (never a pair) may start when FV >= 8 GiB at the spawn moment. During a COLD build, nothing spawns."
+}

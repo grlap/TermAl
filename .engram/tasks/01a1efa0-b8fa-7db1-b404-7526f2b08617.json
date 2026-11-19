@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed 7c582a5d: Windows shared Codex app-server uses the existing suspended kill-on-close job launch and waiter-owned lifecycle; Unix matches the dedicated-runtime spawn. Exact Windows 10/10, Linux parity and batch FULL passed. Fresh independent post-landing acceptance b1c6ea0d228143b18aee3c13fe926bf2 passed all three criteria.",
+    "completed_at": "2026-11-19T04:12:14.398421600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

@@ -1,0 +1,27 @@
+{
+  "id": "01a1f27d-09fd-7df3-8d13-c993415bcc54",
+  "external_ref": null,
+  "title": "Preserve the newer queue decision when a retained Human start fails late",
+  "outcome": "Late Human start failures keep their accepted envelope without replacing a newer pause or completed Stop reason.",
+  "acceptance": [
+    "Event-driven cases exercise newer Pause and completed Stop during an older persistence/start operation. The accepted envelope remains and the newer state and reason win. Cover generic retained failures outside the narrow typed-intake Deadline guard."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "persistence",
+    "prompt-queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

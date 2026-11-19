@@ -1,0 +1,28 @@
+{
+  "id": "01a1f27d-0984-7222-a651-7a7bfba3f3a9",
+  "external_ref": null,
+  "title": "Evaluate automatic retry after a retained Human intake's persistence deadline",
+  "outcome": "After sync, decide whether one automatic retry is worthwhile and design it around exact queue and runtime ownership while preserving manual Resume.",
+  "acceptance": [
+    "The post-sync design resolves automatic owner revocation and idle exit (#2), terminal diagnostics after head cancellation (#6), and injected-time reset coverage (#7) before any implementation is admitted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "after-sync",
+    "persistence",
+    "prompt-queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a1f14c-3214-74b2-ba2b-8846f09ecf90",
+  "disposal_reason": "Fable2 #3391–3392 and Greg 588693a8 #2087 supersede #3390. Automatic recovery remains the parent outcome and adopts Kimi's one-shot fence design after the manual interim lands. This planning duplicate was filed under the earlier instruction.",
+  "completion": null
+}
