@@ -862,6 +862,9 @@ struct EngramTransportError {
     /// the transport's own code, so that callers matching on `code` are
     /// unchanged. Read by `engram_store_transient`.
     refusal_code: Option<String>,
+    /// Structured store-open cause, qualified by the readiness decoder.
+    /// CLI error prose and control reply messages never populate this field.
+    refusal_kind: Option<String>,
     message: String,
     /// The request field a registered-verification refusal names
     /// (`verification_record_refused` with `details.field`), as a safe label
@@ -896,6 +899,7 @@ impl EngramTransportError {
             causal_failure: None,
             code: Some("control_binding_unavailable".to_owned()),
             refusal_code: None,
+            refusal_kind: None,
             message: message.into(),
             refused_field: None,
             process_never_started: true,
@@ -910,6 +914,7 @@ impl EngramTransportError {
             causal_failure: None,
             code: Some("deadline_exceeded".to_owned()),
             refusal_code: None,
+            refusal_kind: None,
             message: message.into(),
             refused_field: None,
             process_never_started: false,
@@ -932,6 +937,7 @@ impl EngramTransportError {
             causal_failure: None,
             code: Some("control_unavailable".to_owned()),
             refusal_code: None,
+            refusal_kind: None,
             message: message.into(),
             refused_field: None,
             process_never_started: false,
@@ -981,6 +987,7 @@ impl EngramTransportError {
             causal_failure: None,
             code: Some("unknown_control_schema".to_owned()),
             refusal_code: None,
+            refusal_kind: None,
             message: message.into(),
             refused_field: None,
             process_never_started: false,
@@ -995,6 +1002,7 @@ impl EngramTransportError {
             causal_failure: None,
             code: Some(error.code),
             refusal_code: None,
+            refusal_kind: None,
             message: error.message,
             refused_field: None,
             process_never_started: false,
