@@ -230,6 +230,138 @@ fn stop_queued_successor_waits_for_the_named_predecessors_durable_capture() {
 }
 
 #[test]
+fn prepared_named_predecessor_retries_delivery_while_successor_runs() {
+    let fixture = TwoClaims::new("prepared-predecessor-store-repair");
+    let job = fixture.stop_before_capture(false);
+    let state = &fixture.turn.state;
+    let session_id = &fixture.turn.session_id;
+    state.shutdown_persist_blocking();
+
+    let release = phase_sync::ReleaseGateOnDrop::new();
+    let gate = release.gate();
+    let (installed, deliveries) = mpsc::channel();
+    let inner = Arc::downgrade(&state.inner);
+    let session = session_id.to_owned();
+    let turn_ref = job.trace.host_turn_ref.clone();
+    let transport = fixture.turn.transport.clone();
+    *state
+        .runtime_observation_lifetime
+        .install_hook
+        .lock()
+        .unwrap() = Some(Arc::new(move |phase| match phase {
+        "closing_installed" => {
+            let inner = inner.upgrade().unwrap();
+            let inner = inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+            if record
+                .engram
+                .unadmitted_reports
+                .iter()
+                .any(|report| report.host_turn_ref == turn_ref)
+            {
+                transport
+                    .observation_policy_errors
+                    .lock()
+                    .unwrap()
+                    .push_back(EngramTransportError::remote(EngramControlErrorBody {
+                        code: "projection_repair_required".to_owned(),
+                        message: "private fixture repair detail".to_owned(),
+                    }));
+            }
+        }
+        "delivery_installed" => {
+            let _ = installed.send(());
+            phase_sync::wait_for_gate(&gate, true);
+        }
+        _ => {}
+    }));
+    fixture.release_worker();
+    receive(&deliveries, "prepared predecessor waits for the store");
+
+    let (waiting, successor) = fixture.turn.record(|record| {
+        assert!(record.queued_prompts.is_empty());
+        assert!(record.engram.pending_naming_selection.is_none());
+        let successor = record.engram.unadmitted_active_turn.clone().unwrap();
+        assert_eq!(
+            successor.opening_root.as_ref().unwrap().binding,
+            fixture.second
+        );
+        let report = record
+            .engram
+            .unadmitted_reports
+            .iter()
+            .find(|report| report.host_turn_ref == job.trace.host_turn_ref)
+            .unwrap();
+        assert_eq!(report.pending(), Some(0));
+        assert!(report.store_wait_notice_posted);
+        (report.clone(), successor)
+    });
+    assert!(
+        runtime_observation_report_is_durable(&state.persistence_path, session_id, &waiting,)
+            .unwrap()
+    );
+    let requests: Vec<_> = waiting
+        .envelopes
+        .iter()
+        .map(|envelope| {
+            assert_eq!(envelope.request["binding"], json!(fixture.first));
+            envelope.request.clone()
+        })
+        .collect();
+    assert_eq!(
+        requests[0]["occurrence"]["observed_checks"][0]["host_check_id"],
+        json!(job.trace.commands[0].check.host_check_id),
+    );
+    let sent = || {
+        fixture
+            .turn
+            .transport
+            .requests()
+            .into_iter()
+            .filter(|call| call.request["operation"] == "execution_observe")
+            .map(|call| call.request)
+            .collect::<Vec<_>>()
+    };
+    assert!(sent().is_empty());
+
+    // The gate parks the real worker after its first retry install. Advance
+    // the fixture's saved due time without waiting for the production delay.
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(session_id).unwrap();
+        let report = record
+            .engram
+            .unadmitted_reports
+            .iter_mut()
+            .find(|report| report.host_turn_ref == job.trace.host_turn_ref)
+            .unwrap();
+        report.retry_at = "2000-01-01T00:00:00.000Z".to_owned();
+        state.commit_session_locked(&mut inner, session_id).unwrap();
+    }
+    release.release();
+    for _ in &requests {
+        receive(&deliveries, "retained predecessor envelope is recorded");
+    }
+    fixture.turn.record(|record| {
+        assert_eq!(
+            record.engram.unadmitted_active_turn.as_ref(),
+            Some(&successor)
+        );
+        let report = record
+            .engram
+            .unadmitted_reports
+            .iter()
+            .find(|report| report.host_turn_ref == job.trace.host_turn_ref)
+            .unwrap();
+        assert!(report.envelopes.iter().all(|envelope| matches!(
+            envelope.delivery,
+            EngramRuntimeObservationDelivery::Recorded { .. }
+        )));
+    });
+    assert_eq!(sent(), requests);
+}
+
+#[test]
 fn stop_queued_successor_preserves_the_unnamed_predecessors_workdir_scope() {
     assert_stop_capture_barrier(false, false, "stop-workdir-capture-barrier");
 }

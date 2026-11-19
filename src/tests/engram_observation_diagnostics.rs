@@ -144,7 +144,7 @@ fn retained_revision_only_observations_retire_before_policy_or_send_and_keep_cus
                 !next.is_discharged(),
                 "local retirement cannot certify an earlier remote outcome"
             );
-            finish_runtime_observation_delivery_attempt(&mut next, &fixture.id, 0);
+            finish_runtime_observation_delivery_attempt(&mut next, &fixture.id, 0, false);
             assert_eq!(
                 deliver_runtime_observation_envelope(&adapter, &next, 0, Duration::from_secs(1))
                     .unwrap(),
@@ -283,7 +283,7 @@ fn ordinary_observation_remote_echo_is_retained_without_entering_transcript_or_d
         let mut next =
             deliver_runtime_observation_envelope(&adapter, &report, 0, Duration::from_secs(1))
                 .unwrap();
-        finish_runtime_observation_delivery_attempt(&mut next, &fixture.id, 0);
+        finish_runtime_observation_delivery_attempt(&mut next, &fixture.id, 0, false);
         let retained = match &next.envelopes[0].delivery {
             EngramRuntimeObservationDelivery::Refused { message, .. }
             | EngramRuntimeObservationDelivery::LocalFailure { message, .. } => message,
@@ -366,7 +366,7 @@ fn ordinary_observation_closing_failure_keeps_remote_details_out_of_transcript()
         )
         .unwrap();
     let transcript = notices(&fixture);
-    assert!(transcript.contains("runtime_observation_failed"));
+    assert!(transcript.contains("runtime_observation_retry_exhausted"));
     assert!(!transcript.contains("DISTINCT_CLOSING_ECHO"));
     assert!(!transcript.contains("PRIVATE_CLOSING_CODE"));
     assert!(!transcript.contains("source_id"));
