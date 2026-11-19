@@ -3,7 +3,7 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unknown_mailbox_repeated_reads_keep_the_original_refusal_and_listed_mailbox_is_readable() {
+async fn native_membership_misses_explain_domain_404s_without_hiding_listed_mail() {
     let case = MailboxCase::new().await;
     let sent = execute(&case, case.request.clone()).unwrap();
     let target = match &case.request.operation {
@@ -60,41 +60,94 @@ async fn unknown_mailbox_repeated_reads_keep_the_original_refusal_and_listed_mai
             read_key: None,
         }),
     )
-    .await;
-    let acknowledgement = match &page {
-        Ok(page) => Some(
-            acknowledge_mailbox(
-                AxumPath((native, mailbox)),
-                State(case.pair.central.clone()),
-                Json(AcknowledgeMailboxRequest {
-                    receipt: page.0.receipt.clone(),
-                    expected_processed_through: None,
-                    processed_through: None,
-                    no_continuation: false,
-                }),
-            )
-            .await,
-        ),
-        Err(_) => None,
-    };
-    case.pair.finish().await;
-    let page = page.unwrap().0;
+    .await
+    .unwrap()
+    .0;
     assert!(page.receipt.is_some());
+    let ack_request = || {
+        Json(AcknowledgeMailboxRequest {
+            receipt: page.receipt.clone(),
+            expected_processed_through: None,
+            processed_through: None,
+            no_continuation: false,
+        })
+    };
+    let refused_ack = acknowledge_mailbox(
+        AxumPath((native.clone(), missing.clone())),
+        State(case.pair.central.clone()),
+        ack_request(),
+    )
+    .await
+    .unwrap_err();
+    let acknowledgement = acknowledge_mailbox(
+        AxumPath((native.clone(), mailbox)),
+        State(case.pair.central.clone()),
+        ack_request(),
+    )
+    .await
+    .unwrap()
+    .0;
+    let diagnostics = get_mailbox_relay_wake_diagnostics(State(case.pair.central.clone()))
+        .await
+        .unwrap()
+        .0;
+    case.pair.finish().await;
     assert!(
         page.messages
             .iter()
             .any(|message| message.id == sent["messageId"].as_str().unwrap())
     );
-    acknowledgement.unwrap().unwrap();
+    assert!(acknowledgement.participants.iter().any(|participant| {
+        participant.session_id == page.reader_session_id.as_deref().unwrap()
+            && Some(participant.processed_through) == page.next_after_sequence
+    }));
+    assert!(refused.iter().all(|error| {
+        error
+            .message
+            .contains("mailbox not found for this participant; no page was selected")
+    }));
+    assert!(
+        refused_ack
+            .message
+            .contains("mailbox not found for this session")
+    );
+    let store_id = diagnostics["nativeRouteMisses"]["coordinationStoreId"]
+        .as_str()
+        .unwrap();
+    assert!(mailbox_relay_uuid(store_id));
+    refused.push(refused_ack);
     for error in refused {
         assert_eq!(
             error.status,
             StatusCode::NOT_FOUND,
             "an unknown mailbox is not an expired frozen page: {error:?}"
         );
-        assert_eq!(
-            error.kind,
-            Some(ApiErrorKind::FederationMailboxReadNotFound)
+        let bytes = axum::body::to_bytes(error.into_response().into_body(), 4096)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], "native_mailbox_route_miss");
+        let message = body["error"].as_str().unwrap();
+        assert!(message.contains("no original native mailbox membership row matched"));
+        assert!(message.contains(&native));
+        assert!(message.contains(&missing));
+        assert!(message.contains(store_id));
+        assert!(message.contains(diagnostics["serverInstanceId"].as_str().unwrap()));
+    }
+    let records = diagnostics["nativeRouteMisses"]["records"]
+        .as_array()
+        .unwrap();
+    assert_eq!(records.len(), 4);
+    for (record, operation) in records.iter().zip(["read", "read", "read", "acknowledge"]) {
+        assert_eq!(record["operation"], operation);
+        assert_eq!(record["callerSessionId"], native);
+        assert_eq!(record["mailboxId"], missing);
+        assert_eq!(record["nativeLookup"], "no_membership");
+        assert_eq!(record["coordinationStoreId"], store_id);
+        assert!(
+            !record
+                .to_string()
+                .contains(page.receipt.as_deref().unwrap())
         );
     }
 }

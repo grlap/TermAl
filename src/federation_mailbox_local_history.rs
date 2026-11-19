@@ -1,6 +1,27 @@
 // Selects original native mailbox ownership before domain/relay routing.
 // Does not retry refused domain operations against a different store or actor.
 
+const NATIVE_MAILBOX_ROUTE_MISS_LIMIT: usize = 64;
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum OriginalMailboxLookup {
+    Member,
+    NoMembership,
+    StoreUnavailable,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeMailboxRouteMiss {
+    at: String,
+    operation: &'static str,
+    caller_session_id: Option<String>,
+    mailbox_id: Option<String>,
+    coordination_store_id: Option<String>,
+    native_lookup: OriginalMailboxLookup,
+}
+
 impl AppState {
     async fn replay_original_native_mailbox_send(
         &self,
@@ -88,23 +109,91 @@ impl AppState {
         .await
     }
 
-    async fn owns_original_mailbox_resource(
+    async fn lookup_original_mailbox_resource(
         &self,
         native: &str,
         id: &str,
         message: bool,
-    ) -> Result<bool, ApiError> {
+    ) -> Result<OriginalMailboxLookup, ApiError> {
         let store = self.mailbox_store.clone();
         let native = native.to_owned();
         let id = id.to_owned();
         run_blocking_api(move || {
-            let Some(connection) = store.connection_if_enabled() else { return Ok(false); };
+            let Some(connection) = store.connection_if_enabled() else {
+                return Ok(OriginalMailboxLookup::StoreUnavailable);
+            };
             let sql = if message {
                 "SELECT EXISTS(SELECT 1 FROM mailbox_participants p JOIN mailbox_messages m ON m.mailbox_id=p.mailbox_id WHERE p.session_id=?1 AND m.id=?2)"
             } else {
                 "SELECT EXISTS(SELECT 1 FROM mailbox_participants WHERE session_id=?1 AND mailbox_id=?2)"
             };
-            connection.query_row(sql, rusqlite::params![native, id], |row| row.get::<_, bool>(0)).map_err(|error| mailbox_api_error(anyhow!(error)))
+            let owns = connection
+                .query_row(sql, rusqlite::params![native, id], |row| row.get::<_, bool>(0))
+                .map_err(|error| mailbox_api_error(anyhow!(error)))?;
+            Ok(if owns {
+                OriginalMailboxLookup::Member
+            } else {
+                OriginalMailboxLookup::NoMembership
+            })
         }).await
+    }
+
+    fn describe_mailbox_route_miss(
+        &self,
+        mut error: ApiError,
+        operation: &'static str,
+        native: &str,
+        mailbox: &str,
+        lookup: OriginalMailboxLookup,
+    ) -> ApiError {
+        if error.status != StatusCode::NOT_FOUND || lookup == OriginalMailboxLookup::Member {
+            return error;
+        }
+        // The path is caller input. Retain only generated identifier shapes,
+        // and never retain receipts, message data or the domain error body.
+        let caller_session_id = native
+            .strip_prefix("session-")
+            .filter(|suffix| {
+                !suffix.is_empty()
+                    && suffix.len() <= 20
+                    && suffix.bytes().all(|byte| byte.is_ascii_digit())
+            })
+            .map(|_| native.to_owned());
+        let mailbox_id = mailbox
+            .strip_prefix("mailbox-")
+            .filter(|suffix| suffix.len() == 36 && mailbox_relay_uuid(suffix))
+            .map(|_| mailbox.to_owned());
+        let coordination_store_id = self.mailbox_store.coordination_store_id.clone();
+        let reason = if lookup == OriginalMailboxLookup::StoreUnavailable {
+            "the original native mailbox store was unavailable"
+        } else {
+            "no original native mailbox membership row matched"
+        };
+        error.message = format!(
+            "{}; domain mailbox {operation} returned 404 after {reason} for caller {} and mailbox {} in coordination store {} (server instance {})",
+            error.message,
+            caller_session_id.as_deref().unwrap_or("<invalid session id>"),
+            mailbox_id.as_deref().unwrap_or("<invalid mailbox id>"),
+            coordination_store_id.as_deref().unwrap_or("unavailable"),
+            self.server_instance_id,
+        );
+        let record = NativeMailboxRouteMiss {
+            at: stamp_now(),
+            operation,
+            caller_session_id,
+            mailbox_id,
+            coordination_store_id,
+            native_lookup: lookup,
+        };
+        let mut history = self
+            .mailbox_store
+            .native_route_misses
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if history.len() == NATIVE_MAILBOX_ROUTE_MISS_LIMIT {
+            history.pop_front();
+        }
+        history.push_back(record);
+        error.with_kind(ApiErrorKind::NativeMailboxRouteMiss)
     }
 }
