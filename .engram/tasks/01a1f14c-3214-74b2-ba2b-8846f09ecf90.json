@@ -1,0 +1,30 @@
+{
+  "id": "01a1f14c-3214-74b2-ba2b-8846f09ecf90",
+  "external_ref": null,
+  "title": "Human prompt start fails with \"persistence acknowledgement failed: Deadline\" and pauses the queue until another prompt arrives",
+  "outcome": "A human prompt whose durable persistence acknowledgement misses its deadline is not lost or duplicated, and the session does not stay paused waiting for an unrelated later prompt: the retained prompt is retried automatically once persistence recovers (or the pause says exactly why and what to do), and the retry delivers it exactly once.",
+  "acceptance": [
+    "The cause of the Deadline is identified with file and line (for example the persistence writer tick or a disk-full write failure; Central's C: was at 0 bytes free around 00:38-00:41Z on 2026-11-19) and stated in the item note, together with what currently resumes the paused queue.",
+    "A behavioural test drives a human prompt through a persistence-acknowledgement deadline, then recovery, and shows the retained prompt is delivered exactly once with no duplicate turn and without needing another prompt to arrive. Time is injected, not wall clock (Greg's no-timing rule).",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "persistence",
+    "prompt-queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

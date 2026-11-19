@@ -1,0 +1,29 @@
+{
+  "id": "01a1f15b-4e0e-72f1-8311-4f2a7fc1104d",
+  "external_ref": null,
+  "title": "Cover missing and ambiguous execution directories in withheld test history",
+  "outcome": "Host-observed test history keeps the execution result after named-root attribution is withheld. When the runtime reports no execution directory or directory candidates are ambiguous, display location and stored proof worktree remain empty.",
+  "acceptance": [
+    "Deterministic host-observed command cases for missing and ambiguous execution directories assert that test results remain visible and both display location and proof worktree are empty."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "sync-path",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

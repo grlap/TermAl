@@ -1,0 +1,38 @@
+{
+  "id": "01a1f13c-fd73-73b1-b90f-e04a3c49b2e9",
+  "external_ref": null,
+  "title": "Settle writer state for proven id-less Codex refusals",
+  "outcome": "A proven completion for a command without a usable native item ID does not leave its uniquely owned current writer or shell move open.",
+  "acceptance": [
+    "A real router test exercises a refused id-less command without an item ID and verifies its own writer and pending shell state are settled when ownership is unique.",
+    "The refused observation remains unchanged, with no artifact or credit, and ambiguity never retires another execution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

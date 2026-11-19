@@ -1,0 +1,27 @@
+{
+  "id": "01a1f127-b756-7660-b083-8ac336a93228",
+  "external_ref": null,
+  "title": "docs/test.md: an interrupt before the run directory can still leave an empty review-runs parent",
+  "outcome": "docs/test.md's deliberately-unchanged entry for a launch interrupted before request.json says precisely what may remain on disk: on a checkout without the review-runs parent, a stop during the recursive directory creation can leave that empty parent, which no later launch reads; and its examples of pre-directory stopping points read as examples, not a complete list.",
+  "acceptance": [
+    "docs/test.md: an interrupt before the run directory can still leave an empty review-runs parent is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "docs",
+    "launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

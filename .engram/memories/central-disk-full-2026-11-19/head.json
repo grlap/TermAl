@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-disk-full-2026-11-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a6b176a90a0d48df9d8882fa66bb4595",
+      "ddc6858759774a0e9f67c9f0ed8dff35",
+      "f73637fd6f9e46db98653ddf61aea735"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-disk-full-2026-11-19",
+    "revision_id": "a6b176a90a0d48df9d8882fa66bb4595",
+    "previous": null,
+    "body_sha256": "35eca03b956d04c3f34244a194c2f6e6f7d9a85ef12a1535d9a428c39d23d23e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T00:39:24.515123700Z"
+    }
+  },
+  "body": "INCIDENT 2026-11-19 00:38Z (Opus2 #6862): Central C: at 0 bytes free; an Engram compile failed with os error 112. Opus2 stopped granting Central runs.\nSeen read-only:\n- TermAl main target/ about 22 GB (it holds the running termal.exe, NEVER to be cleaned);\n- Engram/target about 101 GB;\n- Engram/.worktrees 362 entries;\n- TermAl .tmp 3375 entries, 36 worktrees with their own target/ (5-15 GB each).\nResponse (Fable2):\n- Engram::Fable asked to free Engram/target and superseded worktrees through its Codex lanes (ebe242f7);\n- TermAl Codex owners and Sol-a7bb (for Opus2's and Opus3's lists) remove target/ build output of superseded worktrees with no active run, then superseded worktrees, under \"Cleanup deletions\" (paths checked, nothing forced; frozen in-flight candidates kept);\n- Greg informed in Polish (588693a8).\nReopen Central at about 50 GB free.\nLesson: today's many superseded candidates each left a worktree with a 5-15 GB target/. Owners should remove superseded worktrees promptly, not only at item close. Delete this memory after headroom is restored and the lesson is recorded elsewhere."
+}

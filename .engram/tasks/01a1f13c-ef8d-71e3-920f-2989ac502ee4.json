@@ -1,0 +1,38 @@
+{
+  "id": "01a1f13c-ef8d-71e3-920f-2989ac502ee4",
+  "external_ref": null,
+  "title": "Pin linked launcher artifacts from registration through terminal publication",
+  "outcome": "A linked run retains the original registration-time physical artifact identity and admits only its captured terminal result into live history.",
+  "acceptance": [
+    "A deterministic registration-to-first-END control proves the original directory associates and yields the original durable result, while substituting a different directory with the same request identity cannot claim the registration.",
+    "After terminal capture, changing results in the same linked directory cannot publish replacement facts through indexed list or SSE. Restoring the original data restores availability, with durable producer proof unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

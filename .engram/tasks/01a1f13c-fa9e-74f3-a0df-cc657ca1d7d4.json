@@ -1,0 +1,38 @@
+{
+  "id": "01a1f13c-fa9e-74f3-a0df-cc657ca1d7d4",
+  "external_ref": null,
+  "title": "Fence linked stage log reads to the original artifact directory",
+  "outcome": "A linked stage-log request either reads from the original scoped run artifact or returns an explicit refusal.",
+  "acceptance": [
+    "The genuine linked log is readable when its scope and original result match, or receives the documented bounded refusal.",
+    "A replacement directory or results file cannot choose substitute log bytes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

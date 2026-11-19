@@ -1,0 +1,29 @@
+{
+  "id": "01a1f150-26a5-7b80-b74d-b5b53ee9938a",
+  "external_ref": null,
+  "title": "Update the Engram host adapter’s prepared-report delivery outcome documentation",
+  "outcome": "The delivery outcomes accurately describe the landed contract for durable prepared reports and bounded preparation or ambiguous delivery.",
+  "acceptance": [
+    "The Delivery outcomes section describes qualified readiness store refusals and typed startup busy preserving prepared-report retry custody, the one-time pending notice, verified-store readiness I/O settlement, and bounded ambiguous delivery and preparation. The wording matches the final landed behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "docs",
+    "engram-host-adapter",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1eaa3-014c-7240-b030-5fe431225670",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

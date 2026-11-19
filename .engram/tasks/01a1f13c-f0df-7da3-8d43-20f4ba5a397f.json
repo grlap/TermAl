@@ -1,0 +1,38 @@
+{
+  "id": "01a1f13c-f0df-7da3-8d43-20f4ba5a397f",
+  "external_ref": null,
+  "title": "Serve durable linked registration metadata before artifact indexing",
+  "outcome": "The registration view can confirm a durable linked registration while its artifact is not indexed.",
+  "acceptance": [
+    "The same durable linked registration returns its original metadata and binding before and after indexing, including after reload.",
+    "Detail and raw payloads still require their original scoped artifact."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
