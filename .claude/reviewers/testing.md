@@ -45,6 +45,7 @@ Focus: Test coverage for changes, test quality, Vitest patterns.
      the last: 'Poprawic reviewers aby nigdy to nie wróciło.'; the rule and
      the other three quotes are in AGENTS.md and CLAUDE.md, "No tautological
      tests")
+   - Report a test that asserts on implementation text or shape instead of runtime behavior; do not request such a guard (`source_id` is exempt).
 
 4. **React component tests** (Vitest + React Testing Library):
    - Test user interactions, not implementation details
