@@ -101,6 +101,29 @@ struct EngramReadinessPathPolicy {
     status: String,
 }
 
+struct EngramReadinessStoreRefusal {
+    code: &'static str,
+    refusal_kind: Option<&'static str>,
+    project_id: String,
+    database: Option<PathBuf>,
+}
+
+// Refusal identity is private to the readiness caller. The diagnostic HTTP
+// routes keep returning the same status and bounded diagnostic text.
+struct EngramReadinessFailure {
+    error: ApiError,
+    refusal: Option<EngramReadinessStoreRefusal>,
+}
+
+impl From<ApiError> for EngramReadinessFailure {
+    fn from(error: ApiError) -> Self {
+        Self {
+            error,
+            refusal: None,
+        }
+    }
+}
+
 fn run_engram_readiness(
     binary: &FsPath,
     marker: &FsPath,
@@ -116,6 +139,7 @@ fn run_engram_readiness(
         ENGRAM_READINESS_TIMEOUT,
         host_workdir,
     )
+    .map_err(|failure| failure.error)
 }
 
 fn run_engram_readiness_within(
@@ -125,7 +149,7 @@ fn run_engram_readiness_within(
     root: &FsPath,
     timeout: Duration,
     host_workdir: &FsPath,
-) -> Result<EngramReadinessReceipt, ApiError> {
+) -> Result<EngramReadinessReceipt, EngramReadinessFailure> {
     let declaration = read_engram_diagnostic_declaration(marker)?;
     // Test seam: a registered home's readiness is answered without a process
     // (src/engram_readiness_test_seam.rs); every check below still runs.
@@ -146,27 +170,73 @@ fn run_engram_readiness_within(
         )?,
     };
     if read_engram_diagnostic_declaration(marker).ok().as_ref() != Some(&declaration) {
-        return Err(ApiError::conflict(
-            "Engram declaration changed during readiness; verify again",
-        ));
+        return Err(
+            ApiError::conflict("Engram declaration changed during readiness; verify again").into(),
+        );
     }
     if !output.status.success() {
-        return Err(ApiError::bad_request(format!(
+        let error = ApiError::bad_request(format!(
             "Engram readiness unavailable or refused ({}); no Full Audit fallback: {} {}",
             output.status,
             engram_diagnostic_excerpt(&output.stdout),
             engram_diagnostic_excerpt(&output.stderr),
-        )));
+        ));
+        let refusal = if output.status.code() == Some(1) {
+            engram_readiness_store_refusal(&output.stdout)
+        } else {
+            None
+        };
+        return Err(EngramReadinessFailure { error, refusal });
     }
     if output.stdout.len() > ENGRAM_DIAGNOSTIC_REPORT_LIMIT {
-        return Err(ApiError::bad_request(
-            "Engram readiness receipt exceeds the 16384-byte admission limit; no Full Audit fallback",
-        ));
+        return Err(
+            ApiError::bad_request(
+                "Engram readiness receipt exceeds the 16384-byte admission limit; no Full Audit fallback",
+            )
+            .into(),
+        );
     }
     serde_json::from_slice(&output.stdout).map_err(|error| ApiError::bad_request(format!(
         "Engram readiness returned an unsupported or invalid receipt: {}; update the binary, no Full Audit fallback",
         engram_diagnostic_excerpt(error.to_string().as_bytes()),
-    )))
+    )).into())
+}
+
+// Read refusal fields only from the bounded v1 envelope. Diagnostic prose,
+// malformed output and unrecognized phases cannot grant retries.
+fn engram_readiness_store_refusal(bytes: &[u8]) -> Option<EngramReadinessStoreRefusal> {
+    if bytes.len() > ENGRAM_DIAGNOSTIC_REPORT_LIMIT { return None; }
+    let value: Value = serde_json::from_slice(bytes).ok()?;
+    if value["schema_version"] != 1 || value["scope"] != "readiness"
+        || value["ready"] != false || value["mutation_enabled"] != false
+        || value["full_audit"] != "not_run"
+    { return None; }
+    let phase = value["phase"].as_str();
+    let (code, refusal_kind) = if value["code"] == "store_open_refused" {
+        let kind = match (phase?, value["kind"].as_str()?) {
+            ("open", "busy") => "busy",
+            ("open" | "path", "io") => "io",
+            _ => return None,
+        };
+        ("store_open_refused", Some(kind))
+    } else {
+        let code = ENGRAM_STORE_TRANSIENT_CODES.iter().copied()
+            .find(|code| Some(*code) == value["code"].as_str())?;
+        (code, None)
+    };
+    let database = match (code, phase, value.get("database")?) {
+        ("store_open_refused", Some("path"), Value::Null) => None,
+        (_, Some("path"), _) => return None,
+        (_, _, Value::String(path)) if !path.is_empty() => Some(PathBuf::from(path)),
+        _ => return None,
+    };
+    let project_id = value["project_id"].as_str()?.to_owned();
+    Some(EngramReadinessStoreRefusal {
+        code,
+        refusal_kind,
+        project_id,
+        database,
+    })
 }
 
 // Re-read routing after the process returns; the command's assertion alone is
