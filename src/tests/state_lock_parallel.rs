@@ -306,7 +306,12 @@ async fn modeled_parallel_mailbox_resume_and_writer_keep_their_counts() {
     let hold_phase = phase_number.clone();
     TEST_BOOT_STATE_MUTEX.with(|hook| {
         *hook.borrow_mut() = Some(Box::new(move |inner| {
-            inner.state_projection_cache.lock().unwrap().capture_sink = Some(cut_tx);
+            inner
+                .state_projection_cache
+                .inputs
+                .lock()
+                .unwrap()
+                .capture_sink = Some(cut_tx);
             StateMutex::new_with_diagnostic_reporter(
                 inner,
                 Duration::ZERO,

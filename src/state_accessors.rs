@@ -44,6 +44,7 @@ const SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS: usize = 160;
 thread_local! {
     static TEST_BEFORE_QUEUE_PROJECTION_HASH: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
     static TEST_BEFORE_SESSION_SUMMARY_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+    static TEST_BEFORE_SESSION_SUMMARY_VALIDATE: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
     static TEST_BEFORE_STATE_SNAPSHOT_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -1182,9 +1183,8 @@ impl AppState {
         self.snapshot_from_inner_with_agent_readiness(inner, self.cached_agent_readiness())
     }
 
-    fn pending_engram_mcp_revocation_session_ids(inner: &StateInner) -> Vec<String> {
-        let mut session_ids = inner
-            .sessions
+    fn pending_engram_mcp_revocation_session_ids(sessions: &SessionSequence) -> Vec<String> {
+        let mut session_ids = sessions
             .iter()
             .filter(|record| record.engram_mcp_revocation_pending)
             .map(|record| record.session.id.clone())
@@ -1202,6 +1202,7 @@ impl AppState {
         {
             let hook = inner
                 .state_projection_cache
+                .inputs
                 .lock()
                 .unwrap()
                 .before_materialize
@@ -1212,26 +1213,31 @@ impl AppState {
         }
         #[cfg(test)]
         observe_state_snapshot_projection_for_test();
-        let sessions = inner
+
+        let mut sessions: Vec<_> = inner
             .sessions
             .iter()
             .filter(|record| !record.hidden)
             .map(|record| Self::wire_session_summary_from_record(&self.server_instance_id, record))
             .collect();
-        self.snapshot_header_from_inner(inner, agent_readiness, sessions)
+        let mut header = self.snapshot_header_from_inner(inner, agent_readiness);
+        let projection = header.test_run_overview.source.as_ref().expect("captured test runs");
+        for session in &mut sessions {
+            session.test_run_activity =
+                SessionTestRunActivitySnapshot::captured(projection.clone(), &session.id);
+        }
+        header.sessions = sessions;
+        header.pending_engram_mcp_revocation_session_ids =
+            Self::pending_engram_mcp_revocation_session_ids(&inner.sessions);
+        header
     }
 
     fn snapshot_header_from_inner(
         &self,
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,
-        mut sessions: Vec<StateSessionSummary>,
     ) -> StateResponse {
         let projection = self.test_run_history_projection_locked(inner);
-        for session in &mut sessions {
-            session.test_run_activity =
-                SessionTestRunActivitySnapshot::captured(projection.clone(), &session.id);
-        }
         StateResponse {
             remote_transport_statuses: self.remote_registry.transport_statuses(),
             revision: inner.revision,
@@ -1242,7 +1248,7 @@ impl AppState {
             projects: inner.projects.clone(),
             orchestrators: inner.orchestrator_instances.clone(),
             workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
-            sessions,
+            sessions: Vec::new(),
             delegations: inner
                 .delegations
                 .iter()
@@ -1251,8 +1257,7 @@ impl AppState {
             delegation_waits: inner.delegation_waits.clone(),
             test_run_overview: TestRunOverviewSnapshot::captured(projection),
             test_run_waits: inner.test_run_waits.clone(),
-            pending_engram_mcp_revocation_session_ids:
-                Self::pending_engram_mcp_revocation_session_ids(inner),
+            pending_engram_mcp_revocation_session_ids: Vec::new(),
         }
     }
 
@@ -1289,7 +1294,7 @@ impl AppState {
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
             pending_engram_mcp_revocation_session_ids:
-                Self::pending_engram_mcp_revocation_session_ids(inner),
+                Self::pending_engram_mcp_revocation_session_ids(&inner.sessions),
         }
     }
 

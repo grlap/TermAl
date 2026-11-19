@@ -2589,6 +2589,7 @@ async fn state_events_route_counts_legacy_connections_for_the_stream_lifetime() 
         .lock()
         .unwrap()
         .state_projection_cache
+        .inputs
         .lock()
         .unwrap()
         .before_materialize = Some(Box::new(move || {

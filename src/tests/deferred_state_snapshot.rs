@@ -12,6 +12,9 @@ mod state_diff_broadcast;
 #[path = "queue_projection_cache.rs"]
 mod queue_projection_cache;
 
+#[path = "summary_snapshot_cut.rs"]
+mod summary_snapshot_cut;
+
 struct ProjectionObserver;
 
 impl ProjectionObserver {
@@ -115,9 +118,25 @@ fn metadata_commit(state: &AppState) -> u64 {
     inner.revision
 }
 
-fn current_cut(state: &AppState) -> ImmutableStateSnapshot {
+fn capture_cut(state: &AppState) -> ImmutableStateSnapshot {
     let inner = state.inner.lock().unwrap();
     state.immutable_state_snapshot_locked(&inner)
+}
+
+fn current_cut(state: &AppState) -> ImmutableStateSnapshot {
+    let mut cut = capture_cut(state);
+    cut.project_sessions();
+    cut
+}
+
+fn session_summary_cache(state: &AppState) -> Arc<Mutex<SessionSummaryCache>> {
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .state_projection_cache
+        .session_summaries
+        .clone()
 }
 
 fn materialize(work: StateBroadcastWork) -> StateResponse {
@@ -158,6 +177,7 @@ fn general_commit_rebuilds_only_changed_summaries_and_matches_fresh_projection()
     let count = Arc::new(AtomicUsize::new(0));
     let observer = SummaryObserver::install(count.clone());
     metadata_commit(&state);
+    materialize(mailbox.take_pending_for_test().pop().unwrap());
     assert_eq!(
         count.load(Ordering::SeqCst),
         0,
@@ -170,15 +190,17 @@ fn general_commit_rebuilds_only_changed_summaries_and_matches_fresh_projection()
         record.orchestrator_auto_dispatch_blocked = true;
         state.commit_locked(&mut inner).unwrap();
     }
+    assert_eq!(count.load(Ordering::SeqCst), 0, "commits only capture rows");
+    materialize(mailbox.take_pending_for_test().pop().unwrap());
     assert_eq!(
         count.load(Ordering::SeqCst),
         1,
         "one changed session rebuilds once, not all six"
     );
     metadata_commit(&state);
+    let cut = materialize(mailbox.take_pending_for_test().pop().unwrap());
     assert_eq!(count.load(Ordering::SeqCst), 1);
     drop(observer);
-    let cut = materialize(mailbox.take_pending_for_test().pop().unwrap());
     let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
     assert_eq!(
         serde_json::to_string(&cut).unwrap(),
@@ -384,11 +406,7 @@ fn cache_prunes_hidden_and_deleted_records_and_restamps_recreated_ids() {
     let empty = current_cut(&state);
     assert!(empty.sessions.is_empty());
     assert!(
-        state
-            .inner
-            .lock()
-            .unwrap()
-            .state_projection_cache
+        session_summary_cache(&state)
             .lock()
             .unwrap()
             .sessions
@@ -463,9 +481,10 @@ fn warm_projection_scan_reports_measurement_at_live_session_count() {
     for _ in 0..3 {
         let inner = state.inner.lock().unwrap();
         let started = std::time::Instant::now();
-        let cut = state.immutable_state_snapshot_locked(&inner);
+        let mut cut = state.immutable_state_snapshot_locked(&inner);
         micros.push(started.elapsed().as_micros());
         drop(inner);
+        cut.project_sessions();
         assert_eq!(cut.sessions.len(), 6793);
         cuts.push(cut);
     }

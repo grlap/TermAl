@@ -36,6 +36,7 @@ fn cut(revision: u64, sessions: &[&Arc<StateSessionSummary>]) -> ImmutableStateS
     header.revision = revision;
     ImmutableStateSnapshot {
         header,
+        session_cut: None,
         sessions: sessions
             .iter()
             .map(|session| Arc::clone(*session))
