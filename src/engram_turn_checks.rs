@@ -1485,16 +1485,15 @@ impl AppState {
             // The same start's validated target is also the observation's
             // source. A named linked root must not be resolved again as the
             // session worktree, nor lent to a different command.
-            let observed_root = match target.as_ref() {
-                Some((_, validated_command, target)) => (validated_command == command)
-                    .then(|| test_run_display_path(&target.root)),
-                None => engram_check_worktree_from(
-                    command, FsPath::new(&workdir), places.as_deref(), None,
-                ).map(|target| test_run_display_path(&target.root)),
-            }.unwrap_or_default();
+            let placement = test_run_origin.history_placement(
+                command,
+                FsPath::new(&workdir),
+                places.as_deref(),
+                target.as_ref().map(|(_, command, target)| (command, target)),
+            );
             let declared_binding = declared.as_ref().map(|(_, _, binding)| binding)
                 .or_else(|| visibility_declared.as_ref().map(|(_, _, binding)| binding));
-            self.observe_test_command_start(test_run_origin, command, &observed_root, &started_at, declared_binding);
+            self.observe_test_command_start(test_run_origin, command, placement, &started_at, declared_binding);
         }
         #[cfg(test)]
         TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {

@@ -41,6 +41,9 @@ impl AppState {
         // An off-lock callback cannot rewrite a newer row or an established
         // association, including the exact image held by a receipt's fence.
         if current.artifact.is_some()
+            || current.native_completion_refusal.as_ref().is_some_and(|refusal| {
+                refusal.code == TestRunNativeCompletionRefusalCode::ProviderPlacementUnconfirmed
+            })
             || !test_run_artifact_observation_matches_snapshot(current, expected)
         {
             return;
