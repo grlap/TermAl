@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-legal-slotb-spawn-rule-2026-11-19",
+    "revision_id": "543b5b3a657545f98f7c7ee735e496c1",
+    "previous": null,
+    "body_sha256": "1454cac7214c10f938316e0bcc21938e2ed833c31641613997c5d6ec2300f2aa",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T07:45:04.651522300Z"
+    }
+  },
+  "body": "Central spawn rule for Legal's foreign build window (Fable2 #6921, 2026-11-19; applies to Legal slot B, 08:10Z until Legal::Fable sends 'slot B ended'). Legal's pinned cargo builds are a foreign workload: we measure them but do not gate on them. Allowed: ONE reviewer pair or one single spawn at a time, and only when FV >= 12 GiB (12,582,912 KiB) at the spawn moment. Not allowed: any TermAl or Engram cargo, compile or test leg on Central during the slot. If Legal reports memory pressure, a 1455 or an OOM, stop our spawns at once and tell Fable2; let any running pair finish. Queue order at grant time: 808a R10 (sync), 2C14 4cb0b047, 75B9 7206b3fc, 5FE4 R8. Deferred Central cargo legs (75B9 and 5FE4 R8 cold Windows) wait for 'slot B ended', with Opus2 as the waker."
+}

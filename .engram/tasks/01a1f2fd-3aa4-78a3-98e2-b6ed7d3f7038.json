@@ -1,0 +1,32 @@
+{
+  "id": "01a1f2fd-3aa4-78a3-98e2-b6ed7d3f7038",
+  "external_ref": null,
+  "title": "Git status submodules: follow-ups from the 2A84 R2 review (wrong-type tree OIDs, accessible rename, subprocess fan-out, fixture robustness, test gaps)",
+  "outcome": "The Low findings from the clean 2A84 R2 review pair are fixed or explicitly declined with reasons.",
+  "acceptance": [
+    "Gitlink endpoints that are not commits (for example tree OIDs) are reported as unreadable/wrong type, not Listed, with a real tree-OID fixture.",
+    "A renamed submodule's diff button keeps its 'from <original path>' detail in the accessible description, with a test.",
+    "The trailing-space and rename fixtures are independent of temp-root aliases and inherited status.renames configuration.",
+    "Internal status callers do not pay per-gitlink submodule detail reads, or the reads are bounded, and nested recursion stops once both groups are full.",
+    "Rust fixture tests cover the newly-added-gitlink ls-tree listing, the 100-path cap and remaining count, a nested incomplete/Unavailable result, and a nested SC.. pointer move.",
+    "A two-vendor review has no Medium or higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "git-status",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

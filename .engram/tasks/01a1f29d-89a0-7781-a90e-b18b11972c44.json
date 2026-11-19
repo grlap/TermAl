@@ -1,0 +1,29 @@
+{
+  "id": "01a1f29d-89a0-7781-a90e-b18b11972c44",
+  "external_ref": null,
+  "title": "termal_get_session_result omits retainedReviewAttempts on completed retained reviewer delegations",
+  "outcome": "For a completed reviewer delegation with retained review attempts, the parent's compact termal_get_session_result packet carries retainedReviewAttempts, or retainedReviewAttemptsError when they can't be read, as docs/features/review-attempt-retention.md specifies, without the caller needing an explicit submissionAttempt read.",
+  "acceptance": [
+    "The cause of the omission is identified with file and line on master, distinguishing it from w-dc0ba05feb1f's active-follow-up discovery case.",
+    "A behavioural test drives a completed reviewer delegation with at least one retained attempt and shows the compact parent result includes retainedReviewAttempts, and shows retainedReviewAttemptsError when the retained record is unreadable. It fails before the fix. The explicit submissionAttempt read keeps working unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "review-attempt-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

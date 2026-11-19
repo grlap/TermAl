@@ -1,0 +1,28 @@
+{
+  "id": "01a1f305-f87b-76e1-9085-75e03c423878",
+  "external_ref": null,
+  "title": "Cover the Human intake deadline guard when a newer queue decision wins",
+  "outcome": "An injected-time regression verifies that a late initial Human persistence deadline cannot change the newer pause, Stop or active-turn state, and the original queued prompt is retained once.",
+  "acceptance": [
+    "After the real initial Human row fence is captured, use a normal queue or turn owner to change a captured generation. Advance the scripted clock and verify the newer status, preview and pause survive and the original prompt appears once without a provider send."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "persistence",
+    "prompt-queue",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
