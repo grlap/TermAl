@@ -1,0 +1,29 @@
+{
+  "id": "01a1f36f-eaa4-76a0-a5d8-3d3e264ee5e8",
+  "external_ref": null,
+  "title": "Replay test: assert the replay key's attempt count only after the worker settles the receipt",
+  "outcome": "retryable_remote_responses_replay_the_same_request_instead_of_refusing_it counts same-key attempts only after the worker has settled the replay receipt, so a stray third same-key attempt cannot escape detection.",
+  "acceptance": [
+    "The test waits on an explicit worker completion or idle event, asserts the matching envelope is Recorded, and then counts attempts for the replay key.",
+    "Optionally, it also asserts that every unadmitted_turn request for the same host_turn_ref carries the replay key.",
+    "No assertion rests on wall-clock duration; a two-vendor review has no Medium or higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

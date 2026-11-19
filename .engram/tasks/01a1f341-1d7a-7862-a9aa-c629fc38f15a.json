@@ -1,0 +1,28 @@
+{
+  "id": "01a1f341-1d7a-7862-a9aa-c629fc38f15a",
+  "external_ref": null,
+  "title": "Reassess parked runtime observation retry deadlines after a wall-clock correction",
+  "outcome": "The observation worker reconsiders pending UTC retry deadlines after a wall-clock correction while preserving event-driven waiting and retained report semantics.",
+  "acceptance": [
+    "Deterministic clock and wait inputs cover a forward wall-clock correction during a park and demonstrate prompt reassessment of the due work.",
+    "Normal wake, shutdown, immutable retained report, and ambiguity budget behavior remain covered without a wall-clock timing assertion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "clock",
+    "engram-host-adapter"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

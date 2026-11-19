@@ -22,12 +22,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the Git status submodule folder rows in 1df3b3f1. Both sections mark gitlinks and keep the parent stage, unstage and diff actions. Expanders list concrete commit, modified and untracked paths read-only, with explicit checkout and object availability states. Exact registered Windows TypeScript and 45 focused Vitest tests passed. Verified DL560 Rust author run passed compilation and 44 focused Git tests on byte-identical Rust. The two-vendor pair cleared both earlier Mediums and the complete DL560 gate passed on the exact landed tree. Fresh independent post-landing evaluation b805fd3fe479405394261e23e012cd7e passed all six criteria on the clean landed revision. Low follow-ups remain separately tracked. Integration owner deferred binary installation.",
+    "completed_at": "2026-11-19T09:54:06.383497400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

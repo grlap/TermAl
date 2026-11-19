@@ -1,0 +1,29 @@
+{
+  "id": "01a1f341-1d51-7f20-ad8d-df3728e8146b",
+  "external_ref": null,
+  "title": "Make the shared runtime observation test producer independent of wall-clock rollback",
+  "outcome": "The shared reporting fixture validates and stamps retained runtime observations against deterministic fixture time so correct replay tests survive a clock rollback.",
+  "acceptance": [
+    "A deterministic regression exercises a recorded replay with fixture time moving backward and retains the request identity and valid receipt.",
+    "The fixture preserves production observation validation and existing receipt assertions. No pass or fail depends on a wall-clock step."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "clock",
+    "engram-host-adapter",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
