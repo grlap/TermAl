@@ -45,6 +45,8 @@ struct EngramRuntimeObservationReport {
     call_timeout_ms: u64,
     attempts: u32,
     retry_at: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    store_wait_notice_posted: bool,
     envelopes: Vec<EngramRuntimeObservationEnvelope>,
 }
 
@@ -82,6 +84,7 @@ impl EngramRuntimeObservationReport {
             call_timeout_ms: duration_millis(call_timeout),
             attempts: 0,
             retry_at: unadmitted_observation_timestamp(),
+            store_wait_notice_posted: false,
             envelopes,
         })
     }
@@ -259,12 +262,24 @@ fn runtime_observation_has_legacy_source(occurrence: &EngramInterTurnOccurrence)
 // the original request pending. A documented record-nothing refusal settles
 // that envelope with its code; it never pauses a queue or retries as if
 // permission existed.
+#[cfg(test)]
 fn deliver_runtime_observation_envelope(
     adapter: &EngramHostAdapter,
     report: &EngramRuntimeObservationReport,
     index: usize,
     timeout: Duration,
 ) -> Result<EngramRuntimeObservationReport, EngramTransportError> {
+    deliver_runtime_observation_attempt(adapter, report, index, timeout).map(|(report, _)| report)
+}
+
+// The retry classification belongs to this attempt, not to remote message
+// text or a new persisted request. The worker installs the unchanged wire.
+fn deliver_runtime_observation_attempt(
+    adapter: &EngramHostAdapter,
+    report: &EngramRuntimeObservationReport,
+    index: usize,
+    timeout: Duration,
+) -> Result<(EngramRuntimeObservationReport, bool), EngramTransportError> {
     let Some(envelope) = report.envelopes.get(index) else {
         return Err(EngramTransportError::local_state(
             "runtime observation envelope does not exist",
@@ -274,7 +289,7 @@ fn deliver_runtime_observation_envelope(
         envelope.delivery,
         EngramRuntimeObservationDelivery::Pending { .. }
     ) {
-        return Ok(report.clone());
+        return Ok((report.clone(), false));
     }
     let request: EngramControlRequest =
         serde_json::from_value(envelope.request.clone()).map_err(|_| {
@@ -301,7 +316,7 @@ fn deliver_runtime_observation_envelope(
             code: "legacy_source_input_retired".to_owned(),
             message: format!("retained revision-only source input is retired locally and not sent; any earlier producer outcome is unchanged{earlier_error}"),
         };
-        return Ok(next);
+        return Ok((next, false));
     }
     if !matches!(
         observation.occurrence,
@@ -319,7 +334,13 @@ fn deliver_runtime_observation_envelope(
     // evidence; the producer still judges its account_if_eligible policy.
     if let Err(error) = adapter.read_observation_policy(&report.connection, &report.store, timeout)
     {
-        next.envelopes[index].delivery = if matches!(
+        let store_unavailable = engram_store_transient(&error);
+        next.envelopes[index].delivery = if engram_store_readiness_open_kind(&error) == Some("io") {
+            EngramRuntimeObservationDelivery::LocalFailure {
+                code: "store_open_refused".to_owned(),
+                message: error.message,
+            }
+        } else if !store_unavailable && matches!(
             error.kind,
             EngramTransportErrorKind::Protocol | EngramTransportErrorKind::LocalState
         ) {
@@ -335,8 +356,9 @@ fn deliver_runtime_observation_envelope(
                 last_error: Some(error.message),
             }
         };
-        return Ok(next);
+        return Ok((next, store_unavailable));
     }
+    let mut store_unavailable = false;
     next.envelopes[index].delivery = match adapter.request(&report.connection, &request, timeout) {
         Ok(value) => match if matches!(&observation.occurrence, EngramInterTurnOccurrence::SourceSighting { .. }) {
             EngramSourceObservationReceipt::from_recorded_result(value.clone(), observation, &report.observing_session)
@@ -350,7 +372,10 @@ fn deliver_runtime_observation_envelope(
                 last_error: Some(error.message),
             },
         },
-        Err(error) => engram_runtime_observation_failure_delivery(error, &observation.idempotency_key),
+        Err(error) => {
+            store_unavailable = engram_store_transient(&error);
+            engram_runtime_observation_failure_delivery(error, &observation.idempotency_key)
+        },
     };
-    Ok(next)
+    Ok((next, store_unavailable))
 }

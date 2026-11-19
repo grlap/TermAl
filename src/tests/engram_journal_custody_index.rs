@@ -260,6 +260,7 @@ fn journal_index_preserves_every_primary_class_and_compaction() {
                         call_timeout_ms: 1000,
                         attempts: 0,
                         retry_at: String::new(),
+                        store_wait_notice_posted: false,
                         envelopes: vec![EngramRuntimeObservationEnvelope {
                             request: json!({"binding":{"claim_id":journal.claim_id}}),
                             delivery: EngramRuntimeObservationDelivery::Pending {
