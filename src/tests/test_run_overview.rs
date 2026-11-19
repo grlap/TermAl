@@ -130,6 +130,7 @@ async fn filtered_pages_reach_every_active_run_and_bind_the_cursor_to_all_filter
         .lock()
         .unwrap()
         .state_projection_cache
+        .inputs
         .lock()
         .unwrap()
         .test_runs = None;

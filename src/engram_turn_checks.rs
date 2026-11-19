@@ -1091,11 +1091,11 @@ fn engram_mark_open_turn_checks_in_worktrees(
     except: Option<usize>,
     cause: &dyn Fn(&str) -> String,
 ) {
-    for (other, record) in inner.sessions.iter_mut().enumerate() {
-        if Some(other) == except {
+    for other in 0..inner.sessions.len() {
+        if Some(other) == except || inner.sessions[other].engram.active_turn_checks.is_empty() {
             continue;
         }
-        for check in &mut record.engram.active_turn_checks {
+        for check in &mut inner.sessions[other].engram.active_turn_checks {
             let root = engram_path_key(&check.target.root);
             if check.open_to_writes() && engram_worktrees_may_hold(worktrees, &root) {
                 check.note_overlap(|| cause(&root));
@@ -1113,7 +1113,7 @@ fn engram_mark_open_checks_in_worktrees(
     cause: &str,
 ) {
     engram_mark_open_turn_checks_in_worktrees(inner, worktrees, None, &|_| cause.to_owned());
-    for record in &mut inner.sessions {
+    for (_, record) in inner.sessions.matching_mut(|record| !record.engram.carried_checks.is_empty()) {
         engram_fence_carried_checks(record, worktrees, cause);
     }
 }

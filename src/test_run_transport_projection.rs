@@ -70,6 +70,7 @@ impl AppState {
     ) -> Arc<TestRunHistoryProjection> {
         let mut cache = inner
             .state_projection_cache
+            .inputs
             .lock()
             .expect("projection cache mutex poisoned");
         if let Some(saved) = &cache.test_runs {

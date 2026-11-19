@@ -1740,8 +1740,8 @@ struct StateInner {
     metadata_predecessor: Arc<std::sync::atomic::AtomicU64>,
     metadata_watermarks: Arc<Mutex<PersistMetadataWatermarks>>,
     /// Process-local projections; a restored/replaced StateInner starts cold.
-    /// Access only under StateInner, never from the broadcaster worker.
-    state_projection_cache: Mutex<StateProjectionCache>,
+    /// Consumers retain only the session cache handle, with its own lock.
+    state_projection_cache: StateProjectionCache,
     // Runtime identity of this whole value, refreshed by construction/restore.
     // Never persisted; replacing it cannot join observations across reloads.
     state_lock_epoch: u64,
@@ -1983,7 +1983,7 @@ impl StateInner {
         Self {
             metadata_predecessor: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             metadata_watermarks: Arc::default(),
-            state_projection_cache: Mutex::new(StateProjectionCache::default()),
+            state_projection_cache: StateProjectionCache::default(),
             state_lock_epoch: next_state_lock_epoch(),
             federation: FederationState::default(),
             federation_durable: false,

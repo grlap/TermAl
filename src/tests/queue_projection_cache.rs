@@ -105,6 +105,7 @@ fn warm_cuts_reuse_queue_hashes_and_only_rebuild_changed_summaries() {
     let _observer = HashObserver::install(count.clone());
     for _ in 0..3 {
         metadata_commit(&state);
+        materialize(mailbox.take_pending_for_test().pop().unwrap());
     }
     assert_eq!(
         count.load(Ordering::SeqCst),
@@ -121,11 +122,17 @@ fn warm_cuts_reuse_queue_hashes_and_only_rebuild_changed_summaries() {
             .push(prompt("new"));
         state.commit_locked(&mut inner).unwrap();
     }
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        0,
+        "the commit only captures rows"
+    );
+    materialize(mailbox.take_pending_for_test().pop().unwrap());
     let rebuilt = count.load(Ordering::SeqCst);
     assert!(rebuilt > 0, "changed queues must construct a new hash");
     metadata_commit(&state);
-    assert_eq!(count.load(Ordering::SeqCst), rebuilt);
     let cached = materialize(mailbox.take_pending_for_test().pop().unwrap());
+    assert_eq!(count.load(Ordering::SeqCst), rebuilt);
     let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
     assert!(
         count.load(Ordering::SeqCst) > rebuilt,

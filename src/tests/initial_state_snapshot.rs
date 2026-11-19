@@ -58,6 +58,7 @@ async fn initial_snapshot_releases_state_before_materialization(sse: bool, lagge
         .lock()
         .unwrap()
         .state_projection_cache
+        .inputs
         .lock()
         .unwrap()
         .before_materialize = Some(Box::new(move || {

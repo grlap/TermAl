@@ -511,6 +511,7 @@ impl StateDiffProducer {
     }
 
     fn forward_cut(&mut self, mut snapshot: ImmutableStateSnapshot, senders: &StateBroadcastSenders) {
+        snapshot.project_sessions();
         snapshot.prepare_test_run_activity();
         // The same consumer hooks as the full-state path, which a diff skips.
         #[cfg(test)]
