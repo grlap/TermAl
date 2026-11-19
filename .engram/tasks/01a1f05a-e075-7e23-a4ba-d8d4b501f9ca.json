@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a1f03a-2371-7921-beb7-38d0c01f3065",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed ff9ec4cb7c907ccf11ed689a6d8fe4132243a1e5 (tree cf41758f41e950eef13ad38a236465e45b7e8058) on origin/master, confirmed independently by native Git and clean Engram source measurement at done. Native read/ACK 404 fall-through reports typed lookup context, with bounded process-local diagnostics and preserved membership, receipt and route semantics. Independent post-landing evaluation 368fb65523144e888aa186c905b0daeb at cut 129 passed all 3 criteria and names this exact source. Registered Windows test-bd7e2219 passed 10/10 (native e79c60295bcf411a8e9f5fddf4726ee1). DL560 FULL test-45290acd passed on the identical landed tree, equal source IDs, adopted no-Medium+ review pair. The 64-row cap was source-checked; the behavioral test checks the observed records and does not exceed capacity. The underlying transient mailbox 404 diagnosis remains open separately.",
+    "completed_at": "2026-11-19T03:09:16.215828300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
