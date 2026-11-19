@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "install-build-separate-target-then-swap-2026-11-19",
+    "revision_id": "b79a11d65ed74e80bc7b34605ba341e0",
+    "previous": null,
+    "body_sha256": "a9f3107b222381e26e0253a196a8f498910069ac49267fb2a5ba7dab9e761a78",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T11:02:42.674007300Z"
+    }
+  },
+  "body": "Install lesson (Opus2 #6928, recorded by Fable2, 2026-11-19 ~11:05Z). While an install build of TermAl rebuilds target/release/termal.exe in place, the exe is renamed aside until it links again. During that window, NEW delegation spawns fail with os error 2, because the children's MCP bridge points at that path; Sol-a7bb's post-landing evaluators failed this way at the bf02c303 install. Running sessions and mail are unaffected. Rule for future installs: build into a SEPARATE target dir, then swap the exe into target/release/termal.exe at the end, so the gap is seconds. Keep the running-binary backup, and keep the build matching Greg's start command (memory install-build-must-match-start-command-2026-11-18). Announce install START and END to anyone with pending spawns."
+}

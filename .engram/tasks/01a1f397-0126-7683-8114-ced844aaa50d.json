@@ -1,0 +1,31 @@
+{
+  "id": "01a1f397-0126-7683-8114-ced844aaa50d",
+  "external_ref": null,
+  "title": "Preserve file-change visibility for a named worktree when opening attribution is withheld",
+  "outcome": "A withheld or drifted multi-root turn keeps the appropriate named worktree visible to the file watcher as a location, without granting source or check attribution.",
+  "acceptance": [
+    "A deterministic fixture exercises a multi-root opening with a named worktree below an ignored parent, then withholds attribution or changes the opening identity. An eligible edit or removal under that root still reaches the turn file-change projection.",
+    "The producer outcome remains free of source changes, sightings and attributed checks for the withheld opening. Existing queued subtree-coverage latching and single-root behavior are preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "file-changes",
+    "host-recording",
+    "named-root",
+    "sync-path",
+    "watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

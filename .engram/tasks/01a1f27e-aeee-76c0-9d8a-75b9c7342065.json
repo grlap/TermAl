@@ -27,12 +27,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a1f14c-3214-74b2-ba2b-8846f09ecf90",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the interim manual Resume behavior for ordinary Human persistence deadlines. The original prompt remains queued, and a readable reason points to explicit Resume; a newer pause, Stop or turn keeps ownership. The injected-clock test proves exactly one delivery and no duplicate after a second Resume.",
+    "completed_at": "2026-11-19T11:10:03.980796200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

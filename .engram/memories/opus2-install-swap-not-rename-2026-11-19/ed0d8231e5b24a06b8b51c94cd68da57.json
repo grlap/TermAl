@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-install-swap-not-rename-2026-11-19",
+    "revision_id": "ed0d8231e5b24a06b8b51c94cd68da57",
+    "previous": null,
+    "body_sha256": "78df12463c9730c8178f91c45075fcef069da709c1718bfc685de739abf30137",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T11:02:40.143588100Z"
+    }
+  },
+  "body": "TermAl install lesson (Opus2, 2026-11-19). Renaming target/release/termal.exe aside and then running cargo build --release in place leaves NO termal.exe for the whole build (a -j1 release build takes many minutes). Every new delegation spawn fails meanwhile, because the child MCP bridge and TERMAL_CLI point at target/release/termal.exe (Sol-a7bb's post-landing evaluators failed with 'os error 2' / 'MCP Connection closed'). Next time: build the exact master tree into a SEPARATE target dir (for example CARGO_TARGET_DIR=target/install-target), verify the built exe and its sha256, and only then rename the running termal.exe to the backup name and copy the new exe into target/release/termal.exe. The gap is then seconds. Send install END to the coordinator and to any blocked spawner."
+}

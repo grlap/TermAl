@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "ui-dist-not-built-by-restart-2026-11-19",
+    "revision_id": "02d64d3ae8ca4e57a7cd40661466cb7b",
+    "previous": null,
+    "body_sha256": "bd27764f3a874e319ea7a95d9235085ff7f20cef0dfc074692a4ff0bb2ca7929",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T11:08:25.001970600Z"
+    }
+  },
+  "body": "Fact (Opus2 #6931, read-only check, recorded by Fable2 2026-11-19 ~11:10Z): TermAl has NO build.rs and no UI embedding. src/main.rs run_server serves ui/dist straight from disk (ServeDir on cwd/ui/dist, with index.html as the fallback). ui/dist is git-ignored (.gitignore /ui/dist), so Greg's `git pull` + `cargo run --release` NEVER refreshes the UI. Whenever landed commits touch ui/src, the restart request to Greg must add, from the repository root: `cd ui && npm run build` (the script is tsc --noEmit && vite build; run `npm ci` first only if dependencies changed), then a browser reload. Rebuilding ui/dist is a live change, so agents don't do it; it is Greg's step in the restart request. As of 11:08Z the served ui/dist was from 2026-11-17 16:54:55Z, stale against 2A84 (1df3b3f1)."
+}
