@@ -45,6 +45,12 @@ fn set_retry_due(fixture: &TwoClaims, turn: &str, due: String) {
             "the worker must read back exactly the retry image used to order X and Y"
         );
     }
+    // The fixture changes the deadline out of band. Notify the worker after
+    // the new retry image is durable and the state lock has been released.
+    fixture
+        .turn
+        .state
+        .start_runtime_observation_worker(&fixture.turn.session_id);
 }
 
 fn older_turn_in_retry(fixture: &TwoClaims) -> EngramRuntimeClosingJob {

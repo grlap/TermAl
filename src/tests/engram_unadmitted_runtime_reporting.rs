@@ -23,6 +23,9 @@ mod source_refusals;
 #[path = "engram_unadmitted_storage.rs"]
 mod storage;
 
+#[path = "engram_observation_store_retry.rs"]
+mod store_retry;
+
 #[derive(Clone, Debug)]
 struct SentObservation {
     request: Value,
@@ -35,6 +38,7 @@ enum ReplyMode {
     Recorded,
     LoseFirst,
     TransientFirst(&'static str),
+    TransientFor(&'static str, usize),
     Refuse,
     /// Engram holds a different stored request under the report's key.
     Conflict,
@@ -154,6 +158,11 @@ impl EngramControlTransport for ObservationProducer {
             requests.push(wire.clone());
             requests.len()
         };
+        let transient = match self.mode {
+            ReplyMode::TransientFirst(code) if attempt == 1 => Some(code),
+            ReplyMode::TransientFor(code, count) if attempt <= count => Some(code),
+            _ => None,
+        };
         let receipt = {
             let mut records = self.records.lock().unwrap();
             if let Some((original, receipt)) = records.get(&key) {
@@ -204,7 +213,7 @@ impl EngramControlTransport for ObservationProducer {
                 }
                 if self.mode != ReplyMode::Refuse
                     && self.mode != ReplyMode::Conflict
-                    && !(matches!(self.mode, ReplyMode::TransientFirst(_)) && attempt == 1)
+                    && transient.is_none()
                 {
                     records.insert(key, (wire.clone(), receipt.clone()));
                 }
@@ -219,13 +228,13 @@ impl EngramControlTransport for ObservationProducer {
             durable_before_send: durable,
         });
         crate::tests::phase_sync::wait_for_gate(&self.response_gate, false);
+        if let Some(code) = transient {
+            return Err(EngramTransportError::remote(EngramControlErrorBody {
+                code: code.to_owned(),
+                message: "transient producer response; request was not applied".to_owned(),
+            }));
+        }
         match self.mode {
-            ReplyMode::TransientFirst(code) if attempt == 1 => {
-                Err(EngramTransportError::remote(EngramControlErrorBody {
-                    code: code.to_owned(),
-                    message: "transient producer response; request was not applied".to_owned(),
-                }))
-            }
             ReplyMode::Refuse => Err(EngramTransportError::remote(EngramControlErrorBody {
                 code: "execution_observation_policy_basis_mismatch".to_owned(),
                 message: "definitive producer refusal".to_owned(),
