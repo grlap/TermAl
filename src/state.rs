@@ -373,7 +373,7 @@ impl<T: 'static> StateMutex<T> {
     }
 }
 
-struct StateMutexGuard<'a, T> {
+struct StateMutexGuard<'a, T: 'static> {
     guard: Option<std::sync::MutexGuard<'a, T>>,
     acquired_at: std::time::Instant,
     caller: &'static std::panic::Location<'static>,
@@ -434,7 +434,7 @@ impl<'a, T: 'static> StateMutexGuard<'a, T> {
     }
 }
 
-impl<T> std::ops::Deref for StateMutexGuard<'_, T> {
+impl<T: 'static> std::ops::Deref for StateMutexGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -444,7 +444,7 @@ impl<T> std::ops::Deref for StateMutexGuard<'_, T> {
     }
 }
 
-impl<T> std::ops::DerefMut for StateMutexGuard<'_, T> {
+impl<T: 'static> std::ops::DerefMut for StateMutexGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.guard
             .as_deref_mut()
@@ -452,8 +452,13 @@ impl<T> std::ops::DerefMut for StateMutexGuard<'_, T> {
     }
 }
 
-impl<T> Drop for StateMutexGuard<'_, T> {
+impl<T: 'static> Drop for StateMutexGuard<'_, T> {
     fn drop(&mut self) {
+        let retired_broadcast_work = self.guard.as_deref_mut().and_then(|state| {
+            (state as &mut dyn std::any::Any)
+                .downcast_mut::<StateInner>()
+                .map(|inner| inner.state_projection_cache.take_retired_broadcast_work())
+        });
         let mut span = self.lock_span;
         span.released = Some(state_lock_point(std::time::Instant::now()));
         let held = self.acquired_at.elapsed();
@@ -482,6 +487,7 @@ impl<T> Drop for StateMutexGuard<'_, T> {
             }
         });
         self.lock_observer.finish_release(span);
+        drop(retired_broadcast_work);
         if held >= self.warn_after {
             // After release, on the rare over-threshold path only.
             let mut longest = self
@@ -537,14 +543,17 @@ struct StateBroadcastPending {
 }
 
 impl StateBroadcastPending {
-    fn enqueue(&mut self, work: StateBroadcastWork) {
-        if self.work.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
-            self.work.pop_front();
+    fn enqueue(&mut self, work: StateBroadcastWork) -> Option<StateBroadcastWork> {
+        let retired = if self.work.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
             // Kept outside the bounded queue: further overflow cannot evict
             // the recovery signal. The consumer sees it before retained work.
             self.lagged = true;
-        }
+            self.work.pop_front()
+        } else {
+            None
+        };
         self.work.push_back(work);
+        retired
     }
 
     fn pop_front(&mut self) -> Option<StateBroadcastWork> {
@@ -565,34 +574,37 @@ struct StateBroadcastMailbox {
 }
 
 impl StateBroadcastMailbox {
+    #[cfg(test)]
     fn publish_snapshot(&self, snapshot: StateResponse) {
-        self.publish_snapshot_work(StateBroadcastWork::Snapshot(snapshot));
+        drop(self.publish(StateBroadcastWork::Snapshot(snapshot)));
     }
 
-    fn publish_snapshot_work(&self, work: StateBroadcastWork) {
+    #[cfg(test)]
+    fn publish_delta(&self, event: DeltaEvent) {
+        drop(self.publish(StateBroadcastWork::Delta(event)));
+    }
+
+    // Give discarded owners back to the producer after unlocking the mailbox.
+    fn publish(&self, work: StateBroadcastWork) -> Option<StateBroadcastWork> {
         let mut pending = self
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
         debug_assert!(!pending.stopped);
-        if matches!(
+        let coalescible = matches!(
+            &work,
+            StateBroadcastWork::Snapshot(_) | StateBroadcastWork::ImmutableSnapshot(_)
+        ) && matches!(
             pending.work.back(),
             Some(StateBroadcastWork::Snapshot(_) | StateBroadcastWork::ImmutableSnapshot(_))
-        ) {
-            *pending.work.back_mut().unwrap() = work;
+        );
+        let retired = if coalescible {
+            Some(std::mem::replace(pending.work.back_mut().unwrap(), work))
         } else {
-            pending.enqueue(work);
-        }
+            pending.enqueue(work)
+        };
         self.work_available.notify_one();
-    }
-
-    fn publish_delta(&self, event: DeltaEvent) {
-        let mut pending = self
-            .pending
-            .lock()
-            .expect("state broadcast mailbox mutex poisoned");
-        pending.enqueue(StateBroadcastWork::Delta(event));
-        self.work_available.notify_one();
+        retired
     }
 
     fn recv_next(&self) -> StateBroadcastWork {
@@ -1740,8 +1752,8 @@ struct StateInner {
     metadata_predecessor: Arc<std::sync::atomic::AtomicU64>,
     metadata_watermarks: Arc<Mutex<PersistMetadataWatermarks>>,
     /// Process-local projections; a restored/replaced StateInner starts cold.
-    /// Access only under StateInner, never from the broadcaster worker.
-    state_projection_cache: Mutex<StateProjectionCache>,
+    /// Consumers retain only the session cache handle, with its own lock.
+    state_projection_cache: StateProjectionCache,
     // Runtime identity of this whole value, refreshed by construction/restore.
     // Never persisted; replacing it cannot join observations across reloads.
     state_lock_epoch: u64,
@@ -1983,7 +1995,7 @@ impl StateInner {
         Self {
             metadata_predecessor: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             metadata_watermarks: Arc::default(),
-            state_projection_cache: Mutex::new(StateProjectionCache::default()),
+            state_projection_cache: StateProjectionCache::default(),
             state_lock_epoch: next_state_lock_epoch(),
             federation: FederationState::default(),
             federation_durable: false,

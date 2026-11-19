@@ -683,7 +683,8 @@ impl AppState {
         if let Some(mailbox) = &self.state_broadcast_mailbox {
             // Stopped can change only under this same StateInner mutex.
             if !mailbox.is_stopped() {
-                mailbox.publish_delta(event);
+                let retired = mailbox.publish(StateBroadcastWork::Delta(event));
+                inner.state_projection_cache.defer_broadcast_drop(retired);
                 return;
             }
         }
@@ -810,9 +811,11 @@ impl AppState {
     fn publish_state_locked(&self, inner: &StateInner) {
         if let Some(mailbox) = &self.state_broadcast_mailbox {
             if !mailbox.is_stopped() {
-                mailbox.publish_snapshot_work(StateBroadcastWork::ImmutableSnapshot(
+                let work = StateBroadcastWork::ImmutableSnapshot(
                     self.immutable_state_snapshot_locked(inner),
-                ));
+                );
+                let retired = mailbox.publish(work);
+                inner.state_projection_cache.defer_broadcast_drop(retired);
                 return;
             }
         }
@@ -838,7 +841,8 @@ impl AppState {
         );
         if let Some(mailbox) = &self.state_broadcast_mailbox {
             if !mailbox.is_stopped() {
-                mailbox.publish_snapshot(snapshot);
+                let retired = mailbox.publish(StateBroadcastWork::Snapshot(snapshot));
+                inner.state_projection_cache.defer_broadcast_drop(retired);
                 return;
             }
         }

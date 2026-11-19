@@ -570,11 +570,11 @@ fn engram_fence_carried_for_other_session(
             format!("{who} reported a file edit that TermAl could not place"),
         ),
     };
-    for (other, record) in inner.sessions.iter_mut().enumerate() {
-        if other == writer {
+    for other in 0..inner.sessions.len() {
+        if other == writer || inner.sessions[other].engram.carried_checks.is_empty() {
             continue;
         }
-        for carried in &mut record.engram.carried_checks {
+        for carried in &mut inner.sessions[other].engram.carried_checks {
             if !open(carried) {
                 continue;
             }
@@ -1950,7 +1950,9 @@ impl AppState {
             .collect::<Vec<_>>();
         let mut diagnostics = Vec::new();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        for record in inner.sessions.iter_mut() {
+        for (_, record) in inner.sessions.matching_mut(|record| {
+            !record.engram.carried_checks.is_empty() || !record.engram.active_turn_checks.is_empty()
+        }) {
             for (worktree, candidate) in &cargo_candidates {
                 // A Cargo sibling is judged by `target/` at terminal
                 // settlement, whenever it was notified, so it takes no

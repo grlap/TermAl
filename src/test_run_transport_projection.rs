@@ -70,6 +70,7 @@ impl AppState {
     ) -> Arc<TestRunHistoryProjection> {
         let mut cache = inner
             .state_projection_cache
+            .inputs
             .lock()
             .expect("projection cache mutex poisoned");
         if let Some(saved) = &cache.test_runs {
@@ -212,7 +213,7 @@ impl ImmutableStateSnapshot {
     // Only sessions with running owned/notify work need an enriched row.
     // Last activity disappearing compares an old enriched Arc with the plain
     // successor, so the diff clears it rather than leaving a stale badge.
-    fn prepare_test_run_activity(&mut self) {
+    fn prepare_test_run_activity(&mut self, previous: Option<&EmittedStateCut>) {
         let Some(source) = self.header.test_run_overview.source.as_ref() else {
             return;
         };
@@ -221,6 +222,19 @@ impl ImmutableStateSnapshot {
             if let Some(value) = activity.get(&row.id) {
                 if row.test_run_activity.source.is_none() && row.test_run_activity.wire == *value {
                     continue;
+                }
+                if let Some(base) = previous
+                    && let Some(prior) = base.projected_sessions.get(&row.id)
+                    && let Some(raw) = &prior.raw
+                    && Arc::ptr_eq(&raw.summary, row)
+                {
+                    let emitted = &base.sessions[prior.index];
+                    if emitted.test_run_activity.source.is_none()
+                        && emitted.test_run_activity.wire == *value
+                    {
+                        *row = emitted.clone();
+                        continue;
+                    }
                 }
                 *row = source.session_with_activity(row, value);
             }

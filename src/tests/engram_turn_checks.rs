@@ -5160,3 +5160,50 @@ mod checkpoint_non_application;
 
 #[path = "engram_checkpoint_result_recovery.rs"]
 pub(super) mod checkpoint_result_recovery;
+
+#[test]
+fn summary_cut_retains_unrelated_rows_during_claude_hazard_reconciliation() {
+    for consumer in [None, Some(0)] {
+        let state = test_app_state();
+        for _ in 0..3 {
+            test_session_id(&state, Agent::Codex);
+        }
+        let mut inner = state.inner.lock().unwrap();
+        let check = finished_check(1, engram_ready_basis_capture());
+        let root = engram_path_key(&check.target.root);
+        let mut unrelated = check.clone();
+        unrelated.target.root = PathBuf::from("C:/unrelated");
+        inner.sessions[0].engram.active_turn_checks.push(check);
+        inner.sessions[1].engram.active_turn_checks.push(unrelated);
+        let cut = state.immutable_state_snapshot_locked(&inner);
+        let retained = &cut.session_cut.as_ref().unwrap().rows;
+        let cause = ClaudeHazardCause::DeletedSession {
+            session_id: "departed".to_owned(),
+        };
+        let hazards = [EngramClaudeHazard {
+            owner: EngramHazardOwner::Deleted {
+                cause: cause.clone(),
+            },
+            key: None,
+            self_gate: false,
+            nested: false,
+            owner_writes: true,
+            locations: vec![Some(root)],
+            registered_at: 0,
+        }];
+
+        engram_apply_claude_hazards(&mut inner, &hazards, consumer);
+        assert!(!inner.sessions.shares_body(0, retained, 0));
+        assert!(inner.sessions.shares_body(1, retained, 1));
+        assert!(inner.sessions.shares_body(2, retained, 2));
+        let live = &inner.sessions[0].engram.active_turn_checks[0];
+        assert!(live.overlapped);
+        assert_eq!(live.fenced_by_outstanding.as_ref(), Some(&cause));
+        assert!(!retained[0].engram.active_turn_checks[0].overlapped);
+
+        let next = state.immutable_state_snapshot_locked(&inner);
+        let retained = &next.session_cut.as_ref().unwrap().rows;
+        engram_apply_claude_hazards(&mut inner, &hazards, Some(0));
+        assert!(inner.sessions.shares_body(0, retained, 0));
+    }
+}

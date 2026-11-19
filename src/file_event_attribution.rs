@@ -380,11 +380,13 @@ impl AppState {
         let mut owners = Vec::new();
         let project_roots = inner.projects.iter().filter(|project| project.remote_id == LOCAL_REMOTE_ID)
             .map(|project| normalize_user_facing_path(FsPath::new(&project.root_path))).collect::<Vec<_>>();
-        for record in &mut inner.sessions {
-            diagnostic.visited_sessions += 1;
-            if !record.is_local_session() || record.hidden {
-                continue;
-            }
+        diagnostic.visited_sessions += inner.sessions.len();
+        for (_, record) in inner.sessions.matching_mut(|record| {
+            record.is_local_session()
+                && !record.hidden
+                && (record.active_turn_start_message_count.is_some()
+                    || record.active_turn_file_change_grace_deadline.is_some())
+        }) {
             if record.active_turn_start_message_count.is_none()
                 && !record
                     .active_turn_file_change_grace_deadline

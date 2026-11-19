@@ -16,14 +16,19 @@
 // marked snapshot. A full snapshot of the same cut accompanies a diff only
 // while legacy connections exist; it carries no mark.
 
-/// The last cut the broadcaster emitted. Holding the session Arcs keeps their
-/// identity comparable with later cuts: the projection cache mints a new Arc
-/// for any captured difference and never mutates one in place.
+/// The last cut the broadcaster emitted. Its raw cache entries remain valid
+/// candidates for later worker cuts even if the API has published newer rows.
 struct EmittedStateCut {
     revision: u64,
     server_instance_id: String,
     sessions: Vec<Arc<StateSessionSummary>>,
+    projected_sessions: HashMap<String, EmittedSessionProjection>,
     delegations: Vec<DelegationStateSummary>,
+}
+
+struct EmittedSessionProjection {
+    index: usize,
+    raw: Option<Arc<CachedStateSessionSummary>>,
 }
 
 impl EmittedStateCut {
@@ -32,6 +37,18 @@ impl EmittedStateCut {
             revision: snapshot.header.revision,
             server_instance_id: snapshot.header.server_instance_id.clone(),
             sessions: snapshot.sessions.clone(),
+            projected_sessions: snapshot
+                .sessions
+                .iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    let projection = EmittedSessionProjection {
+                        index,
+                        raw: snapshot.raw_sessions.get(index).cloned(),
+                    };
+                    (row.id.clone(), projection)
+                })
+                .collect(),
             delegations: snapshot.header.delegations.clone(),
         }
     }
@@ -225,19 +242,14 @@ fn state_diff_payload<'a>(
         test_run_waits,
         pending_engram_mcp_revocation_session_ids,
     } = &cut.header;
-    let base_sessions: HashMap<&'a str, &'a Arc<StateSessionSummary>> = base
-        .sessions
-        .iter()
-        .map(|session| (session.id.as_str(), session))
-        .collect();
     let changed = cut
         .sessions
         .iter()
         .filter(|session| {
             touched.sessions.contains(&session.id)
-                || base_sessions
+                || base.projected_sessions
                     .get(session.id.as_str())
-                    .is_none_or(|base_session| !Arc::ptr_eq(*base_session, *session))
+                    .is_none_or(|prior| !Arc::ptr_eq(&base.sessions[prior.index], *session))
         })
         .map(|session| &**session)
         .collect();
@@ -511,7 +523,11 @@ impl StateDiffProducer {
     }
 
     fn forward_cut(&mut self, mut snapshot: ImmutableStateSnapshot, senders: &StateBroadcastSenders) {
-        snapshot.prepare_test_run_activity();
+        let previous = self.base.as_ref().filter(|base| {
+            base.server_instance_id == snapshot.header.server_instance_id
+        });
+        snapshot.project_sessions_from(previous);
+        snapshot.prepare_test_run_activity(previous);
         // The same consumer hooks as the full-state path, which a diff skips.
         #[cfg(test)]
         let snapshot = {

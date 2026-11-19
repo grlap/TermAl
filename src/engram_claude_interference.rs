@@ -266,12 +266,19 @@ fn engram_apply_claude_hazards(
     if hazards.is_empty() {
         return;
     }
+    let count = inner.sessions.len();
+    let consumers = consumer.map_or(0..count, |index| {
+        index..index.saturating_add(1).min(count)
+    });
     let mut changed_sources = Vec::new();
-    for (index, record) in inner.sessions.iter_mut().enumerate() {
-        if consumer.is_some_and(|consumer| consumer != index) {
-            continue;
-        }
-        for check in &mut record.engram.active_turn_checks {
+    for index in consumers {
+        // Inspect eligibility before getting a mutable row: a retained
+        // snapshot makes the first mutable borrow detach the whole record.
+        for check_index in 0..inner.sessions[index].engram.active_turn_checks.len() {
+            let check = &inner.sessions[index].engram.active_turn_checks[check_index];
+            if check.overlapped && check.fenced_by_outstanding.is_some() {
+                continue;
+            }
             let subject = EngramInterferenceSubject {
                 session: index,
                 key: &check.key,
@@ -280,11 +287,13 @@ fn engram_apply_claude_hazards(
                 simple_full_gate: engram_is_simple_full_launcher(&check.command),
             };
             if let Some(cause) = engram_claude_interference_cause(hazards, &subject) {
+                let check = &mut inner.sessions[index].engram.active_turn_checks[check_index];
                 check.overlapped = true;
                 check.fenced_by_outstanding.get_or_insert(cause);
             }
         }
-        for carried in &mut record.engram.carried_checks {
+        for carried_index in 0..inner.sessions[index].engram.carried_checks.len() {
+            let carried = &inner.sessions[index].engram.carried_checks[carried_index];
             if carried.fence.is_some() {
                 continue;
             }
@@ -303,44 +312,66 @@ fn engram_apply_claude_hazards(
                 simple_full_gate: engram_is_simple_full_launcher(&carried.check.command),
             };
             let terminal_at = carried.ended().then_some(()).and(carried.terminal_at);
+            let mut potential = None;
+            let mut fence = None;
             for hazard in hazards {
                 let Some(cause) = engram_claude_interference(hazard, &subject) else {
                     continue;
                 };
                 match terminal_at {
                     Some(terminal_at) if hazard.registered_at > terminal_at => {
-                        if carried
-                            .potential
+                        if potential
                             .as_ref()
+                            .or(carried.potential.as_ref())
                             .is_none_or(|(earliest, _)| hazard.registered_at < *earliest)
                         {
-                            carried.potential = Some((hazard.registered_at, cause));
+                            potential = Some((hazard.registered_at, cause));
                         }
                     }
                     _ => {
-                        carried.fence = Some(cause.describe());
-                        carried.check.fenced_by_outstanding.get_or_insert(cause);
+                        fence = Some(cause);
                         break;
                     }
                 }
             }
+            if potential.is_some() || fence.is_some() {
+                let carried = &mut inner.sessions[index].engram.carried_checks[carried_index];
+                if let Some(potential) = potential {
+                    carried.potential = Some(potential);
+                }
+                if let Some(cause) = fence {
+                    carried.fence = Some(cause.describe());
+                    carried.check.fenced_by_outstanding.get_or_insert(cause);
+                }
+            }
+        }
+        let record = &inner.sessions[index];
+        let active = record.engram.unadmitted_active_turn.as_ref().filter(|trace| {
+            trace.generation == record.active_turn_generation && !trace.source_attribution_uncertain
+        });
+        if active.is_none() && record.engram.unadmitted_closing_jobs.is_empty() {
+            continue;
         }
         let worktree = engram_session_worktree(record);
-        let mixes_source = record.engram.unadmitted_active_turn.as_ref()
-            .filter(|trace| trace.generation == record.active_turn_generation
-                && !trace.source_attribution_uncertain)
-            .is_some_and(|trace| {
-                let root = trace.opening_root.as_ref().and_then(|opening| opening.source_root.as_ref())
-                    .map(|named| engram_path_key(FsPath::new(&named.root)))
-                    .or_else(|| worktree.clone());
-                engram_observation_interference_cause(hazards, index, root.as_deref()).is_some()
-            });
+        let mixes_source = active.is_some_and(|trace| {
+            let root = trace
+                .opening_root
+                .as_ref()
+                .and_then(|opening| opening.source_root.as_ref())
+                .map(|named| engram_path_key(FsPath::new(&named.root)))
+                .or_else(|| worktree.clone());
+            engram_observation_interference_cause(hazards, index, root.as_deref()).is_some()
+        });
         if mixes_source {
-            claude_mark_observation_mixed(record);
+            claude_mark_observation_mixed(&mut inner.sessions[index]);
         }
         let mut changed = mixes_source;
-        for job in &mut record.engram.unadmitted_closing_jobs {
-            if job.trace.source_attribution_uncertain { continue; }
+        for job_index in 0..inner.sessions[index].engram.unadmitted_closing_jobs.len() {
+            let record = &inner.sessions[index];
+            let job = &record.engram.unadmitted_closing_jobs[job_index];
+            if job.trace.source_attribution_uncertain {
+                continue;
+            }
             let root = match &job.scope.root {
                 EngramNamedRootState::Bound { workspace_id, .. } =>
                     Some(engram_path_key(FsPath::new(workspace_id))),
@@ -348,6 +379,7 @@ fn engram_apply_claude_hazards(
                 _ => None,
             };
             if engram_observation_interference_cause(hazards, index, root.as_deref()).is_some() {
+                let job = &mut inner.sessions[index].engram.unadmitted_closing_jobs[job_index];
                 job.trace.source_attribution_uncertain = true;
                 changed = true;
             }

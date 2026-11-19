@@ -4,9 +4,9 @@
 // transient latch changes cannot hide behind a prior record stamp. Cache hits
 // also compare every borrowed metadata field; stamps are an optimization, not
 // sole correctness authority. New projection inputs require this audit again.
-// Producers hold StateInner before the cache or mailbox.pending; the worker
-// reads only owned cuts, never the cache. Closing accepts late work; Stopped
-// is set under StateInner only after drain, before synchronous fallback.
+// Producers hold StateInner before mailbox.pending. The session projection
+// mutex is used only by cut consumers after StateInner is released. Closing
+// accepts late work; Stopped is set under StateInner only after drain.
 
 #[derive(PartialEq, Eq)]
 struct StateProjectionKey {
@@ -31,8 +31,36 @@ impl StateProjectionKey {
 
 #[derive(Default)]
 struct StateProjectionCache {
+    session_summaries: Arc<Mutex<SessionSummaryCache>>,
+    capture_order: AtomicU64,
+    // Header capture never waits for session summary validation or projection.
+    inputs: Mutex<StateProjectionInputs>,
+    // Only the current StateInner owner appends. The guard takes this batch
+    // before unlocking and disposes of the cuts after releasing StateInner.
+    retired_broadcast_work: Mutex<Vec<StateBroadcastWork>>,
+}
+
+impl StateProjectionCache {
+    fn defer_broadcast_drop(&self, retired: Option<StateBroadcastWork>) {
+        if let Some(retired) = retired {
+            self.retired_broadcast_work.lock().unwrap().push(retired);
+        }
+    }
+
+    fn take_retired_broadcast_work(&mut self) -> Vec<StateBroadcastWork> {
+        std::mem::take(self.retired_broadcast_work.get_mut().unwrap())
+    }
+}
+
+#[derive(Default)]
+struct SessionSummaryCache {
     server_instance_id: String,
-    sessions: HashMap<String, CachedStateSessionSummary>,
+    latest_capture: u64,
+    sessions: HashMap<String, Arc<CachedStateSessionSummary>>,
+}
+
+#[derive(Default)]
+struct StateProjectionInputs {
     test_runs: Option<Arc<TestRunHistoryProjection>>,
     test_run_version: u64,
     #[cfg(test)]
@@ -45,14 +73,22 @@ struct CachedStateSessionSummary {
     key: StateProjectionKey,
     summary: Arc<StateSessionSummary>,
     // Only the local public hash's inputs, with no queued text/attachments.
-    // They are captured with summary under StateInner and compared even when
-    // a producer forgot to advance its session's mutation stamp.
+    // They are derived from the same captured row as the summary and compared
+    // even when a producer forgot to advance its session's mutation stamp.
     // None also distinguishes a nonlocal record from an empty local queue.
     queue_identities: Option<Vec<(String, bool, bool)>>,
 }
 
+struct SessionSummaryCut {
+    rows: SessionSequence,
+    cache: Arc<Mutex<SessionSummaryCache>>,
+    order: u64,
+}
+
 struct ImmutableStateSnapshot {
     header: StateResponse,
+    session_cut: Option<SessionSummaryCut>,
+    raw_sessions: Vec<Arc<CachedStateSessionSummary>>,
     sessions: Vec<Arc<StateSessionSummary>>,
     /// The full-state request generation read under StateInner when this cut
     /// was captured (`state_broadcast_diff.rs`).
@@ -62,6 +98,20 @@ struct ImmutableStateSnapshot {
 }
 
 impl ImmutableStateSnapshot {
+    fn project_sessions(&mut self) {
+        self.project_sessions_from(None);
+    }
+
+    fn project_sessions_from(&mut self, previous: Option<&EmittedStateCut>) {
+        let Some(cut) = self.session_cut.take() else {
+            return;
+        };
+        self.header.pending_engram_mcp_revocation_session_ids =
+            AppState::pending_engram_mcp_revocation_session_ids(&cut.rows);
+        self.raw_sessions = cut.project(&self.header.server_instance_id, previous);
+        self.sessions = self.raw_sessions.iter().map(|row| row.summary.clone()).collect();
+    }
+
     fn materialize(mut self) -> StateResponse {
         #[cfg(test)]
         if let Some(hook) = self.before_materialize.take() {
@@ -69,7 +119,8 @@ impl ImmutableStateSnapshot {
         }
         #[cfg(test)]
         observe_state_snapshot_projection_for_test();
-        self.prepare_test_run_activity();
+        self.project_sessions();
+        self.prepare_test_run_activity(None);
         // No StateInner/cache guard survives the handoff to this consumer.
         self.header.sessions = self
             .sessions
@@ -77,6 +128,83 @@ impl ImmutableStateSnapshot {
             .map(|summary| (*summary).clone())
             .collect();
         self.header
+    }
+}
+
+impl SessionSummaryCut {
+    fn project(
+        self,
+        instance: &str,
+        previous: Option<&EmittedStateCut>,
+    ) -> Vec<Arc<CachedStateSessionSummary>> {
+        let mut cache = self.cache.lock().expect("session projection cache poisoned");
+        let publish = self.order >= cache.latest_capture;
+        if publish {
+            cache.latest_capture = self.order;
+            if cache.server_instance_id != instance {
+                cache.sessions.clear();
+                cache.server_instance_id = instance.to_owned();
+            }
+        }
+        let same_instance = cache.server_instance_id == instance;
+        let mut live = HashSet::new();
+        let sessions = self
+            .rows
+            .iter()
+            .filter(|record| !record.hidden)
+            .map(|record| {
+                let id = record.session.id.as_str();
+                if publish {
+                    live.insert(id);
+                }
+                let key = StateProjectionKey::for_record(record);
+                // A newer API cut may already have replaced the shared entry.
+                // The last emitted cut still owns the preceding SSE identity.
+                let preceding = previous
+                    .filter(|_| !publish)
+                    .and_then(|base| base.projected_sessions.get(id))
+                    .and_then(|row| row.raw.as_ref());
+                let latest = same_instance.then(|| cache.sessions.get(id)).flatten();
+                let row = preceding
+                    .into_iter()
+                    .chain(latest.filter(|latest| {
+                        preceding.is_none_or(|preceding| !Arc::ptr_eq(preceding, latest))
+                    }))
+                    .find(|cached| {
+                        cached.key == key
+                            && AppState::cached_state_summary_matches_record(
+                                instance,
+                                record,
+                                &cached.summary,
+                                cached.queue_identities.as_deref(),
+                            )
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        let summary = Arc::new(AppState::wire_session_summary_from_record(
+                            instance, record,
+                        ));
+                        let queue_identities = record.is_local_session().then(|| {
+                            projected_pending_prompt_identities(record)
+                                .map(|(id, interrupted, retained)| (id.to_owned(), interrupted, retained))
+                                .collect()
+                        });
+                        Arc::new(CachedStateSessionSummary {
+                            key,
+                            summary,
+                            queue_identities,
+                        })
+                    });
+                if publish && latest.is_none_or(|latest| !Arc::ptr_eq(latest, &row)) {
+                    cache.sessions.insert(id.to_owned(), row.clone());
+                }
+                row
+            })
+            .collect();
+        if publish {
+            cache.sessions.retain(|id, _| live.contains(id.as_str()));
+        }
+        sessions
     }
 }
 
@@ -90,6 +218,12 @@ impl AppState {
         summary: &StateSessionSummary,
         queue_identities: Option<&[(String, bool, bool)]>,
     ) -> bool {
+        #[cfg(test)]
+        TEST_BEFORE_SESSION_SUMMARY_VALIDATE.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook();
+            }
+        });
         let StateSessionSummary {
             mailbox_participant_id,
             body_seq,
@@ -238,73 +372,31 @@ impl AppState {
         let capture_started = std::time::Instant::now();
         #[cfg(test)]
         assert!(!self.inner.is_not_held_by_current_thread_for_test());
-        let mut cache = inner
-            .state_projection_cache
-            .lock()
-            .expect("projection cache mutex poisoned");
-        // The only projection input outside the stamped record is the local
-        // body-sequence epoch. A new instance cannot reuse the old domain.
-        if cache.server_instance_id != self.server_instance_id {
-            cache.sessions.clear();
-            cache
-                .server_instance_id
-                .clone_from(&self.server_instance_id);
-        }
-        let mut live = HashSet::new();
-        let sessions = inner
-            .sessions
-            .iter()
-            .filter(|record| !record.hidden)
-            .map(|record| {
-                let id = record.session.id.as_str();
-                live.insert(id);
-                let key = StateProjectionKey::for_record(record);
-                if let Some(cached) = cache.sessions.get(id) {
-                    if cached.key == key
-                        && Self::cached_state_summary_matches_record(
-                            &self.server_instance_id,
-                            record,
-                            &cached.summary,
-                            cached.queue_identities.as_deref(),
-                        )
-                    {
-                        return cached.summary.clone();
-                    }
-                }
-                let summary = Arc::new(Self::wire_session_summary_from_record(
-                    &self.server_instance_id,
-                    record,
-                ));
-                let queue_identities = if record.is_local_session() {
-                    Some(projected_pending_prompt_identities(record)
-                        .map(|(id, interrupted, retained)| (id.to_owned(), interrupted, retained))
-                        .collect())
-                } else {
-                    None
-                };
-                cache.sessions.insert(id.to_owned(), CachedStateSessionSummary {
-                    key,
-                    summary: summary.clone(),
-                    queue_identities,
-                });
-                summary
+
+        let cache = &inner.state_projection_cache;
+        // Capture order follows StateInner, including multiple cuts at the
+        // same revision. An older consumer may finish after a newer cut.
+        let order = cache
+            .capture_order
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |order| {
+                order.checked_add(1)
             })
-            .collect();
-        cache.sessions.retain(|id, _| live.contains(id.as_str()));
+            .expect("state snapshot capture order exhausted");
         #[cfg(test)]
-        let before_materialize = cache.before_materialize.take();
-        #[cfg(test)]
-        let capture_sink = cache.capture_sink.clone();
-        drop(cache);
+        let (before_materialize, capture_sink) = {
+            let mut inputs = cache.inputs.lock().unwrap();
+            (inputs.before_materialize.take(), inputs.capture_sink.clone())
+        };
         let snapshot = ImmutableStateSnapshot {
-            header: self.snapshot_header_from_inner(
-                inner,
-                self.cached_agent_readiness(),
-                Vec::new(),
-            ),
-            sessions,
-            // Read under StateInner, which every request increment that must
-            // bind to a cut (the full-state route) also holds.
+            header: self.snapshot_header_from_inner(inner, self.cached_agent_readiness()),
+            session_cut: Some(SessionSummaryCut {
+                rows: inner.sessions.clone(),
+                cache: cache.session_summaries.clone(),
+                order,
+            }),
+            raw_sessions: Vec::new(),
+            sessions: Vec::new(),
+            // Read under StateInner, which also orders full-state requests.
             request_generation: self
                 .state_broadcast_senders
                 .full_state_request_generation
@@ -324,9 +416,11 @@ impl AppState {
     }
 
     fn warm_state_projection_cache(&self) {
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        // One-time startup cost precedes requests; the shared projections stay.
-        self.immutable_state_snapshot_locked(&inner);
+        let mut snapshot = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            self.immutable_state_snapshot_locked(&inner)
+        };
+        snapshot.project_sessions();
     }
 
     fn finish_state_broadcast_if_drained(&self) -> bool {

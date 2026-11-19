@@ -130,6 +130,7 @@ async fn filtered_pages_reach_every_active_run_and_bind_the_cursor_to_all_filter
         .lock()
         .unwrap()
         .state_projection_cache
+        .inputs
         .lock()
         .unwrap()
         .test_runs = None;
@@ -411,7 +412,7 @@ fn active_session_diffs_reuse_unchanged_rows_but_emit_a_recaptured_equal_row() {
         inner.sessions[index].session.name = "Intermediate name".to_owned();
         name
     };
-    drop(capture());
+    drop(capture().materialize());
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&owner).unwrap();
@@ -427,4 +428,86 @@ fn active_session_diffs_reuse_unchanged_rows_but_emit_a_recaptured_equal_row() {
     assert_eq!(changed.len(), 1);
     assert_eq!(changed[0]["id"], owner);
     assert_eq!(changed[0]["testRunActivity"]["ownedRunning"], 1);
+}
+
+#[test]
+fn newer_api_summary_preserves_unchanged_enriched_rows_between_older_worker_cuts() {
+    let fixture = RunFixture::new("overview-activity-ordered-cuts");
+    let owner = create_test_project_session(
+        &fixture.state,
+        Agent::Codex,
+        &fixture.project_id,
+        &fixture.root,
+    );
+    let other = test_session_id(&fixture.state, Agent::Codex);
+    let mut request = full_request(&fixture.root, "2026-09-25T10:00:00.000Z");
+    request["owner"] = json!(owner);
+    write_run(
+        &fixture.runs_dir(),
+        "test-activity",
+        request,
+        Some(running_results(Some(42))),
+    );
+    fixture.refresh(&[42]);
+    let capture = |session: &str, name: &str| {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        inner.session_mut(session).unwrap().session.name = name.to_owned();
+        inner.revision += 1;
+        fixture.state.immutable_state_snapshot_locked(&inner)
+    };
+    let first = capture(&owner, "older worker owner");
+    let second = capture(&other, "changed worker row");
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        inner.session_mut(&owner).unwrap().session.name = "newer API owner".to_owned();
+        inner.revision += 1;
+    }
+    let api = fixture.state.summary_snapshot();
+    assert_eq!(
+        api.sessions
+            .iter()
+            .find(|row| row.id == owner)
+            .unwrap()
+            .name,
+        "newer API owner"
+    );
+
+    let mut producer = StateDiffProducer::default();
+    let mut events = fixture.state.subscribe_stream_events();
+    let senders = &fixture.state.state_broadcast_senders;
+    producer.forward(StateBroadcastWork::ImmutableSnapshot(first), senders);
+    let SseStreamEvent::State(payload) = events.try_recv().unwrap() else {
+        panic!("expected the first cut as a full state");
+    };
+    let snapshot: Value = serde_json::from_str(&payload).unwrap();
+    let first_owner = snapshot["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == owner)
+        .unwrap();
+    assert_eq!(first_owner["name"], "older worker owner");
+    assert_eq!(first_owner["testRunActivity"]["ownedRunning"], 1);
+    let emitted = |producer: &StateDiffProducer| {
+        producer
+            .base
+            .as_ref()
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|row| row.id == owner)
+            .unwrap()
+            .clone()
+    };
+    let older = emitted(&producer);
+    producer.forward(StateBroadcastWork::ImmutableSnapshot(second), senders);
+    let SseStreamEvent::StateDiff(payload) = events.try_recv().unwrap() else {
+        panic!("expected a diff from the first cut");
+    };
+    let diff: Value = serde_json::from_str(&payload).unwrap();
+    let changed = diff["sessions"]["changed"].as_array().unwrap();
+    assert_eq!(changed.len(), 1);
+    assert_eq!(changed[0]["id"], other);
+    assert_eq!(changed[0]["name"], "changed worker row");
+    assert!(Arc::ptr_eq(&older, &emitted(&producer)));
 }
