@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,6 +46,152 @@ describe("GitStatusPanel", () => {
     commitGitChangesMock.mockReset();
     fetchGitStatusMock.mockReset();
   });
+
+  it("expands a clean changed submodule by section and keeps its parent diff and stage actions", async () => {
+    const files: GitStatusFile[] = [{
+      path: "modules/demo",
+      indexStatus: "M",
+      worktreeStatus: "M",
+      submodule: {
+        checkout: "checkedOut",
+        staged: true,
+        unstaged: true,
+        stagedCommits: { state: "listed", paths: ["src/staged path.ts"], remaining: 0 },
+        unstagedCommits: { state: "listed", paths: ["src/unstaged.ts"], remaining: 0 },
+      },
+    }];
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse(files));
+    applyGitFileActionMock.mockResolvedValue(makeStatusResponse(files));
+    const onOpenDiff = vi.fn();
+    render(
+      <GitStatusPanel sessionId={SESSION_ID} workdir="/repo" onOpenDiff={onOpenDiff} onOpenWorkdir={() => {}} />,
+    );
+
+    const [stagedToggle, unstagedToggle] = await screen.findAllByRole("button", { name: "Expand submodule demo" });
+    expect(screen.getAllByText("Submodule")).toHaveLength(2);
+    expect(screen.getAllByText("Pointer changed")).toHaveLength(2);
+    expect(screen.queryByText("src/staged path.ts")).not.toBeInTheDocument();
+    await clickAndSettle(stagedToggle);
+    expect(stagedToggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(screen.getByRole("group", { name: "Commits" })).getByText("src/staged path.ts")).toBeInTheDocument();
+    expect(screen.queryByText("src/unstaged.ts")).not.toBeInTheDocument();
+    await clickAndSettle(unstagedToggle);
+    expect(screen.getByText("src/unstaged.ts")).toBeInTheDocument();
+
+    const [stagedDiff] = screen.getAllByRole("button", { name: "Open submodule diff for demo" });
+    await clickAndSettle(stagedDiff, { ctrlKey: true });
+    expect(onOpenDiff).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "modules/demo", sectionId: "staged", statusCode: "M", sessionId: SESSION_ID }),
+      { sectionId: "staged", openInNewTab: true },
+    );
+
+    await clickAndSettle(screen.getByRole("button", { name: "Move demo to unstaged" }));
+    await waitFor(() => expect(applyGitFileActionMock).toHaveBeenNthCalledWith(1,
+      expect.objectContaining({ action: "unstage", path: "modules/demo", statusCode: "M" }),
+    ));
+    await clickAndSettle(screen.getByRole("button", { name: "Stage demo" }));
+    await waitFor(() => expect(applyGitFileActionMock).toHaveBeenNthCalledWith(2,
+      expect.objectContaining({ action: "stage", path: "modules/demo", statusCode: "M" }),
+    ));
+  });
+
+  it("shows concrete modified and untracked paths in read-only groups", async () => {
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([{
+      path: "demo",
+      worktreeStatus: "M",
+      submodule: {
+        checkout: "checkedOut",
+        staged: false,
+        unstaged: true,
+        modified: { state: "listed", paths: ["src/deep/changed.ts"], remaining: 2 },
+        untracked: { state: "listed", paths: ["src/new.ts"], remaining: 0 },
+      },
+    }]));
+    render(
+      <GitStatusPanel sessionId={SESSION_ID} workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />,
+    );
+
+    await clickAndSettle(await screen.findByRole("button", { name: "Expand submodule demo" }));
+    const modified = within(screen.getByRole("group", { name: "Modified" }));
+    const untracked = within(screen.getByRole("group", { name: "Untracked" }));
+    expect(modified.getByText("src/deep/changed.ts")).toBeInTheDocument();
+    expect(modified.getByText("+2 more")).toBeInTheDocument();
+    expect(untracked.getByText("src/new.ts")).toBeInTheDocument();
+    expect(modified.queryByRole("button")).not.toBeInTheDocument();
+    expect(untracked.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Commits" })).not.toBeInTheDocument();
+  });
+
+  it("shows local submodule edits only on the unstaged side of an MM gitlink", async () => {
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([{
+      path: "demo",
+      indexStatus: "M",
+      worktreeStatus: "M",
+      submodule: {
+        checkout: "checkedOut",
+        staged: true,
+        unstaged: true,
+        stagedCommits: { state: "listed", paths: ["committed.ts"], remaining: 0 },
+        modified: { state: "listed", paths: ["local/changed.ts"], remaining: 0 },
+        untracked: { state: "listed", paths: ["local/new.ts"], remaining: 0 },
+      },
+    }]));
+    render(
+      <GitStatusPanel sessionId={SESSION_ID} workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />,
+    );
+    const [staged, unstaged] = await screen.findAllByRole("button", { name: "Expand submodule demo" });
+    expect(staged).toHaveAccessibleDescription("Submodule Pointer changed");
+    expect(unstaged).toHaveAccessibleDescription("Submodule Modified Untracked");
+    await clickAndSettle(staged);
+    expect(screen.getByRole("group", { name: "Commits" })).toHaveTextContent("committed.ts");
+    expect(screen.queryByRole("group", { name: "Modified" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Untracked" })).not.toBeInTheDocument();
+
+    await clickAndSettle(unstaged);
+    expect(screen.getAllByRole("group", { name: "Commits" })).toHaveLength(1);
+    expect(screen.getByRole("group", { name: "Modified" })).toHaveTextContent("local/changed.ts");
+    expect(screen.getByRole("group", { name: "Untracked" })).toHaveTextContent("local/new.ts");
+  });
+
+  it("keeps the ordinary half of a gitlink type change as an ordinary row", async () => {
+    fetchGitStatusMock.mockResolvedValue(makeStatusResponse([{
+      path: "demo",
+      indexStatus: "T",
+      worktreeStatus: "M",
+      submodule: { checkout: "notCheckedOut", staged: true, unstaged: false },
+    }]));
+    render(
+      <GitStatusPanel sessionId={SESSION_ID} workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Expand submodule demo" })).toBeInTheDocument();
+    expect(screen.getAllByText("Submodule")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /^demo$/ })).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      name: "not checked out",
+      submodule: { checkout: "notCheckedOut", staged: true, unstaged: false, stagedCommits: { state: "unavailable" } },
+      explanation: "Not checked out.",
+    },
+    {
+      name: "commit missing locally",
+      submodule: { checkout: "checkedOut", staged: true, unstaged: false, stagedCommits: { state: "missingCommit", commit: "f".repeat(40) } },
+      explanation: `Commit ${"f".repeat(40)} is not present locally.`,
+    },
+  ] satisfies Array<{ name: string; submodule: GitStatusFile["submodule"]; explanation: string }>)(
+    "explains unavailable submodule details when $name",
+    async ({ submodule, explanation }) => {
+      fetchGitStatusMock.mockResolvedValue(makeStatusResponse([{ path: "demo", indexStatus: "M", submodule }]));
+      render(
+        <GitStatusPanel sessionId={SESSION_ID} workdir="/repo" onOpenDiff={() => {}} onOpenWorkdir={() => {}} />,
+      );
+      const toggle = await screen.findByRole("button", { name: "Expand submodule demo" });
+      await clickAndSettle(toggle);
+      expect(toggle.closest(".git-status-node")).toHaveTextContent(explanation);
+    },
+  );
 
   it("keeps tree actions keyboard reachable without reserving filename width", async () => {
     const user = userEvent.setup();

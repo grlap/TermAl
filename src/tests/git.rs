@@ -19,38 +19,96 @@
 //! leaf or a symlinked parent escape the repo root (five unix-only
 //! tests), and every document reader caps at `MAX_FILE_CONTENT_BYTES`
 //! so a large committed blob or worktree file cannot blow up the
-//! process. `parse_git_status_paths` decodes git's C-escaped quoted
-//! paths (`"folder/file with spaces.txt"`, `"caf\303\251.txt"`, and
-//! `"old" -> "new"` rename arrows) so non-ASCII and space-containing
-//! paths survive the status pipeline.
+//! process. Status tests cover the parent file pipeline and the
+//! submodule commit and working-tree file groups.
 //!
 //! All production surfaces live in `src/git.rs` (extracted earlier
 //! this session): `load_git_diff_for_request`,
 //! `load_git_diff_document_content`, `read_git_diff_document_side`,
 //! `read_git_worktree_text`, `git_diff_document_enrichment_note`,
 //! `should_degrade_git_diff_document_enrichment_error`,
-//! `parse_git_status_paths`, `push_git_repo`, and `sync_git_repo`.
+//! `push_git_repo` and `sync_git_repo`. Status reads live in
+//! `src/git_status.rs`.
 
 use super::*;
 
-// Pins git's C-escaped quoted status paths to decoded owned strings.
-// Guards against losing spaces, non-ASCII octals (`\303\251` → é), or
-// rename arrows when the status pipeline hands paths to pathspec and
-// diff callers.
 #[test]
-fn parses_quoted_git_status_paths() {
-    assert_eq!(
-        parse_git_status_paths(r#""folder/file with spaces.txt""#),
-        (None, "folder/file with spaces.txt".to_owned())
+fn git_status_preserves_renamed_paths_with_spaces_and_unicode() {
+    let root = test_temp_dir().join(format!("termal-git-status-rename-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    init_git_document_test_repo(&root);
+    fs::write(root.join("old name.txt"), "keep this content\n").unwrap();
+    run_git_test_command(&root, &["add", "old name.txt"]);
+    run_git_test_command(&root, &["commit", "-m", "track original"]);
+    run_git_test_command(&root, &["mv", "old name.txt", "café name.txt"]);
+
+    let status = load_git_status_for_path(&root).unwrap();
+    assert_eq!(status.files.len(), 1);
+    let file = &status.files[0];
+    assert_eq!(file.path, "café name.txt");
+    assert_eq!(file.original_path.as_deref(), Some("old name.txt"));
+    assert_eq!(file.index_status.as_deref(), Some("R"));
+    assert!(file.worktree_status.is_none());
+    assert!(file.submodule.is_none());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn git_status_distinguishes_literal_detached_branch_from_detached_head() {
+    let root = test_temp_dir().join(format!("termal-git-status-branch-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    init_git_document_test_repo(&root);
+    run_git_test_command(&root, &["commit", "--allow-empty", "-m", "initial"]);
+    run_git_test_command(&root, &["branch", "-m", "(detached)"]);
+    let status = load_git_status_for_path(&root).unwrap();
+    assert_eq!(status.branch.as_deref(), Some("(detached)"));
+    run_git_test_command(&root, &["switch", "--detach", "HEAD"]);
+    let status = load_git_status_for_path(&root).unwrap();
+    assert_eq!(status.branch.as_deref(), Some("HEAD (no branch)"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn git_status_parses_v2_tracking_headers_and_unmerged_gitlinks() {
+    let bytes = concat!(
+        "# branch.oid 1111111111111111111111111111111111111111\0",
+        "# branch.head feature\0# branch.upstream origin/feature\0# branch.ab +2 -4\0",
+        "# other ignored header\0",
+        "u UU S..U 160000 160000 160000 160000 ",
+        "1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 ",
+        "3333333333333333333333333333333333333333 path with spaces\0",
+        "? other.txt\0"
     );
+    let (branch, entries) = parse_git_status(bytes.as_bytes());
+    assert_eq!(branch.branch.as_deref(), Some("feature"));
+    assert_eq!(branch.upstream.as_deref(), Some("origin/feature"));
+    assert_eq!((branch.ahead, branch.behind), (2, 4));
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].file.path, "path with spaces");
+    assert_eq!(entries[0].file.index_status.as_deref(), Some("U"));
+    assert_eq!(entries[0].file.worktree_status.as_deref(), Some("U"));
+    let gitlink = entries[0].gitlink.as_ref().unwrap();
+    assert!(gitlink.staged && gitlink.unstaged && gitlink.dirt.untracked);
+    assert!(!gitlink.dirt.modified);
+    assert_eq!(entries[1].file.path, "other.txt");
+    assert!(entries[1].gitlink.is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn git_status_preserves_a_trailing_space_in_the_repo_root() {
+    let parent = test_temp_dir().join(format!("termal-git-status-root-{}", Uuid::new_v4()));
+    let root = parent.join("repo ");
+    fs::create_dir_all(&root).unwrap();
+    init_git_document_test_repo(&root);
+    fs::write(root.join("new.txt"), "untracked\n").unwrap();
+    let status = load_git_status_for_path(&root).unwrap();
     assert_eq!(
-        parse_git_status_paths(r#""caf\303\251.txt""#),
-        (None, "caf\u{00e9}.txt".to_owned())
+        status.repo_root.as_deref().map(FsPath::new),
+        Some(root.as_path())
     );
-    assert_eq!(
-        parse_git_status_paths(r#""old name.txt" -> "new name.txt""#),
-        (Some("old name.txt".to_owned()), "new name.txt".to_owned(),)
-    );
+    assert_eq!(status.files[0].path, "new.txt");
+    fs::remove_dir_all(parent).unwrap();
 }
 
 // Pins the end-to-end status → add → restore flow for paths containing
@@ -405,9 +463,8 @@ fn git_diff_skips_submodule_probe_for_untracked_worktree_files() {
     ));
 }
 
-#[test]
-fn git_diff_expands_unstaged_and_staged_submodule_changes() {
-    let test_root = test_temp_dir().join(format!("termal-git-submodule-diff-{}", Uuid::new_v4()));
+fn create_git_submodule_fixture() -> (PathBuf, PathBuf, PathBuf) {
+    let test_root = test_temp_dir().join(format!("termal-git-submodule-{}", Uuid::new_v4()));
     let source_repo = test_root.join("source");
     let parent_repo = test_root.join("parent");
     let checked_out_submodule = parent_repo.join("modules").join("demo");
@@ -433,7 +490,235 @@ fn git_diff_expands_unstaged_and_staged_submodule_changes() {
         ],
     );
     run_git_test_command(&parent_repo, &["commit", "-am", "add submodule"]);
+    (test_root, parent_repo, checked_out_submodule)
+}
 
+#[test]
+fn git_status_lists_files_for_clean_submodule_pointer_moves_and_local_edits() {
+    let (test_root, parent, child) = create_git_submodule_fixture();
+    fs::create_dir_all(child.join("nested/code")).unwrap();
+    fs::write(child.join("nested/code/committed name.txt"), "new commit\n").unwrap();
+    run_git_test_command(&child, &["add", "nested/code/committed name.txt"]);
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "user.email=termal@example.com",
+            "-c",
+            "user.name=TermAl",
+            "commit",
+            "-m",
+            "new submodule commit",
+        ],
+    );
+    let expected_commit_files = GitSubmoduleFiles::Listed {
+        paths: vec!["nested/code/committed name.txt".to_owned()],
+        remaining: 0,
+        incomplete: false,
+    };
+
+    let status = load_git_status_for_path(&parent).unwrap();
+    let file = &status.files[0];
+    assert_eq!(file.path, "modules/demo");
+    assert!(file.index_status.is_none());
+    assert_eq!(file.worktree_status.as_deref(), Some("M"));
+    let submodule = file.submodule.as_ref().unwrap();
+    assert!(matches!(
+        submodule.checkout,
+        GitSubmoduleCheckout::CheckedOut
+    ));
+    assert_eq!(
+        submodule.unstaged_commits.as_ref(),
+        Some(&expected_commit_files)
+    );
+    assert!(submodule.staged_commits.is_none());
+    assert!(submodule.modified.is_none());
+    assert!(submodule.untracked.is_none());
+
+    run_git_test_command(&parent, &["add", "modules/demo"]);
+    let status = load_git_status_for_path(&parent).unwrap();
+    let file = &status.files[0];
+    assert_eq!(file.index_status.as_deref(), Some("M"));
+    assert!(file.worktree_status.is_none());
+    let submodule = file.submodule.as_ref().unwrap();
+    assert_eq!(
+        submodule.staged_commits.as_ref(),
+        Some(&expected_commit_files)
+    );
+    assert!(submodule.unstaged_commits.is_none());
+    assert!(submodule.modified.is_none());
+    assert!(submodule.untracked.is_none());
+
+    fs::write(child.join("file.txt"), "staged in the child\n").unwrap();
+    run_git_test_command(&child, &["add", "file.txt"]);
+    fs::write(
+        child.join("nested/code/committed name.txt"),
+        "worktree edit\n",
+    )
+    .unwrap();
+    fs::write(child.join("nested/code/untracked file.txt"), "untracked\n").unwrap();
+    let status = load_git_status_for_path(&parent).unwrap();
+    let file = &status.files[0];
+    assert_eq!(file.index_status.as_deref(), Some("M"));
+    assert_eq!(file.worktree_status.as_deref(), Some("M"));
+    let submodule = file.submodule.as_ref().unwrap();
+    assert_eq!(
+        submodule.staged_commits.as_ref(),
+        Some(&expected_commit_files)
+    );
+    assert!(submodule.unstaged_commits.is_none());
+    let Some(GitSubmoduleFiles::Listed {
+        paths,
+        remaining,
+        incomplete,
+    }) = &submodule.modified
+    else {
+        panic!("expected local modified files");
+    };
+    assert_eq!(*remaining, 0);
+    assert!(!*incomplete);
+    assert_eq!(paths.len(), 2);
+    assert!(paths.iter().any(|path| path == "file.txt"));
+    assert!(
+        paths
+            .iter()
+            .any(|path| path == "nested/code/committed name.txt")
+    );
+    assert_eq!(
+        submodule.untracked,
+        Some(GitSubmoduleFiles::Listed {
+            paths: vec!["nested/code/untracked file.txt".to_owned()],
+            remaining: 0,
+            incomplete: false,
+        })
+    );
+    fs::remove_dir_all(test_root).unwrap();
+}
+
+#[test]
+fn git_status_keeps_nested_submodule_untracked_and_modified_files_separate() {
+    let (test_root, parent, child) = create_git_submodule_fixture();
+    let source = test_root.join("source");
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            source.to_str().unwrap(),
+            "deps/nested",
+        ],
+    );
+    run_git_test_command(
+        &child,
+        &[
+            "-c",
+            "user.email=termal@example.com",
+            "-c",
+            "user.name=TermAl",
+            "commit",
+            "-m",
+            "add nested submodule",
+        ],
+    );
+    run_git_test_command(&parent, &["add", "modules/demo"]);
+    run_git_test_command(&parent, &["commit", "-m", "record outer submodule commit"]);
+    let nested = child.join("deps/nested");
+    fs::create_dir_all(nested.join("deep")).unwrap();
+    fs::write(nested.join("deep/new file.txt"), "nested untracked\n").unwrap();
+    let untracked = GitSubmoduleFiles::Listed {
+        paths: vec!["deps/nested/deep/new file.txt".to_owned()],
+        remaining: 0,
+        incomplete: false,
+    };
+
+    let status = load_git_status_for_path(&parent).unwrap();
+    assert_eq!(status.files.len(), 1);
+    let submodule = status.files[0].submodule.as_ref().unwrap();
+    assert!(submodule.modified.is_none());
+    assert_eq!(submodule.untracked.as_ref(), Some(&untracked));
+
+    fs::write(nested.join("file.txt"), "nested worktree edit\n").unwrap();
+    let status = load_git_status_for_path(&parent).unwrap();
+    let submodule = status.files[0].submodule.as_ref().unwrap();
+    assert_eq!(
+        submodule.modified,
+        Some(GitSubmoduleFiles::Listed {
+            paths: vec!["deps/nested/file.txt".to_owned()],
+            remaining: 0,
+            incomplete: false,
+        })
+    );
+    assert_eq!(submodule.untracked, Some(untracked));
+    fs::remove_dir_all(test_root).unwrap();
+}
+
+#[test]
+fn git_status_reports_missing_submodule_commits_and_uninitialized_checkouts() {
+    let (test_root, parent, child) = create_git_submodule_fixture();
+    let blob = git_submodule_read_command(&child)
+        .args(["rev-parse", "HEAD:file.txt"])
+        .output()
+        .unwrap();
+    assert!(blob.status.success());
+    let non_commit = std::str::from_utf8(&blob.stdout).unwrap().trim();
+    let head = git_submodule_checkout_head(&child).unwrap();
+    assert_eq!(
+        read_git_submodule_commit_files(&child, Some(&head), Some(non_commit)),
+        GitSubmoduleFiles::Unavailable
+    );
+
+    let length = git_submodule_checkout_head(&child).unwrap().len();
+    let missing_commit = "f".repeat(length);
+    let entry = format!("160000,{missing_commit},modules/demo");
+    run_git_test_command(&parent, &["update-index", "--cacheinfo", &entry]);
+
+    let status = load_git_status_for_path(&parent).unwrap();
+    let submodule = status.files[0].submodule.as_ref().unwrap();
+    assert!(matches!(
+        submodule.checkout,
+        GitSubmoduleCheckout::CheckedOut
+    ));
+    assert_eq!(
+        submodule.staged_commits,
+        Some(GitSubmoduleFiles::MissingCommit {
+            commit: missing_commit
+        })
+    );
+
+    run_git_test_command(&parent, &["restore", "--staged", "--", "modules/demo"]);
+    run_git_test_command(&parent, &["submodule", "deinit", "--", "modules/demo"]);
+    run_git_test_command(&parent, &["update-index", "--cacheinfo", &entry]);
+    fs::write(
+        parent.join("parent-only.txt"),
+        "must not enter submodule group",
+    )
+    .unwrap();
+    let status = load_git_status_for_path(&parent).unwrap();
+    let path = status
+        .files
+        .iter()
+        .find(|file| file.path == "modules/demo")
+        .unwrap();
+    assert_eq!(path.index_status.as_deref(), Some("M"));
+    let submodule = path.submodule.as_ref().unwrap();
+    assert!(matches!(
+        submodule.checkout,
+        GitSubmoduleCheckout::NotCheckedOut
+    ));
+    assert_eq!(
+        submodule.staged_commits,
+        Some(GitSubmoduleFiles::Unavailable)
+    );
+    assert!(submodule.modified.is_none());
+    assert!(submodule.untracked.is_none());
+    fs::remove_dir_all(test_root).unwrap();
+}
+
+#[test]
+fn git_diff_expands_unstaged_and_staged_submodule_changes() {
+    let (test_root, parent_repo, checked_out_submodule) = create_git_submodule_fixture();
     fs::write(checked_out_submodule.join("file.txt"), "base\nworktree\n").unwrap();
     let unstaged = load_git_diff_for_request(
         &parent_repo,
@@ -513,6 +798,28 @@ fn git_diff_expands_unstaged_and_staged_submodule_changes() {
     );
     assert!(staged.diff.contains("+worktree"));
 
+    fs::remove_dir_all(test_root).unwrap();
+}
+
+#[test]
+fn git_status_marks_only_the_gitlink_side_of_a_staged_type_change() {
+    let (test_root, parent, child) = create_git_submodule_fixture();
+    run_git_test_command(&parent, &["submodule", "deinit", "--", "modules/demo"]);
+    fs::remove_dir(&child).unwrap();
+    fs::write(&child, "replace the gitlink with a regular file\n").unwrap();
+    run_git_test_command(&parent, &["add", "modules/demo"]);
+    fs::write(&child, "edit the regular worktree file\n").unwrap();
+    let status = load_git_status_for_path(&parent).unwrap();
+    let file = status
+        .files
+        .iter()
+        .find(|file| file.path == "modules/demo")
+        .unwrap();
+    assert_eq!(file.index_status.as_deref(), Some("T"));
+    assert_eq!(file.worktree_status.as_deref(), Some("M"));
+    let submodule = file.submodule.as_ref().unwrap();
+    assert!(submodule.staged);
+    assert!(!submodule.unstaged);
     fs::remove_dir_all(test_root).unwrap();
 }
 

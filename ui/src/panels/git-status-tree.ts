@@ -1,4 +1,4 @@
-import type { GitStatusFile } from "../api";
+import type { GitStatusFile, GitSubmoduleFiles, GitSubmoduleStatus } from "../api";
 
 export type GitStatusSectionId = "staged" | "unstaged";
 
@@ -17,6 +17,14 @@ export type GitStatusTreeFileNode = {
   path: string;
   statusCode: string;
   statusLabel: string;
+  submodule?: GitStatusTreeSubmodule;
+};
+
+export type GitStatusTreeSubmodule = {
+  checkout: GitSubmoduleStatus["checkout"];
+  commits?: GitSubmoduleFiles;
+  modified?: GitSubmoduleFiles;
+  untracked?: GitSubmoduleFiles;
 };
 
 export type GitStatusTreeNode = GitStatusTreeDirectoryNode | GitStatusTreeFileNode;
@@ -28,13 +36,7 @@ export type GitStatusTreeSection = {
   nodes: GitStatusTreeNode[];
 };
 
-type GitTreeFileEntry = {
-  name: string;
-  originalPath?: string | null;
-  path: string;
-  statusCode: string;
-  statusLabel: string;
-};
+type GitTreeFileEntry = Omit<GitStatusTreeFileNode, "kind">;
 
 type GitTreeDirectoryBuilder = {
   directories: Map<string, GitTreeDirectoryBuilder>;
@@ -132,6 +134,7 @@ function fileBelongsToSection(file: GitStatusFile, sectionId: GitStatusSectionId
 function toTreeEntry(file: GitStatusFile, sectionId: GitStatusSectionId): GitTreeFileEntry {
   const statusCode = sectionId === "staged" ? normalizeGitStatus(file.indexStatus) : resolveUnstagedStatusCode(file);
   const segments = splitGitPath(file.path);
+  const submodule = file.submodule?.[sectionId] ? file.submodule : undefined;
 
   return {
     name: segments[segments.length - 1] ?? file.path,
@@ -139,6 +142,12 @@ function toTreeEntry(file: GitStatusFile, sectionId: GitStatusSectionId): GitTre
     path: file.path,
     statusCode,
     statusLabel: STATUS_LABELS[statusCode] ?? "Changed",
+    submodule: submodule && {
+      checkout: submodule.checkout,
+      commits: sectionId === "staged" ? submodule.stagedCommits : submodule.unstagedCommits,
+      modified: sectionId === "unstaged" ? submodule.modified : undefined,
+      untracked: sectionId === "unstaged" ? submodule.untracked : undefined,
+    },
   };
 }
 
@@ -170,16 +179,7 @@ function materializeChildren(directory: GitTreeDirectoryBuilder): GitStatusTreeN
     .map(materializeDirectory);
   const files = [...directory.files]
     .sort((left, right) => compareGitTreeNames(left.name, right.name))
-    .map(
-      (file): GitStatusTreeFileNode => ({
-        kind: "file",
-        name: file.name,
-        originalPath: file.originalPath,
-        path: file.path,
-        statusCode: file.statusCode,
-        statusLabel: file.statusLabel,
-      }),
-    );
+    .map((file): GitStatusTreeFileNode => ({ kind: "file", ...file }));
 
   return [...directories, ...files];
 }
@@ -281,12 +281,43 @@ function reconcileFileNode(previousNode: GitStatusTreeNode, nextNode: GitStatusT
     previousNode.originalPath === nextNode.originalPath &&
     previousNode.path === nextNode.path &&
     previousNode.statusCode === nextNode.statusCode &&
-    previousNode.statusLabel === nextNode.statusLabel
+    previousNode.statusLabel === nextNode.statusLabel &&
+    sameSubmodule(previousNode.submodule, nextNode.submodule)
   ) {
     return previousNode;
   }
 
   return nextNode;
+}
+
+function sameSubmodule(left?: GitStatusTreeSubmodule, right?: GitStatusTreeSubmodule) {
+  return (
+    left === right ||
+    (left !== undefined &&
+      right !== undefined &&
+      left.checkout === right.checkout &&
+      sameSubmoduleFiles(left.commits, right.commits) &&
+      sameSubmoduleFiles(left.modified, right.modified) &&
+      sameSubmoduleFiles(left.untracked, right.untracked))
+  );
+}
+
+function sameSubmoduleFiles(left?: GitSubmoduleFiles, right?: GitSubmoduleFiles) {
+  if (left === right) {
+    return true;
+  }
+  if (left?.state === "listed" && right?.state === "listed") {
+    return (
+      left.remaining === right.remaining &&
+      Boolean(left.incomplete) === Boolean(right.incomplete) &&
+      left.paths.length === right.paths.length &&
+      left.paths.every((path, index) => path === right.paths[index])
+    );
+  }
+  if (left?.state === "missingCommit" && right?.state === "missingCommit") {
+    return left.commit === right.commit;
+  }
+  return left?.state === "unavailable" && right?.state === "unavailable";
 }
 
 function gitStatusTreeNodeKey(node: GitStatusTreeNode) {

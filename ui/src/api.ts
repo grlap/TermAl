@@ -331,8 +331,25 @@ export type GitStatusFile = {
   indexStatus?: string | null;
   originalPath?: string | null;
   path: string;
+  submodule?: GitSubmoduleStatus;
   worktreeStatus?: string | null;
 };
+
+export type GitSubmoduleStatus = {
+  checkout: "checkedOut" | "notCheckedOut" | "unavailable";
+  // Whether the corresponding row compares a gitlink on either side.
+  staged: boolean;
+  unstaged: boolean;
+  stagedCommits?: GitSubmoduleFiles;
+  unstagedCommits?: GitSubmoduleFiles;
+  modified?: GitSubmoduleFiles;
+  untracked?: GitSubmoduleFiles;
+};
+
+export type GitSubmoduleFiles =
+  | { state: "listed"; paths: string[]; remaining: number; incomplete?: boolean }
+  | { state: "missingCommit"; commit: string }
+  | { state: "unavailable" };
 
 export type GitStatusResponse = {
   ahead: number;

@@ -56,7 +56,53 @@ struct GitStatusFile {
     original_path: Option<String>,
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    submodule: Option<GitSubmoduleStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     worktree_status: Option<String>,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitSubmoduleStatus {
+    checkout: GitSubmoduleCheckout,
+    // Each flag describes whether that section compares a gitlink on either
+    // side. A type change can therefore have just one submodule row.
+    staged: bool,
+    unstaged: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    staged_commits: Option<GitSubmoduleFiles>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unstaged_commits: Option<GitSubmoduleFiles>,
+    // Local changes belong to the unstaged row, including edits staged in
+    // the submodule itself that do not change the superproject's index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modified: Option<GitSubmoduleFiles>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    untracked: Option<GitSubmoduleFiles>,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum GitSubmoduleCheckout {
+    #[default]
+    CheckedOut,
+    NotCheckedOut,
+    Unavailable,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+enum GitSubmoduleFiles {
+    Listed {
+        paths: Vec<String>,
+        remaining: usize,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        incomplete: bool,
+    },
+    MissingCommit {
+        commit: String,
+    },
+    Unavailable,
 }
 
 /// Represents the Git status response payload.

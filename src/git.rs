@@ -150,84 +150,7 @@ where
     })
 }
 
-/// Loads Git status for path.
-fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError> {
-    let workdir = normalize_git_workdir_path(path)?;
-    let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
-        return Ok(GitStatusResponse {
-            ahead: 0,
-            behind: 0,
-            branch: None,
-            files: Vec::new(),
-            is_clean: true,
-            repo_root: None,
-            upstream: None,
-            workdir: workdir.to_string_lossy().into_owned(),
-        });
-    };
-
-    let output = git_command()
-        .arg("-C")
-        .arg(&repo_root)
-        .args(["status", "--porcelain=v1", "--branch", "-uall"])
-        .output()
-        .map_err(|err| ApiError::internal(format!("failed to run git status: {err}")))?;
-
-    if !output.status.success() {
-        return Err(ApiError::internal(format!(
-            "git status failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut branch = None;
-    let mut upstream = None;
-    let mut ahead = 0;
-    let mut behind = 0;
-    let mut files = Vec::new();
-
-    for line in stdout.lines() {
-        if let Some(branch_info) = line.strip_prefix("## ") {
-            let parsed = parse_git_branch_status(branch_info);
-            branch = parsed.branch;
-            upstream = parsed.upstream;
-            ahead = parsed.ahead;
-            behind = parsed.behind;
-            continue;
-        }
-
-        if line.len() < 3 {
-            continue;
-        }
-
-        let status = &line[..2];
-        let path_payload = line[3..].trim();
-        let (original_path, path) = parse_git_status_paths(path_payload);
-        let index_status = status.chars().next().and_then(normalize_git_status_code);
-        let worktree_status = status.chars().nth(1).and_then(normalize_git_status_code);
-
-        files.push(GitStatusFile {
-            index_status,
-            original_path,
-            path,
-            worktree_status,
-        });
-    }
-
-    let is_clean = files.is_empty();
-
-    Ok(GitStatusResponse {
-        ahead,
-        behind,
-        branch,
-        files,
-        is_clean,
-        repo_root: Some(repo_root.to_string_lossy().into_owned()),
-        upstream,
-        workdir: workdir.to_string_lossy().into_owned(),
-    })
-}
+include!("git_status.rs");
 
 /// Normalizes Git working directory path.
 fn normalize_git_workdir_path(path: &FsPath) -> Result<PathBuf, ApiError> {
@@ -581,7 +504,11 @@ fn git_raw_diff_line_is_submodule(line: &str) -> bool {
     let mut fields = line.split('\t').next().unwrap_or(line).split_whitespace();
     let old_mode = fields.next().and_then(|value| value.strip_prefix(':'));
     let new_mode = fields.next();
-    old_mode == Some("160000") || new_mode == Some("160000")
+    old_mode.is_some_and(git_mode_is_submodule) || new_mode.is_some_and(git_mode_is_submodule)
+}
+
+fn git_mode_is_submodule(mode: &str) -> bool {
+    mode == "160000"
 }
 
 /// Builds untracked Git diff.
@@ -1409,14 +1336,6 @@ fn build_git_repo_action_summary(
     }
 }
 
-/// Enumerates parsed Git branch states.
-struct ParsedGitBranchStatus {
-    ahead: usize,
-    behind: usize,
-    branch: Option<String>,
-    upstream: Option<String>,
-}
-
 /// Resolves Git repo root.
 fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> {
     let output = git_command()
@@ -1427,7 +1346,10 @@ fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> 
         .map_err(|err| ApiError::internal(format!("failed to run git rev-parse: {err}")))?;
 
     if output.status.success() {
-        let repo_root = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let repo_root = stdout.strip_suffix('\n').unwrap_or(&stdout);
+        #[cfg(windows)]
+        let repo_root = repo_root.strip_suffix('\r').unwrap_or(repo_root);
         return Ok((!repo_root.is_empty()).then(|| PathBuf::from(repo_root)));
     }
 
@@ -1442,182 +1364,10 @@ fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> 
     )))
 }
 
-/// Parses Git branch status.
-fn parse_git_branch_status(line: &str) -> ParsedGitBranchStatus {
-    let mut branch = None;
-    let mut upstream = None;
-    let mut ahead = 0;
-    let mut behind = 0;
-
-    let (head_segment, counts_segment) = match line.split_once(" [") {
-        Some((head, counts)) => (head, Some(counts.trim_end_matches(']'))),
-        None => (line, None),
-    };
-
-    if let Some((local_branch, upstream_branch)) = head_segment.split_once("...") {
-        branch = Some(local_branch.trim().to_owned());
-        let upstream_name = upstream_branch.trim();
-        if !upstream_name.is_empty() {
-            upstream = Some(upstream_name.to_owned());
-        }
-    } else {
-        let trimmed = head_segment.trim();
-        if !trimmed.is_empty() {
-            branch = Some(trimmed.to_owned());
-        }
-    }
-
-    if let Some(counts_segment) = counts_segment {
-        for item in counts_segment.split(',') {
-            let trimmed = item.trim();
-            if let Some(value) = trimmed.strip_prefix("ahead ") {
-                ahead = value.parse::<usize>().unwrap_or(0);
-            } else if let Some(value) = trimmed.strip_prefix("behind ") {
-                behind = value.parse::<usize>().unwrap_or(0);
-            }
-        }
-    }
-
-    ParsedGitBranchStatus {
-        ahead,
-        behind,
-        branch,
-        upstream,
-    }
-}
-
-/// Parses Git status paths.
-fn parse_git_status_paths(path_payload: &str) -> (Option<String>, String) {
-    if let Some(separator_index) = find_git_status_rename_separator(path_payload) {
-        let original_path = decode_git_status_path(&path_payload[..separator_index]);
-        let path = decode_git_status_path(&path_payload[separator_index + 4..]);
-        return (Some(original_path), path);
-    }
-
-    (None, decode_git_status_path(path_payload))
-}
-
-/// Finds Git status rename separator.
-fn find_git_status_rename_separator(path_payload: &str) -> Option<usize> {
-    let bytes = path_payload.as_bytes();
-    let mut index = 0;
-    let mut in_quotes = false;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\\' if in_quotes => {
-                index += 2;
-            }
-            b'"' => {
-                in_quotes = !in_quotes;
-                index += 1;
-            }
-            b' ' if !in_quotes && bytes[index..].starts_with(b" -> ") => {
-                return Some(index);
-            }
-            _ => {
-                index += 1;
-            }
-        }
-    }
-
-    None
-}
-
-/// Decodes Git status path.
-fn decode_git_status_path(path: &str) -> String {
-    let trimmed = path.trim();
-    decode_git_status_quoted_path(trimmed).unwrap_or_else(|| trimmed.to_owned())
-}
-
-/// Decodes Git status quoted path.
-fn decode_git_status_quoted_path(path: &str) -> Option<String> {
-    if !path.starts_with('"') || !path.ends_with('"') || path.len() < 2 {
-        return None;
-    }
-
-    let inner = &path[1..path.len() - 1];
-    let bytes = inner.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-
-    while index < bytes.len() {
-        if bytes[index] != b'\\' {
-            decoded.push(bytes[index]);
-            index += 1;
-            continue;
-        }
-
-        index += 1;
-        if index >= bytes.len() {
-            return None;
-        }
-
-        match bytes[index] {
-            b'"' | b'\\' => {
-                decoded.push(bytes[index]);
-                index += 1;
-            }
-            b'a' => {
-                decoded.push(0x07);
-                index += 1;
-            }
-            b'b' => {
-                decoded.push(0x08);
-                index += 1;
-            }
-            b'f' => {
-                decoded.push(0x0c);
-                index += 1;
-            }
-            b'n' => {
-                decoded.push(b'\n');
-                index += 1;
-            }
-            b'r' => {
-                decoded.push(b'\r');
-                index += 1;
-            }
-            b't' => {
-                decoded.push(b'\t');
-                index += 1;
-            }
-            b'v' => {
-                decoded.push(0x0b);
-                index += 1;
-            }
-            b'0'..=b'7' => {
-                let mut value = bytes[index] - b'0';
-                index += 1;
-
-                for _ in 0..2 {
-                    if index >= bytes.len() {
-                        break;
-                    }
-                    let next = bytes[index];
-                    if !matches!(next, b'0'..=b'7') {
-                        break;
-                    }
-                    value = value.saturating_mul(8).saturating_add(next - b'0');
-                    index += 1;
-                }
-
-                decoded.push(value);
-            }
-            other => {
-                decoded.push(other);
-                index += 1;
-            }
-        }
-    }
-
-    Some(String::from_utf8_lossy(&decoded).into_owned())
-}
-
 /// Normalizes Git status code.
 fn normalize_git_status_code(code: char) -> Option<String> {
     match code {
-        ' ' => None,
+        ' ' | '.' => None,
         other => Some(other.to_string()),
     }
 }

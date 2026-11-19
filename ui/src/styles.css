@@ -8132,6 +8132,52 @@ textarea {
   margin-left: 0.38rem;
 }
 
+.git-status-submodule-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.git-status-submodule-open {
+  display: block;
+}
+
+.git-status-submodule-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.14rem 0.42rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.git-status-submodule-marker {
+  padding-inline: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.git-status-submodule-files {
+  gap: 0.3rem;
+  padding-block: 0.15rem 0.4rem;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.git-status-submodule-group-label {
+  font-weight: 700;
+}
+
+.git-status-submodule-paths {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.git-status-submodule-message {
+  margin: 0;
+  color: var(--muted);
+}
+
 .git-status-empty-copy {
   margin: 0.05rem 0 0.1rem 1.18rem;
   font-size: 0.8rem;
