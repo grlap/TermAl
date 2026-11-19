@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "pending-residual-dirs-after-restart-2026-11-19",
+  "head": {
+    "state": "active",
+    "chain": [
+      "0dea870b60de4e4ebebf32c12fcb9027"
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "01a1f511-efd0-7c13-8b63-f6277b533c10",
+  "external_ref": null,
+  "title": "Evaluate linked provider placement for Engram-enabled unbound turns",
+  "outcome": "Determine whether factually attaching a same-repository linked worktree is appropriate for an Engram-enabled unbound provider execution while keeping all existing no-credit and no-borrowing fences.",
+  "acceptance": [
+    "Record a disposition for direct START and delayed-description placement while Engram is enabled and no active work/root authority is held.",
+    "If factual association is enabled, distinguish the verified START root and exact launcher artifact from the separate native credit, work binding, root authority and carried-writer predicates, and prove the latter remain unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

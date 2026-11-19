@@ -1,0 +1,29 @@
+{
+  "id": "01a1f54b-355e-7d61-820b-1aadc539c9e8",
+  "external_ref": null,
+  "title": "Remove TermAl tests that pass or fail on source-code text or shape instead of behaviour",
+  "outcome": "TermAl has no test that passes or fails on the text or shape of its own source code: line or byte counts, file, function or module counts, required phrases, module layout, or scans of src/. Every such test is deleted. No replacement static gate is added. Tests that read only their own fixtures, or check observable behaviour, stay. source_id input identity is unaffected.",
+  "acceptance": [
+    "Every TermAl test in Kimi's inventory marked DELETE is removed. The tests the inventory marks KEEP are unchanged, and a recorded read-only search of src/tests and scripts finds no remaining test that reads repository source files and asserts on their text, shape or size.",
+    "No new static gate, lint or wrapper over the same metric is added, and no product code is changed beyond what removing those tests requires, such as dropping now-unused test-only helpers.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

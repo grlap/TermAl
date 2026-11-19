@@ -1,0 +1,31 @@
+{
+  "id": "01a1f41f-86ab-7e52-a615-53bcb4e5052e",
+  "external_ref": null,
+  "title": "Reconcile ordinary named-root refusal wording, coverage, and published-name edge cases",
+  "outcome": "Reconcile the four whole-13 Low findings with the eventual ordinary named-root selection specification. Keep any applicable corrections and deterministic coverage in scope, and document findings displaced by the approved design.",
+  "acceptance": [
+    "Reconcile whether an in-flight or failed re-name can remove still-published authority for a named root from the opening ambiguity decision. Preserve the first-publication fence.",
+    "Where applicable, ordinary refusal wording distinguishes report authority from independent verification and the source-root reason header identifies the actual decision owners.",
+    "Any surviving pending-selection, enqueue recheck, and close recheck fences have deterministic behavioral coverage. Record why any finding no longer applies after the core changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "review-followup",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

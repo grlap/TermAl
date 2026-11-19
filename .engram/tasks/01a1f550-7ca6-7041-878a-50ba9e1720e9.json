@@ -1,0 +1,30 @@
+{
+  "id": "01a1f550-7ca6-7041-878a-50ba9e1720e9",
+  "external_ref": null,
+  "title": "Post-sync review of TermAl's existing tests: what each protects, behaviour vs code shape, cost, duplicates",
+  "outcome": "After sync, every TermAl test module has a concrete review verdict, led by Kimi::Consultant with the TermAl team. For each module or test group the review records:\n- what it protects;\n- whether it checks real observable behaviour, or is brittle or tied to code details;\n- its cost (runtime, timeouts, benchmark-like behaviour);\n- duplicates;\n- a recommendation, DELETE, SIMPLIFY or KEEP, with the reason.\nThe prioritised findings become follow-up items with owners. No new gate is added.",
+  "acceptance": [
+    "A recorded inventory covers every TermAl Rust test module and UI and scripts test file, each with what it protects, behaviour versus code-shape dependence, cost class (fast, slow, benchmark-like) and a DELETE, SIMPLIFY or KEEP verdict with a one-line reason.",
+    "The findings are prioritised, and each DELETE or SIMPLIFY group above trivial size is filed as its own item with an owner. Benchmark-like tests are routed to the existing benchmarks item w-a04c88d77f6c.",
+    "No new static gate, lint or test-policy check is introduced by this review, and nothing in it blocks or delays sync work."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 2,
+  "labels": [
+    "after-sync",
+    "greg-directed",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

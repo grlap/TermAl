@@ -1,0 +1,30 @@
+{
+  "id": "01a1f3e2-fea3-7dd3-badf-a9cc453c05b2",
+  "external_ref": null,
+  "title": "Recover withheld turn outcomes for the exact retained held owner",
+  "outcome": "Keep withheld outcome custody with its exact still-held opening owner even when cached local association is missing or moved, without recovering source or check authority.",
+  "acceptance": [
+    "A withheld ordinary close with a missing cache before production terminal callback can reach retained exact-owner confirmation. A later cache move or restart cannot transfer its outcome.",
+    "A matching exact held claim, fence, control binding, project, store, connection and durable job produces an outcome-only report. Lost or unprovable owners receive a bounded explicit refusal. Check facts remain local and source/check evidence is withheld.",
+    "Deterministic coverage exercises in-turn cache loss, retained-job restoration, still-held owner and actual loss."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

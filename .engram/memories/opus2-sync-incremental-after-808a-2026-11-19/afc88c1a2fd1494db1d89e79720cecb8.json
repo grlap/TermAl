@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-sync-incremental-after-808a-2026-11-19",
+    "revision_id": "afc88c1a2fd1494db1d89e79720cecb8",
+    "previous": null,
+    "body_sha256": "6192c461879be90ec2b10efc60b0e5a59c31ea85b4089f9ae7a9549fec460e4f",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-808add714773"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T20:25:39.186315400Z"
+    }
+  },
+  "body": "Central .engram-data sync change (Engram::Fable #1376, 2026-11-19 20:25Z). Once Engram 808a is INSTALLED on Central (the Merger announces it), switch routine syncs from --rebuild to a plain incremental export: engram task-sync export .engram-data/.engram --include-memories --json, with NO --rebuild. --rebuild is the complete route, kept for recovery only. The last --rebuild commit (555732c5 or later) counts as the bootstrap. The FIRST plain incremental export after 808a is installed is Greg's measurement. Run it ONCE with GIT_TRACE2_EVENT=C:/github/Personal/TermAl/.logs/task-sync/trace2-<timestamp>.json, then send Engram::Fable (session-5135) the git process count (the start events in the trace), the wall time and the exported task count, for Greg. Under 808a, an ordinary export over the store's own uncommitted export REFUSES with 'commit the exported folder, then export'; --rebuild instead replaces it. Keep one export per commit, and keep the step-1 clean-folder check. On a scan hit: commit once the matches are verified false positives, or, for a real secret, discard the export and run an ordinary import before any later export."
+}

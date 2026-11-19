@@ -1,0 +1,38 @@
+{
+  "id": "01a1f529-06cb-7090-a600-fd084be5809b",
+  "external_ref": null,
+  "title": "Address the low-severity linked provider placement review findings",
+  "outcome": "Improve linked placement diagnostics, path handling and test coverage while preserving observation, credit and custody boundaries.",
+  "acceptance": [
+    "Resolve or explicitly defer the five Low findings from the fbc562de whole-seven review, with targeted behavioral coverage where behavior changes.",
+    "Keep placement, original launcher settlement and test credit separate. Use deterministic operation counts for performance tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-machine",
+    "cross-project",
+    "design-rule",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "k3",
+    "multi-machine",
+    "pilot",
+    "remote",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e09e-b62c-77a2-ae7e-5c8b45a10439",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

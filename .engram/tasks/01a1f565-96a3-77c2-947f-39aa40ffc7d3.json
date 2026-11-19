@@ -1,0 +1,29 @@
+{
+  "id": "01a1f565-96a3-77c2-947f-39aa40ffc7d3",
+  "external_ref": null,
+  "title": "Testing lens: give the source-shape bullet a severity and align its wording and exemptions with the coder skill",
+  "outcome": "The source-shape bullet at the end of section 3 of .claude/reviewers/testing.md states its severity and fix direction, consistent with the 'these three' Medium guidance just before it. It says what 'source text or shape' covers (source scans, line or size caps, counts, layout), and that data or response shapes and fixture-driven source-processing tools are behaviour. It also says the source_id exemption covers only binding a result to its input, not scans of the identity implementation itself.",
+  "acceptance": [
+    "The testing-lens source-shape bullet states a severity and remediation consistent with the preceding tautological-test guidance",
+    "The bullet defines source text or code shape with examples and excludes data or response shape and fixture-driven tool tests",
+    "The source_id exemption is limited to binding a result to its input"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

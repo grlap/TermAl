@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-focused-launcher-runs-at-repo-root-2026-11-19",
+    "revision_id": "737887dc0bc7429cb63259d9670bfa14",
+    "previous": null,
+    "body_sha256": "a8a171ca6e4f380f9ed494bca715f0c3d57fce260f3249026860afebc9487cbe",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T20:35:17.546762600Z"
+    }
+  },
+  "body": "GO-writing lesson (Opus2, 2026-11-19, 1AAD-EXACT-2 leg 4). TermAl's scripts/test-launcher.mjs focused mode runs the given command at the REPOSITORY ROOT (focused stage cwd = request.root), whatever directory the launcher is started from. So a GO that says \"cwd ui: npx tsc --noEmit\" runs npx at the root, where ui's node_modules is not on the path, and npx fetched and executed the unrelated registry package tsc@2.0.4 (a deprecated placeholder) on DL560. Rules for UI legs: never use npx in a GO; call the local binaries by path from the repository root, for example node ui/node_modules/typescript/bin/tsc --noEmit -p ui and node ui/node_modules/vitest/vitest.mjs run --root ui FILES..., after an isolated npm ci in ui. Treat a run made under a wrong procedure as INVALID PROCEDURE evidence, not a product result."
+}

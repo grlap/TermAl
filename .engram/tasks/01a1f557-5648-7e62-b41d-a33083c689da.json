@@ -1,0 +1,30 @@
+{
+  "id": "01a1f557-5648-7e62-b41d-a33083c689da",
+  "external_ref": null,
+  "title": "Add the no-source-shape-tests line to the shared coder-test-execution skill and the testing review lens",
+  "outcome": "The shared coder-test-execution skill (.agents/skills/coder-test-execution/SKILL.md, step 2) and TermAl's testing review lens (.claude/reviewers/testing.md) each carry Kimi's agreed one-line rule. It says to test observable behaviour, not the text or shape of the implementation, and to stop reviewers from requesting source-shape guards. The skill line is byte-identical to Engram's copy. AGENTS.md and CLAUDE.md are NOT changed, per Greg, and no new gate is added.",
+  "acceptance": [
+    "Step 2 of .agents/skills/coder-test-execution/SKILL.md has this text appended at its end, verbatim, with no new numbered step: \"A test proves behaviour by running the code. Don't assert on the text or shape of the code (source scans, line or size caps, counts, layout); if something needs protecting, check its effect at run time. Running a source-processing tool on fixtures is behaviour, and `source_id` only binds a result to its input; neither is such a test.\" No other change to the skill.",
+    "The .claude/reviewers/testing.md lens gains this bullet, verbatim: \"- Report a test that asserts on implementation text or shape instead of runtime behavior; do not request such a guard (`source_id` is exempt).\" No other change. AGENTS.md and CLAUDE.md are unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "instructions",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a1f5d9-3d2d-7f33-aa6a-da527c9b1611",
+  "external_ref": null,
+  "title": "Packet retention of a terminal review attempt is retried on every poll when it keeps failing",
+  "outcome": "When the parent's compact termal_get_session_result packet publishes a completed or failed reviewer's unconfirmed terminal attempt (the w-b18b11972c44 path) and that retention keeps failing (for example a capture error), repeated packet reads from waits or UI polling don't repeat a full retention attempt every time. The failure stays reported in retainedReviewAttemptsError, with a bounded retry policy.",
+  "acceptance": [
+    "Repeated parent packet reads of a terminal reviewer whose retention fails persistently do not run a full retention or capture on every read; the retry policy is bounded and documented, and retainedReviewAttemptsError still reports the failure each time.",
+    "A behavioural test shows the bounded retry with deterministic counts, not timing.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-attempt-retention",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -19,7 +19,7 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [
@@ -28,5 +28,12 @@
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed runtime observation retry custody on exact 0b14d090. Prepared reports keep their immutable request and prior retry budget across qualified temporary store refusals, post one redacted notice, and let durable predecessors release named successors. Closing preparation and permanent refusals settle visibly. Deterministic regressions, exact Windows registered verification, clean review pair, and exact-tree FULL passed. Fresh independent post-landing evaluation bd8b04c9a72840aa82131fa92b1fe3d1 passed all three criteria.",
+    "completed_at": "2026-11-19T13:00:04.993409900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

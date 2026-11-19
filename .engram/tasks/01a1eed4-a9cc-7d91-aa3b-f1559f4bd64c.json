@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The launcher says why a committed-input run earns no verification credit and how to get it ('register at start with --input commit in the claim's named root'). The host's registration view reports whether the durable registration bound the run (B6, landed at master 6d89a93b). docs/test.md lists a launch stopped before its first record as deliberately unchanged, including the source-owner HTTP 429 case, which ends by reporting the refusal to the coordinator (B14, landed in docs batch 6, master 64b38cccb964acdd7723f85b385696bc9c732613, pushed 2026-11-19T06:55:58Z). The batch had a clean review pair (Codex delegation-c8510024, Claude delegation-e9339d0a) and FULL test-7a185ac7 PASS with equal sourceIds on tree 0b0767a0. Post-landing evaluation delegation-3b041049 passed 3/3. All author-test refs are deleted. Lows are filed as w-4a780a52ec1a, w-f1edc44ef047 and w-8ac336a93228.",
+    "completed_at": "2026-11-19T19:48:53.203916900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

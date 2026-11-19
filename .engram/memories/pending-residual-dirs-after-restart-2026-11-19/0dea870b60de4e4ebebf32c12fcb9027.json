@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "pending-residual-dirs-after-restart-2026-11-19",
+    "revision_id": "0dea870b60de4e4ebebf32c12fcb9027",
+    "previous": null,
+    "body_sha256": "519e9e996c6ad4bc87bde77264042aeac4f452eb61f2564c28a3d52375bca225",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T19:53:36.388961700Z"
+    }
+  },
+  "body": "Pending cleanup after the next TermAl restart (Fable2, 2026-11-19 ~20:30Z). Each entry is an EMPTY directory that a process still holds open, so a non-forced removal fails with \"being used by another process\". Leave it until a restart releases the handle, then remove it non-forced. Codex executes, per AGENTS.md \"Cleanup deletions\". No forced deletion without Greg's per-case word, and no process stops.\n- .tmp/wt-b912-9474: no Git registration and no reparse point. Likely held by finished evaluator children 18989, 18990 and 19053 (Opus3 #5636). Sol-a7bb's evidence is note 309130ff on w-f1559f4bd64c.\n- Also listed earlier by Opus2 (#6916): the empty freeze residuals docsb2 and b12, with an unknown holder.\nThe restart sweep removes these and records the result."
+}

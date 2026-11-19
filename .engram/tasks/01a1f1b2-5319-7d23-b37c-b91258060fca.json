@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "TermAl's .agents/skills/coder-test-execution/SKILL.md carries Greg's no-watcher wait-ownership rule as step 7, byte-identical with Engram's copy (the joint FINAL text from Engram::Fable, TermAl mailbox 6b771877 #90). It landed in docs batch 6, master 64b38cccb964acdd7723f85b385696bc9c732613, pushed at 2026-11-19T06:55:58Z: a clean review pair (Codex delegation-c8510024, Claude delegation-e9339d0a) and FULL test-7a185ac7 PASS with equal sourceIds on tree 0b0767a0. Post-landing evaluation delegation-d0bec46c passed 2/2. All author-test refs are deleted; the remaining Lows are filed on w-bdf3b9de9d10.",
+    "completed_at": "2026-11-19T19:46:17.648696500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

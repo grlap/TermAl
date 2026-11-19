@@ -1,0 +1,30 @@
+{
+  "id": "01a1f3e2-fd31-7763-bc97-6d132bd2cb14",
+  "external_ref": null,
+  "title": "Track declared runs across an exact named-root drift refusal",
+  "outcome": "Preserve exact first-tool declaration identity across root drift without allowing drifted native reservation, ordinary observation, artifact evidence, or verification credit. Admitted and independently registered runs keep their existing authority.",
+  "acceptance": [
+    "Root drift after native S0 publication and before provider enqueue leaves enough exact identity to refuse the matching first provider tool with a reason and remedy.",
+    "Refused invocation does not create a history row, check, trace occurrence, artifact binding, or producer evidence across foreground, background, and late or duplicate callbacks. Separately proven unrelated commands can still be observed.",
+    "Admitted native and separately registered launcher runs keep exact run custody and their existing artifact and verification fences. Deterministic production-route tests cover drift and normal admission."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "sync-path"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
