@@ -67,7 +67,8 @@ fn read_engram_observation_policy(
         &connection.project_root,
         timeout,
         host_workdir,
-    ).map_err(|error| EngramTransportError::transport(error.message))?;
+    )
+    .map_err(|failure| engram_observation_readiness_error(failure, connection, expected_store))?;
     let store = validate_engram_readiness(
         &receipt, &connection.project_file, &connection.home,
     ).map_err(|error| EngramTransportError::protocol(error.message))?;
@@ -79,6 +80,35 @@ fn read_engram_observation_policy(
     receipt.observation_policy.as_ref().ok_or_else(|| {
         EngramTransportError::protocol("Engram readiness supplied no observation policy tuple")
     })?.observation_policy()
+}
+
+fn engram_observation_readiness_error(
+    failure: EngramReadinessFailure,
+    connection: &EngramConnectionConfig,
+    expected_store: &EngramAuthorityStoreKey,
+) -> EngramTransportError {
+    let mut error = EngramTransportError::transport(failure.error.message);
+    if let Some(refusal) = failure.refusal
+        && refusal.project_id == expected_store.project_id
+        // A path-phase refusal has no producer database. Confirm the pinned
+        // database through the current marker and canonical home route.
+        && validate_engram_diagnostic_identity(
+            &refusal.project_id,
+            refusal
+                .database
+                .as_deref()
+                .unwrap_or(&expected_store.database_path),
+            &connection.project_file,
+            &connection.home,
+        )
+        .is_ok_and(|store| store == *expected_store)
+    {
+        error.refusal_code = Some(refusal.code.to_owned());
+        error.refusal_kind = refusal.refusal_kind.map(str::to_owned);
+    }
+    // An unqualified refusal stays an ordinary transport ambiguity. It
+    // cannot grant a long wait or immediately settle the retained report.
+    error
 }
 
 // This boundary uses only the producer's explicitly admitted root states;

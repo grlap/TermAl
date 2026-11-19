@@ -146,6 +146,27 @@ if [ "$is_doctor" -eq 1 ] || [ "$is_readiness" -eq 1 ]; then
     hash=$(printf '%s' "$mode" | shasum -a 256 | cut -d ' ' -f 1)
   fi
   database="$engram_home/projects/$hash/engram.db"
+  if [ "$is_readiness" -eq 1 ]; then
+    refusal_code=store_open_refused
+    refusal_phase=open
+    refusal_kind=
+    case "$mode" in
+      fixture-readiness-repair) refusal_code=projection_repair_required ;;
+      fixture-readiness-store-busy) refusal_kind=busy ;;
+      fixture-readiness-store-io) refusal_kind=io ;;
+      fixture-readiness-other-database-io) refusal_kind=io; database="$database.other" ;;
+      fixture-readiness-path-io) refusal_phase=path; refusal_kind=io ;;
+      fixture-readiness-store-permission) refusal_kind=permission ;;
+      *) refusal_code= ;;
+    esac
+    if [ -n "$refusal_code" ]; then
+      printf '{"schema_version":1,"scope":"readiness","ready":false,"mutation_enabled":false,"full_audit":"not_run","project_id":"%s","code":"%s","phase":"%s","database":' "$mode" "$refusal_code" "$refusal_phase"
+      if [ "$refusal_phase" = path ]; then printf 'null'; else printf '"%s"' "$database"; fi
+      if [ -n "$refusal_kind" ]; then printf ',"kind":"%s"' "$refusal_kind"; fi
+      printf '}\n'
+      exit 1
+    fi
+  fi
   mkdir -p "$(dirname "$database")"
   [ -f "$database" ] || printf 'fixture database' > "$database"
   if [ "$mode" = 'fixture-diagnostic-large-report' ]; then

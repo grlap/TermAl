@@ -23,6 +23,9 @@ mod source_refusals;
 #[path = "engram_unadmitted_storage.rs"]
 mod storage;
 
+#[path = "engram_observation_store_retry.rs"]
+mod store_retry;
+
 #[derive(Clone, Debug)]
 struct SentObservation {
     request: Value,
@@ -35,6 +38,7 @@ enum ReplyMode {
     Recorded,
     LoseFirst,
     TransientFirst(&'static str),
+    TransientFor(&'static str, usize),
     Refuse,
     /// Engram holds a different stored request under the report's key.
     Conflict,
@@ -154,6 +158,11 @@ impl EngramControlTransport for ObservationProducer {
             requests.push(wire.clone());
             requests.len()
         };
+        let transient = match self.mode {
+            ReplyMode::TransientFirst(code) if attempt == 1 => Some(code),
+            ReplyMode::TransientFor(code, count) if attempt <= count => Some(code),
+            _ => None,
+        };
         let receipt = {
             let mut records = self.records.lock().unwrap();
             if let Some((original, receipt)) = records.get(&key) {
@@ -204,7 +213,7 @@ impl EngramControlTransport for ObservationProducer {
                 }
                 if self.mode != ReplyMode::Refuse
                     && self.mode != ReplyMode::Conflict
-                    && !(matches!(self.mode, ReplyMode::TransientFirst(_)) && attempt == 1)
+                    && transient.is_none()
                 {
                     records.insert(key, (wire.clone(), receipt.clone()));
                 }
@@ -219,13 +228,13 @@ impl EngramControlTransport for ObservationProducer {
             durable_before_send: durable,
         });
         crate::tests::phase_sync::wait_for_gate(&self.response_gate, false);
+        if let Some(code) = transient {
+            return Err(EngramTransportError::remote(EngramControlErrorBody {
+                code: code.to_owned(),
+                message: "transient producer response; request was not applied".to_owned(),
+            }));
+        }
         match self.mode {
-            ReplyMode::TransientFirst(code) if attempt == 1 => {
-                Err(EngramTransportError::remote(EngramControlErrorBody {
-                    code: code.to_owned(),
-                    message: "transient producer response; request was not applied".to_owned(),
-                }))
-            }
             ReplyMode::Refuse => Err(EngramTransportError::remote(EngramControlErrorBody {
                 code: "execution_observation_policy_basis_mismatch".to_owned(),
                 message: "definitive producer refusal".to_owned(),
@@ -1637,8 +1646,68 @@ fn retryable_remote_responses_replay_the_same_request_instead_of_refusing_it() {
             ReplyMode::TransientFirst(code),
             false,
         );
+        let busy_park = (code == "control_store_busy").then(|| {
+            let release = crate::tests::phase_sync::ReleaseGateOnDrop::new();
+            let gate = release.gate();
+            let (parked, events) = mpsc::channel();
+            *fixture
+                .turn
+                .state
+                .runtime_observation_lifetime
+                .install_hook
+                .lock()
+                .unwrap() = Some(Arc::new(move |phase| {
+                if phase == "retry_parked" && parked.send(()).is_ok() {
+                    crate::tests::phase_sync::wait_for_gate(&gate, true);
+                }
+            }));
+            (release, events)
+        });
         fixture.finish();
         let first = fixture.observation();
+        if let Some((release, events)) = busy_park {
+            crate::tests::phase_sync::receive(&events, "the busy report's retry parks");
+            let state = &fixture.turn.state;
+            let session = &fixture.turn.session_id;
+            let turn_ref = occurrence(&first)["host_turn_ref"]
+                .as_str()
+                .expect("the first observation identifies its turn");
+            let waiting = fixture.turn.record(|record| {
+                record
+                    .engram
+                    .unadmitted_reports
+                    .iter()
+                    .find(|report| report.host_turn_ref == turn_ref)
+                    .expect("the busy report remains retained")
+                    .clone()
+            });
+            let pending = waiting
+                .pending()
+                .expect("the busy report still needs delivery");
+            assert_eq!(waiting.envelopes[pending].request, first.request);
+            assert_eq!(
+                waiting.attempts, 0,
+                "a busy store preserves the retry budget"
+            );
+            assert!(waiting.store_wait_notice_posted);
+            assert!(
+                runtime_observation_report_is_durable(&state.persistence_path, session, &waiting)
+                    .unwrap()
+            );
+
+            // Make the retained retry due without waiting through the real backoff.
+            let mut due = waiting.next_version();
+            due.retry_at = "2000-01-01T00:00:00.000Z".into();
+            state
+                .install_runtime_observation_result(session, &waiting, due.clone(), pending)
+                .unwrap();
+            assert!(
+                runtime_observation_report_is_durable(&state.persistence_path, session, &due)
+                    .unwrap()
+            );
+            state.start_runtime_observation_worker(session);
+            release.release();
+        }
         let retry = fixture.observation();
         assert!(first.durable_before_send && retry.durable_before_send);
         assert_eq!(
