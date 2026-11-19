@@ -299,6 +299,28 @@ fn get_test_run_observed_without_native_diagnostics(
                 },
             }));
         }
+        if let Some(source) = test_run_linked_artifact_by_id(&inner, run_id) {
+            let entry = inner.test_runs.find(run_id)
+                .ok_or_else(test_run_results_unreadable)?;
+            let read = TestRunLinkedPublicRead::capture(&inner, source, &entry.disk)?;
+            let registration_bound = inner.test_runs.registered.contains(run_id)
+                && read.registration.as_ref().is_some_and(|row| row.work_binding.is_some());
+            let mut run = entry.summary.clone();
+            run.registration = test_run_registration_view(&inner, &read.disk);
+            run.project_id = test_run_effective_project_id(&inner, entry);
+            test_run_enrich_artifact_summary(&inner, &mut run, Some(&read.disk));
+            diagnostics.request_digest = read.disk.request_identity.clone();
+            drop(inner);
+            let detail = if include_detail {
+                let (request, results, _) = read.payload(&state)?;
+                test_run_detail_from_results(None, &request, &results)
+            } else {
+                TestRunDetail::default()
+            };
+            return Ok(Json(TestRunDetailResponse {
+                source: "index", run, detail, registration_bound,
+            }));
+        }
     }
     // Confirm this exact durable launch without projecting every historical
     // run. Neither branch writes the index or waits for its rescan mutex.
@@ -315,6 +337,15 @@ fn get_test_run_observed_without_native_diagnostics(
             }
             diagnostics.enter("get_detail_dispatch");
             let started = std::time::Instant::now();
+            if {
+                let inner = diagnostics.lock(&state.inner);
+                test_run_linked_artifact_by_id(&inner, run_id).is_some()
+                    || inner.test_runs.find(run_id).is_some_and(|entry| {
+                        entry.disk.provider_directory_identity.is_some()
+                    })
+            } {
+                return Err(test_run_results_unreadable());
+            }
             let detail = test_run_detail(&directory);
             if diagnostics.enabled {
                 eprintln!("[termal] test run query detail: runId={}; operationId={}; attemptId={}; serverInstance={}; phase=get_detail_read; phaseElapsedMs={}; category={}",
@@ -371,6 +402,93 @@ fn get_test_run_observed_without_native_diagnostics(
 /// The largest results.json the raw results route serves.
 const TEST_RUN_RAW_RESULTS_MAX_BYTES: u64 = 1024 * 1024;
 
+struct TestRunLinkedPublicRead {
+    source: TestRunLinkedArtifactSource,
+    disk: Arc<TestRunDisk>,
+    registration: Option<TestRunRegistration>,
+}
+
+impl TestRunLinkedPublicRead {
+    fn capture(
+        inner: &StateInner,
+        source: Option<TestRunLinkedArtifactSource>,
+        disk: &Arc<TestRunDisk>,
+    ) -> Result<Self, ApiError> {
+        let source = source
+            .filter(|source| source.admits_disk(disk))
+            .ok_or_else(test_run_results_unreadable)?;
+        let registration = inner.test_run_registrations.get(&disk.run_id);
+        if registration.is_some_and(|row| {
+            row.run_id != disk.run_id
+                || disk.request_identity.as_ref() != Some(&row.request_identity)
+                || disk.owner.as_deref() != Some(row.initiating_session_id.as_str())
+                || disk.owner.as_deref() != Some(row.owning_session_id.as_str())
+                || disk.started_at != row.started_at
+                || test_run_path_key(&row.run_directory) != test_run_path_key(&source.directory)
+        }) {
+            return Err(test_run_results_unreadable());
+        }
+        Ok(Self { source, disk: disk.clone(), registration: registration.cloned() })
+    }
+
+    fn payload(&self, state: &AppState) -> Result<(Value, Value, Vec<u8>), ApiError> {
+        let run_id = &self.disk.run_id;
+        let run_dir = &self.disk.run_dir;
+        let unreadable = |_| test_run_results_unreadable();
+        let directory = self.source.layout.open_run(run_dir, run_id).map_err(unreadable)?;
+        if directory.identity().map_err(unreadable)? != self.source.identity.directory_identity {
+            return Err(test_run_results_unreadable());
+        }
+        let (request_bytes, _) = directory.read("request.json", TEST_RUN_JSON_MAX_BYTES)
+            .map_err(unreadable)?;
+        let request: Value = serde_json::from_slice(&request_bytes)
+            .map_err(|_| test_run_results_unreadable())?;
+        if request.get("runId").and_then(Value::as_str) != Some(run_id.as_str())
+            || test_run_registration_identity(&request).ok().as_ref()
+                != Some(&self.source.identity.request_identity)
+        {
+            return Err(test_run_results_unreadable());
+        }
+        let (bytes, _) = directory.read("results.json", TEST_RUN_JSON_MAX_BYTES)
+            .map_err(unreadable)?;
+        let digest = file_content_hash(&bytes);
+        if !self.disk.results.as_ref().is_some_and(|results| results.digest == digest)
+            || self.source.terminal_digest.as_deref().is_some_and(|terminal| {
+                !test_run_terminal_digest_matches(Some(&digest), terminal)
+            })
+        {
+            return Err(test_run_results_unreadable());
+        }
+        let results: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| test_run_results_unreadable())?;
+        if results.get("runId").and_then(Value::as_str) != Some(run_id.as_str())
+            || !self.source.layout.open_run(run_dir, run_id)
+                .and_then(|current| current.same_directory(&directory))
+                .map_err(unreadable)?
+        {
+            return Err(test_run_results_unreadable());
+        }
+        drop(directory);
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let registration = inner.test_run_registrations.get(run_id);
+        let same_registration = match (&self.registration, registration) {
+            (Some(expected), Some(actual)) => actual.matches_registration_snapshot(expected),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same_registration
+            || test_run_linked_artifact_by_id(&inner, run_id).flatten().as_ref() != Some(&self.source)
+            || !inner.test_runs.find(run_id).is_some_and(|entry| {
+                self.source.admits_disk(&entry.disk)
+                    && entry.disk.results.as_ref().is_some_and(|results| results.digest == digest)
+            })
+        {
+            return Err(test_run_results_unreadable());
+        }
+        Ok((request, results, bytes))
+    }
+}
+
 /// A refusal from the raw results route: a small JSON body with a named code,
 /// never file bytes, and no digest header.
 fn test_run_raw_results_refusal(status: StatusCode, code: &str, message: &str) -> Response {
@@ -379,7 +497,7 @@ fn test_run_raw_results_refusal(status: StatusCode, code: &str, message: &str) -
 
 /// Serves an indexed run's results.json exactly as stored, with its SHA-256
 /// in `x-termal-results-sha256` and its size as the content length. It is a
-/// diagnostic read: it never parses, rewrites or creates a file, never rescans
+/// diagnostic read: it never rewrites or creates a file, never rescans
 /// the index, and grants no credit. A run the index does not know, or one with
 /// no results.json, is `test_run_results_unknown` (404); a link, FIFO or other
 /// non-regular entry is `test_run_results_not_a_file` (422); a file above
@@ -391,11 +509,16 @@ async fn get_test_run_results(
     AxumPath(run_id): AxumPath<String>,
 ) -> Response {
     // Only the indexed run's directory: no summary projection under the lock.
-    let run_dir = {
+    let entry = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        inner.test_runs.find(&run_id).map(|entry| entry.disk.run_dir.clone())
+        inner.test_runs.find(&run_id).map(|entry| {
+            let source = test_run_linked_artifact_by_id(&inner, &run_id)
+                .or_else(|| entry.disk.provider_directory_identity.as_ref().map(|_| None))
+                .map(|source| TestRunLinkedPublicRead::capture(&inner, source, &entry.disk));
+            (entry.disk.clone(), source)
+        })
     };
-    let Some(run_dir) = run_dir else {
+    let Some((disk, source)) = entry else {
         return test_run_raw_results_refusal(
             StatusCode::NOT_FOUND,
             "test_run_results_unknown",
@@ -403,12 +526,22 @@ async fn get_test_run_results(
         );
     };
     let read = tokio::task::spawn_blocking(move || {
+        if let Some(source) = source {
+            return source
+                .and_then(|read| read.payload(&state).map(|(_, _, bytes)| bytes))
+                .map_err(|_| test_run_raw_results_refusal(
+                    StatusCode::CONFLICT,
+                    "test_run_results_changed",
+                    "results no longer match the original linked run",
+                ));
+        }
+        let run_dir = &disk.run_dir;
         // The run directory and its review-runs parent must still be plain
         // directories, before and after the read: a run redirected through a
         // link or junction after it was indexed is refused, never followed.
-        test_run_raw_results_directories(&run_dir)?;
+        test_run_raw_results_directories(run_dir)?;
         let bytes = test_run_raw_results(&run_dir.join("results.json"))?;
-        test_run_raw_results_directories(&run_dir)?;
+        test_run_raw_results_directories(run_dir)?;
         Ok(bytes)
     })
     .await;

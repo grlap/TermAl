@@ -19,6 +19,20 @@ struct TestRunCompacted {
     artifact_unavailable: bool,
 }
 
+impl TestRunCompacted {
+    fn linked_artifact_source(&self) -> Option<Option<TestRunLinkedArtifactSource>> {
+        let mut sources = self.observations.iter().filter_map(|row| {
+            let artifact = row.artifact.as_ref()?;
+            if artifact.run_id != self.summary.run_id {
+                return None;
+            }
+            TestRunLinkedArtifactSource::from_observation(row)
+        });
+        let source = sources.next()?;
+        Some(if sources.next().is_none() { source } else { None })
+    }
+}
+
 #[derive(Clone, Default)]
 struct TestRunCompactionPersistence(
     Arc<Mutex<BTreeMap<String, (TestRunCompacted, PersistFenceWaiter)>>>,
@@ -116,11 +130,22 @@ fn test_run_compact_is_installed_with(
 fn test_run_compacted_summary(inner: &impl TestRunProjectionSource, row: &TestRunCompacted) -> TestRunSummary {
     let index = inner.projection_index();
     let mut summary = row.summary.clone();
+    if let Some(reason) = row
+        .observations
+        .iter()
+        .find(|observation| observation.execution_id == summary.run_id)
+        .and_then(|observation| observation.execution_context.as_ref())
+        .and_then(TestRunExecutionContext::refusal)
+    {
+        summary.error = Some(reason.message().to_owned());
+    }
     summary.registration.history_compacted = Some(row.compacted);
     summary.registration.artifact_unavailable = if !row.compacted && !index.scanned_once {
         None
     } else {
-        Some(row.artifact_unavailable || (!row.compacted && index.find(&summary.run_id).is_none()))
+        Some(row.artifact_unavailable
+            || (!row.compacted && index.find(&summary.run_id).is_none())
+            || (!index.scanned_once && row.linked_artifact_source().is_some()))
     };
     summary.registration.compaction_reason = Some(row.reason.clone());
     if !row.compacted {
@@ -189,7 +214,11 @@ fn test_run_compaction_eligible_with(
     waited: &HashSet<String>,
 ) -> bool {
     let index = &inner.test_runs;
-    if !matches!(run.state, TestRunState::Passed | TestRunState::Failed)
+    let terminal = matches!(run.state, TestRunState::Passed | TestRunState::Failed)
+        || (run.state == TestRunState::Unknown
+            && inner.test_run_observations.get(&run.run_id)
+                .is_some_and(TestRunCommandObservation::unbound_placement_refusal));
+    if !terminal
         || run.ended_at.is_none()
         || run.registration.restart_would_void_evidence != Some(false)
     {

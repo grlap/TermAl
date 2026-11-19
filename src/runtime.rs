@@ -839,6 +839,19 @@ struct CodexTurnState {
     first_visible_assistant_message_id: Option<String>,
 }
 
+/// Ownership captured at a proven native command START, including non-tests.
+#[derive(PartialEq, Eq)]
+struct CodexCommandStart {
+    address: EngramCodexCommandAddress,
+    command_identity: String,
+}
+
+enum CodexCommandStartState {
+    Active(CodexCommandStart),
+    Conflicting,
+    Consumed(EngramCodexCommandAddress),
+}
+
 /// Tracks session recorder state.
 #[derive(Default)]
 struct SessionRecorderState {
@@ -852,6 +865,9 @@ struct SessionRecorderState {
     // Frame-local native execution proof; an ambient/replayed event cannot
     // acquire a new turn's opening snapshot.
     native_tool_provenance: Option<EngramObservationProvenance>,
+    provider_test_frame: Option<TestRunProviderFrame>,
+    // The current ordinary command may have no test observation.
+    codex_command_starts: HashMap<String, CodexCommandStartState>,
     /// Commands whose message a turn reset keeps: a Claude subagent's tool
     /// calls still pending across the root turn's reset, so their late
     /// results update the same card.
@@ -860,6 +876,8 @@ struct SessionRecorderState {
 
 fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
     recorder_state.native_tool_provenance = None;
+    recorder_state.provider_test_frame = None;
+    recorder_state.codex_command_starts.clear();
     let kept = &recorder_state.kept_command_keys;
     recorder_state
         .command_messages

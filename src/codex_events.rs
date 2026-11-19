@@ -651,11 +651,83 @@ fn handle_shared_codex_app_server_message(
         *completed_turn_id = None;
         *turn_started = false;
     }
+    if message.get("id").is_none()
+        && method == "item/started"
+        && let Some(item) = message.pointer("/params/item")
+        && item.get("type").and_then(Value::as_str) == Some("commandExecution")
+        && let Some(key) = item.get("id").and_then(Value::as_str)
+        && let Some(CodexCommandStartState::Consumed(original)) =
+            recorder_state.codex_command_starts.get(key)
+        && original.runtime == runtime_token
+        && Some(original.turn_generation) == *active_turn_generation
+    {
+        // This item already completed through the exact ordinary route.
+        // A replay cannot create a new transcript, shell move or writer.
+        return Ok(());
+    }
+    let provider_test_frame = (|| {
+        if message.get("id").is_some() || !matches!(method, "item/started" | "item/completed") {
+            return None;
+        }
+        let item = message.pointer("/params/item")?;
+        if item.get("type").and_then(Value::as_str) != Some("commandExecution") {
+            return None;
+        }
+        let thread = message.pointer("/params/threadId").and_then(Value::as_str);
+        let turn = message.pointer("/params/turnId").and_then(Value::as_str);
+        let proven = *turn_started
+            && !*turn_id_provisional
+            && thread.is_some()
+            && thread == thread_id.as_deref()
+            && turn.is_some()
+            && turn == turn_id.as_deref();
+        Some(TestRunProviderFrame {
+            runtime: runtime_token.clone(),
+            generation: (*active_turn_generation)?,
+            turn: thread
+                .zip(turn)
+                .filter(|_| proven)
+                .map(|(thread, turn)| test_run_provider_turn_identity(thread, turn)),
+            item: item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty() && id.len() <= TEST_RUN_TEXT_MAX_BYTES)
+                .map(|id| sha256_hex(id.as_bytes())),
+            cwd: item.get("cwd").and_then(Value::as_str).map(str::to_owned),
+            declined: item.get("status").and_then(Value::as_str) == Some("declined"),
+        })
+    })();
+    if let Some(frame) = provider_test_frame.as_ref() {
+        let prior_end_message = if method == "item/completed" {
+            message
+                .pointer("/params/item/id")
+                .and_then(Value::as_str)
+                .and_then(|key| recorder_state.command_messages.get(key))
+                .map(String::as_str)
+        } else {
+            None
+        };
+        if (method == "item/started" || prior_end_message.is_some())
+            && state.sealed_provider_frame_is_replay(&session_id, frame, prior_end_message)
+        {
+            return Ok(());
+        }
+    }
     recorder_state.native_tool_provenance = (matches!(method, "item/started" | "item/completed") && *turn_started
         && !*turn_id_provisional && event_turn_id.is_some() && event_turn_id == turn_id.as_deref())
         .then_some(*active_turn_generation).flatten().map(|turn_generation| EngramObservationProvenance::Runtime {
             token: runtime_token.clone(), turn_generation,
         });
+    recorder_state.provider_test_frame = provider_test_frame;
+    if method == "item/started"
+        && let Some(frame) = recorder_state.provider_test_frame.as_ref()
+        && message
+            .pointer("/params/item/command")
+            .and_then(Value::as_str)
+            .is_none()
+    {
+        state.refuse_conflicting_provider_start(&session_id, frame, None);
+    }
     let mut recorder = BorrowedSessionRecorder::new(state, &session_id, recorder_state);
     trace_shared_codex_event(
         "route",
@@ -714,6 +786,7 @@ fn handle_shared_codex_app_server_message(
         return handle_codex_app_server_request(method, message, &mut recorder);
     }
 
+    let previous_provenance = session_state.recorder.observation_provenance.clone();
     let effect = apply_owned_shared_codex_notification(
         method,
         message,
@@ -722,7 +795,10 @@ fn handle_shared_codex_app_server_message(
         &runtime_token,
         thread_sessions,
         session_state,
-    )?;
+    );
+    session_state.recorder.provider_test_frame = None;
+    session_state.recorder.observation_provenance = previous_provenance;
+    let effect = effect?;
     let deferred_effect = if let Some(terminal) = deferred_terminal {
         let terminal_method = terminal.get("method").and_then(Value::as_str).unwrap_or("");
         apply_owned_shared_codex_notification(
@@ -769,7 +845,7 @@ fn handle_shared_codex_app_server_notification(
     turn_started_before_response: &mut bool,
     turn_state: &mut CodexTurnState,
     thread_sessions: &SharedCodexThreadMap,
-    recorder: &mut impl TurnRecorder,
+    recorder: &mut (impl TurnRecorder + SessionRecorderAccess),
     terminal_effect: &mut Option<SharedCodexTerminalOutcome>,
 ) -> Result<()> {
     match method {
@@ -1114,10 +1190,15 @@ fn handle_shared_codex_app_server_notification(
             // test its turn's close carried under exactly this item's id takes
             // it as its end whichever turn it names, and it is dropped from
             // the transcript, as an end of a turn no longer running is.
-            if take_shared_codex_late_command_end(
+            if take_shared_codex_late_command_end_from_runtime(
                 state,
                 session_id,
+                runtime_token,
                 session_thread_id.as_deref(),
+                turn_id
+                    .as_deref()
+                    .filter(|_| *turn_started)
+                    .map(|turn| (turn, recorder.recorder_state_mut())),
                 message,
                 item,
             ) {
@@ -1291,10 +1372,15 @@ fn handle_shared_codex_app_server_notification(
             // one too. Give its exact carried item the same terminal handoff
             // as the typed event before applying transcript turn filtering.
             if let Some(item) = message.pointer("/params/msg/item") {
-                if take_shared_codex_late_command_end(
+                if take_shared_codex_late_command_end_from_runtime(
                     state,
                     session_id,
+                    runtime_token,
                     session_thread_id.as_deref(),
+                    turn_id
+                        .as_deref()
+                        .filter(|_| *turn_started)
+                        .map(|turn| (turn, recorder.recorder_state_mut())),
                     message,
                     item,
                 ) {
@@ -1458,10 +1544,39 @@ fn handle_shared_codex_task_complete(
 /// Only an end on the session's own thread, of an item with an id, that
 /// ended, is handed over: a command keyed by its line names no one run.
 /// Returns whether it was taken.
+#[cfg(test)]
 fn take_shared_codex_late_command_end(
     state: &AppState,
     session_id: &str,
     session_thread_id: Option<&str>,
+    message: &Value,
+    item: &Value,
+) -> bool {
+    let runtime = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(session_id)
+            .and_then(|index| inner.sessions[index].runtime.runtime_token())
+    };
+    runtime.as_ref().is_some_and(|runtime| {
+        take_shared_codex_late_command_end_from_runtime(
+            state,
+            session_id,
+            runtime,
+            session_thread_id,
+            None,
+            message,
+            item,
+        )
+    })
+}
+
+fn take_shared_codex_late_command_end_from_runtime(
+    state: &AppState,
+    session_id: &str,
+    runtime: &RuntimeToken,
+    session_thread_id: Option<&str>,
+    current_turn: Option<(&str, &mut SessionRecorderState)>,
     message: &Value,
     item: &Value,
 ) -> bool {
@@ -1473,15 +1588,62 @@ fn take_shared_codex_late_command_end(
     ) {
         return false;
     }
-    let thread = shared_codex_session_thread_id(method, message);
-    if thread.is_none() || thread != session_thread_id {
+    let Some(thread) = shared_codex_session_thread_id(method, message)
+        .filter(|thread| Some(*thread) == session_thread_id)
+    else {
         return false;
-    }
+    };
     let (Some(key), Some(command)) = (
         item.get("id").and_then(Value::as_str),
         item.get("command").and_then(Value::as_str),
     ) else {
         return false;
+    };
+    // An address-less completion can name any managed start under this
+    // runtime and key. Keep it away from the ordinary carried writer.
+    // An explicitly addressed older ordinary END keeps its original route.
+    let event_turn = shared_codex_event_turn_id(message);
+    let current = current_turn.filter(|(turn, _)| Some(*turn) == event_turn);
+    let start = current
+        .as_ref()
+        .and_then(|(_, recorder)| recorder.codex_command_starts.get(key))
+        .and_then(|state| match state {
+            CodexCommandStartState::Active(start)
+                if start.command_identity == sha256_hex(command.as_bytes()) => Some(start),
+            _ => None,
+        });
+    let address = match state.provider_item_end_address(
+        session_id,
+        runtime,
+        thread,
+        event_turn,
+        key,
+        current.is_some(),
+        start.map(|start| &start.address),
+    ) {
+        TestRunProviderEndAddress::Exact => {
+            return method == "codex/event/item_completed";
+        }
+        TestRunProviderEndAddress::CurrentOrdinary(provenance) => {
+            let original = start.map(|start| start.address.clone());
+            if let Some((_, recorder)) = current {
+                if EngramHost::codex_command_exit(item) != EngramCommandExit::NotFinished
+                    && let Some(original) = original
+                {
+                    recorder.codex_command_starts.insert(
+                        key.to_owned(),
+                        CodexCommandStartState::Consumed(original),
+                    );
+                }
+                recorder.native_tool_provenance = Some(provenance.clone());
+                recorder.observation_provenance = provenance;
+                return false;
+            }
+            return true;
+        }
+        TestRunProviderEndAddress::Ambiguous => return true,
+        TestRunProviderEndAddress::Ordinary => None,
+        TestRunProviderEndAddress::CarriedOrdinary(address) => Some(address),
     };
     let exit = EngramHost::codex_command_exit(item);
     if exit == EngramCommandExit::NotFinished {
@@ -1491,9 +1653,11 @@ fn take_shared_codex_late_command_end(
         .get("aggregatedOutput")
         .and_then(Value::as_str)
         .unwrap_or("");
-    state
-        .engram_host()
-        .codex_reported_end(session_id, key, command, output, exit)
+    let host = state.engram_host();
+    if let Some(address) = &address {
+        return host.codex_reported_end_at(session_id, key, command, output, exit, address);
+    }
+    host.codex_reported_end(session_id, key, command, output, exit)
 }
 
 /// Extracts the turn id from a Codex event by probing the several

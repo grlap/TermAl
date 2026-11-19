@@ -3,11 +3,81 @@
 // are neither an executed remote test nor verification credit.
 use super::*;
 
+const PROVIDER_THREAD: &str = "selected-provider-thread";
+const PROVIDER_TURN: &str = "selected-provider-turn";
+
+fn linked_provider_dispatch(
+    state: AppState,
+    runner: &str,
+    provenance: &EngramObservationProvenance,
+) -> impl Fn(&str, Value) {
+    let dispatch = provider_router(state, runner, provenance);
+    move |method, item| {
+        dispatch(
+            method,
+            json!({
+                "threadId": PROVIDER_THREAD, "turnId": PROVIDER_TURN, "item": item,
+            }),
+        );
+    }
+}
+
+fn provider_router(
+    state: AppState,
+    runner: &str,
+    provenance: &EngramObservationProvenance,
+) -> impl Fn(&str, Value) {
+    provider_router_for_turn(state, runner, provenance, PROVIDER_TURN)
+}
+
+fn provider_router_for_turn(
+    state: AppState,
+    runner: &str,
+    provenance: &EngramObservationProvenance,
+    native_turn: &str,
+) -> impl Fn(&str, Value) {
+    let EngramObservationProvenance::Runtime {
+        token: RuntimeToken::Codex(runtime),
+        turn_generation,
+    } = provenance
+    else {
+        panic!("expected a Codex runtime for the linked provider fixture");
+    };
+    let runtime = runtime.clone();
+    let sessions = SharedCodexSessions::new();
+    sessions.lock().unwrap().insert(
+        runner.to_owned(),
+        SharedCodexSessionState {
+            thread_id: Some(PROVIDER_THREAD.to_owned()),
+            turn_id: Some(native_turn.to_owned()),
+            turn_started: true,
+            active_turn_generation: Some(*turn_generation),
+            ..SharedCodexSessionState::default()
+        },
+    );
+    let threads = Arc::new(Mutex::new(HashMap::from([(
+        PROVIDER_THREAD.to_owned(),
+        runner.to_owned(),
+    )])));
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let (input, commands) = mpsc::channel();
+    move |method, params| {
+        let _keep_commands = &commands;
+        let message = json!({ "method": method, "params": params });
+        handle_shared_codex_app_server_message(
+            &message, &state, &runtime, &pending, &sessions, &threads, &input,
+        )
+        .unwrap();
+    }
+}
+
 pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
     state: AppState,
     mode: MailboxTestMode,
+    linked_worktree: bool,
     select: F,
-) where
+) -> TestRunRegistration
+where
     F: FnOnce(String) -> Fut,
     Fut: std::future::Future<Output = String>,
 {
@@ -26,6 +96,11 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
         project_id,
     };
     let runner = running_owner(&fixture, "selected-provider-runtime");
+    let command_root = if linked_worktree {
+        create_provider_worktree(&fixture.root, "selected-provider-linked")
+    } else {
+        fixture.root.clone()
+    };
     let provenance = {
         let mut inner = fixture.state.inner.lock().unwrap();
         inner
@@ -56,17 +131,28 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
             "node scripts/test-launcher.mjs full --input commit --request-message-id {selector}"
         ),
     };
-    let cwd = test_run_display_path(&fs::canonicalize(&fixture.root).unwrap());
+    let command_root = fs::canonicalize(&command_root).unwrap();
+    let cwd = test_run_display_path(&command_root);
     let key = "selected-provider-tool";
-    fixture.state.engram_host().observe(
-        &runner,
-        &provenance,
-        EngramRecorderObservation::CommandStarted {
-            key,
-            ran: Some(&command),
-            cwd: Some(&cwd),
-        },
-    );
+    let dispatch = linked_worktree
+        .then(|| linked_provider_dispatch(fixture.state.clone(), &runner, &provenance));
+    if let Some(dispatch) = &dispatch {
+        dispatch(
+            "item/started",
+            json!({"type": "commandExecution", "id": key, "command": command,
+                "cwd": cwd, "status": "inProgress"}),
+        );
+    } else {
+        fixture.state.engram_host().observe(
+            &runner,
+            &provenance,
+            EngramRecorderObservation::CommandStarted {
+                key,
+                ran: Some(&command),
+                cwd: Some(&cwd),
+            },
+        );
+    }
     let observed = {
         let inner = fixture.state.inner.lock().unwrap();
         let rows: Vec<_> = inner
@@ -81,14 +167,25 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
             "the real selector-bearing provider start must create one observation, even with Engram disabled"
         );
         assert!(rows[0].runtime_identity.is_some());
+        if linked_worktree {
+            let session = &inner.sessions[inner.find_session_index(&runner).unwrap()];
+            assert_eq!(
+                fs::canonicalize(&session.session.workdir).unwrap(),
+                fs::canonicalize(&fixture.root).unwrap(),
+            );
+            assert_ne!(
+                test_run_path_key(&session.session.workdir),
+                test_run_path_key(&cwd)
+            );
+            assert!(rows[0].work_binding.is_none());
+            assert!(rows[0].source_root.is_none());
+            assert!(session.engram.active_turn_checks.is_empty());
+        }
         rows[0].execution_id.clone()
     };
 
     let id = format!("test-{}", Uuid::new_v4());
-    let mut request = full_request(
-        &fs::canonicalize(&fixture.root).unwrap(),
-        &test_run_timestamp(),
-    );
+    let mut request = full_request(&command_root, &test_run_timestamp());
     request["owner"] = json!(runner);
     request["creatorPid"] = json!(std::process::id());
     request["detached"] = json!(false);
@@ -98,12 +195,16 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
     if mode == MailboxTestMode::Focused {
         request["stages"] = json!([{ "name": "focused" }]);
     }
-    let directory = write_run(
-        &fixture.runs_dir(),
-        &id,
-        request,
-        Some(running_results(Some(717))),
-    );
+    let runs_dir = if linked_worktree {
+        let git_dir = run_git_test_command_output(
+            &normalize_user_facing_path(&command_root),
+            &["rev-parse", "--absolute-git-dir"],
+        );
+        PathBuf::from(git_dir).join("review-runs")
+    } else {
+        fixture.runs_dir()
+    };
+    let directory = write_run(&runs_dir, &id, request, Some(running_results(Some(717))));
     let (status, ack): (StatusCode, Value) = request_json(
         &app_router(fixture.state.clone()),
         Request::builder()
@@ -133,26 +234,28 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
         assert!(registration.native_completion.is_none());
     }
     let locator = format!("RUN {}", test_run_display_path(&directory));
-    fixture.state.engram_host().observe(
-        &runner,
-        &provenance,
-        EngramRecorderObservation::CommandFinished {
-            key,
-            command: &command,
-            reported_command: Some(&command),
-            output: &locator,
-            exit: Some(EngramCommandExit::NotFinished),
-            runtime_output_cut: false,
-        },
-    );
-    assert_eq!(
-        fixture.state.inner.lock().unwrap().test_run_observations[&observed]
-            .artifact
-            .as_ref()
-            .unwrap()
-            .run_id,
-        id
-    );
+    if !linked_worktree {
+        fixture.state.engram_host().observe(
+            &runner,
+            &provenance,
+            EngramRecorderObservation::CommandFinished {
+                key,
+                command: &command,
+                reported_command: Some(&command),
+                output: &locator,
+                exit: Some(EngramCommandExit::NotFinished),
+                runtime_output_cut: false,
+            },
+        );
+        assert_eq!(
+            fixture.state.inner.lock().unwrap().test_run_observations[&observed]
+                .artifact
+                .as_ref()
+                .unwrap()
+                .run_id,
+            id
+        );
+    }
 
     let source = json!({
         "commit": "a".repeat(40), "tree": "b".repeat(40),
@@ -170,18 +273,43 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
         }]);
     }
     fs::write(directory.join("results.json"), results.to_string()).unwrap();
-    fixture.state.engram_host().observe(
-        &runner,
-        &provenance,
-        EngramRecorderObservation::CommandFinished {
-            key,
-            command: &command,
-            reported_command: Some(&command),
-            output: &locator,
-            exit: Some(EngramCommandExit::Code(0)),
-            runtime_output_cut: false,
-        },
-    );
+    if let Some(dispatch) = &dispatch {
+        dispatch(
+            "item/completed",
+            json!({"type": "commandExecution", "id": key, "command": command,
+                "cwd": cwd, "status": "completed", "exitCode": 0, "aggregatedOutput": locator}),
+        );
+        let inner = fixture.state.inner.lock().unwrap();
+        let row = &inner.test_run_observations[&observed];
+        let artifact = row.artifact.as_ref().unwrap_or_else(|| {
+            panic!(
+                "the original provider completion must attach the linked launcher artifact (observed worktree {:?})",
+                row.summary.worktree
+            )
+        });
+        assert_eq!(
+            test_run_path_key(&row.summary.worktree),
+            test_run_path_key(&cwd)
+        );
+        assert_eq!(artifact.run_id, id);
+        assert_eq!(
+            artifact.request_identity.as_ref(),
+            Some(&inner.test_run_registrations[&id].request_identity),
+        );
+    } else {
+        fixture.state.engram_host().observe(
+            &runner,
+            &provenance,
+            EngramRecorderObservation::CommandFinished {
+                key,
+                command: &command,
+                reported_command: Some(&command),
+                output: &locator,
+                exit: Some(EngramCommandExit::Code(0)),
+                runtime_output_cut: false,
+            },
+        );
+    }
     fixture.refresh(&[]);
     let registration = fixture.state.inner.lock().unwrap().test_run_registrations[&id].clone();
     let retained = registration
@@ -219,6 +347,1449 @@ pub(in crate::tests) async fn selected_provider_completion<F, Fut>(
         registration.verification_record.is_none(),
         "producer facts do not mint local credit"
     );
+    if let Some(dispatch) = &dispatch {
+        let original = fixture.state.inner.lock().unwrap().test_run_observations[&observed].clone();
+        dispatch(
+            "item/completed",
+            json!({"type": "commandExecution", "id": key, "command": command,
+                "cwd": cwd, "status": "completed", "exitCode": 1}),
+        );
+        assert_eq!(
+            fixture.state.inner.lock().unwrap().test_run_observations[&observed],
+            original,
+            "duplicate provider completion must leave the original association and outcome intact",
+        );
+    }
+    registration
+}
+
+fn create_provider_worktree(root: &FsPath, name: &str) -> PathBuf {
+    run_git_test_command(
+        root,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "fixture root",
+        ],
+    );
+    let linked = root.with_file_name(name);
+    run_git_test_command(
+        root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            linked.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    linked
+}
+
+#[tokio::test]
+async fn foreign_provider_cwd_refusal_survives_compaction_and_reload() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = RunFixture::new("selected-provider-refusal");
+    let runner = running_owner(&fixture, "selected-provider-refusal-runtime");
+    run_git_test_command(&fixture.root, &["init", "--quiet"]);
+    let foreign = fixture.root.with_file_name("selected-provider-foreign");
+    fs::create_dir_all(&foreign).unwrap();
+    run_git_test_command(&foreign, &["init", "--quiet"]);
+    let provenance = {
+        let inner = fixture.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&runner).unwrap()];
+        EngramObservationProvenance::Runtime {
+            token: record.runtime.runtime_token().unwrap(),
+            turn_generation: record.active_turn_generation,
+        }
+    };
+    let dispatch = linked_provider_dispatch(fixture.state.clone(), &runner, &provenance);
+    let id = "foreign-test";
+    let cwd = test_run_display_path(&fs::canonicalize(&foreign).unwrap());
+    dispatch(
+        "item/started",
+        json!({"type": "commandExecution", "id": id,
+        "command": "cargo test", "cwd": cwd, "status": "inProgress"}),
+    );
+    let refused = fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_observations
+        .values()
+        .find(|row| row.tool_identity == sha256_hex(id.as_bytes()))
+        .unwrap()
+        .clone();
+    assert_eq!(refused.summary.state, TestRunState::Unknown);
+    dispatch(
+        "item/completed",
+        json!({"type": "commandExecution", "id": id,
+        "command": "cargo test", "cwd": cwd, "status": "completed", "exitCode": 0}),
+    );
+    let execution = {
+        let inner = fixture.state.inner.lock().unwrap();
+        let row = inner
+            .test_run_observations
+            .values()
+            .find(|row| row.tool_identity == sha256_hex(id.as_bytes()))
+            .unwrap();
+        assert!(row.artifact.is_none() && row.evidence.is_empty());
+        assert!(row.summary.worktree.is_empty());
+        assert!(row.final_unbound_proof.is_none());
+        assert_eq!(row, &refused);
+        row.execution_id.clone()
+    };
+    let live = fixture.summary(&execution);
+    assert_eq!(live.state, TestRunState::Unknown);
+    assert!(live.exit_code.is_none());
+    let explanation = live.error.expect("foreign cwd has a bounded reason");
+    assert!(explanation.contains("outside the session repository"));
+
+    super::compaction::fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
+    fixture.refresh(&[]);
+    for reload in [false, true] {
+        if reload {
+            *fixture.state.inner.lock().unwrap() =
+                load_state(fixture.state.persistence_path.as_path())
+                    .unwrap()
+                    .unwrap();
+        }
+        let app = app_router(fixture.state.clone());
+        let (status, detail): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .uri(format!("/api/test-runs/{execution}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(detail["source"], "retained");
+        assert_eq!(detail["run"]["error"], explanation);
+        assert_eq!(detail["run"]["state"], "unknown");
+        let (status, history): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .uri("/api/test-runs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let listed = history["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["runId"] == execution)
+            .expect("compacted foreign provider observation remains in history");
+        assert_eq!(listed["historyCompacted"], true);
+        assert_eq!(listed["error"], explanation);
+        assert_eq!(listed["state"], "unknown");
+    }
+}
+
+#[tokio::test]
+async fn provider_execution_lifecycle_respects_original_placement_and_terminal_identity() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    // These are real router deliveries. An exact late END after any seal
+    // must leave the entire original observation unchanged.
+    for (case, expected_state, expected_refusal) in [
+        ("numeric exit", TestRunState::Passed, None),
+        ("one-call directory", TestRunState::Passed, None),
+        ("same start replay", TestRunState::Passed, None),
+        ("unrelated completion", TestRunState::Passed, None),
+        (
+            "conflicting start",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::ConflictingStart),
+        ),
+        (
+            "different command at end",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::CompletionMismatch),
+        ),
+        (
+            "missing item",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::ItemIdentityUnavailable),
+        ),
+        (
+            "declined",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::Declined),
+        ),
+        (
+            "declined start",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::Declined),
+        ),
+        (
+            "missing exit",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::MissingExit),
+        ),
+        (
+            "turn closes first",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::MissingExit),
+        ),
+        (
+            "owned error",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::MissingExit),
+        ),
+        (
+            "unusable Git layout",
+            TestRunState::Unknown,
+            Some(TestRunExecutionRefusal::OutsideRepository),
+        ),
+    ] {
+        let fixture = RunFixture::new("provider-lifecycle");
+        let runner = running_owner(&fixture, "provider-lifecycle-runtime");
+        run_git_test_command(&fixture.root, &["init", "--quiet"]);
+        let linked = create_provider_worktree(&fixture.root, "lifecycle-linked");
+        let root_cwd = test_run_display_path(&fs::canonicalize(&fixture.root).unwrap());
+        let linked_cwd = test_run_display_path(&fs::canonicalize(&linked).unwrap());
+        if case == "unusable Git layout" {
+            let admin = run_git_test_command_output(&linked, &["rev-parse", "--absolute-git-dir"]);
+            fs::remove_file(PathBuf::from(admin).join("HEAD")).unwrap();
+        }
+        let (command, cwd) = if case == "one-call directory" {
+            (format!("pushd \"{linked_cwd}\" && cargo test"), &root_cwd)
+        } else {
+            ("cargo test".to_owned(), &linked_cwd)
+        };
+        let provenance = {
+            let inner = fixture.state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&runner).unwrap()];
+            EngramObservationProvenance::Runtime {
+                token: record.runtime.runtime_token().unwrap(),
+                turn_generation: record.active_turn_generation,
+            }
+        };
+        let route = provider_router(fixture.state.clone(), &runner, &provenance);
+        let deliver = |method, item: Value| {
+            route(
+                method,
+                json!({
+                    "threadId": PROVIDER_THREAD, "turnId": PROVIDER_TURN, "item": item,
+                }),
+            )
+        };
+        let mut started = json!({
+            "type": "commandExecution", "id": "lifecycle-command",
+            "command": command, "cwd": cwd, "status": "inProgress",
+        });
+        let complete = json!({
+            "type": "commandExecution", "id": "lifecycle-command",
+            "command": command, "cwd": cwd, "status": "completed", "exitCode": 0,
+        });
+        if case == "missing item" {
+            started.as_object_mut().unwrap().remove("id");
+        } else if case == "declined start" {
+            started["status"] = json!("declined");
+        }
+        deliver("item/started", started.clone());
+        let original = {
+            let inner = fixture.state.inner.lock().unwrap();
+            assert_eq!(inner.test_run_observations.len(), 1, "{case}");
+            inner.test_run_observations.values().next().unwrap().clone()
+        };
+        let read = || {
+            fixture.state.inner.lock().unwrap().test_run_observations[&original.execution_id]
+                .clone()
+        };
+        if expected_refusal.is_none() {
+            assert_eq!(original.summary.worktree, linked_cwd, "{case}");
+            assert_eq!(original.summary.state, TestRunState::Running, "{case}");
+        }
+        match case {
+            "same start replay" => {
+                deliver("item/started", started);
+                assert_eq!(read(), original);
+                deliver("item/completed", complete.clone());
+            }
+            "conflicting start" => {
+                started["cwd"] = json!(root_cwd);
+                deliver("item/started", started);
+            }
+            "unrelated completion" => {
+                for (thread, turn) in [
+                    ("unrelated-thread", PROVIDER_TURN),
+                    (PROVIDER_THREAD, "unrelated-turn"),
+                ] {
+                    route(
+                        "item/completed",
+                        json!({
+                            "threadId": thread, "turnId": turn, "item": complete,
+                        }),
+                    );
+                    assert_eq!(read(), original);
+                }
+                let mut different_item = complete.clone();
+                different_item["id"] = json!("different-command-item");
+                deliver("item/completed", different_item);
+                assert_eq!(read(), original);
+                deliver("item/completed", complete.clone());
+            }
+            "different command at end" => {
+                let mut changed = complete.clone();
+                changed["command"] = json!("cargo test --workspace");
+                deliver("item/completed", changed);
+            }
+            "missing item" => {
+                // The recorder's transcript key is identical. This cannot
+                // substitute for the missing actual native item identity.
+                deliver("item/started", started);
+                let inner = fixture.state.inner.lock().unwrap();
+                assert_eq!(inner.test_run_observations.len(), 2);
+                assert!(inner.test_run_observations.values().all(|row| {
+                    row.runtime_identity.is_some()
+                        && row.artifact.is_none()
+                        && row.final_unbound_proof.is_none()
+                        && row.summary.ended_at.is_some()
+                }));
+            }
+            "declined" | "missing exit" => {
+                let mut unknown = complete.clone();
+                unknown["status"] = json!(if case == "declined" {
+                    "declined"
+                } else {
+                    "failed"
+                });
+                unknown.as_object_mut().unwrap().remove("exitCode");
+                deliver("item/completed", unknown);
+            }
+            "turn closes first" => route(
+                "turn/completed",
+                json!({
+                    "threadId": PROVIDER_THREAD,
+                    "turn": {"id": PROVIDER_TURN, "status": "completed"},
+                }),
+            ),
+            "owned error" => route(
+                "error",
+                json!({
+                    "threadId": PROVIDER_THREAD, "turnId": PROVIDER_TURN,
+                    "willRetry": false, "error": {"message": "fixture owned terminal error"},
+                }),
+            ),
+            _ => deliver("item/completed", complete.clone()),
+        }
+        let terminal = read();
+        let context = terminal.execution_context.as_ref().unwrap();
+        assert_eq!(terminal.summary.state, expected_state, "{case}");
+        assert_eq!(context.refusal(), expected_refusal, "{case}");
+        assert!(terminal.summary.ended_at.is_some(), "{case}");
+        assert!(
+            terminal.artifact.is_none() && terminal.evidence.is_empty(),
+            "{case}"
+        );
+        let mut duplicate = complete;
+        duplicate["exitCode"] = json!(9);
+        deliver("item/completed", duplicate);
+        assert_eq!(read(), terminal, "{case}");
+    }
+}
+
+fn linked_provider_fixture(
+    label: &str,
+) -> (RunFixture, String, PathBuf, EngramObservationProvenance) {
+    let fixture = RunFixture::new(label);
+    let runner = running_owner(&fixture, label);
+    let linked = fs::canonicalize(create_provider_worktree(&fixture.root, label)).unwrap();
+    let provenance = {
+        let inner = fixture.state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&runner).unwrap()];
+        EngramObservationProvenance::Runtime {
+            token: record.runtime.runtime_token().unwrap(),
+            turn_generation: record.active_turn_generation,
+        }
+    };
+    (fixture, runner, linked, provenance)
+}
+
+fn registered_linked_run(label: &str, detached: bool) -> (RunFixture, String, String, PathBuf) {
+    let (fixture, runner, linked, provenance) = linked_provider_fixture(label);
+    super::native_origin::bind_native_host(&fixture);
+    let route = linked_provider_dispatch(fixture.state.clone(), &runner, &provenance);
+    let cwd = test_run_display_path(&linked);
+    let command = if detached {
+        "node scripts/test-launcher.mjs full --input commit --detach"
+    } else {
+        "node scripts/test-launcher.mjs full --input commit"
+    };
+    let item = "detached-refresh-item";
+    route(
+        "item/started",
+        json!({"type":"commandExecution", "id":item,
+        "command":command, "cwd":cwd, "status":"inProgress"}),
+    );
+    let execution = {
+        let inner = fixture.state.inner.lock().unwrap();
+        assert_eq!(
+            inner
+                .test_run_observations
+                .index()
+                .linked_artifact_executions()
+                .count(),
+            0
+        );
+        assert!(test_run_linked_artifact_sources(&inner).is_empty());
+        inner
+            .test_run_observations
+            .values()
+            .next()
+            .unwrap()
+            .execution_id
+            .clone()
+    };
+    let run = format!("test-{}", Uuid::new_v4());
+    let admin = run_git_test_command_output(
+        &normalize_user_facing_path(&linked),
+        &["rev-parse", "--absolute-git-dir"],
+    );
+    let mut request = full_request(&linked, &test_run_timestamp());
+    request["owner"] = json!(runner);
+    request["input"] = json!("commit");
+    request["detached"] = json!(detached);
+    request["creatorPid"] = json!(std::process::id());
+    let results = if detached {
+        running_results(Some(717))
+    } else {
+        let mut terminal = passed_results();
+        terminal["ended"] = json!(test_run_timestamp());
+        terminal
+    };
+    let directory = write_run(
+        &PathBuf::from(admin).join("review-runs"),
+        &run,
+        request,
+        Some(results),
+    );
+    fixture
+        .state
+        .register_test_run(&runner, registration_request(&run, &directory))
+        .unwrap();
+    let locator = if detached { "STARTED" } else { "RUN" };
+    route(
+        "item/completed",
+        json!({"type":"commandExecution", "id":item,
+        "command":command, "cwd":cwd, "status":"completed", "exitCode":0,
+        "aggregatedOutput":format!("{locator} {}", test_run_display_path(&directory))}),
+    );
+    (fixture, run, execution, directory)
+}
+
+#[tokio::test]
+async fn linked_detached_refresh_refuses_replaced_run_directory() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, run, execution, directory) = registered_linked_run("detached-refresh", true);
+    let observation =
+        || fixture.state.inner.lock().unwrap().test_run_observations[&execution].clone();
+    let registration = || fixture.state.inner.lock().unwrap().test_run_registrations[&run].clone();
+    let launched = observation();
+    let context = launched.execution_context.as_ref().unwrap();
+    assert_eq!(context.phase, TestRunExecutionPhase::LauncherReported);
+    assert!(context.artifact_directory_identity.is_some());
+    assert_eq!(launched.artifact.as_ref().unwrap().run_id, run);
+    assert!(
+        launched
+            .artifact
+            .as_ref()
+            .unwrap()
+            .terminal_digest
+            .is_none()
+    );
+    assert!(registration().native_origin.is_some());
+    assert!(registration().native_completion.is_none());
+    assert_eq!(
+        test_run_linked_artifact_sources(&fixture.state.inner.lock().unwrap()).len(),
+        1
+    );
+
+    let original = directory.with_file_name("retired-original");
+    fs::rename(&directory, &original).unwrap();
+    fs::create_dir(&directory).unwrap();
+    fs::copy(
+        original.join("request.json"),
+        directory.join("request.json"),
+    )
+    .unwrap();
+    let mut terminal = passed_results();
+    terminal["runId"] = json!(run);
+    terminal["ended"] = json!(test_run_timestamp());
+    let results = terminal.to_string();
+    fs::write(directory.join("results.json"), &results).unwrap();
+    fixture.refresh(&[]);
+    assert_eq!(observation(), launched);
+    assert!(registration().native_completion.is_none());
+
+    fs::rename(&directory, directory.with_file_name("rejected-replacement")).unwrap();
+    fs::rename(&original, &directory).unwrap();
+    terminal["ended"] = json!(1);
+    fs::write(directory.join("results.json"), terminal.to_string()).unwrap();
+    fixture.refresh(&[]);
+    assert_eq!(
+        observation(),
+        launched,
+        "malformed terminal must not advance the phase"
+    );
+    assert!(registration().native_completion.is_none());
+
+    fs::write(directory.join("results.json"), &results).unwrap();
+    fixture.refresh(&[]);
+    let finished = observation();
+    assert!(matches!(
+        finished.execution_context.unwrap().phase,
+        TestRunExecutionPhase::Terminal {
+            outcome: TestRunExecutionOutcome::Exited(0),
+            ..
+        }
+    ));
+    assert_eq!(finished.summary.state, TestRunState::Passed);
+    assert_eq!(
+        registration().native_completion.unwrap().execution_id,
+        execution
+    );
+    assert!(registration().verification_record.is_none());
+}
+
+#[tokio::test]
+async fn linked_detached_refresh_requires_the_original_results_run_id() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, run, execution, directory) = registered_linked_run("results-run-id", true);
+    let observation =
+        || fixture.state.inner.lock().unwrap().test_run_observations[&execution].clone();
+    let registration = || fixture.state.inner.lock().unwrap().test_run_registrations[&run].clone();
+    let launched = observation();
+    assert_eq!(
+        launched.execution_context.as_ref().unwrap().phase,
+        TestRunExecutionPhase::LauncherReported
+    );
+    let mut terminal = passed_results();
+    terminal["ended"] = json!(test_run_timestamp());
+    terminal["runId"] = json!(format!("test-{}", Uuid::new_v4()));
+    fs::write(directory.join("results.json"), terminal.to_string()).unwrap();
+    fixture.refresh(&[]);
+    assert_eq!(observation(), launched);
+    assert!(registration().native_completion.is_none());
+
+    terminal["runId"] = json!(run);
+    fs::write(directory.join("results.json"), terminal.to_string()).unwrap();
+    fixture.refresh(&[]);
+    assert_eq!(observation().summary.state, TestRunState::Passed);
+    assert_eq!(
+        registration().native_completion.unwrap().execution_id,
+        execution
+    );
+    assert!(registration().verification_record.is_none());
+}
+
+#[tokio::test]
+async fn compacted_linked_refresh_requires_the_original_physical_directory() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, run, execution, directory) = registered_linked_run("retained-linked", false);
+    let alternate = fixture.runs_dir().join(&run);
+    let other_name = fixture.runs_dir().join(format!("test-{}", Uuid::new_v4()));
+    for copy in [&alternate, &other_name] {
+        fs::create_dir_all(copy).unwrap();
+        for file in ["request.json", "results.json"] {
+            fs::copy(directory.join(file), copy.join(file)).unwrap();
+        }
+    }
+    fixture.refresh(&[]);
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        let indexed = inner
+            .test_runs
+            .find(&run)
+            .expect("original linked artifact");
+        assert_eq!(
+            test_run_path_key(&indexed.summary.run_dir),
+            test_run_path_key(&test_run_display_path(&directory))
+        );
+        let row = &inner.test_run_observations[&execution];
+        assert!(test_run_final_unbound_valid(row));
+        assert!(row.linked_artifact_identity().is_some());
+        assert!(
+            inner.test_run_registrations[&run]
+                .native_completion
+                .is_some()
+        );
+    }
+    super::compaction::fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
+    fixture.refresh(&[]);
+    let retained = || {
+        let inner = fixture.state.inner.lock().unwrap();
+        assert!(!inner.test_run_observations.contains_key(&execution));
+        assert!(!inner.test_run_registrations.contains_key(&run));
+        inner.test_run_compacted[&run].clone()
+    };
+    let original = retained();
+    assert!(original.compacted);
+    assert!(!original.artifact_conflict);
+    let registration = original.registration.as_ref().unwrap();
+    let completion = registration.native_completion.as_ref().unwrap();
+    assert_eq!(completion.execution_id, execution);
+    assert!(registration.verification_record.is_none());
+    let app = app_router(fixture.state.clone());
+    let detail = || {
+        request_json::<Value>(
+            &app,
+            Request::builder()
+                .uri(format!("/api/test-runs/{run}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+    let assert_proof = || {
+        let durable = fixture
+            .state
+            .read_durable_native_test_run(registration)
+            .unwrap()
+            .unwrap()
+            .completion
+            .expect("original durable native completion");
+        assert_eq!(durable, completion.completion);
+    };
+
+    let (status, available) = detail().await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(available["run"]["historyCompacted"], true);
+    assert_eq!(available["run"]["artifactUnavailable"], false);
+    assert_proof();
+
+    let saved = directory.with_file_name("retained-original");
+    fs::rename(&directory, &saved).unwrap();
+    fs::create_dir(&directory).unwrap();
+    for file in ["request.json", "results.json"] {
+        fs::copy(saved.join(file), directory.join(file)).unwrap();
+        assert_eq!(
+            fs::read(saved.join(file)).unwrap(),
+            fs::read(directory.join(file)).unwrap()
+        );
+    }
+    for reload in [false, true] {
+        if reload {
+            *fixture.state.inner.lock().unwrap() =
+                load_state(fixture.state.persistence_path.as_path())
+                    .unwrap()
+                    .unwrap();
+        }
+        for _ in 0..2 {
+            fixture.refresh(&[]);
+            let replacement = retained();
+            assert!(replacement.artifact_conflict);
+            assert!(replacement.artifact_unavailable);
+            assert_eq!(replacement.observations, original.observations);
+            assert_eq!(replacement.registration, original.registration);
+            let (status, unavailable) = detail().await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(unavailable["source"], "retained");
+            assert_eq!(unavailable["run"]["artifactUnavailable"], true);
+            let listed: Vec<_> = fixture
+                .summaries()
+                .into_iter()
+                .filter(|entry| entry.run_id == run)
+                .collect();
+            assert_eq!(listed.len(), 1);
+            assert_eq!(listed[0].run_dir, original.summary.run_dir);
+            assert_eq!(listed[0].registration.artifact_unavailable, Some(true));
+            assert_proof();
+        }
+    }
+
+    fs::rename(&directory, directory.with_file_name("retained-replacement")).unwrap();
+    fs::rename(&saved, &directory).unwrap();
+    fixture.refresh(&[]);
+    assert_eq!(retained(), original);
+    let (status, restored) = detail().await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(restored["run"]["artifactUnavailable"], false);
+    assert_proof();
+}
+
+#[tokio::test]
+async fn indexed_linked_detail_and_raw_results_require_original_artifact() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, run, _, directory) = registered_linked_run("linked-public-reads", false);
+    fixture.refresh(&[]);
+    let app = app_router(fixture.state.clone());
+    let query = |suffix: &str| {
+        Request::builder()
+            .uri(format!("/api/test-runs/{run}{suffix}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let original_bytes = fs::read(directory.join("results.json")).unwrap();
+    let (_, original_detail): (StatusCode, Value) = request_json(&app, query("")).await;
+    assert_eq!(original_detail["source"], "index");
+    assert_eq!(original_detail["run"]["runId"], run);
+    assert_eq!(
+        original_detail["detail"]["stages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let assert_original = || async {
+        let (status, detail): (StatusCode, Value) = request_json(&app, query("")).await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        assert_eq!(detail, original_detail);
+        let raw = request_response(&app, query("/results")).await;
+        assert_eq!(raw.status(), StatusCode::OK);
+        assert_eq!(
+            raw.headers()["x-termal-results-sha256"],
+            sha256_hex(&original_bytes)
+        );
+        assert_eq!(
+            to_bytes(raw.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .as_ref(),
+            original_bytes
+        );
+    };
+    let assert_unavailable = || async {
+        let (status, detail): (StatusCode, Value) = request_json(&app, query("")).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{detail}");
+        assert!(detail.get("detail").is_none());
+        let raw = request_response(&app, query("/results")).await;
+        assert_eq!(raw.status(), StatusCode::CONFLICT);
+        assert!(!raw.headers().contains_key("x-termal-results-sha256"));
+        let body = to_bytes(raw.into_body(), usize::MAX).await.unwrap();
+        let refusal: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(refusal["code"], "test_run_results_changed");
+        assert!(!String::from_utf8_lossy(&body).contains("replacement diagnostics"));
+    };
+    assert_original().await;
+
+    // No rescan between the first successful GET and each replacement.
+    let saved = directory.with_file_name("public-original");
+    fs::rename(&directory, &saved).unwrap();
+    fs::create_dir(&directory).unwrap();
+    for file in ["request.json", "results.json"] {
+        fs::copy(saved.join(file), directory.join(file)).unwrap();
+    }
+    assert_unavailable().await;
+    fs::rename(&directory, directory.with_file_name("public-replacement")).unwrap();
+    fs::rename(&saved, &directory).unwrap();
+
+    let results_path = directory.join("results.json");
+    let mut changed: Value = serde_json::from_slice(&original_bytes).unwrap();
+    changed["limitations"] = json!("replacement diagnostics");
+    fs::write(&results_path, changed.to_string()).unwrap();
+    assert_unavailable().await;
+    fs::write(results_path, &original_bytes).unwrap();
+    assert_original().await;
+}
+
+#[tokio::test]
+async fn linked_terminal_digest_cannot_replace_the_original_request_match() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for replace_request in [true, false] {
+        let (fixture, runner, linked, provenance) = linked_provider_fixture("terminal-request");
+        super::native_origin::bind_native_host(&fixture);
+        let route = linked_provider_dispatch(fixture.state.clone(), &runner, &provenance);
+        let cwd = test_run_display_path(&linked);
+        let item = "linked-terminal-request-item";
+        let command = "node scripts/test-launcher.mjs full --input commit";
+        route(
+            "item/started",
+            json!({"type":"commandExecution","id":item,"command":command,
+            "cwd":cwd,"status":"inProgress"}),
+        );
+        let run = format!("test-{}", Uuid::new_v4());
+        let admin = run_git_test_command_output(&linked, &["rev-parse", "--absolute-git-dir"]);
+        let mut request = full_request(&linked, &test_run_timestamp());
+        request["owner"] = json!(runner);
+        request["input"] = json!("commit");
+        request["creatorPid"] = json!(std::process::id());
+        let mut terminal = passed_results();
+        terminal["ended"] = json!(test_run_timestamp());
+        let directory = write_run(
+            &PathBuf::from(admin).join("review-runs"),
+            &run,
+            request,
+            Some(terminal),
+        );
+        route(
+            "item/completed",
+            json!({"type":"commandExecution","id":item,"command":command,"cwd":cwd,
+            "status":"completed","exitCode":0,
+            "aggregatedOutput":format!("RUN {}", test_run_display_path(&directory))}),
+        );
+        let observation = || {
+            fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_observations
+                .values()
+                .next()
+                .unwrap()
+                .clone()
+        };
+        let original = observation();
+        let artifact = original.artifact.as_ref().unwrap();
+        assert!(artifact.terminal_digest.is_some());
+        let request_path = directory.join("request.json");
+        let mut registration_request_json: Value =
+            serde_json::from_slice(&fs::read(&request_path).unwrap()).unwrap();
+        if replace_request {
+            registration_request_json["scope"] = json!("replacement, same terminal bytes");
+            fs::write(&request_path, registration_request_json.to_string()).unwrap();
+        }
+        fixture
+            .state
+            .register_test_run(&runner, registration_request(&run, &directory))
+            .unwrap();
+        fixture.refresh(&[]);
+        let registered = fixture.state.inner.lock().unwrap().test_run_registrations[&run].clone();
+        assert_eq!(
+            registered.request_identity,
+            test_run_registration_identity(&registration_request_json).unwrap()
+        );
+        assert!(registered.verification_record.is_none());
+        if replace_request {
+            assert_ne!(
+                Some(&registered.request_identity),
+                artifact.request_identity.as_ref()
+            );
+            assert_eq!(observation(), original);
+            assert!(registered.native_completion.is_none());
+        } else {
+            assert_eq!(
+                Some(&registered.request_identity),
+                artifact.request_identity.as_ref()
+            );
+            assert_eq!(
+                registered.native_completion.as_ref().unwrap().execution_id,
+                original.execution_id
+            );
+            let durable = fixture
+                .state
+                .read_durable_native_test_run(&registered)
+                .unwrap()
+                .unwrap();
+            assert_eq!(durable.completion.unwrap().run_id, run);
+        }
+    }
+}
+
+#[tokio::test]
+async fn unaddressed_linked_completion_cannot_retire_reused_ordinary_writer() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, runner, linked, original) = linked_provider_fixture("provider-carried-reuse");
+    let item = "reused-provider-item";
+    let command = "cargo test --test source_file_size -- --nocapture";
+    let root_cwd = test_run_display_path(&fs::canonicalize(&fixture.root).unwrap());
+    let predecessor = "original-ordinary-turn";
+    provider_router_for_turn(fixture.state.clone(), &runner, &original, predecessor)(
+        "item/started",
+        json!({"threadId":PROVIDER_THREAD,"turnId":predecessor,
+        "item":{"type":"commandExecution","id":item,"command":command,
+        "cwd":root_cwd,"status":"inProgress"}}),
+    );
+    let provenance = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let original_row = inner.test_run_observations.values().next().unwrap();
+        let captured_native_turn = original_row
+            .execution_context
+            .as_ref()
+            .and_then(|context| context.native_turn.clone())
+            .unwrap();
+        let captured_generation = original_row.turn_generation;
+        assert_eq!(
+            captured_native_turn,
+            test_run_provider_turn_identity(PROVIDER_THREAD, predecessor)
+        );
+        let index = inner.find_session_index(&runner).unwrap();
+        let record = &mut inner.sessions[index];
+        let runtime = record.runtime.runtime_token().unwrap();
+        // Model the earlier turn being closed with its ordinary writer still
+        // running. The test drives the real key-only END handoff below.
+        engram_retire_command_writer(&mut record.engram, item);
+        engram_note_running_codex_test(
+            &mut record.engram,
+            EngramRunningCodexTest {
+                key: item.to_owned(),
+                runtime: runtime.clone(),
+                root_key: engram_path_key(&fixture.root),
+                codex_address: Some(EngramCodexCommandAddress {
+                    runtime: runtime.clone(),
+                    turn_generation: captured_generation,
+                    native_turn: captured_native_turn,
+                }),
+            },
+        );
+        record.active_turn_generation += 1;
+        EngramObservationProvenance::Runtime {
+            token: runtime,
+            turn_generation: record.active_turn_generation,
+        }
+    };
+    let running = || {
+        let inner = fixture.state.inner.lock().unwrap();
+        inner.sessions[inner.find_session_index(&runner).unwrap()]
+            .engram
+            .running_codex_tests
+            .iter()
+            .any(|writer| writer.key == item)
+    };
+    assert!(running());
+    let route = provider_router(fixture.state.clone(), &runner, &provenance);
+    let cwd = test_run_display_path(&linked);
+    route(
+        "item/started",
+        json!({"threadId":PROVIDER_THREAD,"turnId":PROVIDER_TURN,
+        "item":{"type":"commandExecution","id":item,"command":command,"cwd":cwd,"status":"inProgress"}}),
+    );
+    let rows = || {
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_observations
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let originals = rows();
+    assert_eq!(originals.len(), 2);
+    assert!(
+        originals
+            .iter()
+            .any(|row| row.summary.worktree == cwd && row.managed_provider_execution())
+    );
+    let mut completed = json!({"type":"commandExecution","id":item,
+        "command":command,"cwd":cwd,"status":"completed","exitCode":0});
+    route(
+        "item/completed",
+        json!({"threadId":PROVIDER_THREAD,"item":completed}),
+    );
+    completed["type"] = json!("CommandExecution");
+    route(
+        "codex/event/item_completed",
+        json!({"conversationId":PROVIDER_THREAD,
+        "msg":{"item":completed}}),
+    );
+    assert!(running());
+    assert_eq!(rows(), originals);
+
+    completed["type"] = json!("commandExecution");
+    route(
+        "item/completed",
+        json!({"threadId":PROVIDER_THREAD,
+        "turnId":"unrelated-ordinary-turn","item":completed}),
+    );
+    assert!(running());
+    assert_eq!(rows(), originals);
+    route(
+        "item/completed",
+        json!({"threadId":PROVIDER_THREAD,
+        "turnId":PROVIDER_TURN,"item":completed}),
+    );
+    assert!(running());
+    let current_rows = rows();
+    let linked = current_rows
+        .iter()
+        .find(|row| row.managed_provider_execution())
+        .unwrap();
+    assert_eq!(linked.summary.state, TestRunState::Passed);
+    let ordinary = current_rows
+        .iter()
+        .find(|row| !row.managed_provider_execution())
+        .unwrap();
+    assert_eq!(
+        ordinary,
+        originals
+            .iter()
+            .find(|row| !row.managed_provider_execution())
+            .unwrap()
+    );
+    completed["cwd"] = json!(root_cwd);
+    route(
+        "item/completed",
+        json!({"threadId":PROVIDER_THREAD,
+        "turnId":predecessor,"item":completed}),
+    );
+    assert!(
+        !running(),
+        "the explicitly addressed ordinary END still retires its writer"
+    );
+    let settled = rows();
+    let predecessor = settled
+        .iter()
+        .find(|row| row.execution_id == ordinary.execution_id)
+        .unwrap();
+    assert_eq!(predecessor.summary.state, TestRunState::Passed);
+    assert_eq!(
+        settled
+            .iter()
+            .find(|row| row.execution_id == linked.execution_id),
+        Some(linked)
+    );
+}
+
+#[tokio::test]
+async fn current_ordinary_completion_owns_reused_managed_item_without_test_observation() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for (label, legacy) in [("ordinary-end-typed", false), ("ordinary-end-legacy", true)] {
+        let (fixture, runner, linked, history) = linked_provider_fixture(label);
+        let item = "reused-item";
+        let cwd = test_run_display_path(&linked);
+        let previous = linked_provider_dispatch(fixture.state.clone(), &runner, &history);
+        previous(
+            "item/started",
+            json!({
+                "type":"commandExecution", "id":item, "command":"cargo test",
+                "cwd":cwd, "status":"inProgress"
+            }),
+        );
+        previous(
+            "item/completed",
+            json!({
+                "type":"commandExecution", "id":item, "command":"cargo test",
+                "cwd":cwd, "status":"completed", "exitCode":0
+            }),
+        );
+        let (current, managed) = {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            assert_eq!(inner.test_run_observations.len(), 1);
+            let managed = inner.test_run_observations.values().next().unwrap().clone();
+            assert!(managed.managed_provider_execution());
+            assert_eq!(managed.summary.state, TestRunState::Passed);
+            let index = inner.find_session_index(&runner).unwrap();
+            let record = &mut inner.sessions[index];
+            let runtime = record.runtime.runtime_token().unwrap();
+            engram_note_running_codex_test(
+                &mut record.engram,
+                EngramRunningCodexTest {
+                    key: item.to_owned(),
+                    runtime: runtime.clone(),
+                    root_key: engram_path_key(&fixture.root),
+                    codex_address: Some(EngramCodexCommandAddress {
+                        runtime: runtime.clone(),
+                        turn_generation: record.active_turn_generation,
+                        native_turn: test_run_provider_turn_identity(
+                            PROVIDER_THREAD,
+                            "older-ordinary",
+                        ),
+                    }),
+                },
+            );
+            record.active_turn_generation += 1;
+            (
+                EngramObservationProvenance::Runtime {
+                    token: runtime,
+                    turn_generation: record.active_turn_generation,
+                },
+                managed,
+            )
+        };
+        let route =
+            provider_router_for_turn(fixture.state.clone(), &runner, &current, "current-ordinary");
+        let command = format!("cd \"{cwd}\"");
+        let start = || {
+            route(
+                "item/started",
+                json!({
+                    "threadId":PROVIDER_THREAD, "turnId":"current-ordinary",
+                    "item":{"type":"commandExecution", "id":item, "command":command, "status":"inProgress"}
+                }),
+            )
+        };
+        start();
+        let assert_current = |running| {
+            let inner = fixture.state.inner.lock().unwrap();
+            assert_eq!(inner.test_run_observations.len(), 1);
+            assert_eq!(
+                inner.test_run_observations.get(&managed.execution_id),
+                Some(&managed)
+            );
+            let record = &inner.sessions[inner.find_session_index(&runner).unwrap()];
+            assert!(
+                record
+                    .engram
+                    .running_codex_tests
+                    .iter()
+                    .any(|writer| writer.key == item)
+            );
+            assert_eq!(
+                record
+                    .engram
+                    .running_command_worktrees
+                    .iter()
+                    .any(|(key, _)| key == item),
+                running,
+            );
+            let shell = engram_shell_position(record, "next-command");
+            if running {
+                assert!(shell.is_none(), "current shell move is still pending");
+            } else {
+                assert_eq!(
+                    test_run_path_key(&shell.expect("settled shell move")),
+                    test_run_path_key(&cwd)
+                );
+            }
+            let mut statuses =
+                record
+                    .session
+                    .messages
+                    .iter()
+                    .rev()
+                    .filter_map(|message| match message {
+                        Message::Command {
+                            command: line,
+                            status,
+                            output,
+                            ..
+                        } if line == &command => {
+                            assert!(!output.contains("replayed terminal output"));
+                            Some(*status)
+                        }
+                        _ => None,
+                    });
+            assert_eq!(
+                statuses.next(),
+                Some(if running {
+                    CommandStatus::Running
+                } else {
+                    CommandStatus::Success
+                })
+            );
+            assert_eq!(
+                statuses.next(),
+                None,
+                "one transcript entry for the original item"
+            );
+        };
+        assert_current(true);
+        let mut end = json!({"type":"commandExecution", "id":item,
+            "command":command, "exitCode":0, "status":"completed"});
+        route(
+            "item/completed",
+            json!({"threadId":PROVIDER_THREAD, "item":end}),
+        );
+        route(
+            "item/completed",
+            json!({"threadId":PROVIDER_THREAD, "turnId":"unrelated", "item":end}),
+        );
+        assert_current(true);
+        if legacy {
+            end["type"] = json!("CommandExecution");
+            route(
+                "codex/event/item_completed",
+                json!({"conversationId":PROVIDER_THREAD,
+                "msg":{"turn_id":"current-ordinary", "item":end}}),
+            );
+        } else {
+            route(
+                "item/completed",
+                json!({"threadId":PROVIDER_THREAD,
+                "turnId":"current-ordinary", "item":end}),
+            );
+        }
+        assert_current(false);
+        start();
+        assert_current(false);
+        end["aggregatedOutput"] = json!("replayed terminal output");
+        end["type"] = json!("commandExecution");
+        route(
+            "item/completed",
+            json!({"threadId":PROVIDER_THREAD,
+            "turnId":"current-ordinary", "item":end}),
+        );
+        assert_current(false);
+        end["type"] = json!("CommandExecution");
+        route(
+            "codex/event/item_completed",
+            json!({"conversationId":PROVIDER_THREAD,
+            "msg":{"turn_id":"current-ordinary", "item":end}}),
+        );
+        assert_current(false);
+    }
+}
+
+fn assert_sealed_managed_replay_is_inert(method: &str) {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, runner, linked, provenance) = linked_provider_fixture("managed-replay");
+    let route = linked_provider_dispatch(fixture.state.clone(), &runner, &provenance);
+    let cwd = test_run_display_path(&linked);
+    let command = format!("pushd \"{cwd}\" && cargo test");
+    let item = "managed-replay";
+    let start = json!({
+        "type": "commandExecution", "id": item, "command": command, "status": "inProgress",
+    });
+    let end = json!({
+        "type": "commandExecution", "id": item, "command": command,
+        "status": "completed", "exitCode": 0, "aggregatedOutput": "original terminal output",
+    });
+    let snapshot = || {
+        let inner = fixture.state.inner.lock().unwrap();
+        assert_eq!(inner.test_run_observations.len(), 1);
+        let row = inner.test_run_observations.values().next().unwrap().clone();
+        assert!(row.managed_provider_execution());
+        let record = &inner.sessions[inner.find_session_index(&runner).unwrap()];
+        let writer = record
+            .engram
+            .running_command_worktrees
+            .iter()
+            .any(|(key, _)| key == item);
+        let writer_key = record.engram.running_command_keys.contains_key(item);
+        let shell = engram_shell_position(record, "following-command");
+        let message = record.session.messages.iter().find(|message| {
+            matches!(message, Message::Command { command: line, .. } if line == &command)
+        }).unwrap();
+        (
+            row,
+            serde_json::to_value(message).unwrap(),
+            writer,
+            writer_key,
+            shell,
+            inner.revision,
+        )
+    };
+
+    route("item/started", start.clone());
+    let running = snapshot();
+    assert_eq!(running.0.summary.state, TestRunState::Running);
+    assert_eq!(running.1["status"], "running");
+    assert!(running.2, "original current writer must be present");
+    assert!(running.4.is_none(), "original shell move must be pending");
+    route("item/completed", end.clone());
+
+    let sealed = snapshot();
+    assert_eq!(sealed.0.execution_id, running.0.execution_id);
+    assert_eq!(sealed.0.summary.state, TestRunState::Passed);
+    assert_eq!(sealed.1["status"], "success");
+    assert_eq!(sealed.1["output"], "original terminal output");
+    assert!(!sealed.2 && !sealed.3, "original writer must be retired");
+    assert_eq!(
+        test_run_path_key(sealed.4.as_deref().unwrap()),
+        test_run_path_key(&cwd)
+    );
+
+    if method == "item/started" {
+        route(method, start);
+        assert_eq!(snapshot(), sealed);
+    } else {
+        route(method, end.clone());
+        assert_eq!(snapshot(), sealed);
+        let mut conflicting = end;
+        conflicting["status"] = json!("failed");
+        conflicting["exitCode"] = json!(1);
+        conflicting["aggregatedOutput"] = json!("replayed terminal output");
+        route(method, conflicting);
+        assert_eq!(snapshot(), sealed);
+    }
+}
+
+#[tokio::test]
+async fn sealed_managed_start_replay_does_not_reopen_command_or_writer() {
+    assert_sealed_managed_replay_is_inert("item/started");
+}
+
+#[tokio::test]
+async fn sealed_managed_end_replay_keeps_original_terminal_facts() {
+    assert_sealed_managed_replay_is_inert("item/completed");
+}
+
+#[tokio::test]
+async fn idless_provider_command_without_process_cwd_stays_refused() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, runner, _, provenance) = linked_provider_fixture("missing-provider-item");
+    let route = linked_provider_dispatch(fixture.state.clone(), &runner, &provenance);
+    route(
+        "item/started",
+        json!({"type":"commandExecution",
+        "command":"cargo test", "status":"inProgress"}),
+    );
+    let read = || {
+        let inner = fixture.state.inner.lock().unwrap();
+        assert_eq!(inner.test_run_observations.len(), 1);
+        inner.test_run_observations.values().next().unwrap().clone()
+    };
+    let refusal = read();
+    assert_eq!(
+        refusal.execution_context.as_ref().unwrap().refusal(),
+        Some(TestRunExecutionRefusal::ItemIdentityUnavailable)
+    );
+    assert_eq!(refusal.summary.state, TestRunState::Unknown);
+    assert!(refusal.summary.ended_at.is_some());
+    route(
+        "item/completed",
+        json!({"type":"commandExecution",
+        "command":"cargo test", "status":"completed","exitCode":0}),
+    );
+    assert_eq!(read(), refusal);
+    assert!(refusal.artifact.is_none() && refusal.final_unbound_proof.is_none());
+}
+
+#[tokio::test]
+async fn one_call_linked_start_without_process_cwd_uses_original_directory() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, runner, linked, provenance) = linked_provider_fixture("one-call-cwd");
+    let route = linked_provider_dispatch(fixture.state.clone(), &runner, &provenance);
+    let cwd = test_run_display_path(&linked);
+    let command = format!("pushd \"{cwd}\" && cargo test");
+    route(
+        "item/started",
+        json!({"type":"commandExecution","id":"one-call",
+        "command":command,"status":"inProgress"}),
+    );
+    let read = || {
+        let inner = fixture.state.inner.lock().unwrap();
+        assert_eq!(inner.test_run_observations.len(), 1);
+        inner.test_run_observations.values().next().unwrap().clone()
+    };
+    let before = read();
+    assert_eq!(before.summary.worktree, cwd);
+    assert!(matches!(
+        before.execution_context.as_ref().unwrap().placement,
+        TestRunExecutionPlacement::Linked(_)
+    ));
+    assert!(
+        before
+            .execution_context
+            .as_ref()
+            .unwrap()
+            .reported_cwd
+            .is_none()
+    );
+    route(
+        "item/completed",
+        json!({"type":"commandExecution","id":"one-call",
+        "command":command,"status":"completed","exitCode":0}),
+    );
+    let after = read();
+    assert_eq!(after.execution_id, before.execution_id);
+    assert_eq!(after.summary.worktree, cwd);
+    assert_eq!(after.summary.state, TestRunState::Passed);
+    let inner = fixture.state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&runner).unwrap()];
+    let shell = engram_shell_position(record, "next-command").expect("the pending move settled");
+    assert_eq!(test_run_path_key(&shell), test_run_path_key(&cwd));
+    assert!(!record.engram.running_command_keys.contains_key("one-call"));
+}
+
+#[tokio::test]
+async fn managed_monitoring_interrupt_replays_exact_durable_disposition() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (fixture, runner, linked, provenance) = linked_provider_fixture("monitoring-replay");
+    let route = linked_provider_dispatch(fixture.state.clone(), &runner, &provenance);
+    route(
+        "item/started",
+        json!({"type":"commandExecution","id":"monitoring-replay",
+        "command":"cargo test","cwd":test_run_display_path(&linked),"status":"inProgress"}),
+    );
+    let original = fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_observations
+        .values()
+        .next()
+        .unwrap()
+        .clone();
+    let id = &original.execution_id;
+    let interrupt = |reason: &str| {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/test-runs/{id}/interrupt-monitoring"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"ownerSessionId": runner, "startedAt": original.summary.started_at,
+            "reason": reason})
+                .to_string(),
+            ))
+            .unwrap()
+    };
+    let app = app_router(fixture.state.clone());
+    let (status, first): (StatusCode, Value) =
+        request_json(&app, interrupt("Lost original terminal")).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["state"], "unknown");
+    assert_eq!(first["interrupted"], true);
+    assert!(first["endedAt"].is_string());
+    assert!(first["exitCode"].is_null());
+    let sealed = fixture.state.inner.lock().unwrap().test_run_observations[id].clone();
+    assert_eq!(
+        sealed.execution_context.as_ref().unwrap().refusal(),
+        Some(TestRunExecutionRefusal::MonitoringInterrupted)
+    );
+    let (status, replay): (StatusCode, Value) =
+        request_json(&app, interrupt("Lost original terminal")).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay, first);
+    let (status, _): (StatusCode, Value) = request_json(&app, interrupt("Different reason")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        fixture.state.inner.lock().unwrap().test_run_observations[id],
+        sealed
+    );
+    let loaded = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.test_run_observations[id], sealed);
+}
+
+#[tokio::test]
+async fn linked_artifact_reads_are_bound_to_the_open_run_directory() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = RunFixture::new("provider-reader");
+    run_git_test_command(&fixture.root, &["init", "--quiet"]);
+    let linked = create_provider_worktree(&fixture.root, "reader-linked");
+    let admin = PathBuf::from(run_git_test_command_output(
+        &linked,
+        &["rev-parse", "--absolute-git-dir"],
+    ));
+    let layout =
+        delegation_git_boundary::ProviderLinkedWorktree::resolve(&fixture.root, &linked).unwrap();
+    let run_id = format!("test-{}", Uuid::new_v4());
+    let directory = admin.join("review-runs").join(&run_id);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("request.json"), b"original").unwrap();
+    let pinned = layout.open_run(&directory, &run_id).unwrap();
+    #[cfg(windows)]
+    {
+        let incoming = directory.join("request.next");
+        fs::write(&incoming, b"original").unwrap();
+        fs::rename(incoming, directory.join("request.json"))
+            .expect("a held directory still allows the launcher to replace a child file");
+    }
+    let retired = directory.with_file_name("retired-run");
+    let renamed = fs::rename(&directory, &retired);
+    #[cfg(windows)]
+    assert!(
+        renamed.is_err(),
+        "Windows must pin the open directory against renames"
+    );
+    #[cfg(unix)]
+    {
+        // Unix keeps the descriptor pinned even if the public name moves.
+        renamed.unwrap();
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("request.json"), b"replacement").unwrap();
+        let current = layout.open_run(&directory, &run_id).unwrap();
+        assert!(!pinned.same_directory(&current).unwrap());
+    }
+    assert_eq!(pinned.read("request.json", 32).unwrap().0, b"original");
 }
 
 #[test]
