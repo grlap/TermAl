@@ -1191,7 +1191,21 @@ command line, not to registration: a `--notify` misuse in a valid host context
 focused mode. A `category` launch whose catalog, `ui/test-categories.ts`,
 cannot be read or parsed keeps its own diagnostic too: it is refused before
 any run is attempted, as on earlier launchers, and the fix is to the
-repository's catalog, not to registration.
+repository's catalog, not to registration. A launch that is interrupted
+(SIGINT or SIGTERM) or killed before its first record, request.json, is in
+place is deliberately unchanged as well: nothing was registered and the stop
+came from outside the launcher (the user, a supervisor or the host), so there
+is nothing to explain or correct. Stopped before its run directory was made
+(during the source-owner lookup or automatic input selection), it leaves
+nothing on disk; stopped after, it may leave an empty run directory or a
+temporary request file, which has no summary and which no later launch
+reads. It leaves no registration that a later launch must clear. A launch
+made right after it may be refused with HTTP 429 while the host's
+source-owner probes are busy, with the interrupted probe or with another
+session's, since the host serves at most two source-owner metadata requests
+at once. That refusal comes before any run directory, so it leaves no
+per-run artifact or registration; the launching session reports it to its
+coordinator.
 
 A terminal verification refusal is stored beside the run in
 `engram-verification-record-state.json`. The launcher `summary` shows that
