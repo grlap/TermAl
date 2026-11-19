@@ -54,6 +54,7 @@ fn report(envelopes: Vec<EngramRuntimeObservationEnvelope>) -> EngramRuntimeObse
         observing_session: "private-session".into(),
         attempts: 8,
         retry_at: "private-retry".into(),
+        store_wait_notice_posted: false,
         call_timeout_ms: 1,
         connection: EngramConnectionConfig {
             binary_path: "unavailable-binary".into(),

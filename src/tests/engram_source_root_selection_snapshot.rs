@@ -22,7 +22,11 @@ fn saved_job(fixture: &TwoClaims, turn: &str) -> EngramRuntimeClosingJob {
         .expect("the complete closing intent was retained durably")
 }
 
-fn set_retry_due(fixture: &TwoClaims, turn: &str, due: String) {
+fn update_retry_job(
+    fixture: &TwoClaims,
+    turn: &str,
+    update: impl FnOnce(&mut EngramRuntimeClosingJob),
+) {
     {
         let mut inner = fixture.turn.state.inner.lock().unwrap();
         let record = inner.session_mut(&fixture.turn.session_id).unwrap();
@@ -32,7 +36,7 @@ fn set_retry_due(fixture: &TwoClaims, turn: &str, due: String) {
             .iter_mut()
             .find(|job| job.trace.host_turn_ref == turn)
             .unwrap();
-        job.retry_at = due;
+        update(job);
         let prepared = job.clone();
         fixture
             .turn
@@ -45,6 +49,16 @@ fn set_retry_due(fixture: &TwoClaims, turn: &str, due: String) {
             "the worker must read back exactly the retry image used to order X and Y"
         );
     }
+    // The fixture changes the deadline out of band. Notify the worker after
+    // the new retry image is durable and the state lock has been released.
+    fixture
+        .turn
+        .state
+        .start_runtime_observation_worker(&fixture.turn.session_id);
+}
+
+fn set_retry_due(fixture: &TwoClaims, turn: &str, due: String) {
+    update_retry_job(fixture, turn, |job| job.retry_at = due);
 }
 
 fn older_turn_in_retry(fixture: &TwoClaims) -> EngramRuntimeClosingJob {
@@ -547,30 +561,11 @@ fn an_older_snapshot_members_own_retry_terminal_releases_the_successor() {
         .push_back(EngramTransportError::transport(
             "older X exhausted its own capture budget",
         ));
-    {
-        let mut inner = fixture.turn.state.inner.lock().unwrap();
-        let job = inner
-            .session_mut(&fixture.turn.session_id)
-            .unwrap()
-            .engram
-            .unadmitted_closing_jobs
-            .iter_mut()
-            .find(|job| job.trace.host_turn_ref == older.trace.host_turn_ref)
-            .unwrap();
+    update_retry_job(&fixture, &older.trace.host_turn_ref, |job| {
         assert!(job.policy.is_none(), "X must still need its policy capture");
         job.attempts = ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS - 1;
         job.retry_at = unadmitted_observation_timestamp();
-        let prepared = job.clone();
-        fixture
-            .turn
-            .state
-            .commit_session_locked(&mut inner, &fixture.turn.session_id)
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(saved_job(&fixture, &older.trace.host_turn_ref)).unwrap(),
-            serde_json::to_value(&prepared).unwrap()
-        );
-    }
+    });
     let guard = phase_sync::PollGuard::new();
     loop {
         if fixture
