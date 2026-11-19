@@ -33,9 +33,19 @@ The parent's current compact `termal_get_session_result` packet also lists
 confirmed retained publication, including earlier versions of an attempt.
 These are discovery locators, separate from the packet's current result. They
 do not certify that result or a later input. The list uses the existing bounded,
-authenticated custody reader and creates no new capture. If discovery cannot
-validate the retained history, `retainedReviewAttemptsError` explains why;
-the parent's available current result remains readable. Unpublished candidates
+authenticated custody reader. For a completed or failed reviewer whose current
+attempt has no confirmed publication yet, the packet publishes that terminal
+current attempt as an explicit attempt-only read does; otherwise it creates no
+capture. It decides under the retention owner guard, before any capture, so it
+never adds a second version of an attempt that another read published
+meanwhile. Explicit attempt-only reads, of the packet or of output pages, keep
+publishing as described above; unselected output pages publish nothing. Every
+client of this packet publishes this way: the delegation MCP tools
+`termal_get_session_result` and `termal_wait_delegations`, and the UI's
+delegation result view. If discovery cannot validate the retained history, or
+publishing the terminal current attempt fails, `retainedReviewAttemptsError`
+explains why; the parent's available current result remains readable.
+Unpublished candidates
 and reservations supply no result identity.
 
 Parent historical reads retain existing parent/delegation authorization and

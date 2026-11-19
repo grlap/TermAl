@@ -1,5 +1,8 @@
-//! Parent-packet discovery supplies immutable selections without widening reads.
-//! Uses the existing archive fixture; no provider or live operator store is read.
+//! Parent-packet discovery supplies immutable selections without widening reads,
+//! and the parent packet publishes a completed or failed reviewer's terminal
+//! current attempt once, under the canonical parent id and the owner guard.
+//! Uses the existing archive and terminal-review fixtures; no provider or live
+//! operator store is read.
 use super::*;
 
 #[test]
@@ -146,4 +149,248 @@ fn unpublished_custody_is_not_offered_as_an_exact_review_identity() {
         .expect("a provisional candidate remains unavailable");
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.starts_with("review_result_pending"));
+}
+
+fn unselected() -> DelegationResultSelection {
+    DelegationResultSelection {
+        submission_attempt: None,
+        result_id: None,
+    }
+}
+
+#[test]
+fn parent_packet_lists_a_terminal_attempt_that_was_never_retained() {
+    let output = "A completed review that nothing retained yet.";
+    let (state, parent, delegation, _) = terminal_review(output);
+    let internal =
+        serde_json::to_value(state.get_delegation_result(&parent, &delegation).unwrap()).unwrap();
+    assert!(internal.get("retainedReviewAttempts").is_none());
+    assert!(internal.get("retainedReviewAttemptsError").is_none());
+
+    let packet = serde_json::to_value(
+        state
+            .get_delegation_result_selected(&parent, &delegation, &unselected())
+            .unwrap(),
+    )
+    .unwrap();
+    let identities = packet["retainedReviewAttempts"]
+        .as_array()
+        .expect("the parent packet must list the terminal attempt without an explicit read");
+    assert_eq!(identities.len(), 1);
+    assert!(packet.get("retainedReviewAttemptsError").is_none());
+    let selected: DelegationResultSelection =
+        serde_json::from_value(identities[0].clone()).unwrap();
+    assert_eq!(selected.submission_attempt, Some(1));
+    let page = state
+        .get_delegation_result_output_selected(&parent, &delegation, 0, 8192, &selected)
+        .unwrap();
+    assert_eq!(page.output, output);
+
+    let before = changes(&state);
+    let again = serde_json::to_value(
+        state
+            .get_delegation_result_selected(&parent, &delegation, &unselected())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        again["retainedReviewAttempts"],
+        packet["retainedReviewAttempts"]
+    );
+    assert_eq!(
+        changes(&state),
+        before,
+        "a confirmed terminal attempt is listed without another custody write"
+    );
+}
+
+#[test]
+fn parent_packet_reports_unreadable_custody_of_its_terminal_attempt() {
+    let (state, parent, delegation, child) =
+        terminal_review("A completed review whose custody is later damaged.");
+    state
+        .get_delegation_result_selected(&parent, &delegation, &unselected())
+        .unwrap();
+    let rows = state
+        .review_custody_rows_read_only(Some(&child), &delegation)
+        .unwrap();
+    assert!(
+        !rows.is_empty(),
+        "the parent packet published the terminal attempt"
+    );
+    state
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE mailbox_messages SET body=?1 WHERE id=?2",
+            rusqlite::params!["damaged custody", rows[0].message_id],
+        )
+        .unwrap();
+    let original = state
+        .get_delegation_result(&parent, &delegation)
+        .unwrap()
+        .result;
+
+    let packet = state
+        .get_delegation_result_selected(&parent, &delegation, &unselected())
+        .unwrap();
+    assert_eq!(packet.result, original);
+    let packet = serde_json::to_value(packet).unwrap();
+    assert!(packet.get("retainedReviewAttempts").is_none());
+    assert!(
+        packet["retainedReviewAttemptsError"]
+            .as_str()
+            .unwrap()
+            .contains("corrupt")
+    );
+}
+
+#[test]
+fn parent_packet_lists_an_attempt_confirmed_before_its_owner_guard_without_a_second_version() {
+    let (state, parent, delegation, _) = terminal_review("The original terminal cut.");
+    let racing = state.clone();
+    let (racing_parent, racing_delegation) = (parent.clone(), delegation.clone());
+    let racing_id = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+    let recorded_id = racing_id.clone();
+    TEST_REVIEW_PACKET_BEFORE_OWNER_GUARD.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            // Another read confirms the attempt after the packet's unguarded
+            // check, then the terminal cut changes before the packet's guard.
+            let (_, id) = racing
+                .retain_review_attempt(&racing_parent, &racing_delegation, 1)
+                .unwrap();
+            *recorded_id.lock().unwrap() = Some(id);
+            let mut inner = racing.inner.lock().unwrap();
+            let index = inner.find_delegation_index(&racing_delegation).unwrap();
+            inner.delegations[index].result.as_mut().unwrap().summary =
+                "A later, different terminal cut".to_owned();
+        }));
+    });
+
+    let packet = serde_json::to_value(
+        state
+            .get_delegation_result_selected(&parent, &delegation, &unselected())
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(packet.get("retainedReviewAttemptsError").is_none());
+    let identities = packet["retainedReviewAttempts"]
+        .as_array()
+        .expect("the attempt confirmed by the other read is listed");
+    assert_eq!(
+        identities.len(),
+        1,
+        "the packet must not publish a second version of an already confirmed attempt"
+    );
+    let selected: DelegationResultSelection =
+        serde_json::from_value(identities[0].clone()).unwrap();
+    assert_eq!(selected.submission_attempt, Some(1));
+    let racing_id = racing_id
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the racing read ran between the packet's check and its guard");
+    assert_eq!(
+        selected.result_id.as_deref(),
+        Some(racing_id.as_str()),
+        "the listed identity is the racing read's publication"
+    );
+}
+
+#[test]
+fn parent_packet_with_a_padded_parent_id_keeps_custody_under_the_canonical_parent() {
+    let (state, parent, delegation, _) =
+        terminal_review("A completed review read through a padded parent id.");
+    let padded = format!("  {parent} ");
+    let packet = serde_json::to_value(
+        state
+            .get_delegation_result_selected(&padded, &delegation, &unselected())
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(packet.get("retainedReviewAttemptsError").is_none());
+    let identities = packet["retainedReviewAttempts"]
+        .as_array()
+        .expect("the padded parent's packet lists the terminal attempt");
+    assert_eq!(identities.len(), 1);
+
+    let canonical = serde_json::to_value(
+        state
+            .get_delegation_result_selected(&parent, &delegation, &unselected())
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        canonical.get("retainedReviewAttemptsError").is_none(),
+        "custody written for the padded read validates under the canonical parent"
+    );
+    assert_eq!(
+        canonical["retainedReviewAttempts"],
+        packet["retainedReviewAttempts"]
+    );
+    let selected: DelegationResultSelection =
+        serde_json::from_value(identities[0].clone()).unwrap();
+    let (_, retained) = state
+        .retain_review_attempt(&parent, &delegation, 1)
+        .unwrap();
+    assert_eq!(
+        selected.result_id.as_deref(),
+        Some(retained.as_str()),
+        "a later canonical retention finds the same publication"
+    );
+
+    let before = changes(&state);
+    let repeated = serde_json::to_value(
+        state
+            .get_delegation_result_selected(&padded, &delegation, &unselected())
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        repeated.get("retainedReviewAttemptsError").is_none(),
+        "a repeated padded read does not report the canonical custody as corrupt"
+    );
+    assert_eq!(
+        repeated["retainedReviewAttempts"],
+        packet["retainedReviewAttempts"]
+    );
+    assert_eq!(
+        changes(&state),
+        before,
+        "a repeated padded read makes no custody write"
+    );
+}
+
+#[test]
+fn parent_packet_reports_a_failed_terminal_publication_and_still_serves_its_result() {
+    let (state, parent, delegation, _) = terminal_review("A completed review whose cut moves.");
+    let served = state
+        .get_delegation_result(&parent, &delegation)
+        .unwrap()
+        .result;
+    let changed = state.clone();
+    let changing = delegation.clone();
+    TEST_REVIEW_ATTEMPT_AFTER_APPEND.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            let mut inner = changed.inner.lock().unwrap();
+            let index = inner.find_delegation_index(&changing).unwrap();
+            inner.delegations[index].result.as_mut().unwrap().summary =
+                "A concurrent different terminal cut".to_owned();
+            false
+        }));
+    });
+
+    let packet = state
+        .get_delegation_result_selected(&parent, &delegation, &unselected())
+        .unwrap();
+    assert_eq!(packet.result, served);
+    let packet = serde_json::to_value(packet).unwrap();
+    assert!(packet.get("retainedReviewAttempts").is_none());
+    assert!(
+        packet["retainedReviewAttemptsError"]
+            .as_str()
+            .unwrap()
+            .contains("terminal cut changed")
+    );
 }

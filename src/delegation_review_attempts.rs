@@ -14,6 +14,8 @@ thread_local! {
     static TEST_REVIEW_CUSTODY_AFTER_CUT_VALIDATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     static TEST_REVIEW_FOLLOWUP_AFTER_RECUT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     static TEST_REVIEW_FOLLOWUP_AFTER_RECUT_ADOPTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    // Between the parent packet's unguarded discovery check and the owner guard.
+    static TEST_REVIEW_PACKET_BEFORE_OWNER_GUARD: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -200,6 +202,16 @@ fn review_original_project_locked<'a>(
     let project = parent.session.project_id.as_deref()?;
     (!project.trim().is_empty() && child.session.project_id.as_deref() == Some(project))
         .then_some(project)
+}
+
+/// The parent packet publishes only a completed or failed attempt that is
+/// still the delegation's current one.
+fn terminal_review_attempt(record: &DelegationRecord, attempt: u32) -> bool {
+    record.review_result_submission_attempt == attempt
+        && matches!(
+            record.status,
+            DelegationStatus::Completed | DelegationStatus::Failed
+        )
 }
 
 fn review_requester_project_locked(inner: &StateInner, requester: &str) -> Result<String, ApiError> {
@@ -725,21 +737,56 @@ impl AppState {
         delegation: &str,
         attempt: u32,
     ) -> Result<(ReviewAttemptSnapshot, String), ApiError> {
+        Ok(self
+            .retain_review_attempt_inner(parent, delegation, attempt, false)?
+            .expect("unconditional retention returns its publication"))
+    }
+
+    /// `only_if_unpublished` is the parent packet's mode: inside the owner
+    /// guard and before any capture, it returns `None` when the attempt is no
+    /// longer the terminal current one or already has a confirmed
+    /// publication, so a cut that changed after the packet's unguarded check
+    /// never publishes a second version. Other callers keep the existing
+    /// semantics, including a new version for a changed cut.
+    fn retain_review_attempt_inner(
+        &self,
+        parent: &str,
+        delegation: &str,
+        attempt: u32,
+        only_if_unpublished: bool,
+    ) -> Result<Option<(ReviewAttemptSnapshot, String)>, ApiError> {
         let (child, policy, current_attempt) =
             self.review_attempt_authority(parent, delegation, attempt)?;
         if attempt < current_attempt {
+            if only_if_unpublished {
+                return Ok(None);
+            }
             return self.read_retained_review_attempt(parent, delegation, attempt)?
+                .map(Some)
                 .ok_or_else(|| ApiError::not_found("review attempt was not retained; no historical transcript reconstruction is available"));
         }
         // Recovery and the existing terminal refresh precede any current cut.
         // Pinned historical reads take read_review_publication instead.
         self.recover_durable_delegation_review_submission(&child)?;
         self.get_delegation(parent, delegation)?;
+        #[cfg(test)]
+        if only_if_unpublished
+            && let Some(hook) =
+                TEST_REVIEW_PACKET_BEFORE_OWNER_GUARD.with(|slot| slot.borrow_mut().take())
+        {
+            hook();
+        }
         let _owner = self
             .mailbox_store
             .delegation_review_recovery_guard
             .lock()
             .expect("delegation review recovery guard mutex poisoned");
+        if only_if_unpublished
+            && !self
+                .review_attempt_still_unpublished(parent, delegation, &child, &policy, attempt)?
+        {
+            return Ok(None);
+        }
         let snapshot = self.capture_review_semantic_cut(parent, delegation, attempt)?;
         let key = self
             .mailbox_store
@@ -790,7 +837,7 @@ impl AppState {
             }
         }
         if already_confirmed {
-            return Ok((snapshot, id));
+            return Ok(Some((snapshot, id)));
         }
         let head = review_publication_head(&slots);
         let predecessor = head.map(|head| head.result_id.clone());
@@ -896,7 +943,7 @@ impl AppState {
                 ));
             }
         }
-        Ok((snapshot, id))
+        Ok(Some((snapshot, id)))
     }
 
     fn reserve_next_review_capture(
@@ -1074,6 +1121,90 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("review attempt has no confirmed publication"))
     }
 
+    /// The parent's compact packet lists the terminal current attempt too.
+    /// A completed or failed reviewer's current attempt is published here,
+    /// as an explicit attempt-only read publishes it, only when discovery
+    /// found no confirmed publication for that attempt; a confirmed attempt
+    /// takes no capture. That check is repeated inside the owner guard before
+    /// any capture (retain_review_attempt_inner), so a publication confirmed
+    /// in between, even of a changed cut, is listed and never duplicated.
+    /// get_delegation_result itself publishes nothing, so internal result
+    /// reads and unselected output paging take no capture. `parent` is the
+    /// record's canonical parent id (get_delegation_result_selected). The
+    /// state lock covers only the mode and status reads; custody and capture
+    /// I/O run off that lock. A failure is reported in
+    /// retainedReviewAttemptsError while the current result stays served.
+    fn publish_terminal_review_for_packet(
+        &self,
+        parent: &str,
+        delegation: &str,
+        packet: &mut DelegationResultResponse,
+    ) {
+        let Some(attempt) = packet.submission_attempt.filter(|attempt| *attempt > 0) else {
+            return;
+        };
+        if packet.retained_review_attempts_error.is_some()
+            || packet
+                .retained_review_attempts
+                .iter()
+                .any(|identity| identity.submission_attempt == attempt)
+            || !self.review_attempt_storage_enabled()
+        {
+            return;
+        }
+        let terminal_reviewer = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            find_parent_delegation_index_locked(&inner, parent, delegation).is_ok_and(|index| {
+                let record = &inner.delegations[index];
+                record.mode == DelegationMode::Reviewer && terminal_review_attempt(record, attempt)
+            })
+        };
+        if !terminal_reviewer {
+            return;
+        }
+        let discovered = self
+            .retain_review_attempt_inner(parent, delegation, attempt, true)
+            .and_then(|_| self.retained_review_attempt_identities(parent, delegation));
+        match discovered {
+            Ok(identities) => packet.retained_review_attempts = identities,
+            Err(error) => packet.retained_review_attempts_error = Some(error.message),
+        }
+    }
+
+    /// Under the owner guard: whether `attempt` is still the delegation's
+    /// terminal current attempt with no confirmed publication. The state
+    /// lock covers only the status read; custody is read off it.
+    fn review_attempt_still_unpublished(
+        &self,
+        parent: &str,
+        delegation: &str,
+        child: &str,
+        policy: &DelegationWritePolicy,
+        attempt: u32,
+    ) -> Result<bool, ApiError> {
+        let terminal = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = find_parent_delegation_index_locked(&inner, parent, delegation)?;
+            terminal_review_attempt(&inner.delegations[index], attempt)
+        };
+        if !terminal {
+            return Ok(false);
+        }
+        let rows = self.review_custody_rows_read_only(Some(child), delegation)?;
+        if rows.is_empty() {
+            return Ok(true);
+        }
+        let key = self
+            .mailbox_store
+            .review_attempt_auth_key(false)
+            .map_err(mailbox_api_error)?
+            .ok_or_else(review_attempt_corrupt)?;
+        let slots = decode_review_slots(&rows, parent, delegation, child, policy, &key)?;
+        Ok(!slots
+            .iter()
+            .any(|slot| slot.submission_attempt == attempt && slot.publication.is_some()))
+    }
+
     fn get_delegation_result_selected(
         &self,
         parent: &str,
@@ -1084,7 +1215,17 @@ impl AppState {
             if selection.result_id.is_some() {
                 return Err(ApiError::bad_request("resultId requires submissionAttempt"));
             }
-            return self.get_delegation_result(parent, delegation);
+            // Custody is written and validated against the record's canonical
+            // parent id, while the lookup also accepts surrounding whitespace.
+            // Resolve it once, before discovery, and use only that value.
+            let parent = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let index = find_parent_delegation_index_locked(&inner, parent, delegation)?;
+                inner.delegations[index].parent_session_id.clone()
+            };
+            let mut packet = self.get_delegation_result(&parent, delegation)?;
+            self.publish_terminal_review_for_packet(&parent, delegation, &mut packet);
+            return Ok(packet);
         };
         let (snapshot, id) = self.resolve_review_selection(
             parent,
