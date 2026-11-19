@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-named-waker-scheduling-2026-11-19",
+    "revision_id": "89c13caad394492ca8575b248b716e49",
+    "previous": null,
+    "body_sha256": "933f95068bc9de58bf60393429fb52da542717aef301aa821e52b896136cea71",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-19T02:43:30.275239800Z"
+    }
+  },
+  "body": "Termal::Opus2 scheduling rule from Greg's no-watcher direction (2026-11-19, verbatim via Engram::Asistant #1587: „+ Kimi, ktos cos czekal. to nie powinno byc tak, BEZ WATCHERA, musi byc wiadomo, kto co ma wznowic”; Engram memory rules-greg-no-watcher-named-waker-2026-11-19).\n- Never send a conditional \"start when cargo is idle\" GO.\n- Either send LAUNCH NOW, or name the session whose run holds the slot and have that session message the next waiter directly on END, with a cc to me.\n- Build an explicit chain for Central: holder -> next -> next, each END sent directly to the next waiter.\n- No one polls, recensuses in a loop, or runs a monitor.\n- The FV floor still applies at the launch moment. If it is below the floor then, the waiter reports at once, and I name the next step.\nTonight's failure: 11334 sat idle because my GO said \"start when D8D4 releases Central\" and nobody was named to tell it."
+}

@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed f365599acedb4edf3b220bf42f6bf14ccbf3331d at origin/master, tree 3c2923546bd5cced19de092775416a98b713f9f3. Watcher checks ignored directory names relative to the deepest watched root, preserving source events for repositories below target/dist/node_modules, ignored child filtering, and queued nested-root removal. Exact Central verification 8bf6f60a for test-c55b1557 passes all four regressions; the exact-tree DL560 FULL test-37b3479b passed all stages; the byte-identical R2 pair had no Medium+. Independent post-landing evaluation 8ca4b83cbdb04a6c9bf0a39d36744f0c passed 3/3 at cut 428 on the landed source. Opus2 completion handoff #1406.",
+    "completed_at": "2026-11-19T02:00:01.481178400Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

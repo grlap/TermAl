@@ -1,0 +1,29 @@
+{
+  "id": "01a1f1b2-5319-7d23-b37c-b91258060fca",
+  "external_ref": null,
+  "title": "Add Greg's no-watcher wait-ownership rule to the coder-test-execution skill",
+  "outcome": "TermAl's existing .agents/skills/coder-test-execution/SKILL.md carries the same no-watcher wait-ownership rule as Engram's copy (Engram w-95ce01a476e8), verbatim, as one added step.",
+  "acceptance": [
+    "One step is added to .agents/skills/coder-test-execution/SKILL.md with this text, verbatim: \"Every wait names one session to wake and the exact result. The producer sends that result directly to the waiter; no polling. Never wait for a conditional resource state: LAUNCH NOW, or its current holder sends END directly to the named next waiter. No watcher; a coordinator assigns any unnamed wait immediately.\" No other change to the skill.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "docs",
+    "greg-directed",
+    "skills"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

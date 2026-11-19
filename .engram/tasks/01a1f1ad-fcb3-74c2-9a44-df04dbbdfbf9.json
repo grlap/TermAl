@@ -1,0 +1,29 @@
+{
+  "id": "01a1f1ad-fcb3-74c2-9a44-df04dbbdfbf9",
+  "external_ref": null,
+  "title": "Preserve display-only test history for explicit relative execution directories",
+  "outcome": "A withheld or off-root observed test with a single explicit relative cwd shows the resolved local worktree without adding claim, source or artifact authority.",
+  "acceptance": [
+    "An explicit relative cwd resolves against the captured session workdir. The history shows the actual Git worktree and keeps the backing proof worktree, binding and root empty."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "sync-path",
+    "test-history"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1dafa-3bd0-7232-a83f-2c1444fd1f49",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

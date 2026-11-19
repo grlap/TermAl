@@ -1,0 +1,30 @@
+{
+  "id": "01a1f1a0-df6e-7270-841a-f4d434195395",
+  "external_ref": null,
+  "title": "Align closing-baseline handling of acknowledged legacy FULL lint-stage records",
+  "outcome": "Closing-baseline and received-check notice behavior is defined for an already acknowledged legacy FULL body classified by the old clippy/docs stage rules. Use the same host-digest-bound historical reconstruction as settlement and acceptance if the closing policy supports it, or document the intentional fail-closed difference. Never mint new credit from a disk-only body or request label.",
+  "acceptance": [
+    "A deterministic retained-body case exercises a host-acknowledged pre-change record whose clippy or docs stage was labeled Test and lacks independently recognized observed argv. It verifies the chosen closing-baseline and received-notice behavior, alongside the settlement and acceptance behavior.",
+    "Fresh or disk-only legacy-looking records still fail closed. Existing request, source, body digest and receipt checks remain enforced."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "legacy",
+    "sync-path",
+    "verification-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1f035-6b9a-7db1-add3-4f8d8be0147a",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
