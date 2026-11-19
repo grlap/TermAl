@@ -107,6 +107,23 @@ enum HumanPromptDrain {
     Started(StartedQueuedTurn),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct HumanIntakeGenerations {
+    pause: u64,
+    stop: u64,
+    turn: u64,
+}
+
+impl HumanIntakeGenerations {
+    fn capture(record: &SessionRecord) -> Self {
+        Self {
+            pause: record.auto_dispatch_pause_epoch,
+            stop: record.runtime_stop_generation,
+            turn: record.active_turn_generation,
+        }
+    }
+}
+
 fn human_queue_entry_is_eligible(
     _inner: &StateInner,
     record: &SessionRecord,
@@ -340,7 +357,7 @@ impl AppState {
         let review_recut = self.capture_followup_review_recut(followup)?;
         self.prepare_codex_child_followup(session_id)?;
         self.refresh_followup_review_custody(review_recut.as_ref())?;
-        let (accepted_id, fence) = {
+        let (accepted_id, fence, intake_generations) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -448,13 +465,29 @@ impl AppState {
             // This invocation owns a committed envelope, even if final provider
             // delivery instead attempts an older ordinary FIFO head.
             *accepted_prompt_id = Some(id.clone());
-            (id, human_prompt_persistence_fence(&inner, session_id))
+            (
+                id,
+                human_prompt_persistence_fence(&inner, session_id),
+                followup
+                    .is_none()
+                    .then(|| HumanIntakeGenerations::capture(&inner.sessions[index])),
+            )
         };
-        if let Err(error) = fence.and_then(|fence| self.confirm_human_prompt_persistence(fence)) {
-            return Ok(self.retain_accepted_human_start_failure(
+        let confirmation = fence
+            .map_err(HumanPromptPersistenceFailure::Local)
+            .and_then(|image| self.confirm_human_prompt_persistence_typed(image));
+        if let Err(error) = confirmation {
+            let deadline_generations = match error {
+                HumanPromptPersistenceFailure::Acknowledgement(PersistFenceError::Deadline) => {
+                    intake_generations
+                }
+                _ => None,
+            };
+            return Ok(self.retain_accepted_human_start_failure_with_deadline(
                 session_id,
                 &accepted_id,
-                &error.message,
+                &error.into_api_error().message,
+                deadline_generations,
             ));
         }
         let started = match self.start_human_queued_turn(session_id, true) {
@@ -516,12 +549,27 @@ impl AppState {
         prompt_id: &str,
         reason: &str,
     ) -> DispatchTurnResult {
+        self.retain_accepted_human_start_failure_with_deadline(session_id, prompt_id, reason, None)
+    }
+
+    fn retain_accepted_human_start_failure_with_deadline(
+        &self,
+        session_id: &str,
+        prompt_id: &str,
+        reason: &str,
+        deadline_generations: Option<HumanIntakeGenerations>,
+    ) -> DispatchTurnResult {
         eprintln!(
             "human prompt> session={session_id} prompt={prompt_id} retained after start failure: {reason}"
         );
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_visible_session_index(session_id) {
             let record = &mut inner.sessions[index];
+            if deadline_generations.is_some_and(|generations| {
+                generations != HumanIntakeGenerations::capture(record)
+            }) {
+                return DispatchTurnResult::Queued;
+            }
             if record.queued_prompts.iter().any(|queued| {
                 queued.source == QueuedPromptSource::Human && queued.pending_prompt.id == prompt_id
             }) && !record.runtime_stop_in_progress
@@ -544,8 +592,12 @@ impl AppState {
                 } else {
                     "Content retained; delivery confirmation requires recovery before replay."
                 };
-                record.session.preview =
-                    format!("Human prompt queued; start failed: {reason}. {recovery}");
+                record.session.preview = if deadline_generations.is_some() && unsent {
+                    "Persistence acknowledgement missed its deadline. Resume the queued prompt."
+                        .to_owned()
+                } else {
+                    format!("Human prompt queued; start failed: {reason}. {recovery}")
+                };
                 inner.stamp_session_at_index(index);
                 if let Err(error) = self.commit_locked(&mut inner) {
                     eprintln!(
@@ -828,6 +880,23 @@ struct HumanPromptPersistenceImage {
     session_id: String,
     minimum: PersistSessionWriteStamp,
 }
+
+enum HumanPromptPersistenceFailure {
+    Local(ApiError),
+    Acknowledgement(PersistFenceError),
+}
+
+impl HumanPromptPersistenceFailure {
+    fn into_api_error(self) -> ApiError {
+        match self {
+            Self::Local(error) => error,
+            Self::Acknowledgement(error) => ApiError::internal(format!(
+                "human prompt persistence acknowledgement failed: {error:?}"
+            )),
+        }
+    }
+}
+
 fn human_prompt_persistence_fence(
     inner: &StateInner,
     session_id: &str,
@@ -846,28 +915,53 @@ fn human_prompt_persistence_fence(
     }))
 }
 impl AppState {
-    fn confirm_human_prompt_persistence(&self, image: Option<HumanPromptPersistenceImage>) -> Result<(), ApiError> {
-        let Some(image) = image else { return Ok(()) };
-        let (fence, waiter) = PersistFence::new(
+    fn confirm_human_prompt_persistence(
+        &self,
+        image: Option<HumanPromptPersistenceImage>,
+    ) -> Result<(), ApiError> {
+        self.confirm_human_prompt_persistence_typed(image)
+            .map_err(HumanPromptPersistenceFailure::into_api_error)
+    }
+
+    fn confirm_human_prompt_persistence_typed(
+        &self,
+        image: Option<HumanPromptPersistenceImage>,
+    ) -> Result<(), HumanPromptPersistenceFailure> {
+        let Some(image) = image else {
+            return Ok(());
+        };
+        let clock = self.engram_budget_clock();
+        let (fence, waiter) = PersistFence::new_with_clock(
             PersistFenceTarget::HumanPromptRow {
-                session_id: image.session_id.clone(), minimum: image.minimum.clone(),
+                session_id: image.session_id.clone(),
+                minimum: image.minimum.clone(),
             },
-            std::time::Instant::now() + std::time::Duration::from_secs(20),
+            clock.now() + std::time::Duration::from_secs(20),
+            clock,
         );
         if self.persist_tx.send(PersistRequest::Fence(Box::new(fence))).is_err() {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let record = inner.find_session_index(&image.session_id)
+            let record = inner
+                .find_session_index(&image.session_id)
                 .map(|index| &inner.sessions[index])
-                .ok_or_else(|| ApiError::not_found("session not found"))?;
+                .ok_or_else(|| {
+                    HumanPromptPersistenceFailure::Local(ApiError::not_found("session not found"))
+                })?;
             if !PersistSessionWriteStamp::capture(record).covers(&image.minimum) {
-                return Err(ApiError::conflict("human prompt row incarnation changed before persistence acknowledgement"));
+                return Err(HumanPromptPersistenceFailure::Local(ApiError::conflict(
+                    "human prompt row incarnation changed before persistence acknowledgement",
+                )));
             }
             // This synchronous own-row commit proves the captured cut or its
             // successor, including cancellation. A sibling cannot ACK it.
             self.persist_session_internal_locked(&inner, &image.session_id)
-                .map_err(|error| ApiError::internal(format!("human prompt persistence failed: {error:#}")))?;
+                .map_err(|error| {
+                    HumanPromptPersistenceFailure::Local(ApiError::internal(format!(
+                        "human prompt persistence failed: {error:#}"
+                    )))
+                })?;
             return Ok(());
         }
-        waiter.wait().map_err(|error| ApiError::internal(format!("human prompt persistence acknowledgement failed: {error:?}")))
+        waiter.wait().map_err(HumanPromptPersistenceFailure::Acknowledgement)
     }
 }

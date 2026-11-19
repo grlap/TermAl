@@ -2169,6 +2169,114 @@ async fn human_prompt_provider_start_failure_is_accepted_and_resume_reuses_one_o
 }
 
 #[test]
+fn human_prompt_intake_deadline_parks_until_explicit_resume_delivers_once() {
+    let mut turn = OrdinaryRoot::new("human-intake-deadline-explicit-resume");
+    let clock = turn.state.engram_budget_clock();
+    turn.state.shutdown_persist_blocking();
+    let (persist_tx, persisted) = mpsc::channel();
+    turn.state.persist_tx = persist_tx;
+
+    let receive_row_fence = |phase| loop {
+        if let PersistRequest::Fence(fence) = phase_sync::receive(&persisted, phase) {
+            assert!(matches!(
+                &fence.target,
+                PersistFenceTarget::HumanPromptRow { session_id, .. } if session_id == &turn.session
+            ));
+            break fence;
+        }
+    };
+    let intake = {
+        let state = turn.state.clone();
+        let session = turn.session.clone();
+        std::thread::spawn(move || {
+            let mut accepted = None;
+            let result = state
+                .dispatch_human_turn_with_acceptance(&session, prompt(), &mut accepted)
+                .unwrap();
+            assert!(matches!(result, DispatchTurnResult::Queued));
+            accepted.expect("the original prompt remains accepted")
+        })
+    };
+    let intake_fence = receive_row_fence("initial Human row acknowledgement");
+    let PersistFenceTarget::HumanPromptRow {
+        minimum: intake_stamp,
+        ..
+    } = &intake_fence.target
+    else {
+        unreachable!("expected the initial Human row fence");
+    };
+    let intake_stamp = intake_stamp.clone();
+    clock.advance(std::time::Duration::from_secs(20));
+    let prompt_id = intake.join().unwrap();
+    turn.record(|record| {
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert!(record.session.queue_paused);
+        assert_eq!(
+            record.session.preview,
+            "Persistence acknowledgement missed its deadline. Resume the queued prompt."
+        );
+        assert_eq!(record.queued_prompts.len(), 1);
+        let head = &record.queued_prompts[0];
+        assert_eq!(head.pending_prompt.id, prompt_id);
+        assert!(ordinary_queue_entry_is_runnable(record, head));
+        assert!(head.promoted_message_index.is_none());
+        assert!(record.human_prompt_turn.is_none());
+    });
+    turn.assert_no_prompt();
+    intake_fence.finish(Ok(()));
+    turn.assert_no_prompt();
+    assert!(
+        persisted
+            .try_iter()
+            .all(|request| !matches!(request, PersistRequest::Fence(_))),
+        "the late acknowledgement must not schedule another fence"
+    );
+
+    let resume = {
+        let state = turn.state.clone();
+        let session = turn.session.clone();
+        std::thread::spawn(move || state.resume_session_queue(&session).unwrap())
+    };
+    let promotion = receive_row_fence("explicit Resume promotion acknowledgement");
+    let PersistFenceTarget::HumanPromptRow { minimum, .. } = &promotion.target else {
+        unreachable!("expected the promotion Human row fence");
+    };
+    assert!(minimum.covers(&intake_stamp) && minimum.mutation_stamp > intake_stamp.mutation_stamp);
+    turn.assert_no_prompt();
+    promotion.finish(Ok(()));
+    resume.join().unwrap();
+
+    let command = turn.prompt();
+    assert!(command.prompt.contains(&prompt().text));
+    let runtime = turn.record(|record| {
+        let owner = record.human_prompt_turn.as_ref().unwrap();
+        assert_eq!(owner.prompt_id, prompt_id);
+        assert_eq!(owner.generation, command.active_turn_generation);
+        assert!(record.queued_prompts.is_empty());
+        assert_eq!(
+            record
+                .session
+                .messages
+                .iter()
+                .filter(|message| message.id() == prompt_id.as_str())
+                .count(),
+            1
+        );
+        record.runtime.runtime_token().unwrap()
+    });
+    turn.state
+        .finish_turn_ok_if_runtime_and_generation_match(
+            &turn.session,
+            &runtime,
+            command.active_turn_generation,
+        )
+        .unwrap();
+    turn.record(|record| assert_eq!(record.session.status, SessionStatus::Idle));
+    turn.state.resume_session_queue(&turn.session).unwrap();
+    turn.assert_no_prompt();
+}
+
+#[test]
 fn human_prompt_failed_or_deadline_promotion_ack_cannot_strand_or_replace_a_successor() {
     for expires in [false, true] {
         let turn = queue::retained_queue_fixture();
