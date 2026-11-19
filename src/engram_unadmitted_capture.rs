@@ -404,6 +404,8 @@ impl EngramRuntimeClosingJob {
 
     fn failed(&self, session_id: &str, error: &EngramTransportError) -> Self {
         let mut next = self.clone();
+        // Preparation still depends on the current source and binding. Only
+        // an already prepared, immutable report can wait for the store.
         next.attempts = next.attempts.saturating_add(1);
         next.retry_at = (chrono::Utc::now() + runtime_observation_retry_delay(session_id, next.attempts))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
