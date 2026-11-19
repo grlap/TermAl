@@ -105,6 +105,8 @@ fn durable_native_test_run_from_rows(
                         && row.summary.ended_at.is_some()
                         && row.summary.owner_session_id.as_deref()
                             == Some(expected.owning_session_id.as_str())
+                        && (row.linked_artifact_context().is_none()
+                            || row.linked_terminal_matches(run, Some(&expected.request_identity)))
                         && row.artifact.as_ref().is_some_and(|artifact| {
                             artifact.run_id == run
                                 && artifact.request_identity.as_deref()

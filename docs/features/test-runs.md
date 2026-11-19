@@ -212,6 +212,17 @@ start time and work ownership; that late description creates no retroactive
 verification check. Visibility is independent of the owner's active or open
 session. Unknown PIDs, stages and locations remain unknown.
 
+For a recognized Codex test in a linked worktree of the session's repository,
+TermAl retains the original provider execution. Replayed start and end
+notifications for a settled command leave its transcript, shell position,
+writer state and observed result intact.
+
+Linked association assumes that the launcher owns its run directory and writes
+its request and results files. Deliberately replacing that directory or its files
+during or after the run is outside this guarantee. Placement and Test Runs
+display do not confer credit. Credit depends on the original registration,
+durable producer readback, and the existing qualification checks.
+
 A terminal Claude background-task notification settles the observation for its
 exact session, runtime and tool use, including after the originating prompt
 ends. Without a test verdict or exit code it records `unknown`, an end time and

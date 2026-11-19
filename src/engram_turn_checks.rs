@@ -243,6 +243,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
 struct EngramTurnCheck {
     host_turn_ref: String,
     key: String,
+    codex_address: Option<EngramCodexCommandAddress>,
     /// The check's place in the turn, which keeps its observation ids unique
     /// even when a runtime reuses a key (Codex falls back to the command).
     sequence: usize,
@@ -1224,6 +1225,13 @@ fn engram_observed_command_worktree(
     observed
 }
 
+fn engram_retire_command_writer(engram: &mut EngramSessionState, key: &str) {
+    engram.running_command_keys.remove(key);
+    engram.withheld_command_keys.remove(key);
+    engram.uncredited_command_notice_keys.remove(key);
+    engram.running_command_worktrees.retain(|(running, _)| running != key);
+}
+
 impl AppState {
     // Recover only this invocation's original facts, before a first delayed
     // description consumes its saved start. A description without a start
@@ -1287,6 +1295,7 @@ impl AppState {
     /// and from where the commands before it left that shell
     /// (`engram_command_directories`), a `cd` counting once its command has
     /// run; where TermAl could not follow them no check is kept.
+    #[cfg(test)]
     fn note_engram_command_started(
         &self,
         session_id: &str,
@@ -1294,6 +1303,18 @@ impl AppState {
         key: &str,
         ran: Option<&str>,
         cwd: Option<&str>,
+    ) {
+        self.note_engram_command_started_with_provider(session_id, provenance, key, ran, cwd, None);
+    }
+
+    fn note_engram_command_started_with_provider(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+        provider: Option<&TestRunProviderFrame>,
     ) {
         // Observe this command's boundary before off-lock target/capture work.
         // The launcher still must start at or after this correlated event.
@@ -1434,6 +1455,11 @@ impl AppState {
                 Some(_) => recognised.clone()?,
                 None => started?,
             };
+            if command.kind == EngramVerificationKind::Test
+                && provider.is_some_and(|frame| frame.item.is_none())
+            {
+                return None;
+            }
             // Where the shell cannot be followed, no check can say where it
             // ran, unless the line names its own directory.
             let target = engram_check_worktree_from(
@@ -1459,15 +1485,35 @@ impl AppState {
         for (_, _, binding) in declared.iter_mut().chain(visibility_declared.iter_mut()) {
             applied.bind(binding);
         }
+        let provider_replay = provider
+            .is_some_and(|frame| self.refuse_conflicting_provider_start(session_id, frame, ran));
+        // An already validated measurement target owns its original
+        // observation and carried-writer path, including named linked roots.
+        let provider_placement = provider
+            .filter(|_| !provider_replay && target.is_none())
+            .zip(ran)
+            .zip(recognised.as_ref())
+            .filter(|(_, command)| command.kind == EngramVerificationKind::Test)
+            .and_then(|((frame, line), command)| {
+                TestRunExecutionContext::at_start(frame, line, command, FsPath::new(&workdir))
+                    .map(|(context, worktree)| (frame, context, worktree))
+            });
+        let managed_placement = provider_placement
+            .as_ref()
+            .is_some_and(|(_, context, _)| context.managed());
         // ACP may repeat a start when it first supplies command text. Consume
         // any saved original observation before considering a new start; this
         // does not create a retroactive check or borrow the current grant.
         let original_launch_location = self.observed_full_launch_location(
             &test_run_origin, recognised.as_ref(), cwd, None,
         );
-        let original_start = self.observe_test_command_description(
-            session_id, provenance, key, ran, cwd,
-        );
+        let original_start = if provider_replay {
+            TestCommandOriginalStart::ThisTurn
+        } else if managed_placement {
+            TestCommandOriginalStart::None
+        } else {
+            self.observe_test_command_description(session_id, provenance, key, ran, cwd)
+        };
         let has_original_start = original_start != TestCommandOriginalStart::None;
         // An Ambient description may select an older or ambiguous original
         // start. If the exact original was not recoverable above, do not
@@ -1494,7 +1540,32 @@ impl AppState {
             }.unwrap_or_default();
             let declared_binding = declared.as_ref().map(|(_, _, binding)| binding)
                 .or_else(|| visibility_declared.as_ref().map(|(_, _, binding)| binding));
-            self.observe_test_command_start(test_run_origin, command, &observed_root, &started_at, declared_binding);
+            if let Some((frame, context, worktree)) = provider_placement {
+                self.observe_test_command_start_with_context(
+                    test_run_origin,
+                    command,
+                    &worktree,
+                    &started_at,
+                    declared_binding,
+                    None,
+                    Some((frame, context)),
+                );
+            } else if let Some((frame, line)) = provider.zip(ran)
+                .filter(|(frame, _)| frame.codex_address().is_some())
+            {
+                self.observe_test_command_start_with_context(
+                    test_run_origin, command, &observed_root, &started_at,
+                    declared_binding, None, Some((frame, TestRunExecutionContext::ordinary(frame, line))),
+                );
+            } else {
+                self.observe_test_command_start(
+                    test_run_origin,
+                    command,
+                    &observed_root,
+                    &started_at,
+                    declared_binding,
+                );
+            }
         }
         #[cfg(test)]
         TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {
@@ -1924,6 +1995,7 @@ impl AppState {
         record.engram.active_turn_checks.push(EngramTurnCheck {
             host_turn_ref,
             key: key.to_owned(),
+            codex_address: provider.and_then(|frame| frame.codex_address()),
             sequence,
             command,
             declared: declared.map(|(_, _, binding)| Box::new(binding)),
@@ -2341,13 +2413,86 @@ impl AppState {
         exit: Option<EngramCommandExit>,
         runtime_output_cut: bool,
     ) {
-        self.note_engram_command_finished_reported_with_observation_hook(
+        self.note_engram_command_finished_reported_with_provider(
+            session_id,
+            provenance,
+            key,
+            command,
+            reported_command,
+            output,
+            exit,
+            runtime_output_cut,
+            None,
+        );
+    }
+
+    fn note_engram_command_finished_reported_with_provider(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        command: &str,
+        reported_command: Option<&str>,
+        output: &str,
+        exit: Option<EngramCommandExit>,
+        runtime_output_cut: bool,
+        provider: Option<&TestRunProviderFrame>,
+    ) {
+        let routed = provider
+            .filter(|frame| frame.item.is_some() || EngramHost::recognized_check(command)
+                .is_some_and(|command| command.kind == EngramVerificationKind::Test))
+            .map_or(TestRunProviderEnd::Ordinary, |frame| {
+                self.finish_provider_execution(session_id, frame, key, reported_command, exit)
+            });
+        match routed {
+            TestRunProviderEnd::Associate(execution_id) => {
+                self.observe_test_command_artifact_at(
+                    session_id,
+                    provenance,
+                    key,
+                    command,
+                    output,
+                    runtime_output_cut,
+                    Some(&execution_id),
+                );
+                return;
+            }
+            TestRunProviderEnd::Managed | TestRunProviderEnd::Refused => return,
+            TestRunProviderEnd::Ordinary => {}
+        }
+        self.note_engram_command_finished_reported_inner(
             session_id, provenance, key, command, reported_command, output, exit, runtime_output_cut,
             #[cfg(test)] || {},
         );
     }
 
+    #[cfg(test)]
     fn note_engram_command_finished_reported_with_observation_hook(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        command: &str,
+        reported_command: Option<&str>,
+        output: &str,
+        exit: Option<EngramCommandExit>,
+        runtime_output_cut: bool,
+        after_observation_end: impl FnOnce(),
+    ) {
+        self.note_engram_command_finished_reported_inner(
+            session_id,
+            provenance,
+            key,
+            command,
+            reported_command,
+            output,
+            exit,
+            runtime_output_cut,
+            after_observation_end,
+        );
+    }
+
+    fn note_engram_command_finished_reported_inner(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -2386,7 +2531,9 @@ impl AppState {
         } else {
             self.observe_test_command_end(session_id, provenance, key, exit)
         };
-        self.observe_test_command_artifact(session_id, provenance, key, command, output, runtime_output_cut);
+        self.observe_test_command_artifact(
+            session_id, provenance, key, command, output, runtime_output_cut,
+        );
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
@@ -2574,6 +2721,11 @@ impl AppState {
                 engram_launch_batch_members(&inner, index, session_id, check, launch_held.as_ref())
             })
             .unwrap_or_default();
+        let keep_carried_writer = inner.sessions[index].session.agent == Agent::Codex
+            && test_run_runtime_identity(&inner.sessions[index], provenance)
+                .is_some_and(|runtime| {
+                    test_run_has_managed_provider_item(&inner, session_id, &runtime, &sha256_hex(key.as_bytes()))
+                });
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -2583,14 +2735,10 @@ impl AppState {
             engram_settle_shell_move(record, key, exit);
         }
         if exit != Some(EngramCommandExit::NotFinished) {
-            record.engram.running_command_keys.remove(key);
-            engram_forget_running_codex_test(&mut record.engram, key);
-            record.engram.withheld_command_keys.remove(key);
-            record.engram.uncredited_command_notice_keys.remove(key);
-            record
-                .engram
-                .running_command_worktrees
-                .retain(|(running, _)| running != key);
+            engram_retire_command_writer(&mut record.engram, key);
+            if !keep_carried_writer {
+                engram_forget_running_codex_test(&mut record.engram, key);
+            }
         }
         // An end of another turn's or a replaced runtime's command ends none
         // of the grant's checks: it is kept for no grant and the live grant
@@ -2765,13 +2913,31 @@ impl AppState {
     /// stay open to writes until the turn ends, and a `cd` it would have made
     /// moves nothing. Its existing execution observation retains the original
     /// start and the unknown terminal boundary without claiming verification.
+    #[cfg(test)]
     fn note_engram_command_abandoned(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
         key: &str,
     ) {
-        self.observe_test_command_end(session_id, provenance, key, Some(EngramCommandExit::Unknown));
+        self.note_engram_command_abandoned_with_provider(session_id, provenance, key, None);
+    }
+
+    fn note_engram_command_abandoned_with_provider(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        provider: Option<&TestRunProviderFrame>,
+    ) {
+        if provider.is_none_or(|frame| !self.provider_abandon_owns_observation(session_id, frame)) {
+            self.observe_test_command_end(
+                session_id,
+                provenance,
+                key,
+                Some(EngramCommandExit::Unknown),
+            );
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id) {
             let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
@@ -2791,12 +2957,7 @@ impl AppState {
             }
             let record = &mut inner.sessions[index];
             let engram = &mut record.engram;
-            engram.running_command_keys.remove(key);
-            engram.withheld_command_keys.remove(key);
-            engram.uncredited_command_notice_keys.remove(key);
-            engram
-                .running_command_worktrees
-                .retain(|(running, _)| running != key);
+            engram_retire_command_writer(engram, key);
             engram
                 .active_turn_checks
                 .retain(|check| check.key != key || check.end.is_some());

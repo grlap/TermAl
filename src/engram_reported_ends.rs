@@ -371,6 +371,7 @@ fn engram_carry_running_codex_checks(record: &mut SessionRecord, host_turn_ref: 
                 key: check.key.clone(),
                 runtime: runtime.clone(),
                 root_key: engram_path_key(&check.target.root),
+                codex_address: check.codex_address.clone(),
             })
             .collect::<Vec<_>>();
         for test in running {
@@ -624,6 +625,42 @@ struct EngramRunningCodexTest {
     key: String,
     runtime: RuntimeToken,
     root_key: String,
+    codex_address: Option<EngramCodexCommandAddress>,
+}
+
+/// The thread and native turn are hashed together at the original START.
+/// The command item key remains on its check or writer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngramCodexCommandAddress {
+    runtime: RuntimeToken,
+    turn_generation: u64,
+    native_turn: String,
+}
+
+impl EngramCodexCommandAddress {
+    fn provenance(&self) -> EngramObservationProvenance {
+        EngramObservationProvenance::Runtime {
+            token: self.runtime.clone(),
+            turn_generation: self.turn_generation,
+        }
+    }
+}
+
+fn engram_codex_report_address(
+    record: &SessionRecord,
+    runtime: &RuntimeToken,
+    key: &str,
+    native_turn: &str,
+) -> Option<EngramCodexCommandAddress> {
+    if record.runtime.runtime_token().as_ref() != Some(runtime) {
+        return None;
+    }
+    let mut matches = record.engram.running_codex_tests.iter()
+        .filter(|writer| writer.key == key && &writer.runtime == runtime)
+        .filter_map(|writer| writer.codex_address.as_ref())
+        .filter(|address| &address.runtime == runtime && address.native_turn == native_turn);
+    let address = matches.next()?.clone();
+    matches.next().is_none().then_some(address)
 }
 
 /// Notes `test` as still running, replacing any test under the same key.
@@ -725,18 +762,57 @@ impl AppState {
         exit: EngramCommandExit,
         #[cfg(test)] after_observation_end: impl FnOnce(),
     ) -> bool {
+        self.note_engram_reported_end_owned(
+            session_id, key, command, output, exit, None,
+            #[cfg(test)] after_observation_end,
+        )
+    }
+
+    fn note_engram_reported_end_owned(
+        &self,
+        session_id: &str,
+        key: &str,
+        command: &str,
+        output: &str,
+        exit: EngramCommandExit,
+        address: Option<&EngramCodexCommandAddress>,
+        #[cfg(test)] after_observation_end: impl FnOnce(),
+    ) -> bool {
+        if let Some(address) = address {
+            // Claim only this still-running writer before any terminal side
+            // effects. Recheck under the lock after the router's lookup.
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else { return false };
+            let record = &mut inner.sessions[index];
+            if engram_codex_report_address(record, &address.runtime, key, &address.native_turn)
+                .as_ref() != Some(address)
+            {
+                return false;
+            }
+            record.engram.running_codex_tests.retain(|writer| {
+                writer.key != key || writer.codex_address.as_ref() != Some(address)
+            });
+        }
+        let provenance = address.map_or(
+            EngramObservationProvenance::Ambient, EngramCodexCommandAddress::provenance,
+        );
         self.settle_reported_test_observation(
-            session_id, key, command, exit,
+            session_id, &provenance, key, command, exit,
             #[cfg(test)]
             after_observation_end,
         );
-        self.observe_test_command_artifact(
+        let execution = address.map(|address| test_run_execution_id(
+            session_id, Some(&test_run_token_identity(&address.runtime)),
+            address.turn_generation, &sha256_hex(key.as_bytes()),
+        ));
+        self.observe_test_command_artifact_at(
             session_id,
-            &EngramObservationProvenance::Ambient,
+            &provenance,
             key,
             command,
             output,
             false,
+            execution.as_deref(),
         );
         // The output is read off the lock, for a carried test only.
         let started = {
@@ -745,16 +821,19 @@ impl AppState {
                 return false;
             };
             // Its process ended, whether or not its evidence is still carried.
-            engram_forget_running_codex_test(&mut inner.sessions[index].engram, key);
+            if address.is_none() {
+                engram_forget_running_codex_test(&mut inner.sessions[index].engram, key);
+            }
             inner.sessions[index]
                 .engram
                 .carried_checks
                 .iter()
-                .find(|carried| engram_carried_awaits_report(carried, key))
+                .find(|carried| engram_carried_awaits_report(carried, key)
+                    && address.is_none_or(|address| carried.check.codex_address.as_ref() == Some(address)))
                 .map(|carried| carried.check.clone())
         };
         let Some(started) = started else {
-            return false;
+            return address.is_some();
         };
         let reading =
             engram_read_check_end(Some(&started), session_id, Some(command), output, Some(exit));
@@ -771,6 +850,7 @@ impl AppState {
             engram_carried_awaits_report(carried, key)
                 && carried.check.host_turn_ref == started.host_turn_ref
                 && carried.check.sequence == started.sequence
+                && address.is_none_or(|address| carried.check.codex_address.as_ref() == Some(address))
         }) else {
             return false;
         };
@@ -790,11 +870,13 @@ impl AppState {
             session_id.to_owned(),
         );
         carried.terminal_at = Some(engram_interference_tick());
-        engram.running_command_keys.remove(key);
-        engram.withheld_command_keys.remove(key);
-        engram
-            .running_command_worktrees
-            .retain(|(running, _)| running != key);
+        if address.is_none() {
+            engram.running_command_keys.remove(key);
+            engram.withheld_command_keys.remove(key);
+            engram
+                .running_command_worktrees
+                .retain(|(running, _)| running != key);
+        }
         true
     }
 }
