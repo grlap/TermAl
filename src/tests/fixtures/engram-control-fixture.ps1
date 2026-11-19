@@ -159,6 +159,33 @@ if (($args -contains "doctor") -or ($args -contains "readiness")) {
     $hash = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($mode))).Replace('-', '').ToLowerInvariant()
     $sha.Dispose()
     $database = [System.IO.Path]::GetFullPath((Join-Path $engramHome "projects/$hash/engram.db"))
+    if ($diagnostic -eq 'readiness') {
+        $refusal = switch ($mode) {
+            'fixture-readiness-repair' { @{ code = 'projection_repair_required'; phase = 'open' } }
+            'fixture-readiness-store-busy' { @{ code = 'store_open_refused'; phase = 'open'; kind = 'busy' } }
+            'fixture-readiness-store-io' { @{ code = 'store_open_refused'; phase = 'open'; kind = 'io' } }
+            'fixture-readiness-other-database-io' { @{ code = 'store_open_refused'; phase = 'open'; kind = 'io' } }
+            'fixture-readiness-path-io' { @{ code = 'store_open_refused'; phase = 'path'; kind = 'io' } }
+            'fixture-readiness-store-permission' { @{ code = 'store_open_refused'; phase = 'open'; kind = 'permission' } }
+        }
+        if ($refusal) {
+            $refusal.schema_version = 1
+            $refusal.scope = 'readiness'
+            $refusal.ready = $false
+            $refusal.mutation_enabled = $false
+            $refusal.full_audit = 'not_run'
+            $refusal.project_id = $mode
+            $refusal.database = if ($refusal.phase -eq 'path') {
+                $null
+            } elseif ($mode -eq 'fixture-readiness-other-database-io') {
+                "$database.other"
+            } else {
+                $database
+            }
+            [Console]::Out.WriteLine(($refusal | ConvertTo-Json -Compress))
+            exit 1
+        }
+    }
     # Hashed store paths can exceed Windows PowerShell's legacy 248-character
     # directory limit inside the contained test run root. Match native Rust
     # filesystem handling without shortening or changing the store identity.

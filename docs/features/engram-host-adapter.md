@@ -897,7 +897,10 @@ path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
   until it settles. A local failure has no automatic resolution and stays for the
   session's life. Exact row read-back precedes every send, and the
   turn/check identities determine immutable idempotency keys. An uncertain
-  reply or a restart replays the identical retained request. Retained
+  reply or a restart replays the identical retained request. Exact read-back
+  of the prepared row also releases a named successor, even when delivery
+  still waits for the original store. The worker waits until the next retry
+  is due and wakes early for new work or shutdown. Retained
   reports may replay automatically after boot as evidence, without
   activating a session. A restored closing job still needs its original
   pinned scope; a scope that changed produces the visible scope failure.
@@ -925,7 +928,8 @@ path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
 - **Delivery outcomes.** Before sending, the worker reads current reporting
   eligibility. It keeps the pinned capture policy in the wire when other
   policy details changed; the producer judges `account_if_eligible`.
-  Unavailable or disabled policy has a visible local-failure diagnostic.
+  A policy read that fails with a local-state or protocol error has a visible
+  local-failure diagnostic. Other failures follow the retry rules below.
   Only `execution_observe`'s documented refusals that record nothing
   (`invalid_request`, `execution_observation_invalid`,
   `execution_observation_basis_mismatch`,
@@ -940,13 +944,25 @@ path lives in `engram_unadmitted_capture.rs`, `engram_unadmitted_lifecycle.rs`,
   is not known. If the write that stores this settlement fails, this process
   still sends nothing more, but the store keeps the pending report: a host
   restarted from it sends the identical request once more, which Engram
-  rejects again unapplied. Every other
-  reply, a busy store, an expired request, a storage error, a code this build
-  does not know or a transport failure, retains the immutable request for the
-  identical replay with the existing backoff. After eight failed attempts,
-  delivery or capture ends visibly rather than retrying forever, and an
-  exhausted delivery is told as unresolved, since any attempt may have been
-  recorded. Malformed
+  rejects again unapplied. After exact local read-back, the prepared report
+  waits without spending its existing attempt budget when Engram returns a
+  typed temporary refusal. These refusals are `projection_repair_required`,
+  `work_projection_invalid`, `control_startup_busy`, `control_store_busy`,
+  and readiness `store_open_refused` with kind `busy` in the open phase.
+  A readiness refusal must identify the report's pinned project and database through the
+  retained marker and home. The first temporary wait writes one redacted
+  recovery notice alongside the report's notice flag. The worker keeps
+  retrying the same request until the store is available.
+  A qualified readiness `store_open_refused` with kind `io` in the open or
+  path phase settles the current envelope immediately with a local failure
+  and a visible `store_open_refused` notice. Unqualified readiness refusals,
+  expired requests, unrecognized codes and other transport ambiguities keep
+  the immutable request for identical replay with the bounded backoff.
+  After eight ambiguous delivery attempts, `runtime_observation_retry_exhausted`
+  ends retrying with an unresolved outcome, since an earlier attempt may
+  have been recorded. Before a report is prepared, capture uses its own
+  eight-attempt budget. Its `runtime_observation_retry_exhausted` notice
+  identifies exhausted preparation and says no observation was sent. Malformed
   retained wire becomes a visible local failure and does not starve later
   reports. Settled request/receipt bodies and failed closing jobs are currently
   retained; diagnostics and eligibility reads are per envelope.
@@ -3603,7 +3619,9 @@ so the next call starts a new one.
 - Startup may have written, so neither code counts as a process that never
   started or as certified non-application.
 - A host observation report answered this way was never judged: it is kept
-  for the identical replay, never dropped as refused.
+  for identical replay. For a prepared report, `control_startup_busy` waits
+  without spending the existing attempt budget, while
+  `control_startup_refused` spends one of the bounded ambiguity attempts.
 Every other remote code, a live `storage_error` among them, keeps its worker;
 whether it settles a report follows the delivery outcomes under
 [Reporting turns as host observations](#reporting-turns-as-host-observations).

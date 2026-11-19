@@ -3,13 +3,13 @@
 // unadmitted_worker_running (runtime-only, defaults false on restore).
 // Neither field participates in an admission/recovery predicate.
 
-enum EngramRuntimeObservationWork {
-    Capture(EngramRuntimeClosingJob),
-    Deliver(EngramRuntimeObservationReport),
+enum EngramRuntimeObservationWork<C = EngramRuntimeClosingJob, D = EngramRuntimeObservationReport> {
+    Capture(C),
+    Deliver(D),
 }
 
-// An unavailable producer never blocks later historical reports forever.
-// Exhaustion retains the immutable wire as a visible local failure.
+// Preparation and uncertain delivery failures use a bounded retry. A
+// prepared report can wait for a typed temporary store refusal to clear.
 const ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS: u32 = 8;
 
 // Bounded observation delivery backoff, independent of any turn or queue.
@@ -22,22 +22,48 @@ fn runtime_observation_retry_delay(session_id: &str, attempts: u32) -> chrono::D
     chrono::Duration::milliseconds((DELAYS_SECONDS[index] * 1000 * (100 + spread) / 100) as i64)
 }
 
+fn runtime_observation_retry_wait(
+    due: &str, now: chrono::DateTime<chrono::Utc>,
+) -> Option<Duration> {
+    let due = chrono::DateTime::parse_from_rfc3339(due).ok()?;
+    due.signed_duration_since(now).to_std().ok().filter(|delay| !delay.is_zero())
+}
+
+#[cfg(test)]
 fn runtime_observation_retry_due(due: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
-    chrono::DateTime::parse_from_rfc3339(due).map_or(true, |at| at <= now)
+    runtime_observation_retry_wait(due, now).is_none()
 }
 
 // Retain transport details in the outbox, independently of the fixed notices
 // published at installation. This transition also handles restored attempts.
+#[cfg(test)]
 fn finish_runtime_observation_delivery_attempt(
     report: &mut EngramRuntimeObservationReport,
     session_id: &str,
     envelope_index: usize,
+    store_unavailable: bool,
+) {
+    finish_runtime_observation_delivery_attempt_at(
+        report, session_id, envelope_index, store_unavailable, chrono::Utc::now(),
+    );
+}
+
+fn finish_runtime_observation_delivery_attempt_at(
+    report: &mut EngramRuntimeObservationReport,
+    session_id: &str,
+    envelope_index: usize,
+    store_unavailable: bool,
+    now: chrono::DateTime<chrono::Utc>,
 ) {
     if let EngramRuntimeObservationDelivery::Pending { last_error } =
         &report.envelopes[envelope_index].delivery
     {
-        report.attempts = report.attempts.saturating_add(1);
-        if report.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS {
+        if store_unavailable {
+            report.store_wait_notice_posted = true;
+        } else {
+            report.attempts = report.attempts.saturating_add(1);
+        }
+        if !store_unavailable && report.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS {
             let message = last_error.clone()
                 .unwrap_or_else(|| "delivery remained uncertain".to_owned());
             report.envelopes[envelope_index].delivery = EngramRuntimeObservationDelivery::LocalFailure {
@@ -46,8 +72,10 @@ fn finish_runtime_observation_delivery_attempt(
             };
             report.attempts = 0;
         }
-        report.retry_at = (chrono::Utc::now()
-            + runtime_observation_retry_delay(session_id, report.attempts))
+        report.retry_at = (now
+            + runtime_observation_retry_delay(session_id, if store_unavailable {
+                ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS
+            } else { report.attempts }))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     } else {
         report.attempts = 0;
@@ -69,6 +97,7 @@ fn runtime_observation_notice_code(code: &str) -> &'static str {
         "runtime_observation_policy_unavailable" => "runtime_observation_policy_unavailable",
         "runtime_observation_scope_changed" => "runtime_observation_scope_changed",
         "runtime_observation_source_refused" => "runtime_observation_source_refused",
+        "store_open_refused" => "store_open_refused",
         "legacy_source_input_retired" => "legacy_source_input_retired",
         _ => "runtime_observation_failed",
     }
@@ -83,12 +112,37 @@ struct EngramRuntimeObservationLifetime {
     stopping: std::sync::atomic::AtomicBool,
     installs: Mutex<usize>,
     drained: std::sync::Condvar,
+    worker_wakes: Mutex<HashMap<String, (std::thread::ThreadId, mpsc::SyncSender<()>)>>,
     #[cfg(test)]
     install_hook: Mutex<Option<Arc<dyn Fn(&'static str) + Send + Sync>>>,
 }
 
 struct EngramRuntimeObservationInstall {
     lifetime: Arc<EngramRuntimeObservationLifetime>,
+}
+
+// A single buffered wake covers new work arriving both during the queue
+// inspection and after the worker starts waiting. There is one per session.
+struct EngramRuntimeObservationWake<'a> {
+    lifetime: &'a EngramRuntimeObservationLifetime,
+    session_id: &'a str,
+    receiver: mpsc::Receiver<()>,
+}
+
+impl EngramRuntimeObservationWake<'_> {
+    fn wait(&self, delay: Duration) {
+        let _ = self.receiver.recv_timeout(delay);
+    }
+}
+
+impl Drop for EngramRuntimeObservationWake<'_> {
+    fn drop(&mut self) {
+        let mut wakes = self.lifetime.worker_wakes.lock().expect("observation wakes poisoned");
+        // A replacement can register after this worker clears the running flag.
+        if wakes.get(self.session_id).is_some_and(|(id, _)| *id == std::thread::current().id()) {
+            wakes.remove(self.session_id);
+        }
+    }
 }
 
 impl Drop for EngramRuntimeObservationInstall {
@@ -106,6 +160,19 @@ impl Drop for EngramRuntimeObservationInstall {
 }
 
 impl EngramRuntimeObservationLifetime {
+    fn register_worker<'a>(&'a self, session_id: &'a str) -> EngramRuntimeObservationWake<'a> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        self.worker_wakes.lock().expect("observation wakes poisoned")
+            .insert(session_id.to_owned(), (std::thread::current().id(), sender));
+        EngramRuntimeObservationWake { lifetime: self, session_id, receiver }
+    }
+
+    fn wake_worker(&self, session_id: &str) {
+        if let Some((_, wake)) = self.worker_wakes.lock().expect("observation wakes poisoned").get(session_id) {
+            let _ = wake.try_send(());
+        }
+    }
+
     fn enter(self: &Arc<Self>, phase: &'static str) -> Option<EngramRuntimeObservationInstall> {
         let mut count = self
             .installs
@@ -129,6 +196,9 @@ impl EngramRuntimeObservationLifetime {
     fn request_stop(&self) {
         self.stopping
             .store(true, std::sync::atomic::Ordering::Release);
+        for (_, wake) in self.worker_wakes.lock().expect("observation wakes poisoned").values() {
+            let _ = wake.try_send(());
+        }
     }
 
     fn stop_and_join(&self) {
@@ -156,11 +226,18 @@ impl EngramRuntimeObservationLifetime {
     }
 }
 
-impl EngramRuntimeObservationWork {
+impl EngramRuntimeObservationWork<&EngramRuntimeClosingJob, &EngramRuntimeObservationReport> {
     fn due(&self) -> &str {
         match self {
             Self::Capture(job) => &job.retry_at,
             Self::Deliver(report) => &report.retry_at,
+        }
+    }
+
+    fn claim(self) -> EngramRuntimeObservationWork {
+        match self {
+            Self::Capture(job) => EngramRuntimeObservationWork::Capture(job.clone()),
+            Self::Deliver(report) => EngramRuntimeObservationWork::Deliver(report.clone()),
         }
     }
 }
@@ -210,15 +287,18 @@ impl AppState {
                 return;
             };
             let state = &mut inner.sessions[index].engram;
-            if state.unadmitted_worker_running
-                || state
-                    .unadmitted_reports
+            if state.unadmitted_worker_running {
+                self.runtime_observation_lifetime.wake_worker(session_id);
+                return;
+            }
+            if state
+                .unadmitted_reports
+                .iter()
+                .all(|report| report.is_settled())
+                && state
+                    .unadmitted_closing_jobs
                     .iter()
-                    .all(|report| report.is_settled())
-                    && state
-                        .unadmitted_closing_jobs
-                        .iter()
-                        .all(|job| job.terminal_failure.is_some())
+                    .all(|job| job.terminal_failure.is_some())
             {
                 return;
             }
@@ -238,54 +318,67 @@ impl AppState {
     }
 
     fn run_runtime_observation_worker(&self, session_id: &str) {
+        self.run_runtime_observation_worker_with_clock(session_id, chrono::Utc::now);
+    }
+
+    fn run_runtime_observation_worker_with_clock(
+        &self,
+        session_id: &str,
+        now: impl Fn() -> chrono::DateTime<chrono::Utc>,
+    ) {
         let shutdown = self.subscribe_shutdown_signal();
+        let wake = self.runtime_observation_lifetime.register_worker(session_id);
         while !*shutdown.borrow()
             && !self
                 .runtime_observation_lifetime
                 .stopping
                 .load(std::sync::atomic::Ordering::Acquire)
         {
+            #[cfg(test)]
+            self.runtime_observation_lifetime.observe("retry_inspected");
             let candidate = {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let Some(index) = inner.find_session_index(session_id) else {
                     return;
                 };
-                let adapter = inner.engram_host_adapter.clone();
                 let capture_waits = Self::runtime_observation_capture_waits_for_binding(
                     &inner.sessions[index],
                 );
                 let state = &mut inner.sessions[index].engram;
+                let now = now();
                 let pending = state
                     .unadmitted_reports
                     .iter()
                     .filter(|report| !report.is_settled())
-                    .min_by_key(|report| report.retry_at.clone())
-                    .cloned()
                     .map(EngramRuntimeObservationWork::Deliver);
                 let closing = state
                     .unadmitted_closing_jobs
                     .iter()
                     .filter(|job| !capture_waits && job.terminal_failure.is_none())
-                    .min_by_key(|job| job.retry_at.clone())
-                    .cloned()
                     .map(EngramRuntimeObservationWork::Capture);
                 let pending = pending
                     .into_iter()
                     .chain(closing)
-                    .min_by_key(|work| work.due().to_owned());
+                    .min_by(|left, right| left.due().cmp(right.due()));
                 let Some(work) = pending else {
                     state.unadmitted_worker_running = false;
                     #[cfg(test)]
                     self.runtime_observation_lifetime.observe("idle");
                     return;
                 };
-                (adapter, work)
+                if let Some(delay) = runtime_observation_retry_wait(work.due(), now) {
+                    drop(inner);
+                    #[cfg(test)]
+                    self.runtime_observation_lifetime.observe("retry_parked");
+                    wake.wait(delay);
+                    continue;
+                }
+                let work = work.claim();
+                (inner.engram_host_adapter.clone(), work)
             };
             let (adapter, work) = candidate;
-            if !runtime_observation_retry_due(work.due(), chrono::Utc::now()) {
-                std::thread::sleep(Duration::from_millis(100));
-                continue;
-            }
+            #[cfg(test)]
+            self.runtime_observation_lifetime.observe("retry_claimed");
             if let EngramRuntimeObservationWork::Capture(job) = work {
                 // In particular the policy-pin phase must reach SQLite before
                 // any filesystem measurement uses it, including after restart.
@@ -297,11 +390,11 @@ impl AppState {
                 )
                 .unwrap_or(false)
                 {
-                    std::thread::sleep(Duration::from_millis(100));
+                    wake.wait(Duration::from_millis(100));
                     continue;
                 }
                 let Some(_slot) = self.runtime_retry_slots.try_acquire() else {
-                    std::thread::sleep(Duration::from_millis(100));
+                    wake.wait(Duration::from_millis(100));
                     continue;
                 };
                 let result = self.capture_runtime_observation_report(session_id, &job);
@@ -324,12 +417,12 @@ impl AppState {
                     self.release_named_selection_after_durable_capture(session_id, &report);
                 }
                 Ok(false) | Err(_) => {
-                    std::thread::sleep(Duration::from_millis(100));
+                    wake.wait(Duration::from_millis(100));
                     continue;
                 }
             }
             let Some(_slot) = self.runtime_retry_slots.try_acquire() else {
-                std::thread::sleep(Duration::from_millis(100));
+                wake.wait(Duration::from_millis(100));
                 continue;
             };
             if *shutdown.borrow() {
@@ -340,14 +433,14 @@ impl AppState {
             };
             let timeout = Duration::from_millis(report.call_timeout_ms);
             let next =
-                deliver_runtime_observation_envelope(&adapter, &report, envelope_index, timeout);
+                deliver_runtime_observation_attempt(&adapter, &report, envelope_index, timeout);
             // A reply arriving after this process was shut down cannot
             // overwrite a restarted host's pending image. That host replays
             // the retained request and validates its own immutable receipt.
             if *shutdown.borrow() {
                 break;
             }
-            let mut next = match next {
+            let (mut next, store_unavailable) = match next {
                 Ok(next) => next,
                 Err(error) => {
                     let mut failed = report.next_version();
@@ -356,10 +449,12 @@ impl AppState {
                             code: "runtime_observation_invalid_retained_image".to_owned(),
                             message: error.message,
                         };
-                    failed
+                    (failed, false)
                 }
             };
-            finish_runtime_observation_delivery_attempt(&mut next, session_id, envelope_index);
+            finish_runtime_observation_delivery_attempt_at(
+                &mut next, session_id, envelope_index, store_unavailable, now(),
+            );
             if let Err(error) =
                 self.install_runtime_observation_result(session_id, &report, next, envelope_index)
             {
@@ -367,6 +462,9 @@ impl AppState {
                     "engram> observation settlement for {} is not saved: {error:#}",
                     report.host_turn_ref
                 );
+            } else {
+                #[cfg(test)]
+                self.runtime_observation_lifetime.observe("delivery_installed");
             }
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -544,20 +642,26 @@ impl AppState {
             Ok(EngramRuntimeClosingOutcome::ReportWithFocus { .. }) => unreachable!(),
             Err(error) => {
                 let failed = expected.failed(session_id, &error);
-                if matches!(error.code.as_deref(), Some(
-                    "runtime_observation_scope_changed" | "runtime_observation_source_refused"))
-                    || failed.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS
-                {
-                    let code = runtime_observation_notice_code(error.code.as_deref().unwrap_or(""));
+                let definitive = matches!(error.code.as_deref(), Some(
+                    "runtime_observation_scope_changed" | "runtime_observation_source_refused"));
+                let exhausted = !definitive
+                    && failed.attempts >= ENGRAM_RUNTIME_OBSERVATION_MAX_ATTEMPTS;
+                if definitive || exhausted {
+                    let code = if exhausted { "runtime_observation_retry_exhausted" }
+                        else { runtime_observation_notice_code(error.code.as_deref().unwrap_or("")) };
                     let reason = match code {
                         "runtime_observation_scope_changed" => "source scope changed",
                         "runtime_observation_source_refused" => "source capture was refused",
                         _ => "report preparation failed",
                     };
-                    diagnostic = Some(format!(
+                    let mut notice = format!(
                         "Runtime-started turn {} not reported to Engram ({code}): {reason}. Its checks remain uncredited.",
                         expected.trace.host_turn_ref
-                    ));
+                    );
+                    if exhausted {
+                        notice.push_str(" Report preparation reached its retry limit. No observation was sent. The original closing facts and error remain retained locally. Check the Engram producer and store before running later observations.");
+                    }
+                    diagnostic = Some(notice);
                     let mut failed = failed;
                     failed.terminal_failure = Some(error.message);
                     state.unadmitted_closing_jobs[position] = failed;
@@ -639,6 +743,14 @@ impl AppState {
             return Ok(());
         };
         let diagnostic = match &next.envelopes[envelope_index].delivery {
+            EngramRuntimeObservationDelivery::Pending { .. }
+                if next.store_wait_notice_posted && !expected.store_wait_notice_posted =>
+            {
+                Some(format!(
+                    "Reporting runtime-started turn {} to Engram is pending: the store is temporarily unavailable. Check Engram readiness and resolve any reported repair. TermAl will retry the retained report when the store is ready.",
+                    next.host_turn_ref,
+                ))
+            }
             // An identity collision is told as such: this report was
             // rejected unapplied because an earlier, different operation
             // holds its key; details remain in the retained report, and that
@@ -674,6 +786,13 @@ impl AppState {
                      It is kept and not sent again; any earlier Engram outcome is unchanged and may be unknown. \
                      Read the item's observations before deciding. Its checks remain uncredited."
                 ))
+            }
+            EngramRuntimeObservationDelivery::LocalFailure { code, .. }
+                if code == "store_open_refused" =>
+            {
+                Some(
+                    "Engram could not open or resolve its store (store_open_refused). The retained request has stopped retrying. Check Engram readiness and inspect the item's observations for any earlier result.".to_owned(),
+                )
             }
             EngramRuntimeObservationDelivery::LocalFailure { code, .. } => Some(format!(
                 "Runtime-started turn not reported to Engram ({}). Its checks remain uncredited.",
