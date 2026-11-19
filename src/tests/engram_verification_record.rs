@@ -31,6 +31,9 @@ mod source_projection;
 #[path = "engram_verification_fmt.rs"]
 mod fmt;
 
+#[path = "engram_verification_full_lint.rs"]
+mod full_lint;
+
 #[path = "engram_verification_doc_links.rs"]
 mod doc_links;
 

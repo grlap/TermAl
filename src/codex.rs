@@ -407,7 +407,6 @@ fn spawn_shared_codex_runtime(
     // Codex threads carry their own cwd, so one shared app-server can serve
     // every session of a profile.
     let codex_home = prepare_termal_codex_home(&state.default_workdir, profile.codex_home_scope())?;
-    let runtime_id = Uuid::new_v4().to_string();
     let mut command = codex_command()?;
     command
         .arg("app-server")
@@ -432,23 +431,25 @@ fn spawn_shared_codex_runtime(
     // its exact identity through `shell_environment_policy.set` instead.
     apply_agent_process_env(&mut command, None, None)?;
 
-    let mut child = command
-        .spawn()
-        .context("failed to start shared Codex app-server")?;
-    let stdin = child
-        .stdin
-        .take()
-        .context("failed to capture shared Codex app-server stdin")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("failed to capture shared Codex app-server stdout")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("failed to capture shared Codex app-server stderr")?;
-    let process =
-        Arc::new(SharedChild::new(child).context("failed to share shared Codex app-server child")?);
+    start_shared_codex_runtime(state, codex_home, &mut command)
+}
+
+fn start_shared_codex_runtime(
+    state: AppState,
+    codex_home: PathBuf,
+    command: &mut Command,
+) -> Result<SharedCodexRuntime> {
+    let runtime_id = Uuid::new_v4().to_string();
+    let DedicatedRuntimeChild {
+        process,
+        stdin,
+        stdout,
+        stderr,
+        #[cfg(windows)]
+        tree,
+        #[cfg(windows)]
+        mut launch_guard,
+    } = spawn_dedicated_runtime(command, "shared Codex app-server")?;
     let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let sessions = SharedCodexSessions::new();
@@ -934,29 +935,40 @@ fn spawn_shared_codex_runtime(
         let wait_process = process.clone();
         let wait_pending_requests = pending_requests.clone();
         let wait_runtime_id = runtime_id.clone();
-        std::thread::spawn(move || match wait_process.wait() {
-            Ok(status) if status.success() => {
-                fail_pending_codex_requests(
-                    &wait_pending_requests,
-                    "shared Codex app-server exited while waiting for a pending response",
-                );
-                let _ = wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, None);
-            }
-            Ok(status) => {
-                let detail = format!("shared Codex app-server exited with status {status}");
-                fail_pending_codex_requests(&wait_pending_requests, &detail);
-                let _ =
-                    wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, Some(&detail));
-            }
-            Err(err) => {
-                let detail = format!("failed waiting for shared Codex app-server: {err}");
-                fail_pending_codex_requests(&wait_pending_requests, &detail);
-                let _ =
-                    wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, Some(&detail));
+        #[cfg(windows)]
+        let wait_tree = tree.clone();
+        std::thread::spawn(move || {
+            let result = wait_process.wait();
+            // The waiter owns the job for the app-server's lifetime. Closing
+            // the last handle also ends descendants that outlive its root.
+            #[cfg(windows)]
+            drop(wait_tree);
+            match result {
+                Ok(status) if status.success() => {
+                    fail_pending_codex_requests(
+                        &wait_pending_requests,
+                        "shared Codex app-server exited while waiting for a pending response",
+                    );
+                    let _ = wait_state.handle_shared_codex_runtime_exit(&wait_runtime_id, None);
+                }
+                Ok(status) => {
+                    let detail = format!("shared Codex app-server exited with status {status}");
+                    fail_pending_codex_requests(&wait_pending_requests, &detail);
+                    let _ = wait_state
+                        .handle_shared_codex_runtime_exit(&wait_runtime_id, Some(&detail));
+                }
+                Err(err) => {
+                    let detail = format!("failed waiting for shared Codex app-server: {err}");
+                    fail_pending_codex_requests(&wait_pending_requests, &detail);
+                    let _ = wait_state
+                        .handle_shared_codex_runtime_exit(&wait_runtime_id, Some(&detail));
+                }
             }
         });
     }
 
+    #[cfg(windows)]
+    launch_guard.resume(&process, &tree)?;
     Ok(SharedCodexRuntime {
         runtime_id,
         input_tx,

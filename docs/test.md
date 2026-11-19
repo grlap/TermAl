@@ -86,10 +86,18 @@ TypeScript and Vitest use their JavaScript entrypoints rather than `.cmd` shims.
 working directories and required files are preflighted, and a missing
 prerequisite leaves every stage explicitly unrun.
 
-In a registered full run, the exact `cargo fmt --check` stage is a Lint check,
-including when it fails. It grants no Test or Build credit. A stage that never
-runs stays `not_run` in the run body and mints no verification record. Ordinary
-command recognition is unchanged. Lint does not meet a Test-bound criterion.
+The registered verification sender classifies TermAl's `fmt` stage
+(`cargo fmt --check`) as Lint. It also recognizes Engram's FULL `clippy`
+(`cargo clippy --all-targets --all-features -- -D warnings`) and `docs`
+(`node scripts/check-doc-links.mjs`) stages as Lint for those exact commands.
+Engram's completed `clippy` and `docs` stages require observed command
+arguments. A request label cannot give either stage Test credit. A stage
+that genuinely did not run can be classified from its plan and remains
+`not_run`, with no verification record for that stage.
+A completed Lint check records its actual pass or failure and grants no Test
+or Build credit. Clippy is not required for Test or Build credit. The launcher
+determines execution and the overall gate verdict. Unsupported stages receive
+a named classification refusal.
 
 Before those six stages, the full launcher prepares private UI dependencies
 with `npm ci --include=dev --no-audit --no-fund` in the candidate's `ui/`

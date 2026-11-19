@@ -342,7 +342,7 @@ enum RuntimeLaunchPhase {
 
 #[cfg(all(test, windows))]
 type RuntimeLaunchTestHook =
-    Box<dyn FnMut(RuntimeLaunchPhase, &std::os::windows::io::OwnedHandle) -> Result<()>>;
+    Box<dyn FnMut(RuntimeLaunchPhase, &RuntimeLaunchGuard) -> Result<()>>;
 
 #[cfg(all(test, windows))]
 thread_local! {
@@ -359,7 +359,7 @@ fn runtime_launch_test_checkpoint(
 ) -> Result<()> {
     TEST_RUNTIME_LAUNCH_HOOK.with(|hook| {
         if let Some(hook) = hook.borrow_mut().as_mut() {
-            hook(phase, guard.root.as_ref().expect("launch root handle"))?;
+            hook(phase, guard)?;
         }
         Ok(())
     })

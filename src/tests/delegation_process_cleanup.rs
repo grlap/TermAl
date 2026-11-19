@@ -1439,6 +1439,79 @@ fn launch_fixture_command(cwd: &FsPath) -> Command {
 }
 
 #[cfg(windows)]
+#[test]
+fn shared_codex_app_server_is_contained_before_resume_and_reaps_descendants() {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::{
+        JobObjects::{
+            IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            QueryInformationJobObject,
+        },
+        Threading::GetProcessId,
+    };
+
+    let _directory = TestTempRootDirectoryScope::repository_local();
+    let temp = TestTempRoot::create("shared-codex-job");
+    let _launch = LaunchFailureScope::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut command = launch_fixture_command(temp.path());
+    command
+        .env(FIXTURE_ROLE, "runtime")
+        .env(FIXTURE_ENDPOINT, listener.local_addr().unwrap().to_string());
+
+    let (contained_tx, contained_rx) = mpsc::channel();
+    TEST_RUNTIME_LAUNCH_HOOK.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move |phase, guard| {
+            if phase != RuntimeLaunchPhase::BeforeResume {
+                return Ok(());
+            }
+            let root = guard.root.as_ref().unwrap().as_raw_handle();
+            let job = guard.tree.as_ref().unwrap().tree.job.handle.as_raw_handle();
+            let mut member = 0;
+            assert_ne!(unsafe { IsProcessInJob(root, job, &mut member) }, 0);
+            assert_ne!(member, 0, "app-server root must already be in its job");
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            assert_ne!(
+                unsafe {
+                    QueryInformationJobObject(
+                        job,
+                        JobObjectExtendedLimitInformation,
+                        (&mut limits as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                        std::mem::size_of_val(&limits) as u32,
+                        std::ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            assert_ne!(
+                limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                0
+            );
+            contained_tx.send(unsafe { GetProcessId(root) }).unwrap();
+            Ok(())
+        }));
+    });
+
+    // Replace only the executable and its configured home. The production
+    // shared-runtime launch and waiter own containment throughout the test.
+    let runtime =
+        start_shared_codex_runtime(test_app_state(), temp.path().to_owned(), &mut command).unwrap();
+    assert_eq!(contained_rx.try_recv().unwrap(), runtime.process.id());
+    let peers: Vec<_> = (0..3).map(|_| ProcessPeer::accept(&listener)).collect();
+    assert!(peers.iter().any(|peer| {
+        peer.description["role"] == "runtime" && peer.description["pid"] == runtime.process.id()
+    }));
+    assert!(runtime.process.try_wait().unwrap().is_none());
+    // Leave descendant sockets open so their exit depends on job cleanup.
+    runtime.process.kill().unwrap();
+    for peer in &peers {
+        peer.assert_exited();
+    }
+}
+
+#[cfg(windows)]
 fn assert_launch_handle_exited(handle: &std::os::windows::io::OwnedHandle) {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::{Foundation::WAIT_OBJECT_0, System::Threading::WaitForSingleObject};
@@ -1461,8 +1534,9 @@ fn launch_failure_case(phase: RuntimeLaunchPhase) {
     let observed = Arc::new(Mutex::new(None));
     let hook_observed = observed.clone();
     TEST_RUNTIME_LAUNCH_HOOK.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move |current, root| {
+        *hook.borrow_mut() = Some(Box::new(move |current, guard| {
             if current == phase {
+                let root = guard.root.as_ref().unwrap();
                 *hook_observed.lock().unwrap() = Some(root.try_clone().unwrap());
                 bail!("forced launch failure at {phase:?}");
             }
@@ -1512,7 +1586,8 @@ fn delegation_process_cleanup_launch_missing_pipe() {
     let observed = Arc::new(Mutex::new(None));
     let hook_observed = observed.clone();
     TEST_RUNTIME_LAUNCH_HOOK.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move |_, root| {
+        *hook.borrow_mut() = Some(Box::new(move |_, guard| {
+            let root = guard.root.as_ref().unwrap();
             *hook_observed.lock().unwrap() = Some(root.try_clone().unwrap());
             Ok(())
         }));
