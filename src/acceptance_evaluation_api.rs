@@ -1951,7 +1951,10 @@ impl AppState {
             return Err(in_progress());
         }
         let authority = acceptance_evaluation_submit_authority_locked(&inner, child)?;
-        if acceptance_evidence_unfinished(&authority.target).is_some() {
+        if let Some(unfinished) = acceptance_evidence_unfinished(&authority.target) {
+            if unfinished.stale_basis {
+                return Err(ApiError::conflict(format!("this attempt's evidence basis went stale ({}); finish and report it, then the parent should request a fresh evaluation", acceptance_brief_text(&unfinished.reason, 512))));
+            }
             return Err(ApiError::conflict("this evidence recovery attempt ended without a verdict; finish and report it, then the parent may request a fresh evaluation"));
         }
         let requires_attempt_key = authority.target.attempt_history.as_ref()

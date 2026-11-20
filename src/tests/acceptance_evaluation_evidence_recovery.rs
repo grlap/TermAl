@@ -311,6 +311,151 @@ fn invalid_caller_keys_and_unissued_records_do_not_damage_the_real_attempt() {
     );
 }
 
+/// Engram's refusal of a notes continuation whose window gained a record after
+/// its cut, as a failed CLI call and as a control reply deliver it.
+fn window_changed_refusals() -> [EngramTransportError; 2] {
+    let message = "the window changed; start a fresh window";
+    let mut cli = EngramTransportError::transport(format!(
+        "Engram acceptance reader failed: {{\"error\":{{\"code\":\"work_show_cursor_invalid\",\"message\":\"{message}\"}}}}"
+    ));
+    cli.refusal_code = Some("work_show_cursor_invalid".into());
+    let control = EngramTransportError::remote(EngramControlErrorBody {
+        code: "work_show_cursor_invalid".to_owned(),
+        message: message.to_owned(),
+    });
+    [cli, control]
+}
+
+#[test]
+fn a_record_appended_after_the_captured_cut_is_a_retryable_stale_basis_not_a_bare_no_verdict() {
+    for refusal in window_changed_refusals() {
+        let (state, _, id, child, key) = recovery_fixture();
+        let instant = std::time::Instant::now();
+        let request = read_request(&key, "catalog-after-append", false);
+        let result = state
+            .read_acceptance_evidence_with_io(
+                &child,
+                request.clone(),
+                |connection, args, timeout| {
+                    if args.iter().any(|a| a == "--after") {
+                        Err(refusal.clone())
+                    } else {
+                        recovery_reader(connection, args, timeout)
+                    }
+                },
+                move || instant,
+            )
+            .unwrap();
+        assert_eq!(result["state"], "stale", "{result}");
+        assert_eq!(result["retryable"], true);
+        assert_eq!(result["recorded"], false);
+        assert!(
+            result.get("catalog").is_none(),
+            "nothing past the cut is exposed"
+        );
+        let reason = result["unfinishedEvidence"]["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("the item's evidence changed after the captured cut"),
+            "{reason}"
+        );
+        assert!(
+            reason.contains("the window changed"),
+            "names Engram's refusal: {reason}"
+        );
+        let replay = state
+            .read_acceptance_evidence_with_io(
+                &child,
+                request,
+                |_, _, _| panic!("a recorded stale basis is replayed, not read again"),
+                move || instant,
+            )
+            .unwrap();
+        assert_eq!(result, replay);
+        let mut submit = two_verdicts();
+        submit.attempt_key = Some(key.clone());
+        let refused = state
+            .submit_acceptance_evaluation_with_runner(&child, submit, runner_must_not_run)
+            .unwrap_err()
+            .message;
+        assert!(refused.contains("went stale"), "{refused}");
+        assert!(refused.contains(reason), "{refused}");
+        let inner = state.inner.lock().unwrap();
+        let target = inner.delegations[inner.find_delegation_index(&id).unwrap()]
+            .acceptance_evaluation
+            .as_ref()
+            .unwrap();
+        let outcome = acceptance_evaluation_outcome_line(target);
+        assert!(outcome.contains("retryable"), "{outcome}");
+        assert!(outcome.contains(reason), "{outcome}");
+        assert!(!outcome.contains("no verdict"), "{outcome}");
+        let round_trip: DelegationAcceptanceEvaluation =
+            serde_json::from_value(serde_json::to_value(target).unwrap()).unwrap();
+        assert!(
+            acceptance_evidence_unfinished(&round_trip)
+                .unwrap()
+                .stale_basis
+        );
+    }
+}
+
+#[test]
+fn a_reused_evaluators_stale_attempt_is_reported_beside_its_earlier_retired_write() {
+    let [_, refusal] = window_changed_refusals();
+    let (state, _, id, child, key) = recovery_fixture();
+    let instant = std::time::Instant::now();
+    let result = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            read_request(&key, "catalog-after-append", false),
+            |connection, args, timeout| {
+                if args.iter().any(|a| a == "--after") {
+                    Err(refusal.clone())
+                } else {
+                    recovery_reader(connection, args, timeout)
+                }
+            },
+            move || instant,
+        )
+        .unwrap();
+    assert_eq!(result["state"], "stale", "{result}");
+    let reason = result["unfinishedEvidence"]["reason"].as_str().unwrap();
+    let inner = state.inner.lock().unwrap();
+    let mut reused = inner.delegations[inner.find_delegation_index(&id).unwrap()]
+        .acceptance_evaluation
+        .clone()
+        .unwrap();
+    // The persisted history reuse keeps for an earlier attempt whose write
+    // was retired locally.
+    let earlier = AcceptanceEvaluationPreviousAttempt {
+        ordinal: 1,
+        key: format!("{key}-earlier"),
+        acceptance_basis: reused.acceptance_basis,
+        evidence_basis: reused.evidence_basis,
+        source_fingerprint: None,
+        source_id: None,
+        submission: AcceptanceEvaluationSubmission::None,
+        refusal: Some(AcceptanceEvaluationDefinitiveRefusal {
+            code: ACCEPTANCE_LOCAL_RETIREMENT_CODE.to_owned(),
+            message: "the earlier write was retired locally".to_owned(),
+            original: AcceptanceEvaluationOpenWrite::default(),
+        }),
+    };
+    reused
+        .attempt_history
+        .as_mut()
+        .unwrap()
+        .previous
+        .push(earlier);
+    let outcome = acceptance_evaluation_outcome_line(&reused);
+    assert!(outcome.contains("retryable"), "{outcome}");
+    assert!(outcome.contains(reason), "{outcome}");
+    assert!(
+        outcome.contains(ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE),
+        "{outcome}"
+    );
+    assert!(!outcome.contains("no verdict"), "{outcome}");
+}
+
 #[test]
 fn exhausted_allowance_is_an_unfinished_attempt_not_a_verdict_and_parent_can_request_again() {
     let (state, parent, id, child, key) = recovery_fixture();

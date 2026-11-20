@@ -2884,17 +2884,23 @@ fn acceptance_evaluation_outcome_line(evaluation: &DelegationAcceptanceEvaluatio
         AcceptanceEvaluationSubmission::None if acceptance_evaluation_current_write_retired(evaluation) => {
             format!("{subject}: {ACCEPTANCE_EVALUATION_UNKNOWN_OUTCOME_TEXT}; the retained write was retired locally and will not be resent.")
         }
+        // The current attempt's own disposition comes before an earlier
+        // retired write; that write's notice is appended below.
+        AcceptanceEvaluationSubmission::None if acceptance_evidence_unfinished(evaluation).is_some() => {
+            let unfinished = acceptance_evidence_unfinished(evaluation).expect("checked unfinished read");
+            let reason = acceptance_brief_text(&unfinished.reason, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS);
+            if unfinished.stale_basis {
+                format!("{subject}: retryable, {reason}. Request a fresh evaluation to judge the current evidence.")
+            } else {
+                format!("{subject}: evidence recovery unfinished; no verdict was sent. {reason}. The parent may request a fresh evaluation.")
+            }
+        }
         AcceptanceEvaluationSubmission::None if acceptance_evaluation_has_retired_write(evaluation) => {
             if let Some(refusal) = evaluation.attempt_history.as_ref().and_then(|history| history.refusal.as_ref()) {
                 format!("{subject}: the current attempt was refused: {}.", acceptance_brief_text(&refusal.message, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS))
             } else {
                 format!("{subject}: no verdict is recorded for the current attempt.")
             }
-        }
-        AcceptanceEvaluationSubmission::None if acceptance_evidence_unfinished(evaluation).is_some() => {
-            let reason = &acceptance_evidence_unfinished(evaluation).expect("checked unfinished read").reason;
-            format!("{subject}: evidence recovery unfinished; no verdict was sent. {}. The parent may request a fresh evaluation.",
-                acceptance_brief_text(reason, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS))
         }
         AcceptanceEvaluationSubmission::None => format!(
             "{subject}: nothing was recorded; the tracker has no verdict from this evaluator."

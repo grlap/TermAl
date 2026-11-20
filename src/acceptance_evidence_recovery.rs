@@ -6,7 +6,7 @@
 const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME: &str = "termal_read_acceptance_evidence";
 const TERMAL_READ_ACCEPTANCE_EVIDENCE_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_read_acceptance_evidence";
-const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION: &str = "When your current brief enables evidence recovery, read omitted evidence before judging. An attempt without recovery keeps its missing-evidence verdict route; this tool refuses such a call without ending that attempt. Supply your exact attemptKey and a new readKey for each logical read. action catalog continues the captured notes catalog: omit cursor for its original boundary, then use only a cursor this tool returned. action records reads whole records named by your brief or a recovered catalog page; supply locators. The host derives the store, work, run and cut. Repeating the same readKey and arguments returns its original result without another read or budget charge; reusing it for different arguments refuses. All reads share one attempt allowance. An unfinished result recorded no verdict and ends this attempt: finish and report it so the parent can request a fresh evaluation. When recovery is enabled, do not submit insufficient-evidence merely because discovery stopped before older proof was read.";
+const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION: &str = "When your current brief enables evidence recovery, read omitted evidence before judging. An attempt without recovery keeps its missing-evidence verdict route; this tool refuses such a call without ending that attempt. Supply your exact attemptKey and a new readKey for each logical read. action catalog continues the captured notes catalog: omit cursor for its original boundary, then use only a cursor this tool returned. action records reads whole records named by your brief or a recovered catalog page; supply locators. The host derives the store, work, run and cut. Repeating the same readKey and arguments returns its original result without another read or budget charge; reusing it for different arguments refuses. All reads share one attempt allowance. An unfinished result recorded no verdict and ends this attempt: finish and report it so the parent can request a fresh evaluation. A stale result means the item's evidence changed after the captured cut; it also ends this attempt and is retryable: report it so the parent requests a fresh evaluation. When recovery is enabled, do not submit insufficient-evidence merely because discovery stopped before older proof was read.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AcceptanceEvidenceRecoveryManifest {
@@ -28,6 +28,10 @@ struct AcceptanceUnfinishedEvidenceRead {
     intent_digest: Option<String>,
     reason: String,
     captured_cut: Option<Value>,
+    /// The item's evidence changed after the captured cut, so Engram refused
+    /// to continue the captured notes window. Retryable by a fresh evaluation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    stale_basis: bool,
     /// This is local attempt history, never an Engram evaluation receipt.
     #[serde(skip_deserializing)]
     recorded: bool,
@@ -109,6 +113,19 @@ struct AcceptanceEvidenceRecovery {
     seen: BTreeSet<String>,
     pages: HashMap<String, Value>,
     replies: HashMap<String, (String, Value)>,
+    /// Set when a read failed because the captured window went stale.
+    stale_basis: Option<String>,
+}
+
+/// Engram refused to continue the captured notes window because a record was
+/// appended to the item after its cut. Judged on the structured refusal code:
+/// a failed CLI call carries it as `refusal_code`, a control reply as `code`.
+fn acceptance_evidence_window_changed(error: &EngramTransportError) -> bool {
+    error.refusal_code.as_deref().or_else(|| {
+        (error.kind == EngramTransportErrorKind::Remote)
+            .then_some(error.code.as_deref())
+            .flatten()
+    }) == Some("work_show_cursor_invalid")
 }
 
 impl AcceptanceEvidenceRecovery {
@@ -150,6 +167,7 @@ impl AcceptanceEvidenceRecovery {
             catalog_seen,
             pages: HashMap::new(),
             replies: HashMap::new(),
+            stale_basis: None,
         }
     }
 
@@ -205,9 +223,20 @@ impl AcceptanceEvidenceRecovery {
         self.remaining = self
             .remaining
             .saturating_sub(now().saturating_duration_since(started));
-        result.map_err(|_| {
-            ApiError::bad_gateway("the captured evidence read is unavailable or its cursor expired")
-        })
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) if acceptance_evidence_window_changed(&error) => {
+                let reason = format!(
+                    "stale evidence basis: Engram can no longer continue the captured evidence window ({}); the item's evidence changed after the captured cut, typically by an appended record",
+                    acceptance_brief_text(&error.message, 512)
+                );
+                self.stale_basis = Some(reason.clone());
+                Err(ApiError::conflict(reason))
+            }
+            Err(_) => Err(ApiError::bad_gateway(
+                "the captured evidence read is unavailable or its cursor expired",
+            )),
+        }
     }
 
     fn inspect(
@@ -543,6 +572,7 @@ impl AppState {
         request: &ReadAcceptanceEvidenceRequest,
         reason: String,
         cut: Option<Value>,
+        stale_basis: bool,
     ) -> Result<Value, ApiError> {
         let index = inner
             .find_delegation_index(&authority.delegation_id)
@@ -566,11 +596,18 @@ impl AppState {
                 intent_digest: Some(acceptance_evaluation_payload_digest(&[request.intent()])),
                 reason: acceptance_brief_text(&reason, 1024),
                 captured_cut: cut,
+                stale_basis,
                 recorded: false,
                 persistence_confirmed: false,
             })
             .clone();
         inner.mark_delegation_mutated(index);
+        if unfinished.stale_basis {
+            return Ok(json!({"state":"stale", "retryable":true, "recorded":false,
+                "attemptKey":request.attempt_key, "readKey":request.read_key,
+                "unfinishedEvidence":unfinished,
+                "remedy":"The item's evidence changed after the captured cut, so this attempt cannot judge it. Finish and report this stale basis; the parent should request a fresh evaluation, which captures the current evidence."}));
+        }
         Ok(
             json!({"state":"unfinished", "recorded":false, "attemptKey":request.attempt_key,
             "readKey":request.read_key, "unfinishedEvidence":unfinished,
@@ -591,7 +628,7 @@ impl AppState {
     ) -> Result<Value, ApiError> {
         let result =
             self.read_acceptance_evidence_with_io_inner(child, request.clone(), read, now)?;
-        if result["state"] != "unfinished" {
+        if !matches!(result["state"].as_str(), Some("unfinished" | "stale")) {
             return Ok(result);
         }
         // The cache may hold this reply while its first persistence attempt is
@@ -695,6 +732,7 @@ impl AppState {
                 "the original evidence recovery state is unavailable; its allowance was not reset"
                     .to_owned(),
                 None,
+                false,
             );
         };
         // One attempt owns one serialized logical-read stream. Identical
@@ -755,6 +793,8 @@ impl AppState {
             ),
             Ok(target) => recovery.execute(&request, &target.connection, &read, &now),
         };
+        // Taken at once, so no early return below can leave it for a later read.
+        let stale_basis = recovery.stale_basis.take();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let current =
             self.acceptance_evidence_caller_locked(&inner, child, &request.attempt_key)?;
@@ -773,8 +813,9 @@ impl AppState {
                 &mut inner,
                 &authority,
                 &request,
-                error.message,
+                stale_basis.clone().unwrap_or(error.message),
                 Some(json!(recovery.manifest.window.read_cut)),
+                stale_basis.is_some(),
             )?,
         };
         recovery
