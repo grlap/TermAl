@@ -4,14 +4,17 @@
   "title": "Rust tests fail with 'Filename too long' and '$GIT_DIR too big' when the test temp root is deep (Windows path limits); about 166 tests on master c083c33",
   "outcome": "Rust tests fail with 'Filename too long' and '$GIT_DIR too big' when the test temp root is deep (Windows path limits); about 166 tests on master c083c33",
   "acceptance": [
-    "Rust tests fail with 'Filename too long' and '$GIT_DIR too big' when the test temp root is deep (Windows path limits); about 166 tests on master c083c33 is done"
+    "C1: Rust test fixture roots are named <prefix>-<16 lowercase hex> instead of a 36-char UUID. Each root is created exclusively, so a collision fails loudly. The owner marker and cleanup are unchanged. Path: src/test_temp_root.rs.",
+    "C2: on Windows, test_temp_dir fails ONCE, before any fixture, when the resolved product test directory exceeds budget B. One message names the directory, its length, B, and the remedy: set TERMAL_TEST_USER_TEMP shorter. Non-Windows is unchanged. B comes from a recorded measurement of the deepest GIT_DIR and file path in one Windows run of the Git-fixture modules, with at least 20 chars of margin under GIT_DIR 220 and path 260. The launcher default must fit. Path: src/test_temp_paths.rs.",
+    "C3: deterministic tests in src/tests/test_temp_paths.rs: (a) exactly B is accepted and B+1 is refused with C2's message; (b) a Windows fixture at the C1 name under a directory padded to B runs git init, add and commit at the measured deepest depth. No source scans, no timing.",
+    "C4: focused RED (test (a) on master) and GREEN on Windows, plus one docs/test.md sentence near TERMAL_TEST_USER_TEMP stating the budget. No new gate stage and no launcher change.",
+    "The usual review pair (/review-changes) has no outstanding in-scope finding of Medium or higher, and the full gate is green on the exact landed input."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "bug",
   "priority": 3,
   "labels": [
-    "acceptance-needed",
     "test-design"
   ],
   "assigned_to": null,

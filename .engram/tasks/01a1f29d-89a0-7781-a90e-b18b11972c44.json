@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The parent's compact termal_get_session_result packet now lists a completed or failed reviewer's terminal current attempt in retainedReviewAttempts without an explicit submissionAttempt read, or reports retainedReviewAttemptsError when discovery or publication fails, while the current result is still served. The packet path canonicalizes the parent id once at entry, and publishes through the same retention as the explicit attempt-only read only when that attempt is still unpublished, re-checked inside the owner guard so a racing read never causes a second version. Internal reads and unselected output pages publish nothing. Four review rounds' Mediums were fixed (R1 race, R2 untrimmed parent, R3 repeated padded read), each proven red then green on C7. Landed at master 5ca3701357cc9d073de4995d60242ed56d468565, pushed 2026-11-20T00:57:23Z: a clean review pair (Codex 728d3f1d, Claude c642fee4), and FULL test-fb60dbbc PASS with equal sourceIds on tree c467dd07. Installed as target/release/termal.exe, sha256 abb9ffb5d4876fd7630f93a493d66aba90d0af0fe36eb716c6b7a04cc6fef38d. Post-landing evaluation delegation-53c43f71 passed 3/3. Lows are filed as w-da527c9b1611 and w-9adda97d567c. All author and test refs are deleted.",
+    "completed_at": "2026-11-20T01:09:47.552508600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

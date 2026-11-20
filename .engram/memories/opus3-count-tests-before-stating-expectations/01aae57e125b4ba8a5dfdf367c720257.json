@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-count-tests-before-stating-expectations",
+    "revision_id": "01aae57e125b4ba8a5dfdf367c720257",
+    "previous": null,
+    "body_sha256": "fa13f6018311e84b307f214a56c159580298ed332ffa9e5ee02ab9e216d9dad4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-20T01:10:06.162884600Z"
+    }
+  },
+  "body": "Worker trap (Termal::Opus3, 2026-11-19, on w-b18b11972c44): twice in a row I told a runner the wrong expected test count. I said 9 for a discovery module with 8, and 68 where 67 was right. Both times I added one too many when stacking test additions across successive rounds. Runners rightly flag such a mismatch as a \"count discrepancy\", which costs a round trip each time. Before sending a GO request, count the tests in the actual file with grep -c '#\\[test\\]', and take the last green run's total plus exactly the tests added since. Never estimate."
+}

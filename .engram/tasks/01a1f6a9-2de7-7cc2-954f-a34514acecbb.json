@@ -1,0 +1,29 @@
+{
+  "id": "01a1f6a9-2de7-7cc2-954f-a34514acecbb",
+  "external_ref": null,
+  "title": "Append the direct Medium+ decision handoff sentence to the shared skill's step 7",
+  "outcome": "Step 7 of the shared .agents/skills/coder-test-execution/SKILL.md (the no-watcher wait rule) also says that after every review pair the review parent sends any open Medium-or-higher finding directly to the decision owner. The scheduler's slot END never counts as reporting a finding. The text is byte-identical with Engram's copy.",
+  "acceptance": [
+    "Step 7 of .agents/skills/coder-test-execution/SKILL.md has this text appended, verbatim: \"After every review pair, the review parent sends any open Medium or higher DIRECTLY to the decision owner, with the candidate, the finding and the requested ruling. The slot END to the scheduler stays a separate message and never counts as reporting a finding. The waker is the decision owner's direct ruling back to the review parent. No watcher and no new gate.\" No other change, and it is byte-identical with Engram's copy.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "docs",
+    "skills"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
