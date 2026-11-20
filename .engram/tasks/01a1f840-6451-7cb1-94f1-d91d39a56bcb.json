@@ -1,0 +1,27 @@
+{
+  "id": "01a1f840-6451-7cb1-94f1-d91d39a56bcb",
+  "external_ref": null,
+  "title": "Document the retryable stale result of termal_read_acceptance_evidence",
+  "outcome": "docs/features/engram-host-adapter.md (around line 2807) describes the evaluator evidence-recovery contract. It omits the new response state \"stale\", with retryable: true, recorded: false and unfinishedEvidence.staleBasis. Its replay paragraph lists only successful or unfinished responses.\n\nDocument that a stale result:\n- ends the attempt with no verdict;\n- replays unchanged under the same readKey;\n- makes the submission refusal name the stale basis;\n- calls for a fresh evaluation.\n\nThat way API consumers can handle the new state. Found by the Codex reviewer in round 2 of the stale-basis change (delegation-47f821c1-ff46-4ea3-84ec-6131601063e8); Low.",
+  "acceptance": [
+    "Document the retryable stale result of termal_read_acceptance_evidence is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

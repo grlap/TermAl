@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-test-filter-uses-mod-path-not-file-name",
+    "revision_id": "09317e0f13634cf197bd1656676277aa",
+    "previous": null,
+    "body_sha256": "e1c0cc3b3f21ceadeaf767c9923123352630746307181e497d1a0daa9d4a21a7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-20T08:56:25.442205800Z"
+    }
+  },
+  "body": "Rust test filters for `cargo test --bin termal <filter>` must use the module path, not the file name. Many files under src/tests/ are mounted with `#[path = \"file.rs\"] mod short_name;` inside a parent module. For example, src/tests/acceptance_evaluation_evidence_recovery.rs is tests::acceptance_evaluation::evidence_recovery (src/tests/acceptance_evaluation.rs:86), and acceptance_evaluation_evidence.rs is tests::acceptance_evaluation::evidence_selection.\n\nBefore naming a filter in a RED/GREEN request, grep the parent for the `#[path = \"<file>\"]` line, and make \"running 0 tests\" an explicit STOP. A wrong filter passes vacuously with exit 0. It cost one RED and one GREEN leg on DL560 for w-ff5fc754e13d (2026-11-20)."
+}

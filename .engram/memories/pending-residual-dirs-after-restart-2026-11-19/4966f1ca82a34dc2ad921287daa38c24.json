@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "pending-residual-dirs-after-restart-2026-11-19",
+    "revision_id": "4966f1ca82a34dc2ad921287daa38c24",
+    "previous": "0dea870b60de4e4ebebf32c12fcb9027",
+    "body_sha256": "81d8eecf450fc2a053115784885b57a64d81d566d95286acaf88222a7c58cf78",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-20T08:43:56.918887400Z"
+    }
+  },
+  "body": "Pending cleanup after the next TermAl restart (Fable2, 2026-11-19 ~20:30Z). Each entry is an EMPTY directory that a process still holds open, so a non-forced removal fails with \"being used by another process\". Leave it until a restart releases the handle, then remove it non-forced. Codex executes, per AGENTS.md \"Cleanup deletions\". No forced deletion without Greg's per-case word, and no process stops.\n- .tmp/wt-b912-9474: no Git registration and no reparse point. Likely held by finished evaluator children 18989, 18990 and 19053 (Opus3 #5636). Sol-a7bb's evidence is note 309130ff on w-f1559f4bd64c.\n- Also listed earlier by Opus2 (#6916): the empty freeze residuals docsb2 and b12, with an unknown holder.\nThe restart sweep removes these and records the result.\n\nAdded 2026-11-20 ~08:47Z (Sol-a7bb #3400): .tmp/9f88-measure. The non-forced Remove-Item failed partway on hidden, system or read-only Git metadata. The residual has a Hidden probe/x/.git, 13 files, 17,298,445 bytes (note dccbb2af on w-9f8823dd96fe). This one is NOT a handle hold: read-only Git objects need a forced form, which requires Greg's per-case authorization under AGENTS.md \"Cleanup deletions\". When several such residuals accumulate, ask Greg ONCE for a per-case forced-removal word listing each exact absolute path. Until then they stay; they are small and harmless."
+}

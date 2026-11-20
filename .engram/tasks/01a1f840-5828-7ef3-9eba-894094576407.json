@@ -1,0 +1,26 @@
+{
+  "id": "01a1f840-5828-7ef3-9eba-894094576407",
+  "external_ref": null,
+  "title": "Stale evidence-basis wording asserts a cause the classifier cannot observe",
+  "outcome": "TermAl classifies Engram's work_show_cursor_invalid during an evaluator evidence read as a retryable stale evidence basis (src/acceptance_evidence_recovery.rs). Its reason, tool description and remedy still say the item's evidence changed after the captured cut. Engram uses the same code for other cursor failures, including a read clock before the captured cut, so that diagnosis isn't established.\n\nDescribe the captured window as unusable for Engram's stated reason, keeping the retryable classification and the fresh-evaluation remedy. Also align:\n- the doc comment on acceptance_evidence_window_changed, which still says \"because a record was appended\";\n- the next-attempt notice lead-in (acceptance_unfinished_evidence_notice_locked, \"ended unfinished without an Engram verdict\"), so it names the stale basis.\n\nFound in review round 2 of the stale-basis change: Codex Low delegation-47f821c1-ff46-4ea3-84ec-6131601063e8, and Claude Notes delegation-1e261b92-0912-4c23-b84b-829ac90a7c46.",
+  "acceptance": [
+    "Stale evidence-basis wording asserts a cause the classifier cannot observe is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

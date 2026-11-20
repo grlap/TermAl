@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Windows Rust test fixtures no longer fail with \"Filename too long\" or \"$GIT_DIR too big\" on a deep temp root.\n- Fixture roots are named <prefix>-<16 hex> instead of a full UUID, which saves 20 chars, and are created exclusively.\n- On Windows, a fixture root in the default test directory, or in the checkout's .tmp/, is refused with one clear message when that directory is longer than 67 bytes in canonical spelling. The budget was measured from a Git setup trace of the whole bin: the deepest fixture GIT_DIR is 133 below the directory, under Git's 220 limit with a 20-char margin.\n- Tests (a), (b) and (c) cover the boundary, the deepest Git shape at the budget, and the single refusal. The docs give the effective TERMAL_TEST_USER_TEMP limits.\n\nEvidence:\n- Three review rounds, clean at round 3.\n- RED R2, GREEN G4 and S4.\n- The FULL on DL560 C6 (test-cfd64498) and the Windows whole bin (test-85638321).\n- Pre-landing and post-landing evaluations both passed.\n\nLanded as c4a26109 on master. The install was a no-op, with the binary identical, because the changes are test-only.",
+    "completed_at": "2026-11-20T08:41:09.902778900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

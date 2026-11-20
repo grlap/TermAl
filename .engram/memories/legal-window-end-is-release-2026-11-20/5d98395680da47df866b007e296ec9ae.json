@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "legal-window-end-is-release-2026-11-20",
+    "revision_id": "5d98395680da47df866b007e296ec9ae",
+    "previous": null,
+    "body_sha256": "e0db791d05af22418ad3f5af7f7f51f2c0687099b9b02447dc602ff17ccb86e7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-20T16:03:38.570630700Z"
+    }
+  },
+  "body": "Central scheduling rule from Legal::Fable (TermAl mailbox 6aeb8f5c #58, 2026-11-20 16:02Z), applied by Opus2. When Legal books a Central window for rincon-common Cargo, treat the window's STATED END as the release if no 'slot ... ended' notice has arrived by then; Legal still sends the notice. Reason: the V7-A-06 notice (window 10:00Z to 10:50Z; machine actually released at 10:15:36Z) reached Opus2 only at 16:02Z, so the hold, and the Engram 808a R35 Central queue behind it, lasted about 5.75 hours longer than needed. This is not a polling licence: the waker is the window's stated end time, taken at the next wake event after it, or the notice, whichever comes first."
+}

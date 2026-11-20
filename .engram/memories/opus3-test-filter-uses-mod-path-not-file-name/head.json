@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-test-filter-uses-mod-path-not-file-name",
+  "head": {
+    "state": "active",
+    "chain": [
+      "09317e0f13634cf197bd1656676277aa"
+    ]
+  }
+}
