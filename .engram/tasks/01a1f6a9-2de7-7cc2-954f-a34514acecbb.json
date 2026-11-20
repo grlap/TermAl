@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed 285bc8999f965ca35ca085ea121f2a125c42752a on origin/master. The sole step 7 append is verbatim and its 881-byte shared line matches Engram's frozen digest. The independent review pair had no Medium-or-higher finding. DL560 A345-FULL-1 test-ca70b6ec-b0e2-4623-ac97-e82fcc8ca323 passed on the exact landed tree 9888ed718b4b8903941eb2264c31c96425880b61. Independent post-landing evaluation 6d95e5e724cd4e94a6da25a61be58bcc is current and passed both criteria.",
+    "completed_at": "2026-11-20T03:12:43.520001800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
