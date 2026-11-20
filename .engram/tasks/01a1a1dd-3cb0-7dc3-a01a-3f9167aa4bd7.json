@@ -17,12 +17,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a17a6d-ae67-7801-8888-eb1e3a594349",
+  "disposal_reason": "Duplicate. w-eb1e3a594349 (Sol-d50d) documents that native relay and central-domain mailboxes do not accept noContinuation, and what to do instead, in the host guidance and the termal_acknowledge_mailbox description. This item had only placeholder acceptance.",
   "completion": null
 }

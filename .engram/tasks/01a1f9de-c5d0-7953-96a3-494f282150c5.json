@@ -1,0 +1,31 @@
+{
+  "id": "01a1f9de-c5d0-7953-96a3-494f282150c5",
+  "external_ref": null,
+  "title": "Preserve Human Resume diagnostics and callbacks around disconnected persistence",
+  "outcome": "When persistence disconnects around automatic Human Resume, live clients see the delivered queue state, deferred Windows Stop callbacks still settle, and an already paused intake displays its persistence timeout when it owns the unchanged queue. Observable tests cover the remaining automatic selection and Fast delivery races.",
+  "acceptance": [
+    "After the promotion ACK, a successful direct or Fast provider handoff exposes the actual unpaused live queue to an already connected client when the state writer disconnects, without a synchronous fallback or weaker persisted handoff protection.",
+    "An intake deadline in an already paused session is visible when it owns the unchanged queue and does not start an automatic Resume or overwrite a newer owner. In the Windows runtime-reset failure path, writer disconnect does not suppress existing deferred Stop callback replay or exit handling.",
+    "Deterministic tests drive the same-ID head edit and a newer owner before retry, pre-paused intake and the disconnected direct/Fast delivery paths through real behavior. The later unrelated append remains compatible."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "persistence",
+    "prompt-queue",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1f14c-3214-74b2-ba2b-8846f09ecf90",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

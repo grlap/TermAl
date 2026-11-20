@@ -1,0 +1,27 @@
+{
+  "id": "01a1f9c1-4278-7632-9560-db441896eafd",
+  "external_ref": null,
+  "title": "Bound the shared step-7 \"fixes in-scope, undisputed findings at once\" clause to Medium or higher",
+  "outcome": "Step 7 of .agents/skills/coder-test-execution/SKILL.md now says \"an implementing parent fixes in-scope, undisputed findings at once\". It has no severity bound, so a literal reader can take every in-scope Low and Note as mandatory immediately. CLAUDE.md's standing rule makes Low and Note fixes optional, with an unfixed Low filed as its own item, and that section governs where they conflict, so the effective rule is unchanged.\n\nDecide jointly with Engram's coordinator whether to scope the clause, for example to \"in-scope, undisputed Medium-or-higher findings\", or to add that Lows and Notes follow the project's own rule. The text must stay byte-identical with Engram's copy, so any change goes through both coordinators.\n\nFound by the Claude reviewer (delegation-3d514db5-9df2-437d-ba46-335f6454b9db) in the review of the joint step-7 wording; Low.",
+  "acceptance": [
+    "Bound the shared step-7 \"fixes in-scope, undisputed findings at once\" clause to Medium or higher is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "cross-project",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

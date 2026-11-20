@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "An acceptance evaluator no longer ends with a bare \"no verdict\" when its captured Engram notes cursor is invalidated mid-run.\n\nCause:\n- Engram refuses a show-window continuation with work_show_cursor_invalid once a record is appended after the cut (record_windows.rs:156).\n- TermAl mapped every read error to a terminal unfinished read that refused every later submission.\n\nFix (src/acceptance_evidence_recovery.rs, acceptance_evaluation.rs, acceptance_evaluation_api.rs):\n- That refusal, identified by its structured code from the CLI or a control reply, is now a retryable stale evidence basis.\n- The read returns state \"stale\" with Engram's reason. No verdict is accepted from that attempt.\n- The submission refusal and the fan-in line name the stale basis, and the current attempt's disposition comes before an earlier retired write.\n- Other read errors keep their existing handling.\n\nEvidence:\n- Two behavioural tests with injected time.\n- RED-2 and RED-3 failed on twins, as expected. GREEN-3 passed 23/23, and fmt passed.\n- The FULL gate on DL560 C6 passed (test-a78d3a71).\n- The review pair was clean after round 2.\n- The pre-landing and post-landing evaluations passed.\n\nThe Engram twin is w-5bf9985acf09. Follow-ups: w-894094576407 (wording) and w-d91d39a56bcb (docs). Landed as a6ce484e; the install is pending until after Legal's window.",
+    "completed_at": "2026-11-20T16:12:38.230166400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

@@ -18,12 +18,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a17a6d-ae67-7801-8888-eb1e3a594349",
+  "disposal_reason": "Duplicate. w-eb1e3a594349 (Sol-d50d) fixes the same guidance and tool-description mismatch for relay and central-domain noContinuation, documenting the local-only capability across the injected guidance, MCP description, CLI help and feature docs. This item's criterion requiring a guidance-text pin test is now forbidden by the source-text test rule (w-a33083c689da). Behaviour is tested instead.",
   "completion": null
 }

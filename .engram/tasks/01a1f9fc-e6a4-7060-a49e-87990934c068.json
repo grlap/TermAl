@@ -1,0 +1,28 @@
+{
+  "id": "01a1f9fc-e6a4-7060-a49e-87990934c068",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance refuses a freeze note's evidence id as 'record does not belong to this task'",
+  "outcome": "An evaluation request that names, as criterion evidence, a note recorded on the same work item is either accepted, or refused with a reason that tells the caller which kinds of record the selector accepts; the refusal never names a record of the item as foreign.",
+  "acceptance": [
+    "termal_evaluate_acceptance refuses a freeze note's evidence id as 'record does not belong to this task' is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "evidence-selector"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

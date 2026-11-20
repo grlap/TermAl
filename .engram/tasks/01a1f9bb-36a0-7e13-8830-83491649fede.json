@@ -1,0 +1,29 @@
+{
+  "id": "01a1f9bb-36a0-7e13-8830-83491649fede",
+  "external_ref": null,
+  "title": "Replace the shared skill's step-7 handoff sentence with the joint wording that defers to review-changes §7",
+  "outcome": "The handoff sentence that w-a34514acecbb added to step 7 of .agents/skills/coder-test-execution/SKILL.md is replaced by the joint wording. An implementing parent fixes in-scope, undisputed findings at once (review-changes §7). Only a Medium or higher that is disputed, out of scope or needs a decision goes directly to the decision owner. The text is byte-identical with Engram's copy.",
+  "acceptance": [
+    "In step 7 of .agents/skills/coder-test-execution/SKILL.md, the sentence beginning \"After every review pair, the review parent sends any open Medium or higher DIRECTLY to the decision owner\" (through \"No watcher and no new gate.\") is replaced verbatim by: \"After every review pair, an implementing parent fixes in-scope, undisputed findings at once. Any open Medium or higher that it does not fix, because it is disputed, out of scope or needs a decision, the review parent sends DIRECTLY to the decision owner, with the candidate, the finding and the requested ruling; that ruling back to the review parent is its waker. The slot END to the scheduler stays a separate message and never counts as reporting a finding. No watcher and no new gate.\" (488 bytes UTF-8, sha256 e1a18a51920faaafc2ada6c3db1ee228b82515f18108a7948f27ac8758473d69). No other change, and it is byte-identical with Engram's copy.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "docs",
+    "skills"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

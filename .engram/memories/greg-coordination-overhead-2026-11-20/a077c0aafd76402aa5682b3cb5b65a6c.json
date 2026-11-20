@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-coordination-overhead-2026-11-20",
+    "revision_id": "a077c0aafd76402aa5682b3cb5b65a6c",
+    "previous": null,
+    "body_sha256": "2a1ab0ea933a86e910114c5e3d56bc2b27ab8fa62e723c14e89f2bc771817587",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-20T17:23:43.495809400Z"
+    }
+  },
+  "body": "Signal from Greg (2026-11-20 17:22Z, his direct word to Legal::Fable, relayed by Opus2 #6973), verbatim: „jedz teraz, bo ta synchronizacja nie ma sensu / oni za duza chca”. He told Legal to run its Central slot immediately instead of waiting behind the TermAl/Engram sequencing, finding our cross-project slot synchronization excessive. Lesson for coordinators: keep Central sequencing minimal. Don't hold other projects behind multi-step chains, avoid back-and-forth that crosses (the restart timing crossed three times that afternoon), and prefer simple rules over negotiated sequences."
+}
