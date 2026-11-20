@@ -1,0 +1,29 @@
+{
+  "id": "01a1f5e5-ea66-7e92-8909-1e247077522a",
+  "external_ref": null,
+  "title": "Document the UI test files covered by full-gate category accounting",
+  "outcome": "Describe the existing full-gate UI category accounting boundary as regular *.test.ts and *.test.tsx files under ui/src. Leave discovery, Vitest projects and gate behavior unchanged.",
+  "acceptance": [
+    "The UI test categories section of docs/test.md states the applicable directory and file patterns for file ownership accounting.",
+    "No test-discovery behavior or static gate changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "greg-directed",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1f54b-355e-7d61-820b-1aadc539c9e8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

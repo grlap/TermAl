@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The shared coder-test-execution skill (step 2) and TermAl's testing review lens (.claude/reviewers/testing.md) now carry the agreed rule: test behaviour by running the code, never by asserting on the text or shape of the code; source_id is exempt. The step-2 bytes are identical to Engram's copy (commit 7db75fa1). AGENTS.md and CLAUDE.md are unchanged. Landed at master 9c8ff098761fc003b1dff8812413d55855c91e38, pushed 2026-11-19T22:12:06Z: a clean review pair, and FULL test-11edcfbb PASS with equal sourceIds on tree acb678f3. Post-landing evaluation delegation-ac6d9439 passed 3/3. Lows are filed as w-39aa40ffc7d3. All author and test refs are deleted.",
+    "completed_at": "2026-11-19T22:14:12.178769800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

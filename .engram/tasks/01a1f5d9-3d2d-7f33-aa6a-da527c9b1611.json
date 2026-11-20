@@ -1,11 +1,14 @@
 {
   "id": "01a1f5d9-3d2d-7f33-aa6a-da527c9b1611",
   "external_ref": null,
-  "title": "Packet retention of a terminal review attempt is retried on every poll when it keeps failing",
-  "outcome": "When the parent's compact termal_get_session_result packet publishes a completed or failed reviewer's unconfirmed terminal attempt (the w-b18b11972c44 path) and that retention keeps failing (for example a capture error), repeated packet reads from waits or UI polling don't repeat a full retention attempt every time. The failure stays reported in retainedReviewAttemptsError, with a bounded retry policy.",
+  "title": "Parent-packet review retention: follow-up Lows (polling retries, untrimmed explicit-read parent, races, HEAD, gate boundaries)",
+  "outcome": "The follow-up Lows from w-b18b11972c44's review rounds are resolved or explicitly ruled. (e) A terminal reviewer whose retention keeps failing is not fully retried on every packet poll. (1) The explicit attempt-only read (resolve_review_selection) passes the canonical parent id to retention, so a whitespace-padded parent cannot write custody that canonical reads reject; this is the pre-existing twin of the packet-path fix. (2) A follow-up confirming between the packet's discovery and its terminal check no longer serves an old snapshot without its locator or makes a retry 409. (3) A HEAD request to the result endpoint publishes nothing, since axum dispatches HEAD to the GET handler. (4) The terminal-gate boundaries (a Failed attempt, a non-current attempt, storage disabled) have behavioural tests.",
   "acceptance": [
-    "Repeated parent packet reads of a terminal reviewer whose retention fails persistently do not run a full retention or capture on every read; the retry policy is bounded and documented, and retainedReviewAttemptsError still reports the failure each time.",
-    "A behavioural test shows the bounded retry with deterministic counts, not timing.",
+    "Repeated parent packet reads of a terminal reviewer whose retention fails persistently do not run a full retention or capture on every read; the retry policy is bounded and documented, and retainedReviewAttemptsError still reports the failure. Shown by a behavioural test with deterministic counts, not timing.",
+    "An explicit attempt-only read with a whitespace-padded parent id writes custody only under the canonical parent; a later canonical read and follow-up retention succeed. Shown by a behavioural test.",
+    "A follow-up that confirms between the packet's discovery and its terminal check yields a packet that lists the confirmed identity or reports a clear error, never an unlocatable old snapshot, and a retry does not 409. Shown by a deterministic interleaving test.",
+    "A HEAD request to the delegation result endpoint makes no custody write. Shown by a behavioural test.",
+    "The packet path's terminal gate is covered by behavioural tests for a Failed attempt, a non-current attempt and storage disabled.",
     "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
   ],
   "acceptance_bindings": [],

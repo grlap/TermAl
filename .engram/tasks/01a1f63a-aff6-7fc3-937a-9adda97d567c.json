@@ -1,0 +1,29 @@
+{
+  "id": "01a1f63a-aff6-7fc3-937a-9adda97d567c",
+  "external_ref": null,
+  "title": "Review packet publication: bound owner-guard wait and cover the remaining no-publication and terminal-branch cases",
+  "outcome": "The compact packet's optional terminal publication no longer delays or times out the current result when the store-wide retention owner guard is contended, and the remaining no-publication and terminal-branch cases have behavioural tests.",
+  "acceptance": [
+    "Optional packet publication does not block serving the current result on a contended owner guard; contention is reported through retainedReviewAttemptsError",
+    "A behavioural test shows an unselected output page requested before the first compact packet publishes no identity and writes no custody",
+    "Behavioural tests cover the guarded terminal-status or superseded branch, a Failed reviewer packet publishing, a Canceled reviewer packet not publishing, and no custody write on the corrupt-custody packet read"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
