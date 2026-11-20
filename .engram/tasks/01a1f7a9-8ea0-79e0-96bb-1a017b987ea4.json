@@ -1,0 +1,27 @@
+{
+  "id": "01a1f7a9-8ea0-79e0-96bb-1a017b987ea4",
+  "external_ref": null,
+  "title": "Windows fixture directory check silently measures the raw spelling when canonicalization fails",
+  "outcome": "windows_fixture_directory_check in src/test_temp_paths.rs canonicalizes the directory before applying the 67-byte budget. When canonicalize fails, it falls back to the original spelling, so a short alias can pass unmeasured and a later fixture operation fails without the placement diagnostic. Both callers now create the directory first, so a canonicalization failure should instead return a diagnostic naming the directory and the OS error. Found by the Codex reviewer in round 3 (delegation-8cbb4084-c485-4e69-b2e2-1a8d1b905fb9) of the review that landed the fixture budget; Low.",
+  "acceptance": [
+    "Windows fixture directory check silently measures the raw spelling when canonicalization fails is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "test-design",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

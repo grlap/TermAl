@@ -1,0 +1,29 @@
+{
+  "id": "01a1f81a-c543-7f73-beb7-ff5fc754e13d",
+  "external_ref": null,
+  "title": "Acceptance evaluator ends with no verdict when its captured evidence cursor expires mid-run",
+  "outcome": "An acceptance evaluation started through termal_evaluate_acceptance either reads its captured evidence basis for the whole run, or ends with a concrete, retryable stale-basis result naming what changed. It never ends with no verdict because a captured evidence cursor expired, for example when a new note lands on the item mid-run.",
+  "acceptance": [
+    "The cause is identified with file and line: which cursor expires (a TermAl-held or an Engram continuation), what lifetime or invalidation ends it, and why the evaluator then produces no verdict. If the cursor's lifetime is Engram's, an Engram item is filed and cross-referenced.",
+    "A behavioural test drives an evaluation whose evidence cursor expires or is invalidated mid-run, for example by a note appended to the item, and shows a concrete retryable stale-basis result with its reason, or a completed verdict on the captured basis, never a no-verdict end. It fails before the fix. Time is injected, with no wall clock.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

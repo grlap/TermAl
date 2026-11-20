@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Removed the inventoried repository-source text and shape tests while preserving fixture, runtime, rendered and compiler assertions. The 19-path cleanup landed in 832e65e6. The first post-landing evaluation found a missed checked-in workflow-text test; the deletion-only 0bda522c correction landed on master with a clean independent review pair and verified exact-tree DL560 FULL test-bc889b22. Fresh independent post-landing evaluation 21645a3e550f454182cfb859d74a2f4b passed all three criteria on clean 0bda522c/4bb2530e. Exact registered planner check passed 15/15. No replacement static gate, product logic change, or R3 install.",
+    "completed_at": "2026-11-20T06:12:40.233835800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
