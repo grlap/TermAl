@@ -1,0 +1,27 @@
+{
+  "id": "01a1fa01-2293-7230-adae-19d15da254a8",
+  "external_ref": null,
+  "title": "Parent packet: a follow-up confirming between discovery and the terminal check can serve an old snapshot or make a retry 409",
+  "outcome": "In the parent's compact delegation result packet, publish_terminal_review_for_packet (src/delegation_review_attempts.rs) runs discovery, then a terminal check, then retention.\n\nIf a follow-up turn confirms a new review publication between discovery and the terminal check, the packet can list an old snapshot without its locator, and an immediate retry can return 409. The packet should either list the confirmed identity or report a clear error, and a retry should not 409. Show it with a deterministic interleaving test using the existing test hooks, not timing.\n\nSplit from w-da527c9b1611 by Fable2's ruling (03723eab #5690). It was a Low from w-b18b11972c44's review rounds.",
+  "acceptance": [
+    "Parent packet: a follow-up confirming between discovery and the terminal check can serve an old snapshot or make a retry 409 is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-attempt-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1faa9-8256-7392-9721-a19ee11b9c4d",
+  "external_ref": null,
+  "title": "A named source root keeps a stale claim fence after the claim lapses and is reclaimed, so the next launcher run is refused only at launch",
+  "outcome": "When a session's claim lapses and is reclaimed, the session learns that its named source root must be named again before it next runs the launcher (for example, the reclaim or a read of the root's status says so), so a queued launch is not spent on a run that the host refuses at its first step.",
+  "acceptance": [
+    "A named source root keeps a stale claim fence after the claim lapses and is reclaimed, so the next launcher run is refused only at launch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "claim-fence",
+    "named-root",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1fa21-bdd2-74f2-97ab-6187e8a3b712",
+  "external_ref": null,
+  "title": "Packet retention: admit one capture per (delegation, attempt, identity) under overlapping parent packet reads",
+  "outcome": "Overlapping parent packet reads of a terminal reviewer run at most one failing capture per record identity, not one each.",
+  "acceptance": [
+    "When two parent packet reads overlap on the same terminal attempt and record identity, at most one runs a capture; the other makes no custody write and serves either nothing new or the shared outcome. Shown by a deterministic overlap test, using a hook between the packet's discovery check and the owner guard, not timing.",
+    "No lock is held across capture I/O, and an abandoned or panicking capture cannot block later retries."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "delegations",
+    "review-attempt-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

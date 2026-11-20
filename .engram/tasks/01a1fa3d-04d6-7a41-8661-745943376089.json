@@ -1,0 +1,32 @@
+{
+  "id": "01a1fa3d-04d6-7a41-8661-745943376089",
+  "external_ref": null,
+  "title": "Git status panel: show an expanded submodule's changed files as a folder tree, like ordinary folders",
+  "outcome": "In the Git status panel, the changed files listed under an expanded submodule row (the groups added for the submodule view: files changed by the pointer move, local modified or staged files, and untracked files inside the submodule) render as an expandable tree of folders and files, the same way ordinary folders and files render in Git status, instead of a long flat list of full paths. Greg's words, 2026-11-20, relayed by Engram::Asistant in TermAl mailbox 588693a8 #2132: 'mozna by prosic jeszcze o liste folderow i plikow ? tak jak normalne foldery ALE fajne! jestesmy blisko!!'",
+  "acceptance": [
+    "Under an expanded submodule row, each labelled group of changed files renders as a tree: folders as expandable and collapsible folder rows, nested by path, with files under their folders. It uses the same row look and expand behaviour as ordinary folders in the Git status panel, not a flat list of full paths.",
+    "Every folder and file row inside the submodule stays on a single line: a name that does not fit is cut with an ellipsis (…), as in the ordinary Git status view, and never wraps over several lines. Greg, 2026-11-20, relayed in TermAl mailbox 588693a8 #2133: 'prosba aby byla jedna linia, standardowo ... jak sie nie miesci'.",
+    "Each inner file keeps its group, status and existing read-only behaviour, and the existing explanation shown when a list cannot be produced is unchanged. Ordinary files and folders, and the submodule row's own actions (stage, unstage, submodule diff), behave exactly as before.",
+    "Behavioural vitest tests render a submodule with nested inner paths in at least two groups and check the folder rows, nesting, and expand and collapse. `cd ui && npx tsc --noEmit` is clean.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "git",
+    "greg-requested",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

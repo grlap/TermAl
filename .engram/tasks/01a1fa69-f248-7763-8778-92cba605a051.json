@@ -1,0 +1,28 @@
+{
+  "id": "01a1fa69-f248-7763-8778-92cba605a051",
+  "external_ref": null,
+  "title": "State the HTTP 400 for noContinuation on central-domain mailbox acknowledgements",
+  "outcome": "The central-domain acknowledgement documentation explicitly says that the flag is rejected with HTTP 400 and directs callers to acknowledge the same receipt without the flag, preserving the owed continuation.",
+  "acceptance": [
+    "The central-domain mailbox feature documentation names the HTTP 400 refusal and the unchanged-receipt fallback, consistent with the implemented acknowledgement route.",
+    "The existing central-domain focused behavior check still proves refusal without cursor advancement followed by a successful plain receipt ACK."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a17a6d-ae67-7801-8888-eb1e3a594349",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

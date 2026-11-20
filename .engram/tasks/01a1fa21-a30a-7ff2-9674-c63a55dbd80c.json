@@ -1,0 +1,28 @@
+{
+  "id": "01a1fa21-a30a-7ff2-9674-c63a55dbd80c",
+  "external_ref": null,
+  "title": "Packet retention-failure memory: record identity is coarse (second-resolution completed_at, no result content)",
+  "outcome": "The parent packet's remembered retention failure is retried whenever the delegation record changes in a way that could let a retry succeed, not only when its status, completion time or current attempt changes.",
+  "acceptance": [
+    "The record identity that keys a remembered packet retention failure changes on every delegation record mutation that can change the captured terminal cut, including a result content change without a status change, or the remembered failure is otherwise retried after such a change. Shown by a behavioural test that changes only the result content and observes exactly one retry.",
+    "The bound remains: an unchanged record is not retried on every poll."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-attempt-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

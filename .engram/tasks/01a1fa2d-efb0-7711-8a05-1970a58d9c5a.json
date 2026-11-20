@@ -1,0 +1,29 @@
+{
+  "id": "01a1fa2d-efb0-7711-8a05-1970a58d9c5a",
+  "external_ref": null,
+  "title": "Packet retention-failure memory: test the removal hooks with an existing entry; refresh the publish doc comment",
+  "outcome": "The delegation-removal and parent-session-removal cleanup of remembered packet retention failures is covered by tests that fail without it, and the publish_terminal_review_for_packet doc comment states the remembered-failure contract.",
+  "acceptance": [
+    "A behavioural test remembers a packet retention failure (map holds one entry), then removes the delegation, and asserts the entry is gone; a second case removes the parent session instead. Each test fails if the matching retain call in record_removed_delegation or record_removed_session is removed.",
+    "The publish_terminal_review_for_packet doc comment describes the lock scope (lookup, pruning and write-back under the state lock, never across capture I/O) and that a failure is served without a new capture until the record identity changes; the disabled-storage test notes that its gate is test-only."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-attempt-retention",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

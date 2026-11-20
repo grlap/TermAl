@@ -1,0 +1,28 @@
+{
+  "id": "01a1fa29-82d5-7190-8a59-ff2c84b96de1",
+  "external_ref": null,
+  "title": "MCP termal_acknowledge_mailbox returns 404 'mailbox not found' where the CLI acknowledge of the same mailbox succeeds",
+  "outcome": "Acknowledging a mailbox the caller can read gives the same result through the MCP tool and the CLI: both succeed for the same mailbox id and receipt, or both refuse with the same reason.",
+  "acceptance": [
+    "MCP termal_acknowledge_mailbox returns 404 'mailbox not found' where the CLI acknowledge of the same mailbox succeeds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cli-parity",
+    "mailbox",
+    "mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

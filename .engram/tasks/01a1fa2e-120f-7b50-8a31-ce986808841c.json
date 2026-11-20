@@ -1,0 +1,28 @@
+{
+  "id": "01a1fa2e-120f-7b50-8a31-ce986808841c",
+  "external_ref": null,
+  "title": "Packet retention-failure map: prune on discovery error, and index per delegation instead of scanning host-wide",
+  "outcome": "Remembered packet retention failures are pruned against the live record even when retained-history discovery fails, and packet pruning touches only the requested delegation's entries.",
+  "acceptance": [
+    "A packet visit whose retained-history discovery fails still drops that delegation's obsolete remembered failures (another attempt or a changed identity), while publication stays gated on successful discovery. Shown by a behavioural test.",
+    "The map is indexed by (canonical parent, delegation), with the attempt stored in the entry, so pruning does not scan unrelated delegations' entries."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "delegations",
+    "review-attempt-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1fa2e-00df-7df3-8a65-8023b949cff4",
+  "external_ref": null,
+  "title": "Packet retention-failure memory remembers transient storage errors and serves them unmarked",
+  "outcome": "A transient storage or I/O failure in the parent packet's terminal-attempt publication does not hide the attempt until the record changes, or the served error says it is remembered and how to retry.",
+  "acceptance": [
+    "Either only deterministic publication failures (terminal cut changed, corrupt custody) are remembered and a transient storage error is retried on the next packet read, or a served remembered error is marked as remembered and names the explicit attempt-only read as the retry path. Shown by a behavioural test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "review-attempt-retention"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

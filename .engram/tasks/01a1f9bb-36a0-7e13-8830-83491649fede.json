@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Step 7 of .agents/skills/coder-test-execution/SKILL.md now carries the joint TermAl/Engram wording.\n- An implementing parent fixes in-scope, undisputed findings at once. Only a Medium or higher that it does not fix, because it is disputed, out of scope or needs a decision, goes directly to the decision owner, whose ruling is the review parent's waker.\n- The \"(review-changes §7)\" citation was dropped by coordinator agreement, because it pointed to a different rule in TermAl.\n- The sentence is 488 bytes, sha256 e1a18a51…, byte-identical with Engram's frozen copy (a6b83faa), which 11323 confirmed from both blobs.\n\nEvidence:\n- The review pair was clean. Claude's Low is filed as w-db441896eafd.\n- Fable2 ruled that this is not authority text.\n- The FULL test-5d9683f6 on DL560 C7 passed.\n- The pre-landing and post-landing evaluations passed.\n\nLanded as 61bb80ec. The change is docs-only, so the binary is unchanged.",
+    "completed_at": "2026-11-20T17:27:28.649528500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }
