@@ -316,13 +316,14 @@ authoritative list remains available through `termal_list_mailboxes`.
 The additional injected host guidance is:
 
 ```text
-ACK alone never suppresses a queued continuation. The host may cover it with an exact read and receipt ACK in the same later active turn, through its boundary, when nothing is unread. Set noContinuation (CLI --no-continuation) on a receipt acknowledgement only when you have fully handled every message through that receipt, sent every reply they need, and owe no work in a later turn. Never set it when you promised a follow-up, are waiting for a delegation, evaluator or gate result that will not arrive as mail, or have not read the whole page. It covers only that mailbox and receipt boundary; a later message, including a reply you await, re-arms the wake. Numeric ACK cannot carry it.
+ACK alone never suppresses a queued continuation. For standalone local mailboxes, the host may cover it with an exact read and receipt ACK in the same later active turn, through its boundary, when nothing is unread. Set noContinuation (CLI --no-continuation) on a standalone local receipt acknowledgement only when you have fully handled every message through that receipt, sent every reply they need, and owe no work in a later turn. Never set it when you promised a follow-up, are waiting for a delegation, evaluator or gate result that will not arrive as mail, or have not read the whole page. It covers only that mailbox and receipt boundary; a later message, including a reply you await, re-arms the wake. Numeric ACK cannot carry it. For native relay and central-domain mailboxes, ACK the unchanged receipt without the flag and keep the owed continuation.
 ```
 
 ### Coverage of an accepted continuation
 
-ACK alone never suppresses an accepted wake. Two independent proofs can cover
-its exact mailbox boundary before turn-end checkpoint selection:
+ACK alone never suppresses an accepted wake. For standalone local mailboxes,
+two independent proofs can cover its exact boundary before turn-end checkpoint
+selection:
 
 - A page is read and that exact receipt is acknowledged in the same active
   runtime turn, whose generation is later than acceptance or the last boundary
@@ -708,9 +709,9 @@ caller can safely replay them. WAL still permits concurrent readers.
 External-process or OS-level lock exhaustion uses the same retryable
 classification instead of an internal-error `500`.
 
-Coverage applies to standalone local mailboxes. Central-domain and native relay mailboxes retain
-their receipt-only protocol and owed wakes; `noContinuation: true` is refused
-there, rather than silently accepted without a matching local runtime proof.
+Coverage applies to standalone local mailboxes. For native relay and central-domain
+mailboxes, acknowledge the unchanged receipt without `noContinuation` and keep
+the owed continuation. Those paths lack matching local runtime proof.
 
 Before either coordination store or the HTTP listener is available, TermAl
 initializes an empty `coordination.sqlite` with the current schema, atomically

@@ -36,11 +36,14 @@ const COORDINATION_CLI_USAGE: &str = "usage:
                       [--json] [--base-url <url>]
   Legacy acknowledge accepts --expected <cursor> --through <last> instead
   of --receipt; every newly acknowledged visible message must have been issued.
-  ACK alone never suppresses a wake. A same-later-turn read and receipt ACK
-  through its boundary can cover it when nothing is unread. --no-continuation
-  explicitly declares no later-turn work is owed for that receipt's mailbox
-  boundary; use only after processing all bodies and sending required replies.
-  Later messages re-arm the wake. Numeric ACK cannot carry this declaration.
+  ACK alone never suppresses a wake. For standalone local mailboxes, a
+  same-later-turn read and receipt ACK through its boundary can cover it when
+  nothing is unread. --no-continuation declares that no later-turn work is owed
+  for that local receipt's mailbox boundary. Use it only after processing all
+  bodies and sending required replies. Later messages re-arm the wake. Numeric
+  ACK cannot carry this declaration.
+  For native relay and central-domain mailboxes, ACK the unchanged receipt
+  without --no-continuation and keep the owed continuation.
 
 Flags accept `--flag value` and `--flag=value`. `--as-session` is the root
 session the command acts as and defaults to TERMAL_SESSION_ID; delegation-child

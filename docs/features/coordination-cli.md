@@ -106,8 +106,9 @@ with numeric ACK. Successful declarations are durably audited, but process-local
 coverage proof does not survive restart. Retained work, Stop, durability holds
 and paused queues stay protected. See [mailbox coverage](agent-mailboxes.md#coverage-of-an-accepted-continuation).
 
-Coverage is local to standalone mailboxes. Central-domain mailboxes reject
-`--no-continuation`; their normal receipt acknowledgement keeps the owed wake.
+Coverage applies to standalone local mailboxes. For native relay and central-domain
+mailboxes, acknowledge the unchanged receipt without `--no-continuation` and keep
+the owed continuation.
 
 - `mailbox send` requires `--idempotency-key`. Re-running the identical
   command returns the original receipt with `duplicate: true`; the backend
