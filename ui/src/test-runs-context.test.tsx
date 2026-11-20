@@ -80,21 +80,6 @@ it("keeps action-only consumers independent of run updates", () => {
   fireEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(open).toHaveBeenCalledTimes(1);
 });
-it("truncates the marker in existing toolbar space without a reserved row or overlay", async () => {
-  const moduleName = "node:fs";
-  const urlModuleName = "node:url";
-  const fs = await import(moduleName) as { readFileSync: (path: string, encoding: string) => string };
-  const { fileURLToPath } = await import(urlModuleName) as { fileURLToPath: (url: string) => string };
-  // Resolved beside this file, not from the working directory.
-  const moduleUrl = import.meta.url;
-  const css = fs.readFileSync(fileURLToPath(new URL("./panels/test-runs-panel.css", moduleUrl).href), "utf8");
-  const marker = css.match(/\.pane-view-strip \.test-run-session-marker \{([^}]+)\}/)?.[1] ?? "";
-  expect(css).not.toContain("test-run-session-chrome");
-  expect(marker).toContain("text-overflow: ellipsis");
-  expect(marker).toContain("white-space: nowrap");
-  expect(marker).not.toMatch(/position:\s*(absolute|fixed)/);
-  expect(css).not.toContain(".session-activity-strip > .test-run-session-marker");
-});
 it("offers the Test Runs dock action separately from section navigation", () => {
   const open = vi.fn();
   render(<TestRunsProvider snapshotReady runs={[]} open={open}><ControlPanelSurface

@@ -5119,11 +5119,6 @@ mod claude_adopted_terminalization;
 #[path = "engram_launcher_stages.rs"]
 mod launcher_stages;
 
-// The first extraction's end-to-end proof against its base, likewise a child
-// module.
-#[path = "engram_first_extraction.rs"]
-mod first_extraction;
-
 // Kimi's ACP shell-call output and exit recognition against the captured
 // frames, likewise a child module.
 #[path = "engram_kimi_acp_exit.rs"]

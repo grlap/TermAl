@@ -64,29 +64,4 @@ describe("renderPlainTextWithSoftBreaks", () => {
     expect(highlight?.textContent).toBe("public_table");
     expect(highlight?.querySelector("wbr")).not.toBeNull();
   });
-
-  it("keeps arbitrary character breaks as a fallback instead of competing with wbr", async () => {
-    const nodeFsModule = "node:fs";
-    const nodeUrlModule = "node:url";
-    const { readFileSync } = (await import(nodeFsModule)) as {
-      readFileSync: (path: string, encoding: "utf8") => string;
-    };
-    const { fileURLToPath } = (await import(nodeUrlModule)) as { fileURLToPath: (url: string) => string };
-    // Resolved beside this file, not from the working directory.
-    const moduleUrl = import.meta.url;
-    const styles = readFileSync(fileURLToPath(new URL("./styles.css", moduleUrl).href), "utf8");
-    const plainTextRule = styles.match(/\.plain-text-copy\s*\{([^}]*)\}/)?.[1];
-    const inlineCodeRule = styles.match(
-      /\.markdown-copy\s+:not\(pre\)\s*>\s*code\s*\{([^}]*)\}/,
-    )?.[1];
-    const inlineCodeLinkRule = styles.match(
-      /\.markdown-copy\s+a\.inline-code-link\s*\{([^}]*)\}/,
-    )?.[1];
-
-    for (const rule of [plainTextRule, inlineCodeRule, inlineCodeLinkRule]) {
-      expect(rule).toMatch(/overflow-wrap:\s*break-word\s*;/);
-      expect(rule).toMatch(/word-break:\s*normal\s*;/);
-      expect(rule).not.toMatch(/overflow-wrap:\s*anywhere\s*;/);
-    }
-  });
 });

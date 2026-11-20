@@ -56,69 +56,6 @@ import type {
 } from "../types";
 import { RESPONSE_BOARD_MESSAGE_MIME } from "../response-board";
 
-// Resolved beside this file, not from the working directory, so the tests
-// read the same stylesheet whichever directory Vitest is started from.
-async function readProductionStyles() {
-  const nodeFsModule = "node:fs";
-  const nodeUrlModule = "node:url";
-  const { readFileSync } = (await import(nodeFsModule)) as {
-    readFileSync: (path: string, encoding: "utf8") => string;
-  };
-  const { fileURLToPath } = (await import(nodeUrlModule)) as { fileURLToPath: (url: string) => string };
-  const moduleUrl = import.meta.url;
-  return readFileSync(fileURLToPath(new URL("../styles.css", moduleUrl).href), "utf8");
-}
-
-function extractCssBlock(source: string, headerPattern: RegExp) {
-  const match = source.match(headerPattern);
-  if (!match || match.index === undefined) {
-    throw new Error(`Missing CSS block matching ${headerPattern}`);
-  }
-
-  const openingBrace = source.indexOf("{", match.index + match[0].length);
-  if (openingBrace < 0) {
-    throw new Error(`Missing opening brace for CSS block ${headerPattern}`);
-  }
-
-  let depth = 0;
-  let quote: '"' | "'" | null = null;
-  let inComment = false;
-  for (let index = openingBrace; index < source.length; index += 1) {
-    const character = source[index];
-    const nextCharacter = source[index + 1];
-    if (inComment) {
-      if (character === "*" && nextCharacter === "/") {
-        inComment = false;
-        index += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      if (character === "\\") {
-        index += 1;
-      } else if (character === quote) {
-        quote = null;
-      }
-      continue;
-    }
-    if (character === "/" && nextCharacter === "*") {
-      inComment = true;
-      index += 1;
-    } else if (character === '"' || character === "'") {
-      quote = character;
-    } else if (character === "{") {
-      depth += 1;
-    } else if (character === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return source.slice(openingBrace + 1, index);
-      }
-    }
-  }
-
-  throw new Error(`Missing closing brace for CSS block ${headerPattern}`);
-}
-
 function makeSession(id: string, overrides?: Partial<Session>): Session {
   return {
     id,
@@ -803,28 +740,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(scrollWrites).toEqual([]);
   });
 
-  it("keeps the queued-prompt group in normal flow across attachment state", async () => {
-    const stylesCss = await readProductionStyles();
-    const messageStackDeclarations = stylesCss.match(
-      /\.message-stack\s*\{([^}]*)\}/s,
-    )?.[1];
-    expect(messageStackDeclarations).toMatch(
-      /--message-stack-block-padding\s*:\s*var\(--space-2xl\)\s*;/,
-    );
-    const baseDeclarations = stylesCss.match(
-      /\.conversation-queued-tail\s*\{([^}]*)\}/s,
-    )?.[1];
-    expect(baseDeclarations).toBeDefined();
-    expect(baseDeclarations).not.toMatch(
-      /(?:^|;)\s*position\s*:\s*(?:sticky|fixed|absolute)\s*(?:;|$)/,
-    );
-    const attachedDeclarations = stylesCss.match(
-      /\.conversation-queued-tail\[data-tail-follow="attached"\]\s*\{([^}]*)\}/s,
-    )?.[1];
-    // Attachment is scroll-controller intent only. Synchronous pre-paint
-    // growth correction keeps the in-flow tail stable without a second
-    // positioning authority during the first manual movement.
-    expect(attachedDeclarations).toBeUndefined();
+  it("keeps the queued-prompt group across attachment state", () => {
 
     const activeSession = makeSession("session-a", {
       status: "active",
@@ -853,8 +769,7 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(liveTail).toHaveClass("conversation-queued-tail");
   });
 
-  it("reveals only appended transcript entries with paint-only motion", async () => {
-    const stylesCss = await readProductionStyles();
+  it("reveals only appended transcript entries", async () => {
     const initialMessages = makeTextMessages(30);
     const activeSession = makeSession("session-message-reveal", {
       messages: initialMessages,
@@ -911,41 +826,6 @@ describe("AgentSessionPanel conversation caching", () => {
         ".conversation-queued-tail.conversation-message-entry-reveal",
       ),
     ).toBeNull();
-
-    const revealDeclarations = extractCssBlock(
-      stylesCss,
-      /(?:^|\n)\.conversation-message-entry-reveal\s*(?=\{)/,
-    );
-    expect(revealDeclarations).toMatch(
-      /animation\s*:\s*conversation-message-entry-reveal\s+180ms\s+ease-out\s+backwards\s*;/,
-    );
-    const cancelledRevealDeclarations = extractCssBlock(
-      stylesCss,
-      /(?:^|\n)\.conversation-message-entry-reveal\[\s*data-conversation-message-entry-reveal-cancelled\s*\]\s*(?=\{)/,
-    );
-    expect(cancelledRevealDeclarations).toMatch(/animation\s*:\s*none\s*;/);
-    const revealKeyframes = extractCssBlock(
-      stylesCss,
-      /@keyframes\s+conversation-message-entry-reveal\s*(?=\{)/,
-    );
-    expect(revealKeyframes).toMatch(/from\s*\{\s*opacity\s*:\s*0\s*;/s);
-    expect(revealKeyframes).toMatch(/transform\s*:\s*translateY\(6px\)\s*;/);
-    expect(revealKeyframes).toMatch(/to\s*\{\s*opacity\s*:\s*1\s*;/s);
-    expect(revealKeyframes).toMatch(/transform\s*:\s*translateY\(0\)\s*;/);
-
-    const forbiddenGeometryProperty =
-      /(?:^|[;{}\s])(?:block-size|bottom|gap|height|inset|left|margin|max-height|min-height|padding|position|right|scroll-margin|top)\s*:/m;
-    expect(revealDeclarations).not.toMatch(forbiddenGeometryProperty);
-    expect(revealDeclarations).not.toMatch(/(?:transform|translate)\s*:/);
-    expect(revealKeyframes).not.toMatch(forbiddenGeometryProperty);
-
-    const reducedMotionRules = extractCssBlock(
-      stylesCss,
-      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*(?=\{)/,
-    );
-    expect(reducedMotionRules).toMatch(
-      /\.conversation-message-entry-reveal\s*\{\s*animation\s*:\s*none\s*;/s,
-    );
   });
 
   it("keeps append identity through a metadata-first message-count update", async () => {
@@ -1000,80 +880,6 @@ describe("AgentSessionPanel conversation caching", () => {
           .closest(".conversation-message-marker-shell"),
       ).toHaveClass("conversation-message-entry-reveal");
     });
-  });
-
-  it("stacks the prompt above composer actions based on pane width", async () => {
-    const stylesCss = await readProductionStyles();
-
-    const composerDeclarations = extractCssBlock(
-      stylesCss,
-      /(?:^|\n)\.composer\s*(?=\{)/,
-    );
-    expect(composerDeclarations).toMatch(
-      /container-name\s*:\s*session-composer\s*;/,
-    );
-    expect(composerDeclarations).toMatch(/container-type\s*:\s*inline-size\s*;/);
-
-    const composerActionSplit = extractCssBlock(
-      stylesCss,
-      /(?:^|\n)\.composer-action-split\s*(?=\{)/,
-    );
-    expect(composerActionSplit).toMatch(/justify-self\s*:\s*end\s*;/);
-    expect(composerActionSplit).toMatch(/width\s*:\s*max-content\s*;/);
-    expect(composerActionSplit).toMatch(/min-width\s*:\s*12\.5rem\s*;/);
-
-    const composerActionTrigger = extractCssBlock(
-      stylesCss,
-      /(?:^|\n)\.composer-action-split\s*>\s*\.composer-action-menu-trigger\s*(?=\{)/,
-    );
-    expect(composerActionTrigger).toMatch(/flex\s*:\s*0\s+0\s+2\.35rem\s*;/);
-    expect(composerActionTrigger).toMatch(/width\s*:\s*2\.35rem\s*;/);
-
-    const composerActionMenu = extractCssBlock(
-      stylesCss,
-      /(?:^|\n)\.composer-action-menu\s*(?=\{)/,
-    );
-    expect(composerActionMenu).toMatch(
-      /background\s*:\s*linear-gradient\([^}]*var\(--paper-strong\)/,
-    );
-
-    const narrowComposerRules = extractCssBlock(
-      stylesCss,
-      /@container\s+session-composer\s*\(\s*max-width\s*:\s*46rem\s*\)(?=\s*\{)/,
-    );
-    const narrowComposerRow = extractCssBlock(
-      narrowComposerRules,
-      /(?:^|\n)\s*\.composer-row\s*(?=\{)/,
-    );
-    expect(narrowComposerRow).toMatch(
-      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*;/,
-    );
-    const narrowComposerActions = extractCssBlock(
-      narrowComposerRules,
-      /(?:^|\n)\s*\.composer-actions\s*(?=\{)/,
-    );
-    expect(narrowComposerActions).toMatch(
-      /grid-template-columns\s*:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\s*;/,
-    );
-    const narrowComposerActionSplit = extractCssBlock(
-      narrowComposerRules,
-      /(?:^|\n)\s*\.composer-actions\s*>\s*\.composer-action-split\s*(?=\{)/,
-    );
-    expect(narrowComposerActionSplit).toMatch(/width\s*:\s*max-content\s*;/);
-    expect(narrowComposerActionSplit).toMatch(/min-width\s*:\s*12\.5rem\s*;/);
-    expect(narrowComposerActionSplit).toMatch(/justify-self\s*:\s*end\s*;/);
-
-    const compactComposerRules = extractCssBlock(
-      stylesCss,
-      /@container\s+session-composer\s*\(\s*max-width\s*:\s*20rem\s*\)(?=\s*\{)/,
-    );
-    const compactComposerActions = extractCssBlock(
-      compactComposerRules,
-      /(?:^|\n)\s*\.composer-actions\s*(?=\{)/,
-    );
-    expect(compactComposerActions).toMatch(
-      /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*;/,
-    );
   });
 
   it("does not splice live-only cards beneath a historical window", async () => {

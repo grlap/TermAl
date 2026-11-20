@@ -1,6 +1,5 @@
 /*
-The UI test categories: one manifest that vite.config.ts and the category
-guard (src/test-categories.test.ts) both read.
+The UI test categories: the manifest for the projects in vite.config.ts.
 
 Owns: which category each UI test file belongs to, the resource tags of the
 heavy files, and the four Vitest projects built from them (unit, component,
@@ -14,7 +13,7 @@ environment of each: node for unit, jsdom for the others.
   - component: every other *.test.tsx, plus the *.test.ts files listed as
     needing the DOM.
 Every *.test.ts is in exactly one of the unit, DOM and app lists, so a new one
-is placed on purpose; the guard fails until it is.
+is placed on purpose.
 Does not own: running a category or accounting a run per project (the
 launcher's `category` mode and scripts/test-categories-plan.mjs, which read
 CATEGORY_PROJECTS and projectSelects from here), choosing what runs in a
@@ -134,8 +133,7 @@ export const HEAVY_TEST_FILES: readonly HeavyTestFile[] = [
 // window, itself or through a module it imports, fails; such a file belongs
 // in the list below. Browser storage is not caught that way, since
 // test-setup supplies in-memory storage in every project, and neither is code
-// behind a typeof check. The guard's static check is a quicker backstop that
-// reads only each test file's own text for its listed patterns.
+// behind a typeof check.
 export const UNIT_TEST_FILES: readonly string[] = [
   "src/SessionPaneView.active-tab.test.ts",
   "src/SessionPaneView.content-transition.test.ts",
@@ -281,9 +279,6 @@ export const DOM_TS_TEST_FILES: readonly string[] = [
   "src/tab-drag.test.ts",
   "src/test-setup.test.ts",
   "src/themes.test.ts",
-  // Reads production source and names `window.setInterval` in its AST
-  // checks, which the guard's text scan for unit files rejects.
-  "src/transcript-proof-boundary.test.ts",
   "src/use-stable-map-by-signature.test.ts",
   "src/use-theme-preferences.test.ts",
   "src/workspace-storage.test.ts",

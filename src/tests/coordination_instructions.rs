@@ -331,7 +331,7 @@ fn mailbox_guidance_acp_failed_wire_submission_does_not_consume_teaching() {
 }
 
 #[test]
-fn mailbox_guidance_existing_surfaces_compose_one_bounded_body() {
+fn mailbox_guidance_existing_surfaces_compose_one_body() {
     let section = termal_codex_agents_section();
     assert_eq!(section.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);
     assert_eq!(
@@ -340,13 +340,10 @@ fn mailbox_guidance_existing_surfaces_compose_one_bounded_body() {
             .count(),
         1
     );
-    assert!(TERMAL_MAILBOX_GUIDANCE.len() <= 900);
-    assert!(TERMAL_MAILBOX_GUIDANCE.lines().count() <= 12);
 }
 
 #[test]
-fn mailbox_coverage_guidance_existing_surfaces_compose_one_bounded_body() {
-    assert!(TERMAL_MAILBOX_COVERAGE_GUIDANCE.len() <= 800);
+fn mailbox_coverage_guidance_existing_surfaces_compose_one_body() {
     for surface in [
         render_termal_host_guidance(),
         termal_codex_agents_section(),

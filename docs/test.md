@@ -1563,38 +1563,13 @@ because it takes its non-DOM branch. The other three projects run in jsdom. Each
 Vitest 4 runs a one-worker, isolated project with groupOrder 0 after every
 ordered group, so 0 would put it last.
 
-The guard `ui/src/test-categories.test.ts` checks the placement rules:
+Add a new `*.test.ts` file to the unit list, the list of files that need the
+DOM, or the `app` list. Use `app` for tests that render the whole App.
 
-- A new `*.test.ts` must be added to the unit list, to the list of files that
-  need the DOM, or to `app`.
-- A file that renders the App must be in `app`, and every `app` file must
-  render it. A file renders the App when it imports the App module, calls a
-  harness export that renders it (`renderApp`, `renderAppWithProjectAndSession`
-  or `withFallbackStateHarness`), or imports a local module that does. This is
-  a text match followed one module level deep, not an import graph.
-
-It also fails when any of these hold:
-
-- a test file under `ui/` falls into no project or into two, by the manifest's
-  own matcher;
-- a selection pattern is a glob other than the one component glob;
-- the group order is wrong;
-- a project's environment is not node for `unit` and jsdom for the others, by
-  the manifest, by a source check of `ui/vite.config.ts`, and by the guard's
-  own run, which is in `unit` and asserts that `document` and `window` are
-  undefined;
-- a unit file's own text contains one of these patterns: an import
-  `from "@testing-library/…"`, `renderHook`, `render(`, `screen.`,
-  `document.`, `window.`, `localStorage`, `sessionStorage`, or a
-  `@vitest-environment` comment, which would give that one file jsdom inside
-  the `unit` project.
-
-That last check is a static backstop with stated limits. It reads only the
-test file's own text, not the modules the test imports, and only those
-patterns. A unit file that reaches a DOM global through a module it exercises
-passes it; the `unit` project's node environment catches such a file instead,
-by failing its run, with the two exceptions above (browser storage and code
-behind a typeof check).
+The full gate's per-project accounting reports a failure if a UI test file
+belongs to no project or to more than one. The runtime test in
+`ui/src/test-categories.test.ts` verifies that Vitest runs the unit project
+without `document` or `window`.
 
 ## Known Coverage Gaps
 

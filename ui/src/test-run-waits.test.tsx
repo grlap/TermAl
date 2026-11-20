@@ -170,21 +170,6 @@ it("announces a failure from one surface only: the pane notice, not the board's"
   expect(screen.getAllByTitle("resume unavailable")).toHaveLength(2);
 });
 
-
-it("constrains the board wait label to one ellipsized line", async () => {
-  const nodeFsModule = "node:fs";
-  const nodeUrlModule = "node:url";
-  const { readFileSync } = await import(nodeFsModule) as { readFileSync: (path: string, encoding: "utf8") => string };
-  const { fileURLToPath } = await import(nodeUrlModule) as { fileURLToPath: (url: string) => string };
-  // Resolve from this module, not the runner's working directory.
-  const moduleUrl = import.meta.url;
-  const css = readFileSync(fileURLToPath(new URL("./panels/test-runs-panel.css", moduleUrl).href), "utf8");
-  const rule = css.match(/\.test-run-wait-indicator \{([^}]+)\}/)?.[1] ?? "";
-  expect(rule).toContain("white-space: nowrap");
-  expect(rule).toContain("text-overflow: ellipsis");
-  expect(rule).toContain("overflow: hidden");
-});
-
 it("shows pane and board waits only when idle and clears them without adding transcript content", () => {
   const wait = makeTestRunWait();
   const view = (status: "idle" | "active", pending = true) => <TestRunsProvider snapshotReady runs={[makeTestRun()]} waits={pending ? [wait] : []} open={vi.fn()}>

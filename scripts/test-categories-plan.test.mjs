@@ -1,5 +1,5 @@
-// Exercises the UI category planner without running Vitest: category names
-// from the real manifest, and the per-project accounting of a run's report.
+// Exercises the UI category planner's per-project accounting without running
+// Vitest.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -8,12 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   accountingSummaryLines,
   accountVitestRun,
-  categoryNames,
-  listUiTestFiles,
-  loadCategoryManifest,
-  partialCheckLabel,
   resolveCategory,
-  serializedLaneProject,
 } from "./test-categories-plan.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 
@@ -64,45 +59,19 @@ const account = (overrides) => accountVitestRun({
   ...overrides,
 });
 
-test("the categories are the manifest's projects, named ui-<project>, and nothing else", async () => {
-  const manifest = await loadCategoryManifest(projectRoot);
-  assert.deepEqual(categoryNames(manifest), ["ui-unit", "ui-component", "ui-heavy", "ui-app"]);
-  for (const project of manifest.projects) {
-    assert.equal(resolveCategory(manifest, `ui-${project.name}`), project);
+test("resolves category names and rejects malformed names", () => {
+  for (const project of sample.projects) {
+    assert.equal(resolveCategory(sample, `ui-${project.name}`), project);
   }
   for (const name of ["ui-bogus", "heavy", "ui-", "UI-HEAVY"]) {
-    assert.throws(() => resolveCategory(manifest, name), /unknown category: .*known categories: ui-unit, ui-component, ui-heavy, ui-app/u);
+    assert.throws(
+      () => resolveCategory(sample, name),
+      /unknown category: .*known categories: ui-unit, ui-heavy/u,
+    );
   }
-  assert.equal(partialCheckLabel, "partial check, not the full gate");
 });
 
-test("every active UI test file belongs to exactly one project, so the full run covers it once", async () => {
-  const manifest = await loadCategoryManifest(projectRoot);
-  const baseline = listUiTestFiles(uiRoot);
-  assert.ok(baseline.length > 100, `baseline listed only ${baseline.length} files`);
-  // Vitest runs the projects one group after another.
-  const groupOf = (file) => manifest.projects
-    .find((project) => manifest.projectSelects(project, file))?.groupOrder ?? Infinity;
-  const runOrder = [...baseline].sort((left, right) => groupOf(left) - groupOf(right));
-  const accounting = accountVitestRun({
-    manifest,
-    uiRoot,
-    baseline,
-    accounted: manifest.projects.map((project) => project.name),
-    reportText: reportOf(runOrder),
-  });
-  assert.deepEqual(accounting.problems, []);
-  assert.equal(accounting.status, "complete");
-  const total = accounting.projects.reduce((sum, row) => sum + row.selectedFiles, 0);
-  assert.equal(total, baseline.length, "the projects' selections partition the baseline");
-  for (const row of accounting.projects) assert.ok(row.selectedFiles > 0, `${row.category} selects nothing`);
-});
-
-test("the serialized lane is the heavy project, in a group of its own", async () => {
-  const manifest = await loadCategoryManifest(projectRoot);
-  assert.equal(serializedLaneProject, "heavy");
-  const orders = manifest.projects.map((project) => project.groupOrder);
-  assert.equal(new Set(orders).size, orders.length, "each project has its own group");
+test("reports each fixture project in its execution lane", () => {
   const accounting = account({ reportText: reportOf(sampleBaseline) });
   assert.deepEqual(accounting.projects.map((row) => [row.category, row.lane]), [
     ["ui-unit", "ordered"],

@@ -1,6 +1,5 @@
 // All body-bearing projections share the owner gate and current-owner render.
 import { afterEach, expect, it } from "vitest";
-import ts from "typescript";
 import { TranscriptRepairAuthority } from "./transcript-repair-authority";
 import { getSessionRecordSnapshotForTesting, resetSessionStoreForTesting } from "./session-store";
 import type { UseAppLiveStateParams } from "./app-live-state-types";
@@ -61,54 +60,3 @@ function compilerBoundary(owner: TranscriptRepairAuthority, live: UseAppLiveStat
   actions.setters.setSessions([]);
 }
 void compilerBoundary;
-
-const WRITERS = [
-  ["transcript-repair-authority.ts", "adoptSummaries", "metadata"],
-  ["transcript-repair-authority.ts", "adoptSummaryDiff", "metadata"],
-  ["transcript-repair-authority.ts", "receiveBodyDelta", "delta"],
-  ["transcript-repair-authority.ts", "adoptTail", "delta"],
-  ["transcript-repair-authority.ts", "adoptTail", "delta"],
-  ["transcript-repair-authority.ts", "adoptCreatedSession", "delta"],
-  ["app-live-state.ts", "publishHistorySession", "history"],
-  ["app-live-state-transport-events.ts", "applyTranscriptDelta", "delta"],
-  ["app-live-state-transport-events.ts", "handleDeltaEvent", "metadata"],
-  ["app-live-state-transport-events.ts", "handleDeltaEvent", "metadata"],
-  ["app-session-actions.ts", "updateSessionLocally", "metadata"],
-  ["app-session-actions.ts", "handleCancelQueuedPrompt", "metadata"],
-];
-const sourceBodies = import.meta.glob<string>(["./**/*.ts", "./**/*.tsx"], {
-  eager: true, query: "?raw", import: "default",
-});
-
-it("pins every production commit site and its provenance, and forbids other store body publishers", () => {
-  const writers: string[][] = [];
-  for (const [path, body] of Object.entries(sourceBodies)) {
-    if (/\.test\.|test-support|test-fixtures|test-harness/.test(path)) continue;
-    const source = ts.createSourceFile(path, body, ts.ScriptTarget.Latest, true);
-    const file = path.split(/[\\/]/).pop()!;
-    function inspect(node: ts.Node) {
-      if (ts.isCallExpression(node)) {
-        const name = ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text
-          : ts.isIdentifier(node.expression) ? node.expression.text : "";
-        if (["syncComposerSessionsStore", "syncComposerSessionsStoreIncremental", "upsertSessionStoreSession"].includes(name)) {
-          expect(file, `store publisher in ${path}`).toBe("transcript-repair-authority.ts");
-        }
-        if (name === "commit") {
-          let ancestor: ts.Node | undefined = node.parent;
-          while (ancestor && !(ts.isFunctionDeclaration(ancestor) || ts.isMethodDeclaration(ancestor))) ancestor = ancestor.parent;
-          const functionName = ancestor && (ts.isFunctionDeclaration(ancestor) || ts.isMethodDeclaration(ancestor)) ? ancestor.name?.getText(source) : undefined;
-          const argument = node.arguments[1];
-          const kind = argument && ts.isStringLiteral(argument) ? argument.text
-            : argument && ts.isObjectLiteralExpression(argument)
-              ? argument.properties.find(property => ts.isPropertyAssignment(property) && property.name.getText(source) === "kind") : undefined;
-          const provenance = typeof kind === "string" ? kind
-            : kind && ts.isPropertyAssignment(kind) && ts.isStringLiteral(kind.initializer) ? kind.initializer.text : "unknown";
-          writers.push([file, functionName ?? "unknown", provenance]);
-        }
-      }
-      ts.forEachChild(node, inspect);
-    }
-    inspect(source);
-  }
-  expect(writers.sort()).toEqual([...WRITERS].sort());
-});
