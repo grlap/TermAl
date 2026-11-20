@@ -392,6 +392,182 @@ fn wrapper_paths_reuse_the_run_directory_without_nesting_another_product_root() 
 }
 
 #[test]
+fn the_fixture_directory_budget_accepts_its_exact_length_and_refuses_one_more() {
+    let start = if cfg!(windows) { r"C:\" } else { "/" };
+    let directory =
+        |length: usize| PathBuf::from(format!("{start}{}", "d".repeat(length - start.len())));
+    let exact = directory(WINDOWS_FIXTURE_DIRECTORY_BUDGET);
+    let over = directory(WINDOWS_FIXTURE_DIRECTORY_BUDGET + 1);
+    assert_eq!(exact.as_os_str().len(), WINDOWS_FIXTURE_DIRECTORY_BUDGET);
+    for remedy in [
+        DEFAULT_FIXTURE_DIRECTORY_REMEDY,
+        REPOSITORY_FIXTURE_DIRECTORY_REMEDY,
+    ] {
+        assert_eq!(fixture_directory_within_budget(&exact, remedy), Ok(()));
+        let message = fixture_directory_within_budget(&over, remedy).unwrap_err();
+        assert!(message.contains(&over.display().to_string()), "{message}");
+        assert!(
+            message.contains(&format!(
+                "is {} bytes long, more than the {WINDOWS_FIXTURE_DIRECTORY_BUDGET}",
+                WINDOWS_FIXTURE_DIRECTORY_BUDGET + 1
+            )),
+            "{message}"
+        );
+        assert!(message.ends_with(remedy), "{message}");
+    }
+}
+
+/// How far below its directory the deepest Git directory of this suite's
+/// fixtures lies: a linked worktree's admin directory under a project in a
+/// `termal-test-state` root.
+#[cfg(windows)]
+const DEEPEST_FIXTURE_GIT_DIR_BELOW_DIRECTORY: usize = 133;
+
+#[cfg(windows)]
+#[test]
+fn the_deepest_git_fixture_shape_works_in_a_directory_at_the_budget() {
+    struct RemoveOnDrop(PathBuf);
+    impl Drop for RemoveOnDrop {
+        fn drop(&mut self) {
+            remove_test_directory(&self.0);
+        }
+    }
+    let base = normalize_user_facing_path(&fs::canonicalize(test_temp_dir()).unwrap());
+    // Pad the default directory up to exactly the budget. With too little room
+    // for a reliably unique padding name, the fixture runs in the default
+    // directory itself.
+    let room = WINDOWS_FIXTURE_DIRECTORY_BUDGET
+        .checked_sub(base.as_os_str().len() + 1)
+        .filter(|room| *room >= 8);
+    let (directory, _padded) = match room {
+        Some(room) => {
+            let name: String = format!("{:032x}", Uuid::new_v4().as_u128())
+                .chars()
+                .chain(std::iter::repeat('p'))
+                .take(room)
+                .collect();
+            let padded = base.join(name);
+            assert_eq!(padded.as_os_str().len(), WINDOWS_FIXTURE_DIRECTORY_BUDGET);
+            fs::create_dir(&padded).unwrap();
+            (padded.clone(), Some(RemoveOnDrop(padded)))
+        }
+        None => {
+            assert_eq!(
+                fixture_directory_within_budget(&base, DEFAULT_FIXTURE_DIRECTORY_REMEDY),
+                Ok(())
+            );
+            (base.clone(), None)
+        }
+    };
+    let root = {
+        let _placement = TestTempRootDirectoryScope::within(directory.clone());
+        TestTempRoot::create("termal-test-state")
+    };
+    // The same name lengths as the deepest measured fixture.
+    let project = root.join("eo-check-ordinary-delete-changed-child-project");
+    fs::create_dir(&project).unwrap();
+    init_git_document_test_repo(&project);
+    fs::write(project.join("README.md"), "fixture\n").unwrap();
+    run_git_test_command(&project, &["add", "README.md"]);
+    run_git_test_command(&project, &["commit", "--quiet", "-m", "fixture"]);
+    let linked = project
+        .join(".worktrees")
+        .join("ordinary-delete-changed-child-child");
+    run_git_test_command(
+        &project,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            linked.to_str().unwrap(),
+            "HEAD",
+        ],
+    );
+    fs::write(linked.join("README.md"), "changed\n").unwrap();
+    run_git_test_command(&linked, &["add", "README.md"]);
+    run_git_test_command(&linked, &["commit", "--quiet", "-m", "changed"]);
+    let git_dir = run_git_test_command_output(&linked, &["rev-parse", "--absolute-git-dir"]);
+    assert_eq!(
+        git_dir.len(),
+        directory.as_os_str().len() + DEEPEST_FIXTURE_GIT_DIR_BELOW_DIRECTORY,
+        "{git_dir}"
+    );
+    assert!(git_dir.len() <= 200, "{git_dir}");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_default_directory_over_the_budget_refuses_every_fixture_root_with_one_message() {
+    let sandbox = TestTempRoot::create("termal-budget");
+    // The child's user temp is padded so that its default directory is over
+    // the budget whatever this process's own temp directory is.
+    let user_temp = sandbox.path().join("p".repeat(68));
+    fs::create_dir(&user_temp).unwrap();
+    let child_directory = normalize_user_facing_path(&fs::canonicalize(&user_temp).unwrap())
+        .join("termal")
+        .join("tests");
+    assert!(
+        child_directory.as_os_str().len() > WINDOWS_FIXTURE_DIRECTORY_BUDGET,
+        "{}",
+        child_directory.display()
+    );
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
+        .args([
+            "--exact",
+            "tests::test_temp_paths::over_budget_default_directory_child",
+            "--nocapture",
+        ])
+        .env("TERMAL_TEST_OVER_BUDGET", "1")
+        .env("TERMAL_TEST_USER_TEMP", &user_temp)
+        .env_remove("TERMAL_TEST_RUN_ROOT");
+    let (status, stderr) = phase_sync::CapturedStderrProcess::spawn(&mut command)
+        .wait_with_stderr("over-budget default directory");
+    assert!(status.success(), "{stderr}");
+    assert!(
+        stderr.contains("over-budget refusal verified twice"),
+        "{stderr}"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn over_budget_default_directory_child() {
+    // Driven in a fresh process by
+    // a_default_directory_over_the_budget_refuses_every_fixture_root_with_one_message.
+    if std::env::var_os("TERMAL_TEST_OVER_BUDGET").is_none() {
+        return;
+    }
+    fn refusal() -> String {
+        let payload = std::panic::catch_unwind(|| TestTempRoot::create("termal-test-state"))
+            .map(drop)
+            .expect_err("a fixture root over the budget must be refused");
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_else(|| payload.downcast_ref::<&str>().unwrap().to_string())
+    }
+    let directory = test_temp_dir();
+    let first = refusal();
+    assert!(
+        first.contains(
+            &normalize_user_facing_path(&fs::canonicalize(&directory).unwrap())
+                .display()
+                .to_string()
+        ),
+        "{first}"
+    );
+    assert!(first.contains("TERMAL_TEST_USER_TEMP"), "{first}");
+    assert_eq!(refusal(), first, "every refused root fails the same way");
+    assert!(
+        fs::read_dir(&directory).unwrap().next().is_none(),
+        "a refused root is never created"
+    );
+    eprintln!("over-budget refusal verified twice");
+}
+
+#[test]
 fn poisoned_cleanup_observers_do_not_panic_or_lose_the_removal_receipt() {
     let root = TestTempRoot::create("termal-poisoned-cleanup");
     let path = root.path().to_owned();

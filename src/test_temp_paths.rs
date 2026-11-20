@@ -105,6 +105,53 @@ fn test_temp_dir() -> PathBuf {
     target
 }
 
+/// Longest directory, in UTF-8 bytes (at least its character count), that may
+/// hold Git-fixture roots on Windows. The deepest fixture Git directory this
+/// suite creates lies 133 characters below such a directory. Git refuses an
+/// explicit GIT_DIR longer than 220 (PATH_MAX - 40) even with core.longpaths,
+/// and 67 keeps 20 characters in reserve.
+const WINDOWS_FIXTURE_DIRECTORY_BUDGET: usize = 67;
+/// Remedy for a default directory that is too deep (the user temp chooses it).
+const DEFAULT_FIXTURE_DIRECTORY_REMEDY: &str =
+    "set TERMAL_TEST_USER_TEMP to a shorter absolute path";
+/// Remedy for a repository-local directory that is too deep.
+const REPOSITORY_FIXTURE_DIRECTORY_REMEDY: &str = "use a shallower checkout";
+
+/// Refuses a fixture directory too deep for this suite's Git fixtures under
+/// Windows' path limits, naming the remedy for how the directory was chosen.
+fn fixture_directory_within_budget(directory: &FsPath, remedy: &str) -> Result<(), String> {
+    let length = directory.as_os_str().len();
+    if length <= WINDOWS_FIXTURE_DIRECTORY_BUDGET {
+        return Ok(());
+    }
+    Err(format!(
+        "test fixture directory {} is {length} bytes long, more than the \
+         {WINDOWS_FIXTURE_DIRECTORY_BUDGET} that keeps this suite's Git fixtures within \
+         Git's Windows path limits; {remedy}",
+        directory.display()
+    ))
+}
+
+/// The budget check for a directory as Git will see it: fixture roots are
+/// canonicalized, so an existing directory is measured in that spelling.
+#[cfg(windows)]
+fn windows_fixture_directory_check(directory: &FsPath, remedy: &str) -> Result<(), String> {
+    let spelled = fs::canonicalize(directory)
+        .map(|canonical| normalize_user_facing_path(&canonical))
+        .unwrap_or_else(|_| directory.to_owned());
+    fixture_directory_within_budget(&spelled, remedy)
+}
+
+/// The default directory's budget result, computed once per process so that
+/// every refused fixture root fails with the same message.
+#[cfg(windows)]
+fn default_fixture_directory_budget() -> &'static Result<(), String> {
+    static RESULT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    RESULT.get_or_init(|| {
+        windows_fixture_directory_check(&test_temp_dir(), DEFAULT_FIXTURE_DIRECTORY_REMEDY)
+    })
+}
+
 fn stale_unmarked_test_fixture(
     path: &FsPath,
     now: std::time::SystemTime,

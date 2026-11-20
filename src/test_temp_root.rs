@@ -60,6 +60,15 @@ struct TestTempRootDirectoryScope {
 impl TestTempRootDirectoryScope {
     fn repository_local() -> Self {
         let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
+        // Created first so that the check below always measures the canonical
+        // spelling that fixture roots will use, even on first use.
+        ensure_plain_test_directory(&directory).expect("plain repository test directory");
+        #[cfg(windows)]
+        if let Err(message) =
+            windows_fixture_directory_check(&directory, REPOSITORY_FIXTURE_DIRECTORY_REMEDY)
+        {
+            panic!("{message}");
+        }
         Self::within(directory)
     }
 
@@ -108,9 +117,26 @@ impl TestTempRoot {
         );
         let directory = TEST_TEMP_ROOT_DIRECTORY
             .with(|slot| slot.borrow().clone())
-            .unwrap_or_else(test_temp_dir);
-        let path = directory.join(format!("{prefix}-{}", Uuid::new_v4()));
-        fs::create_dir_all(&path).expect("test temp root should be created");
+            .unwrap_or_else(|| {
+                // The default directory is checked here. A repository-local
+                // scope is checked where it is chosen; another explicit scope
+                // is placed deliberately by the test that chooses it.
+                #[cfg(windows)]
+                if let Err(message) = default_fixture_directory_budget() {
+                    panic!("{message}");
+                }
+                test_temp_dir()
+            });
+        // Sixteen hex digits keep fixture paths short under Windows' path
+        // limits. Exclusive creation makes a name collision fail loudly
+        // instead of two tests sharing one root.
+        let path = directory.join(format!("{prefix}-{:016x}", Uuid::new_v4().as_u64_pair().0));
+        fs::create_dir(&path).unwrap_or_else(|error| {
+            panic!(
+                "test temp root {} should be created: {error}",
+                path.display()
+            )
+        });
         // The guard exists before canonicalization and the marker write, so
         // either failure still removes the root.
         let mut root = Self::own(path);

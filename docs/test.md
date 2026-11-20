@@ -350,6 +350,14 @@ directory), and other subprocess-specific output locations are also outside
 this check. The coordinator checks their capacity separately before granting
 a build window, especially when they are on another volume.
 
+On Windows, Rust fixture roots need a short directory to stay within Git's path
+limits. A fixture root is refused with one message when the directory that
+holds it is longer than 67 bytes in its canonical spelling. That directory is
+`termal\tests` under `TERMAL_TEST_USER_TEMP` (or the OS temporary directory),
+plus the launcher's `run-*` folder below it, or the checkout's `.tmp/`. So
+`TERMAL_TEST_USER_TEMP` can be at most about 43 bytes under the launcher, and
+about 54 for a direct Cargo run.
+
 The launcher warns below **100 GiB**. A **full gate refuses to start below
 50 GiB**, or when available space cannot be established, at any checked
 location. Exactly 50 GiB is allowed with a warning; exactly 100 GiB needs no
