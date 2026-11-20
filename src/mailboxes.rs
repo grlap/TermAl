@@ -365,6 +365,8 @@ struct MailboxStore {
     #[cfg(test)]
     before_relay_association_authorize: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
+    before_relay_read_association: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(test)]
     internal_writer_waiters: Mutex<usize>,
     #[cfg(test)]
     internal_writer_waiter_changed: Condvar,
@@ -2153,6 +2155,8 @@ impl MailboxStore {
             #[cfg(test)]
             before_relay_association_authorize: Mutex::new(None),
             #[cfg(test)]
+            before_relay_read_association: Mutex::new(None),
+            #[cfg(test)]
             internal_writer_waiters: Mutex::new(0),
             #[cfg(test)]
             internal_writer_waiter_changed: Condvar::new(),
@@ -2179,6 +2183,7 @@ impl MailboxStore {
             relay_home_rpc_failures: MailboxRelayHomeRpcFailures::default(),
             before_native_wake: Mutex::new(None),
             before_relay_association_authorize: Mutex::new(None),
+            before_relay_read_association: Mutex::new(None),
             internal_writer_waiters: Mutex::new(0),
             internal_writer_waiter_changed: Condvar::new(),
         }
@@ -3784,9 +3789,9 @@ impl MailboxStore {
                 ));
             }
         }
-        let summary = mailbox_summaries_for_session(&transaction, session_id)?
+        let summary = mailbox_summaries_in_scope(&transaction, session_id, false, Some(mailbox_id))?
             .into_iter()
-            .find(|summary| summary.id == mailbox_id)
+            .next()
             .ok_or_else(|| {
                 mailbox_store_error(
                     MailboxStoreErrorKind::NotFound,
@@ -4004,13 +4009,32 @@ fn mailbox_summaries_for_session(
     mailbox_summaries_for_session_with_empty(connection, session_id, false)
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_MAILBOX_SUMMARY_ROW: std::cell::RefCell<Option<Box<dyn FnMut(&str)>>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
 fn mailbox_summaries_for_session_with_empty(
     connection: &rusqlite::Connection,
     session_id: &str,
     include_empty: bool,
 ) -> Result<Vec<MailboxSummary>> {
+    mailbox_summaries_in_scope(connection, session_id, include_empty, None)
+}
+
+fn mailbox_summaries_in_scope(
+    connection: &rusqlite::Connection,
+    session_id: &str,
+    include_empty: bool,
+    mailbox_id: Option<&str>,
+) -> Result<Vec<MailboxSummary>> {
+    // An acknowledgement holds the writer and connection. Use the mailbox key
+    // in SQL so unread counts, latest messages and participants stay target-only.
+    let mailbox_filter = if mailbox_id.is_some() { "AND m.id = ?4" } else { "" };
     let mut statement = connection
-        .prepare(
+        .prepare(&format!(
             "SELECT m.id, COALESCE(latest.sequence, 0),
                     (
                       SELECT COUNT(*)
@@ -4032,17 +4056,19 @@ fn mailbox_summaries_for_session_with_empty(
                 WHERE candidate.mailbox_id = m.id
                   AND COALESCE(candidate.topic, '') NOT GLOB ?2
               )
-             WHERE mine.left_at IS NULL AND (?3 OR latest.id IS NOT NULL)
+             WHERE mine.left_at IS NULL AND (?3 OR latest.id IS NOT NULL) {mailbox_filter}
              ORDER BY COALESCE(latest.created_at, m.created_at) DESC, m.id",
-        )
+        ))
         .context("failed to prepare mailbox summary query")?;
+    let params: [&dyn rusqlite::ToSql; 3] = [
+        &session_id,
+        &DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN,
+        &include_empty,
+    ];
+    let params = params.into_iter().chain(mailbox_id.iter().map(|id| id as &dyn rusqlite::ToSql));
     let rows = statement
         .query_map(
-            rusqlite::params![
-                session_id,
-                DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN,
-                include_empty
-            ],
+            rusqlite::params_from_iter(params),
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -4058,6 +4084,12 @@ fn mailbox_summaries_for_session_with_empty(
     for row in rows {
         let (id, latest_sequence, unread_count, latest_body, latest_message_at) =
             row.context("failed to decode mailbox summary")?;
+        #[cfg(test)]
+        TEST_MAILBOX_SUMMARY_ROW.with(|slot| {
+            if let Some(observe) = slot.borrow_mut().as_mut() {
+                observe(&id);
+            }
+        });
         summaries.push(MailboxSummary {
             participants: mailbox_participants(connection, &id)?,
             id,

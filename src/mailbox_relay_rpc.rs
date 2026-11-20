@@ -320,6 +320,18 @@ impl AppState {
                 issue_receipt,
             } => {
                 actor.require_origin(authenticated_origin)?;
+                #[cfg(test)]
+                {
+                    let before_association = self
+                        .mailbox_store
+                        .before_relay_read_association
+                        .lock()
+                        .expect("relay read association observer mutex poisoned")
+                        .take();
+                    if let Some(before_association) = before_association {
+                        before_association();
+                    }
+                }
                 self.require_mailbox_relay_conversation(&actor, &mailbox_id, &conversation)?;
                 let authority = self.mailbox_relay_home_authority(
                     lease,

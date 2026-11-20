@@ -359,3 +359,178 @@ fn home_rpc_failures_do_not_copy_invalid_or_unknown_metadata() {
         assert!(!serde_json::to_string(&row).unwrap().contains("SECRET"));
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn acknowledging_one_mailbox_leaves_sibling_relay_read_available() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let target = proxy.send(&fixture, "scoped-ack-target").await;
+    let second_sender = test_session_id(&fixture.central, Agent::Codex);
+    let response = fixture
+        .client
+        .post(format!(
+            "http://127.0.0.1:{}/api/sessions/{second_sender}/mailboxes/send",
+            proxy.central_api.port,
+        ))
+        .json(&json!({
+            "targetSessionId": format!(
+                "host:{}::{}", fixture.channel.snapshot.peer.host_id, fixture.native,
+            ),
+            "message": "unprocessed sibling message",
+            "idempotencyKey": "scoped-ack-sibling",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let sibling: MailboxAppendReceipt = response.json().await.unwrap();
+    let target_page = read_relay_page(&fixture.satellite, &fixture.native, &target.mailbox_id)
+        .await
+        .unwrap();
+    let sibling_page = read_relay_page(&fixture.satellite, &fixture.native, &sibling.mailbox_id)
+        .await
+        .unwrap();
+    let home_id = |mailbox: &str| {
+        MailboxRelayLocator::decode(mailbox, false)
+            .unwrap()
+            .unwrap()
+            .id
+    };
+    let target_id = home_id(&target.mailbox_id);
+    let sibling_id = home_id(&sibling.mailbox_id);
+    assert_ne!(target_id, sibling_id);
+    let actor = fixture
+        .satellite
+        .native_mailbox_relay_descriptor(&fixture.native)
+        .unwrap()
+        .principal;
+    let reader = actor.participant_key();
+    let home = fixture.central.clone();
+    let list = || home.mailbox_store.list_for_session(&reader).unwrap();
+    let before = list();
+    let mut expected = before
+        .iter()
+        .find(|row| row.id == target_id)
+        .unwrap()
+        .clone();
+    let sibling_before = before.iter().find(|row| row.id == sibling_id).unwrap();
+    assert_eq!(expected.unread_count, 1);
+    assert_eq!(sibling_before.unread_count, 1);
+    expected.unread_count = 0;
+    expected
+        .participants
+        .iter_mut()
+        .find(|row| row.session_id == reader)
+        .unwrap()
+        .processed_through = target.sequence;
+
+    let conversation = home
+        .mailbox_store
+        .mailbox_relay_association(&actor, &target_id)
+        .unwrap()
+        .unwrap();
+    let lease = fixture.channel.current_lease().unwrap();
+    let origin = actor.host.clone();
+    let operation = MailboxRelayOperation::Acknowledge {
+        actor,
+        conversation,
+        mailbox_id: target_id.clone(),
+        receipt: target_page.receipt.unwrap(),
+    };
+    let release = phase_sync::ReleaseGateOnDrop::new();
+    let gate = release.gate();
+    let (sibling_seen, mut at_sibling) = tokio::sync::mpsc::unbounded_channel();
+    let notify = sibling_seen.clone();
+    let held_sibling = sibling_id.clone();
+    let worker = home.clone();
+    let mut ack = tokio::task::spawn_blocking(move || {
+        struct ClearObserver;
+        impl Drop for ClearObserver {
+            fn drop(&mut self) {
+                TEST_MAILBOX_SUMMARY_ROW.with(|slot| {
+                    slot.borrow_mut().take();
+                });
+            }
+        }
+        let _clear = ClearObserver;
+        TEST_MAILBOX_SUMMARY_ROW.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move |id| {
+                if id == held_sibling {
+                    notify.send(()).unwrap();
+                    phase_sync::wait_for_gate(&gate, true);
+                }
+            }));
+        });
+        // Exercise the production home ACK without subjecting the fixture's
+        // lock holder itself to the reader's scripted HTTP deadline.
+        worker.execute_mailbox_relay(operation, &lease, &origin)
+    });
+
+    let early_ack = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
+        tokio::select! {
+            result = &mut ack => Some(result.unwrap()),
+            seen = at_sibling.recv() => { seen.unwrap(); None }
+        }
+    })
+    .await
+    .expect("the home ACK neither completed nor reached the sibling");
+    let concurrent_read = if early_ack.is_some() {
+        read_relay_page(&fixture.satellite, &fixture.native, &sibling.mailbox_id).await
+    } else {
+        let (entered, before_connection) = tokio::sync::oneshot::channel();
+        *home
+            .mailbox_store
+            .before_relay_read_association
+            .lock()
+            .unwrap() = Some(Box::new(move || entered.send(()).unwrap()));
+        let satellite = fixture.satellite.clone();
+        let reader = fixture.native.clone();
+        let mailbox = sibling.mailbox_id.clone();
+        let read =
+            tokio::spawn(async move { read_relay_page(&satellite, &reader, &mailbox).await });
+        tokio::time::timeout(phase_sync::DEADLOCK_GUARD, before_connection)
+            .await
+            .unwrap()
+            .unwrap();
+        fixture
+            .channel
+            .control
+            .clock
+            .advance(Duration::from_secs(5));
+        tokio::time::timeout(phase_sync::DEADLOCK_GUARD, read)
+            .await
+            .unwrap()
+            .unwrap()
+    };
+    release.release();
+    let acknowledged = match early_ack {
+        Some(result) => result,
+        None => ack.await.unwrap(),
+    }
+    .unwrap();
+    let acknowledged: MailboxSummary = serde_json::from_value(acknowledged).unwrap();
+    let after = list();
+    let observed = diagnostics(&fixture.central).await;
+    proxy.finish().await;
+    fixture.finish().await;
+
+    assert_eq!(acknowledged, expected);
+    assert_eq!(
+        after.iter().find(|row| row.id == target_id),
+        Some(&expected)
+    );
+    assert_eq!(
+        after.iter().find(|row| row.id == sibling_id),
+        Some(sibling_before)
+    );
+    let page = concurrent_read.unwrap_or_else(|error| {
+        panic!(
+            "an unrelated mailbox delayed the read: {} ({})",
+            error.message, observed["homeRpcFailures"]
+        )
+    });
+    assert_eq!(page.processed_through, sibling_page.processed_through);
+    assert_eq!(page.messages, sibling_page.messages);
+    assert_eq!(page.receipt, sibling_page.receipt);
+}
