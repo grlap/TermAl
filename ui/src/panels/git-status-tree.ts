@@ -2,19 +2,22 @@ import type { GitStatusFile, GitSubmoduleFiles, GitSubmoduleStatus } from "../ap
 
 export type GitStatusSectionId = "staged" | "unstaged";
 
-export type GitStatusTreeDirectoryNode = {
-  children: GitStatusTreeNode[];
+export type GitPathTreeDirectoryNode<FileNode extends GitPathTreeFileNode> = {
+  children: GitPathTreeNode<FileNode>[];
   fileCount: number;
   kind: "directory";
   name: string;
   path: string;
 };
 
-export type GitStatusTreeFileNode = {
+export type GitPathTreeFileNode = {
   kind: "file";
   name: string;
-  originalPath?: string | null;
   path: string;
+};
+
+export type GitStatusTreeFileNode = GitPathTreeFileNode & {
+  originalPath?: string | null;
   statusCode: string;
   statusLabel: string;
   submodule?: GitStatusTreeSubmodule;
@@ -27,7 +30,9 @@ export type GitStatusTreeSubmodule = {
   untracked?: GitSubmoduleFiles;
 };
 
-export type GitStatusTreeNode = GitStatusTreeDirectoryNode | GitStatusTreeFileNode;
+export type GitPathTreeNode<FileNode extends GitPathTreeFileNode> = GitPathTreeDirectoryNode<FileNode> | FileNode;
+export type GitStatusTreeDirectoryNode = GitPathTreeDirectoryNode<GitStatusTreeFileNode>;
+export type GitStatusTreeNode = GitPathTreeNode<GitStatusTreeFileNode>;
 
 export type GitStatusTreeSection = {
   fileCount: number;
@@ -36,11 +41,11 @@ export type GitStatusTreeSection = {
   nodes: GitStatusTreeNode[];
 };
 
-type GitTreeFileEntry = Omit<GitStatusTreeFileNode, "kind">;
+type GitTreeFileEntry = Omit<GitStatusTreeFileNode, "kind" | "name">;
 
-type GitTreeDirectoryBuilder = {
-  directories: Map<string, GitTreeDirectoryBuilder>;
-  files: GitTreeFileEntry[];
+type GitTreeDirectoryBuilder<FileNode extends GitPathTreeFileNode> = {
+  directories: Map<string, GitTreeDirectoryBuilder<FileNode>>;
+  files: FileNode[];
   name: string;
   path: string;
 };
@@ -100,21 +105,30 @@ function buildSection(
   const entries = files
     .filter((file) => fileBelongsToSection(file, id))
     .map((file) => toTreeEntry(file, id));
-  const root = createDirectoryBuilder("", "");
-
-  for (const entry of entries) {
-    insertFileEntry(root, entry);
-  }
 
   return reconcileSection(previousSection, {
     fileCount: entries.length,
     id,
     label,
-    nodes: materializeChildren(root),
+    nodes: buildPathTree(entries),
   });
 }
 
-function createDirectoryBuilder(name: string, path: string): GitTreeDirectoryBuilder {
+export function buildGitPathTree(paths: readonly string[]): GitPathTreeNode<GitPathTreeFileNode>[] {
+  return buildPathTree(paths.map((path) => ({ path })));
+}
+
+function buildPathTree<Entry extends { path: string }>(entries: Entry[]): GitPathTreeNode<Entry & GitPathTreeFileNode>[] {
+  const root = createDirectoryBuilder<Entry & GitPathTreeFileNode>("", "");
+  for (const entry of entries) {
+    const segments = splitGitPath(entry.path);
+    insertFileEntry(root, { ...entry, kind: "file", name: segments[segments.length - 1] }, segments);
+  }
+
+  return materializeChildren(root);
+}
+
+function createDirectoryBuilder<FileNode extends GitPathTreeFileNode>(name: string, path: string): GitTreeDirectoryBuilder<FileNode> {
   return {
     directories: new Map(),
     files: [],
@@ -133,11 +147,9 @@ function fileBelongsToSection(file: GitStatusFile, sectionId: GitStatusSectionId
 
 function toTreeEntry(file: GitStatusFile, sectionId: GitStatusSectionId): GitTreeFileEntry {
   const statusCode = sectionId === "staged" ? normalizeGitStatus(file.indexStatus) : resolveUnstagedStatusCode(file);
-  const segments = splitGitPath(file.path);
   const submodule = file.submodule?.[sectionId] ? file.submodule : undefined;
 
   return {
-    name: segments[segments.length - 1] ?? file.path,
     originalPath: file.originalPath,
     path: file.path,
     statusCode,
@@ -151,9 +163,11 @@ function toTreeEntry(file: GitStatusFile, sectionId: GitStatusSectionId): GitTre
   };
 }
 
-function insertFileEntry(root: GitTreeDirectoryBuilder, entry: GitTreeFileEntry) {
-  const segments = splitGitPath(entry.path);
-  const fileName = segments[segments.length - 1] ?? entry.path;
+function insertFileEntry<FileNode extends GitPathTreeFileNode>(
+  root: GitTreeDirectoryBuilder<FileNode>,
+  entry: FileNode,
+  segments: string[],
+) {
   let directory = root;
 
   for (let index = 0; index < segments.length - 1; index += 1) {
@@ -161,30 +175,29 @@ function insertFileEntry(root: GitTreeDirectoryBuilder, entry: GitTreeFileEntry)
     const path = segments.slice(0, index + 1).join("/");
     let nextDirectory = directory.directories.get(name);
     if (!nextDirectory) {
-      nextDirectory = createDirectoryBuilder(name, path);
+      nextDirectory = createDirectoryBuilder<FileNode>(name, path);
       directory.directories.set(name, nextDirectory);
     }
     directory = nextDirectory;
   }
 
-  directory.files.push({
-    ...entry,
-    name: fileName,
-  });
+  directory.files.push(entry);
 }
 
-function materializeChildren(directory: GitTreeDirectoryBuilder): GitStatusTreeNode[] {
+function materializeChildren<FileNode extends GitPathTreeFileNode>(
+  directory: GitTreeDirectoryBuilder<FileNode>,
+): GitPathTreeNode<FileNode>[] {
   const directories = Array.from(directory.directories.values())
     .sort((left, right) => compareGitTreeNames(left.name, right.name))
     .map(materializeDirectory);
-  const files = [...directory.files]
-    .sort((left, right) => compareGitTreeNames(left.name, right.name))
-    .map((file): GitStatusTreeFileNode => ({ kind: "file", ...file }));
+  const files = [...directory.files].sort((left, right) => compareGitTreeNames(left.name, right.name));
 
   return [...directories, ...files];
 }
 
-function materializeDirectory(directory: GitTreeDirectoryBuilder): GitStatusTreeDirectoryNode {
+function materializeDirectory<FileNode extends GitPathTreeFileNode>(
+  directory: GitTreeDirectoryBuilder<FileNode>,
+): GitPathTreeDirectoryNode<FileNode> {
   const children = materializeChildren(directory);
   const fileCount = children.reduce((count, child) => count + (child.kind === "file" ? 1 : child.fileCount), 0);
 

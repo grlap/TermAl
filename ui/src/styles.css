@@ -8058,6 +8058,12 @@ textarea {
   gap: 0.05rem;
 }
 
+.git-status-tree-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .git-status-node {
   display: grid;
   gap: 0.02rem;
@@ -8168,9 +8174,35 @@ textarea {
   font-weight: 700;
 }
 
-.git-status-submodule-paths {
-  margin: 0;
-  padding-left: 1.15rem;
+.git-status-submodule-files,
+.git-status-submodule-files :is(.git-status-tree, .git-status-node, .git-status-tree-children) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.git-status-submodule-files .git-status-node {
+  container: git-status-submodule-branch / inline-size;
+}
+
+.git-status-submodule-folder-parent {
+  display: none;
+}
+
+/* Reserve room for the chevron and name before adding another level of indentation. */
+@container git-status-submodule-branch (max-width: 8rem) {
+  .git-status-submodule-files .git-status-tree-children {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+    box-shadow: inset 1px 0 var(--line);
+  }
+
+  .git-status-submodule-folder-parent {
+    display: inline-flex;
+    gap: 0.15rem;
+    min-width: 0;
+    max-width: 40%;
+    color: var(--muted);
+  }
 }
 
 .git-status-submodule-message {

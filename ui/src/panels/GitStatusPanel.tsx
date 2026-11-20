@@ -9,6 +9,7 @@ import {
   type GitStatusResponse,
 } from "../api";
 import { GitStatusSubmoduleFiles, GitStatusSubmoduleLabels } from "./GitStatusSubmoduleFiles";
+import { ChevronIcon, GitStatusTreeName, GitStatusTreeRows, type GitStatusTreeOptions } from "./GitStatusTreeRows";
 import {
   buildGitStatusTree,
   gitStatusTone,
@@ -696,7 +697,6 @@ export function GitStatusPanel({
                   onTreeToggle={toggleTreeItem}
                   mutationDisabled={isGitMutationPending}
                   pendingActionKey={pendingActionKey}
-                  repoRoot={visibleStatus.repoRoot ?? ""}
                   section={section}
                   treeExpansionByKey={treeExpansionByKey}
                 />
@@ -752,7 +752,6 @@ const GitStatusSection = memo(function GitStatusSection({
   onSectionAction,
   onTreeToggle,
   pendingActionKey,
-  repoRoot,
   section,
   treeExpansionByKey,
 }: {
@@ -768,7 +767,6 @@ const GitStatusSection = memo(function GitStatusSection({
   onSectionAction: (sectionId: GitStatusSectionId, nodes: GitStatusTreeNode[], action: GitFileAction) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
   pendingActionKey: string | null;
-  repoRoot: string;
   section: GitStatusTreeSection;
   treeExpansionByKey: Record<string, boolean>;
 }) {
@@ -817,7 +815,6 @@ const GitStatusSection = memo(function GitStatusSection({
             onOpenDiff={onOpenDiff}
             onTreeToggle={onTreeToggle}
             pendingActionKey={pendingActionKey}
-            repoRoot={repoRoot}
             sectionId={section.id}
             treeExpansionByKey={treeExpansionByKey}
           />
@@ -837,7 +834,6 @@ const GitStatusTree = memo(function GitStatusTree({
   onOpenDiff,
   onTreeToggle,
   pendingActionKey,
-  repoRoot,
   sectionId,
   treeExpansionByKey,
 }: {
@@ -852,98 +848,21 @@ const GitStatusTree = memo(function GitStatusTree({
   onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
   onTreeToggle: (key: string, defaultValue: boolean) => void;
   pendingActionKey: string | null;
-  repoRoot: string;
   sectionId: GitStatusSectionId;
   treeExpansionByKey: Record<string, boolean>;
 }) {
-  return (
-    <div className="git-status-tree">
-      {nodes.map((node) =>
-        node.kind === "directory" ? (
-          <GitStatusDirectoryNode
-            key={`${sectionId}:${node.path}`}
-            mutationDisabled={mutationDisabled}
-            node={node}
-            onDirectoryAction={onDirectoryAction}
-            onFileAction={onFileAction}
-            onOpenDiff={onOpenDiff}
-            onTreeToggle={onTreeToggle}
-            pendingActionKey={pendingActionKey}
-            repoRoot={repoRoot}
-            sectionId={sectionId}
-            treeExpansionByKey={treeExpansionByKey}
-          />
-        ) : (
-          <GitStatusFileRow
-            key={`${sectionId}:${node.path}`}
-            isPending={pendingActionKey !== null && pendingActionKey.startsWith(`${sectionId}:${node.path}:`)}
-            mutationDisabled={mutationDisabled}
-            node={node}
-            onAction={onFileAction}
-            onOpenDiff={onOpenDiff}
-            onSubmoduleToggle={node.submodule ? onTreeToggle : undefined}
-            repoRoot={repoRoot}
-            sectionId={sectionId}
-            submoduleExpanded={node.submodule ? treeExpansionByKey[submoduleExpansionKey(sectionId, node.path)] : undefined}
-          />
-        ),
-      )}
-    </div>
-  );
-});
-
-const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
-  mutationDisabled,
-  node,
-  onDirectoryAction,
-  onFileAction,
-  onOpenDiff,
-  onTreeToggle,
-  pendingActionKey,
-  repoRoot,
-  sectionId,
-  treeExpansionByKey,
-}: {
-  mutationDisabled: boolean;
-  node: GitStatusTreeDirectoryNode;
-  onDirectoryAction: (
-    sectionId: GitStatusSectionId,
-    node: GitStatusTreeDirectoryNode,
-    action: GitFileAction,
-  ) => void;
-  onFileAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
-  onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
-  onTreeToggle: (key: string, defaultValue: boolean) => void;
-  pendingActionKey: string | null;
-  repoRoot: string;
-  sectionId: GitStatusSectionId;
-  treeExpansionByKey: Record<string, boolean>;
-}) {
-  const expansionKey = directoryExpansionKey(sectionId, node.path);
-  const isExpanded = treeExpansionByKey[expansionKey] ?? true;
-  const isStaged = sectionId === "staged";
-  const action: GitFileAction = isStaged ? "unstage" : "stage";
-  const actionLabel = formatGitStageActionLabel(node.name, isStaged);
-  const isPending = pendingActionKey === gitFileActionKey(sectionId, node.path, action);
-
-  return (
-    <div className="git-status-node">
-      <div className={`git-status-tree-row git-status-tree-directory-row${isPending ? " pending" : ""}`}>
-        <button
-          className="git-status-tree-directory-toggle"
-          type="button"
-          aria-expanded={isExpanded}
-          onClick={() => onTreeToggle(expansionKey, true)}
-        >
-          <span className="git-tree-toggle" aria-hidden="true">
-            <ChevronIcon expanded={isExpanded} />
-          </span>
-          <span className="git-status-tree-label-group">
-            <span className="git-status-tree-name">{node.name}</span>
-          </span>
-        </button>
-        <div className="git-status-tree-tail">
-          <div className="git-status-tree-actions">
+  const options = useMemo<GitStatusTreeOptions<GitStatusTreeFileNode>>(() => {
+    const isStaged = sectionId === "staged";
+    const action: GitFileAction = isStaged ? "unstage" : "stage";
+    return {
+      directoryKey: (path) => directoryExpansionKey(sectionId, path),
+      onTreeToggle,
+      treeExpansionByKey,
+      directoryActions: (node) => {
+        const actionLabel = formatGitStageActionLabel(node.name, isStaged);
+        return {
+          isPending: pendingActionKey === gitFileActionKey(sectionId, node.path, action),
+          actions: (
             <button
               className="git-status-action-button"
               type="button"
@@ -954,31 +873,25 @@ const GitStatusDirectoryNode = memo(function GitStatusDirectoryNode({
             >
               {isStaged ? <UnstageIcon /> : <StageIcon />}
             </button>
-          </div>
-          <span className="git-status-tree-count" aria-hidden="true">
-            {node.fileCount}
-          </span>
-        </div>
-      </div>
+          ),
+        };
+      },
+      renderFile: (node) => (
+        <GitStatusFileRow
+          isPending={pendingActionKey !== null && pendingActionKey.startsWith(`${sectionId}:${node.path}:`)}
+          mutationDisabled={mutationDisabled}
+          node={node}
+          onAction={onFileAction}
+          onOpenDiff={onOpenDiff}
+          onTreeToggle={onTreeToggle}
+          sectionId={sectionId}
+          treeExpansionByKey={node.submodule ? treeExpansionByKey : undefined}
+        />
+      ),
+    };
+  }, [mutationDisabled, onDirectoryAction, onFileAction, onOpenDiff, onTreeToggle, pendingActionKey, sectionId, treeExpansionByKey]);
 
-      {isExpanded ? (
-        <div className="git-status-tree-children">
-          <GitStatusTree
-            mutationDisabled={mutationDisabled}
-            nodes={node.children}
-            onDirectoryAction={onDirectoryAction}
-            onFileAction={onFileAction}
-            onOpenDiff={onOpenDiff}
-            onTreeToggle={onTreeToggle}
-            pendingActionKey={pendingActionKey}
-            repoRoot={repoRoot}
-            sectionId={sectionId}
-            treeExpansionByKey={treeExpansionByKey}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
+  return <GitStatusTreeRows nodes={nodes} options={options} />;
 });
 
 const GitStatusFileRow = memo(function GitStatusFileRow({
@@ -987,26 +900,26 @@ const GitStatusFileRow = memo(function GitStatusFileRow({
   node,
   onAction,
   onOpenDiff,
-  onSubmoduleToggle,
-  repoRoot,
+  onTreeToggle,
   sectionId,
-  submoduleExpanded = false,
+  treeExpansionByKey,
 }: {
   isPending: boolean;
   mutationDisabled: boolean;
   node: GitStatusTreeFileNode;
   onAction: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, action: GitFileAction) => void;
   onOpenDiff: (sectionId: GitStatusSectionId, node: GitStatusTreeFileNode, options?: GitDiffOpenOptions) => void;
-  onSubmoduleToggle?: (key: string, defaultValue: boolean) => void;
-  repoRoot: string;
+  onTreeToggle: (key: string, defaultValue: boolean) => void;
   sectionId: GitStatusSectionId;
-  submoduleExpanded?: boolean;
+  treeExpansionByKey?: Record<string, boolean>;
 }) {
   const tone = gitStatusTone(node.statusCode);
   const isStaged = sectionId === "staged";
   const stageActionLabel = formatGitStageActionLabel(node.name, isStaged);
 
   const submodule = node.submodule;
+  const expansionKey = submoduleExpansionKey(sectionId, node.path);
+  const submoduleExpanded = treeExpansionByKey?.[expansionKey] ?? false;
   const stateDescriptionId = useId();
   const row = (
     <div className={`git-status-tree-row git-status-tree-file-row${submodule ? " git-status-submodule-row" : ""}${isPending ? " pending" : ""}`}>
@@ -1017,7 +930,7 @@ const GitStatusFileRow = memo(function GitStatusFileRow({
           aria-expanded={submoduleExpanded}
           aria-label={`${submoduleExpanded ? "Collapse" : "Expand"} submodule ${node.name}`}
           aria-describedby={stateDescriptionId}
-          onClick={() => onSubmoduleToggle?.(submoduleExpansionKey(sectionId, node.path), false)}
+          onClick={() => onTreeToggle(expansionKey, false)}
         >
           <span className="git-tree-toggle" aria-hidden="true">
             <ChevronIcon expanded={submoduleExpanded} />
@@ -1037,10 +950,7 @@ const GitStatusFileRow = memo(function GitStatusFileRow({
         disabled={isPending}
       >
         {submodule ? null : <span className="git-tree-toggle git-tree-toggle-placeholder" aria-hidden="true" />}
-        <span className="git-status-tree-label-group">
-          <span className="git-status-tree-name">{node.name}</span>
-          {node.originalPath ? <span className="git-status-tree-detail">from {node.originalPath}</span> : null}
-        </span>
+        <GitStatusTreeName name={node.name} originalPath={node.originalPath} />
         {submodule ? <GitStatusSubmoduleLabels id={stateDescriptionId} submodule={submodule} /> : null}
       </button>
 
@@ -1083,9 +993,14 @@ const GitStatusFileRow = memo(function GitStatusFileRow({
   return submodule ? (
     <div className="git-status-node">
       {row}
-      {submoduleExpanded ? (
+      {submoduleExpanded && treeExpansionByKey ? (
         <div className="git-status-tree-children git-status-submodule-files">
-          <GitStatusSubmoduleFiles submodule={submodule} />
+          <GitStatusSubmoduleFiles
+            expansionKey={expansionKey}
+            onTreeToggle={onTreeToggle}
+            submodule={submodule}
+            treeExpansionByKey={treeExpansionByKey}
+          />
         </div>
       ) : null}
     </div>
@@ -1149,32 +1064,6 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <h3>{title}</h3>
       <p>{body}</p>
     </article>
-  );
-}
-
-function ChevronIcon({ expanded }: { expanded: boolean }) {
-  return (
-    <svg className="git-tree-chevron" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-      {expanded ? (
-        <path
-          d="M2.5 4.25 6 7.75l3.5-3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.5"
-        />
-      ) : (
-        <path
-          d="m4.25 2.5 3.5 3.5-3.5 3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.5"
-        />
-      )}
-    </svg>
   );
 }
 

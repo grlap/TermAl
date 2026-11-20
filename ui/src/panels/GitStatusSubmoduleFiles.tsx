@@ -1,8 +1,10 @@
 // Owns the submodule marker and read-only file groups for GitStatusPanel.
-// Row expansion, Git requests, and action handlers stay in GitStatusPanel.
+// Git requests and action handlers stay in GitStatusPanel.
 
+import { useMemo } from "react";
 import type { GitSubmoduleFiles } from "../api";
-import type { GitStatusTreeSubmodule } from "./git-status-tree";
+import { GitStatusTreeName, GitStatusTreeRows, type GitStatusTreeExpansion, type GitStatusTreeOptions } from "./GitStatusTreeRows";
+import { buildGitPathTree, type GitPathTreeFileNode, type GitStatusTreeSubmodule } from "./git-status-tree";
 
 export function GitStatusSubmoduleLabels({ id, submodule }: { id: string; submodule: GitStatusTreeSubmodule }) {
   return (
@@ -16,7 +18,11 @@ export function GitStatusSubmoduleLabels({ id, submodule }: { id: string; submod
   );
 }
 
-export function GitStatusSubmoduleFiles({ submodule }: { submodule: GitStatusTreeSubmodule }) {
+type SubmoduleTreeExpansion = GitStatusTreeExpansion & { expansionKey: string };
+
+export function GitStatusSubmoduleFiles({ submodule, ...expansion }: SubmoduleTreeExpansion & {
+  submodule: GitStatusTreeSubmodule;
+}) {
   const { checkout, commits, modified, untracked } = submodule;
   if (checkout === "notCheckedOut") {
     return <p className="git-status-submodule-message">Not checked out.</p>;
@@ -27,10 +33,15 @@ export function GitStatusSubmoduleFiles({ submodule }: { submodule: GitStatusTre
   return (
     <>
       {commits ? (
-        <FileGroup label="Commits" files={commits} empty="The pointer changed, but Git listed no changed paths." />
+        <FileGroup
+          {...expansion}
+          label="Commits"
+          files={commits}
+          empty="The pointer changed, but Git listed no changed paths."
+        />
       ) : null}
-      {modified ? <FileGroup label="Modified" files={modified} /> : null}
-      {untracked ? <FileGroup label="Untracked" files={untracked} /> : null}
+      {modified ? <FileGroup {...expansion} label="Modified" files={modified} /> : null}
+      {untracked ? <FileGroup {...expansion} label="Untracked" files={untracked} /> : null}
     </>
   );
 }
@@ -39,7 +50,8 @@ function FileGroup({
   label,
   files,
   empty = "Git reported this change without file paths.",
-}: {
+  ...expansion
+}: SubmoduleTreeExpansion & {
   label: string;
   files: GitSubmoduleFiles;
   empty?: string;
@@ -50,12 +62,10 @@ function FileGroup({
       {files.state === "listed" ? (
         <>
           {files.paths.length > 0 ? (
-            <ul className="git-status-submodule-paths">
-              {files.paths.map((path, index) => (
-                <li key={index}>{path}</li>
-              ))}
-              {files.remaining > 0 ? <li className="git-status-submodule-message">+{files.remaining} more</li> : null}
-            </ul>
+            <>
+              <SubmodulePathTree {...expansion} label={label} paths={files.paths} />
+              {files.remaining > 0 ? <p className="git-status-submodule-message">+{files.remaining} more</p> : null}
+            </>
           ) : <p className="git-status-submodule-message">{empty}</p>}
           {files.incomplete ? <p className="git-status-submodule-message">Some nested submodule files could not be read.</p> : null}
         </>
@@ -68,4 +78,29 @@ function FileGroup({
       )}
     </div>
   );
+}
+
+function SubmodulePathTree({ expansionKey, label, paths, onTreeToggle, treeExpansionByKey }: SubmoduleTreeExpansion & {
+  label: string;
+  paths: string[];
+}) {
+  const nodes = useMemo(() => buildGitPathTree(paths), [paths]);
+  const options = useMemo<GitStatusTreeOptions<GitPathTreeFileNode>>(() => ({
+    asList: true,
+    directoryKey: (path) => `submodule-directory:${JSON.stringify([expansionKey, label, path])}`,
+    onTreeToggle,
+    treeExpansionByKey,
+    showFolderPaths: true,
+    renderFile: (node) => (
+      <div className="git-status-tree-row git-status-tree-file-row">
+        <span className="git-status-tree-open-button">
+          <span className="git-tree-toggle git-tree-toggle-placeholder" aria-hidden="true" />
+          <GitStatusTreeName ariaHidden name={node.name} title={node.path} />
+          <span className="visually-hidden">{node.path}</span>
+        </span>
+      </div>
+    ),
+  }), [expansionKey, label, onTreeToggle, treeExpansionByKey]);
+
+  return <GitStatusTreeRows nodes={nodes} options={options} />;
 }
