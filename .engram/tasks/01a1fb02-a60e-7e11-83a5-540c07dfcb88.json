@@ -1,0 +1,28 @@
+{
+  "id": "01a1fb02-a60e-7e11-83a5-540c07dfcb88",
+  "external_ref": null,
+  "title": "Mailbox id refusal tests: assert the echoed prefix and cut-off, and the numeric-acknowledge refusal message",
+  "outcome": "The malformed-id and numeric-acknowledge tests distinguish the behaviour they cover from neighbouring refusals.",
+  "acceptance": [
+    "The over-long malformed-id case uses characters distinguishable across the 96-character cut-off and asserts that the 400 echoes exactly the first 96 input characters, omits the rest, and states the full length.",
+    "The numeric-acknowledge test for domain members asserts the central-domain refusal message, not only the 400 status, so it fails if the request is refused as a malformed id instead."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "mailbox",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

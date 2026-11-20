@@ -4,7 +4,9 @@
   "title": "MCP termal_acknowledge_mailbox returns 404 'mailbox not found' where the CLI acknowledge of the same mailbox succeeds",
   "outcome": "Acknowledging a mailbox the caller can read gives the same result through the MCP tool and the CLI: both succeed for the same mailbox id and receipt, or both refuse with the same reason.",
   "acceptance": [
-    "MCP termal_acknowledge_mailbox returns 404 'mailbox not found' where the CLI acknowledge of the same mailbox succeeds is done"
+    "On the public read and acknowledge mailbox routes, a mailbox id that is neither \"mailbox-\" followed by a canonical lowercase UUID nor a valid relay locator is refused with 400 before any membership, store or central-domain lookup. The message echoes the received value escaped and bounded: control and format characters escaped, and an over-long value truncated with its length stated. Shown by behavioural tests through the routes, on a native and on a central-domain session, for an id with a stray trailing character, one with a control character, and an over-long id. The tests fail on master before the fix (RED first).",
+    "A route-miss 404 from the central-domain read or acknowledge names the received mailbox id, escaped and bounded, instead of \"<invalid mailbox id>\". Requests with canonical ids keep their current results; participation and lookup logic are unchanged. Shown by behavioural tests: a canonical but unknown mailbox id gets a 404 naming that id, and the reported own-send acknowledge sequence (the parked 844e61f1 diagnostic) still succeeds.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,

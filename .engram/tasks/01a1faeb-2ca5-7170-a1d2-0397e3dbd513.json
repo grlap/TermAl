@@ -1,0 +1,28 @@
+{
+  "id": "01a1faeb-2ca5-7170-a1d2-0397e3dbd513",
+  "external_ref": null,
+  "title": "A Central TermAl restart can kill a remote runner's foreground launcher run mid-gate, leaving it interrupted without a terminal result",
+  "outcome": "A restart of the Central TermAl host does not end a launcher run that a federated runner session started in the foreground, or, if it can, the run is recorded with a clear interruption cause and the runner and scheduler are told; restart guidance names foreground gate runs on runners as work a restart would cut.",
+  "acceptance": [
+    "A Central TermAl restart can kill a remote runner's foreground launcher run mid-gate, leaving it interrupted without a terminal result is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "remote-runner",
+    "restart",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

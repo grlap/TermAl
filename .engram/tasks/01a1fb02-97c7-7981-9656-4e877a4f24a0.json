@@ -1,0 +1,27 @@
+{
+  "id": "01a1fb02-97c7-7981-9656-4e877a4f24a0",
+  "external_ref": null,
+  "title": "Mailbox id guard: accept a canonically spelled nil UUID as syntax, reuse the shared predicate, settle the unreachable route-miss echo",
+  "outcome": "The mailbox-id syntax check rests on one predicate, separates canonical spelling from the relay-specific nil refusal, and has no untested dead branch.",
+  "acceptance": [
+    "A canonically spelled nil-UUID mailbox id (mailbox-00000000-0000-0000-0000-000000000000) on the read and acknowledge routes is treated as an unknown mailbox (404 naming it), not refused as malformed; non-canonical ids still get the 400. Shown by a behavioural test.",
+    "require_canonical_mailbox_id and valid_mailbox_relay_id share one minted-shape predicate, and the echo fallback in describe_mailbox_route_miss is either removed or documented as a guard for other callers."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

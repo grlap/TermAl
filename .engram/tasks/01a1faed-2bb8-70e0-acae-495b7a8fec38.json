@@ -1,0 +1,28 @@
+{
+  "id": "01a1faed-2bb8-70e0-acae-495b7a8fec38",
+  "external_ref": null,
+  "title": "Git status panel tests: the submodule tree's full-path accessibility check runs without the app stylesheet",
+  "outcome": "Low from the w-745943376089 review, round 5. The Codex reviewer, delegation-6084cec6, raised it at ui/src/panels/GitStatusPanel.test.tsx:256 on candidate e077c996, and the coordinator downgraded it from Medium. Vitest imports GitStatusPanel without the application's styles.css. A future stylesheet rule that hid the full-path text with display:none would therefore not fail the accessibility test. Neither reviewer found a present stylesheet defect. The DOM assertions already catch missing ownership, hidden, aria-hidden and inline display:none, and a committed Chromium fixture checks the runtime one-line and ellipsis layout. If coverage is added, it should check the rendered behaviour with the real stylesheet, never the CSS text.",
+  "acceptance": [
+    "Git status panel tests: the submodule tree's full-path accessibility check runs without the app stylesheet is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "test-coverage",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

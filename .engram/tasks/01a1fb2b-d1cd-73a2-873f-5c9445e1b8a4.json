@@ -1,0 +1,29 @@
+{
+  "id": "01a1fb2b-d1cd-73a2-873f-5c9445e1b8a4",
+  "external_ref": null,
+  "title": "Attribute native mailbox relay handler deadlines to the home wait or holder",
+  "outcome": "The next authenticated home Read or Describe deadline distinguishes a wait for the shared mailbox connection or writer, the operation holding it where observable, and deadlines elsewhere in the handler. The diagnostics preserve the existing response and mailbox privacy.",
+  "acceptance": [
+    "In the existing authenticated relay diagnostics, a deterministic disposable-store case correlates a home Read or Describe deadline with a controlled connection or writer holder, and a control distinguishes a deadline with no attributable holder.",
+    "The diagnostic stays bounded and redacted, excludes mailbox content and receipt tokens, and preserves authentication, deadlines and response behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

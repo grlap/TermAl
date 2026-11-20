@@ -1,0 +1,30 @@
+{
+  "id": "01a1fafb-da58-7ec2-b0bf-d3862af346b9",
+  "external_ref": null,
+  "title": "Relay read of Opus2's mailbox from DL560 fails with 503 'native mailbox relay response unavailable' while other relay mailboxes read normally",
+  "outcome": "A remote runner can read every relay mailbox it participates in; a read fails only with a stated, specific cause. Reported by s4 (DL560, Engram Runner) to Fable2 in relay mailbox 1bc0835c #296 at 22:02Z on 2026-11-20. `$TERMAL_CLI mailbox read --mailbox-id <relay locator of Opus2's mailbox e33d91e9-c1b2-4877-8ffe-a65bfe7e24f1> --json` failed with 'TermAl delegation API returned 503 Service Unavailable: mailbox page unavailable: the original home could not be reached or gave no usable answer (native mailbox relay response unavailable)'. Occurrences: 20:17Z, where one retry at 20:19:20Z worked; and 21:59Z, where one retry at 22:01:58Z failed again. At the same time s4's reads of three other relay mailboxes (11334, Engram::Merger, Claude::TLA) answered normally, and sends to Opus2 succeeded. The failure is specific to this one mailbox, so a per-mailbox property is a first suspect: page size or response size, or the content of one message. The home is Central, running the build of 61bb80ec since the 18:29Z restart. Related but not the same: w-7842edb291bf (503 then 409 after a link change) and w-3bddbf73af2a (unstructured unknown-outcome replies). Impact: s4 gates each next TLC configuration on reading this mailbox, so Coord round 6c is held.",
+  "acceptance": [
+    "A receipt-backed acknowledgement computes the returned summary only for the acknowledged mailbox inside its existing transaction. It preserves participant and receipt checks, cursor and optional continuation declaration behavior, exact target summary, authority fencing, and the full mailbox List result.",
+    "A deterministic, authenticated relay regression drives a real acknowledgement with a sibling mailbox. The unfixed acknowledgement reaches the sibling hold and delays an overlapping Read at the home connection. On the fix the Read succeeds, the target acknowledgement returns the correct summary and cursor, and the sibling cursor and summary stay unchanged.",
+    "The item records the nine authenticated home handler-deadline observations and the proven unnecessary acknowledgement work as distinct evidence, with no per-incident lock-holder attribution. Independent review has no outstanding Medium-or-higher finding and the exact landed tree has a passing FULL gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

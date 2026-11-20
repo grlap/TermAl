@@ -14,12 +14,19 @@
   "labels": [],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed 699dad1ef71d19538c063b3371b397c6568453c2 on origin/master. Host guidance, MCP tool description, CLI help and docs scope the continuation declaration to standalone local receipts and give the same-receipt fallback for native relay and central-domain mailboxes. Original Central focused Test passed all five cases including relay refusal and plain ACK; the identical carry adopted the independent R1 reviews and passed all six FULL stages on its exact tree. Independent post-landing evaluation 718f227177ac487f9ec8553d8f853e9e is current and passed both criteria.",
+    "completed_at": "2026-11-20T20:40:28.427837Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
