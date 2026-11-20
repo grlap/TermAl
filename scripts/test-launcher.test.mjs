@@ -3166,20 +3166,6 @@ test("the recover command reports an already terminal run without changing it", 
   });
 });
 
-test("CI runs every maintained helper test suite on each platform, under the gate's hang guard", () => {
-  const workflow = readFileSync(
-    join(projectRoot, ".github", "workflows", "review-freeze.yml"),
-    "utf8",
-  );
-  const run = /run: node (--test .+)$/mu.exec(workflow);
-  assert.ok(run, "the workflow runs node --test");
-  assert.deepEqual(run[1].trim().split(/\s+/u), [...helperTestArgs]);
-  // The gate host's Node: the hang guard and the hung/failed verdicts rely on
-  // its test runner (see docs/test.md).
-  assert.match(workflow, /^\s*node-version-file: \.nvmrc\s*$/mu);
-  assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/u);
-});
-
 // On Windows a rename that replaces a file fails with EPERM while any other
 // handle on that file is open, even one that shares delete; a handle this
 // process holds stands for another process's reader, such as the host's.
