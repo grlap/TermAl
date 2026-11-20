@@ -1,0 +1,30 @@
+{
+  "id": "01a1f769-fe59-7580-95a7-f77f28673173",
+  "external_ref": null,
+  "title": "Federated mailbox send to a remote native session fails with 429 'federation peer RPC limit reached' during a multi-part bundle send",
+  "outcome": "A sender streaming an ordered multi-part message sequence to a remote native session over federation either is never refused by the peer RPC limit at the sender's expected rate, or receives a retry-safe signal that preserves part order; the limit and its retry behaviour are documented.",
+  "acceptance": [
+    "A behaviour test sends a burst of ordered mailbox messages to a federated remote native session and shows that either none is refused, or each refusal is a documented retryable error naming the limit, and an identical-key retry is accepted exactly once.",
+    "The federation peer RPC limit (its value, scope and window) and the recommended sender behaviour are documented in the relevant feature doc.",
+    "Out-of-order arrival caused by a retried part is either prevented or explicitly surfaced to the receiver (for example by sequence labels), as stated in the doc."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

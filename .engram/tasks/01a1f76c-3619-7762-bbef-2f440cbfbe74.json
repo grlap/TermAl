@@ -1,0 +1,30 @@
+{
+  "id": "01a1f76c-3619-7762-bbef-2f440cbfbe74",
+  "external_ref": null,
+  "title": "Remote test-run wait for a DL560 FULL reports preset 'focused' and null facts while association is stale",
+  "outcome": "termal_resume_after_test_runs on a remote run whose origin facts are not yet authenticated reports an explicit unknown state, never a default preset such as 'focused', and resolves to the run's real preset and facts once they arrive.",
+  "acceptance": [
+    "A behaviour test registers a remote-run wait before the origin's authenticated facts are available and shows the response reports the preset as unknown or absent (not 'focused') with the stale-association reason.",
+    "The same test shows that once authenticated native origin facts for a 'full' run arrive, the wait reports preset 'full' with the run's identity and start time.",
+    "The wait's response fields for the stale-association state are documented."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "remote-runner",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

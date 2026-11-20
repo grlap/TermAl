@@ -1,0 +1,27 @@
+{
+  "id": "01a1f761-a01e-7172-b188-c0f0ea91401e",
+  "external_ref": null,
+  "title": "Bind the Windows fixture GIT_DIR depth to the real fixtures, not a hand-measured constant",
+  "outcome": "On Windows, the fixture-directory budget (67) rests on a hand-measured depth: the deepest fixture GIT_DIR is 133 chars below its directory. That figure is mirrored as DEEPEST_FIXTURE_GIT_DIR_BELOW_DIRECTORY in src/tests/test_temp_paths.rs. A later test that adds a deeper Git fixture can again fail with 'Filename too long' or '$GIT_DIR too big' under a directory the check accepts, while the boundary tests stay green. Bind the bound to where fixture GIT_DIRs are actually created, for example a check in the shared Git-fixture helpers that the GIT_DIR stays within Git's 220 limit with margin, or otherwise make drift visible at run time. No source scans, no timing.",
+  "acceptance": [
+    "Bind the Windows fixture GIT_DIR depth to the real fixtures, not a hand-measured constant is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-design",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
