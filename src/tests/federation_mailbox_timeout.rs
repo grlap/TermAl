@@ -91,6 +91,10 @@ async fn mailbox_deadline_keeps_link_and_worker_capacity_until_worker_settlement
             phase_sync::wait_for_gate(&phase, true);
         }
     });
+    // The request deadline runs on logical time: the test steps past it
+    // instead of waiting in real time.
+    channel.control.clock = FederationControlClock::scripted_io();
+    let clock = channel.control.clock.clone();
     let router = federation_router(channel.clone(), federation_link::allowed());
     let request = FederationMailboxRequest {
         protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
@@ -166,6 +170,7 @@ async fn mailbox_deadline_keeps_link_and_worker_capacity_until_worker_settlement
         .await
         .unwrap()
         .unwrap();
+    clock.advance(FEDERATION_HANDLER_DEADLINE);
     let response = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
         .await
         .unwrap()
@@ -281,7 +286,7 @@ async fn health_deadline_answers_408_and_keeps_its_link_incarnation() {
         .await
         .unwrap()
         .unwrap();
-    clock.advance(Duration::from_secs(5));
+    clock.advance(FEDERATION_HANDLER_DEADLINE);
     let response = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
         .await
         .unwrap()

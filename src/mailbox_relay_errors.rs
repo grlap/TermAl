@@ -28,6 +28,131 @@ struct MailboxRelayHomeRpcFailure {
     status: u16,
     stage: MailboxRelayHomeRpcStage,
     request_id: String,
+    // The fixed phase still running when the record was made, and the
+    // elapsed time of each phase finished before it. Names and ms only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    phases: Vec<MailboxRelayPhaseElapsed>,
+}
+
+// A relay request's fixed phases, so a slow or expired request names where it
+// waited: admission, dispatch, origin, operation, connection, storeId, state,
+// authority, postAuthority. No payload, key or peer text is ever recorded.
+const MAILBOX_RELAY_PHASES: usize = 16;
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MailboxRelayPhaseElapsed {
+    phase: &'static str,
+    elapsed_ms: u64,
+}
+
+#[derive(Default)]
+struct MailboxRelayPhaseTrace {
+    state: Mutex<MailboxRelayPhaseState>,
+}
+
+#[derive(Default)]
+struct MailboxRelayPhaseState {
+    current: Option<(&'static str, std::time::Instant)>,
+    finished: Vec<MailboxRelayPhaseElapsed>,
+}
+
+impl MailboxRelayPhaseTrace {
+    fn enter(&self, phase: &'static str) {
+        let now = std::time::Instant::now();
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((previous, began)) = state.current.take()
+            && state.finished.len() < MAILBOX_RELAY_PHASES
+        {
+            state.finished.push(MailboxRelayPhaseElapsed {
+                phase: previous,
+                elapsed_ms: now.saturating_duration_since(began).as_millis() as u64,
+            });
+        }
+        state.current = Some((phase, now));
+    }
+
+    /// The phase still running, with its elapsed time so far, and the
+    /// finished phases before it.
+    fn snapshot(
+        &self,
+    ) -> (
+        Option<MailboxRelayPhaseElapsed>,
+        Vec<MailboxRelayPhaseElapsed>,
+    ) {
+        let now = std::time::Instant::now();
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current = state
+            .current
+            .map(|(phase, began)| MailboxRelayPhaseElapsed {
+                phase,
+                elapsed_ms: now.saturating_duration_since(began).as_millis() as u64,
+            });
+        (current, state.finished.clone())
+    }
+}
+
+thread_local! {
+    static MAILBOX_RELAY_PHASE_TRACE: std::cell::RefCell<Option<Arc<MailboxRelayPhaseTrace>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Installs a relay request's phase trace on the blocking job's thread for
+/// its lifetime, so shared helpers can mark phases without new parameters.
+struct MailboxRelayPhaseScope;
+
+impl MailboxRelayPhaseScope {
+    fn install(trace: Option<Arc<MailboxRelayPhaseTrace>>) -> Self {
+        MAILBOX_RELAY_PHASE_TRACE.with(|slot| *slot.borrow_mut() = trace);
+        Self
+    }
+}
+
+impl Drop for MailboxRelayPhaseScope {
+    fn drop(&mut self) {
+        MAILBOX_RELAY_PHASE_TRACE.with(|slot| *slot.borrow_mut() = None);
+    }
+}
+
+/// Marks the current relay request's phase; does nothing outside one.
+fn mailbox_relay_phase(phase: &'static str) {
+    MAILBOX_RELAY_PHASE_TRACE.with(|slot| {
+        if let Some(trace) = slot.borrow().as_ref() {
+            trace.enter(phase);
+        }
+    });
+}
+
+/// The bounded operation name and request id of a relay request body, read
+/// without decoding or copying its operation content.
+fn mailbox_relay_diagnostic_metadata(request: &[u8]) -> (&'static str, String) {
+    let metadata = serde_json::from_slice::<MailboxRelayDiagnosticRequest<'_>>(request).ok();
+    let request_id = metadata
+        .as_ref()
+        .map(|value| value.request_id)
+        .filter(|id| mailbox_relay_uuid(id))
+        .unwrap_or("unavailable");
+    let operation = match metadata.as_ref().map(|value| value.operation.operation) {
+        Some("observeTestRun") => "observeTestRun",
+        Some("describe") => "describe",
+        Some("send") => "send",
+        Some("list") => "list",
+        Some("read") => "read",
+        Some("readMessage") => "readMessage",
+        Some("acknowledge") => "acknowledge",
+        Some("wake") => "wake",
+        Some("inspectWake") => "inspectWake",
+        _ => "unavailable",
+    };
+    (operation, request_id.to_owned())
 }
 
 #[derive(Default)]
@@ -57,30 +182,32 @@ struct MailboxRelayDiagnosticOperation<'a> {
 }
 
 impl MailboxRelayHomeRpcFailures {
+    #[cfg(test)]
     fn note(&self, request: &[u8], status: StatusCode, stage: MailboxRelayHomeRpcStage) {
+        self.note_with_phases(request, status, stage, None);
+    }
+
+    fn note_with_phases(
+        &self,
+        request: &[u8],
+        status: StatusCode,
+        stage: MailboxRelayHomeRpcStage,
+        trace: Option<&MailboxRelayPhaseTrace>,
+    ) {
         if !status.is_server_error() { return; }
         // Borrow only the correlation fields; serde skips all other payloads.
-        let metadata = serde_json::from_slice::<MailboxRelayDiagnosticRequest<'_>>(request).ok();
-        let request_id = metadata.as_ref().map(|value| value.request_id)
-            .filter(|id| mailbox_relay_uuid(id)).unwrap_or("unavailable");
-        let operation = match metadata.as_ref().map(|value| value.operation.operation) {
-            Some("observeTestRun") => "observeTestRun",
-            Some("describe") => "describe",
-            Some("send") => "send",
-            Some("list") => "list",
-            Some("read") => "read",
-            Some("readMessage") => "readMessage",
-            Some("acknowledge") => "acknowledge",
-            Some("wake") => "wake",
-            Some("inspectWake") => "inspectWake",
-            _ => "unavailable",
-        };
+        let (operation, request_id) = mailbox_relay_diagnostic_metadata(request);
+        let (current, phases) = trace
+            .map(MailboxRelayPhaseTrace::snapshot)
+            .unwrap_or_default();
         let record = MailboxRelayHomeRpcFailure {
             at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             operation,
             status: status.as_u16(),
             stage,
-            request_id: request_id.to_owned(),
+            request_id,
+            phase: current.map(|current| current.phase),
+            phases: phases.into_iter().chain(current).collect(),
         };
         let mut history = self.history.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if history.records.len() == MAILBOX_RELAY_HOME_RPC_FAILURES {
