@@ -204,6 +204,25 @@ fn review_original_project_locked<'a>(
         .then_some(project)
 }
 
+/// A failed publication of a terminal review attempt, as the parent packet
+/// last saw it, with the delegation record identity it was seen at.
+#[derive(Clone, Debug)]
+struct ReviewPacketRetentionFailure {
+    record: String,
+    error: String,
+}
+
+/// The parts of a delegation record whose change makes a remembered packet
+/// retention failure worth retrying: its status, completion and attempt.
+fn review_packet_record_identity(record: &DelegationRecord) -> String {
+    format!(
+        "{:?}|{}|{}",
+        record.status,
+        record.completed_at.as_deref().unwrap_or(""),
+        record.review_result_submission_attempt
+    )
+}
+
 /// The parent packet publishes only a completed or failed attempt that is
 /// still the delegation's current one.
 fn terminal_review_attempt(record: &DelegationRecord, attempt: u32) -> bool {
@@ -1143,28 +1162,87 @@ impl AppState {
         let Some(attempt) = packet.submission_attempt.filter(|attempt| *attempt > 0) else {
             return;
         };
-        if packet.retained_review_attempts_error.is_some()
-            || packet
-                .retained_review_attempts
-                .iter()
-                .any(|identity| identity.submission_attempt == attempt)
-            || !self.review_attempt_storage_enabled()
+        if packet.retained_review_attempts_error.is_some() || !self.review_attempt_storage_enabled()
         {
             return;
         }
-        let terminal_reviewer = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            find_parent_delegation_index_locked(&inner, parent, delegation).is_ok_and(|index| {
-                let record = &inner.delegations[index];
-                record.mode == DelegationMode::Reviewer && terminal_review_attempt(record, attempt)
-            })
+        let listed = packet
+            .retained_review_attempts
+            .iter()
+            .any(|identity| identity.submission_attempt == attempt);
+        let (key, record_identity, remembered) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Ok(index) = find_parent_delegation_index_locked(&inner, parent, delegation) else {
+                return;
+            };
+            let record = &inner.delegations[index];
+            let key = (record.parent_session_id.clone(), record.id.clone(), attempt);
+            let identity = review_packet_record_identity(record);
+            let current = record.review_result_submission_attempt;
+            let terminal =
+                record.mode == DelegationMode::Reviewer && terminal_review_attempt(record, attempt);
+            // Of this delegation's remembered failures, only the current
+            // attempt's survives, and only while the record is unchanged; a
+            // published attempt keeps none.
+            inner.review_packet_retention_failures.retain(
+                |(entry_parent, entry_delegation, entry_attempt), failure| {
+                    *entry_parent != key.0
+                        || *entry_delegation != key.1
+                        || (*entry_attempt == current
+                            && failure.record == identity
+                            && !(listed && *entry_attempt == attempt))
+                },
+            );
+            if listed || !terminal {
+                return;
+            }
+            let remembered = inner
+                .review_packet_retention_failures
+                .get(&key)
+                .map(|failure| failure.error.clone());
+            (key, identity, remembered)
         };
-        if !terminal_reviewer {
+        // A failure that persists is retried once per change of the
+        // delegation record, not on every poll; overlapping reads may each
+        // attempt once. An explicit attempt-only read still retries at once.
+        if let Some(error) = remembered {
+            packet.retained_review_attempts_error = Some(error);
             return;
         }
         let discovered = self
             .retain_review_attempt_inner(parent, delegation, attempt, true)
             .and_then(|_| self.retained_review_attempt_identities(parent, delegation));
+        {
+            // This read answers only for the record it was seen at. It
+            // remembers a failure while the delegation, parent and record
+            // are unchanged, and removes only an entry for that same record:
+            // a newer read's failure for a changed record stays remembered.
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let unchanged = find_parent_delegation_index_locked(&inner, parent, delegation)
+                .is_ok_and(|index| {
+                    review_packet_record_identity(&inner.delegations[index]) == record_identity
+                });
+            match &discovered {
+                Err(error) if unchanged => {
+                    inner.review_packet_retention_failures.insert(
+                        key,
+                        ReviewPacketRetentionFailure {
+                            record: record_identity,
+                            error: error.message.clone(),
+                        },
+                    );
+                }
+                _ => {
+                    if inner
+                        .review_packet_retention_failures
+                        .get(&key)
+                        .is_some_and(|failure| failure.record == record_identity)
+                    {
+                        inner.review_packet_retention_failures.remove(&key);
+                    }
+                }
+            }
+        }
         match discovered {
             Ok(identities) => packet.retained_review_attempts = identities,
             Err(error) => packet.retained_review_attempts_error = Some(error.message),
@@ -1211,22 +1289,26 @@ impl AppState {
         delegation: &str,
         selection: &DelegationResultSelection,
     ) -> Result<DelegationResultResponse, ApiError> {
+        // Custody is written and validated against the record's canonical
+        // parent id, while the lookup also accepts surrounding whitespace.
+        // Resolve it once, before either branch, and use only that value. A
+        // caller that is not the parent keeps its own id: the exact-id read
+        // then serves it as a root, never as the parent.
+        let canonical_parent = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            find_parent_delegation_index_locked(&inner, parent, delegation)
+                .map(|index| inner.delegations[index].parent_session_id.clone())
+        };
         let Some(attempt) = selection.submission_attempt else {
             if selection.result_id.is_some() {
                 return Err(ApiError::bad_request("resultId requires submissionAttempt"));
             }
-            // Custody is written and validated against the record's canonical
-            // parent id, while the lookup also accepts surrounding whitespace.
-            // Resolve it once, before discovery, and use only that value.
-            let parent = {
-                let inner = self.inner.lock().expect("state mutex poisoned");
-                let index = find_parent_delegation_index_locked(&inner, parent, delegation)?;
-                inner.delegations[index].parent_session_id.clone()
-            };
+            let parent = canonical_parent?;
             let mut packet = self.get_delegation_result(&parent, delegation)?;
             self.publish_terminal_review_for_packet(&parent, delegation, &mut packet);
             return Ok(packet);
         };
+        let parent = canonical_parent.as_deref().unwrap_or(parent);
         let (snapshot, id) = self.resolve_review_selection(
             parent,
             delegation,
@@ -1278,6 +1360,14 @@ impl AppState {
         let attempt = selection
             .submission_attempt
             .expect("explicit selector checked");
+        // The same canonical parent as get_delegation_result_selected uses.
+        let canonical_parent = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            find_parent_delegation_index_locked(&inner, parent, delegation)
+                .ok()
+                .map(|index| inner.delegations[index].parent_session_id.clone())
+        };
+        let parent = canonical_parent.as_deref().unwrap_or(parent);
         let (snapshot, id) = self.resolve_review_selection(
             parent,
             delegation,

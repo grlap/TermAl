@@ -564,6 +564,7 @@ impl PersistedState {
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashMap::new(),
             acceptance_evidence_recovery: HashMap::new(),
+            review_packet_retention_failures: HashMap::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
             #[cfg(test)]

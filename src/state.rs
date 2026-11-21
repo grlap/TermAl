@@ -1895,6 +1895,12 @@ struct StateInner {
     /// Attempt-scoped read cursors, replay cache and actual-I/O allowance.
     /// A restart loses these capabilities; it never resets an old allowance.
     acceptance_evidence_recovery: HashMap<String, Arc<Mutex<AcceptanceEvidenceRecovery>>>,
+    /// The parent packet's last failed publication of a terminal review
+    /// attempt, keyed by (canonical parent, delegation, attempt). It is served
+    /// instead of a new retention until the delegation record changes, which
+    /// removes it, as do removing the delegation or its parent session. Memory
+    /// only, never persisted: a restart retries once.
+    review_packet_retention_failures: HashMap<(String, String, u32), ReviewPacketRetentionFailure>,
     /// Threads taking an acceptance evaluation's source revision that are
     /// still alive, abandoned ones included (`bounded_source_capture`).
     /// Memory only, one count for the host.
@@ -2040,6 +2046,7 @@ impl StateInner {
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashMap::new(),
             acceptance_evidence_recovery: HashMap::new(),
+            review_packet_retention_failures: HashMap::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
             #[cfg(test)]

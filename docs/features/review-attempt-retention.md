@@ -45,6 +45,11 @@ client of this packet publishes this way: the delegation MCP tools
 delegation result view. If discovery cannot validate the retained history, or
 publishing the terminal current attempt fails, `retainedReviewAttemptsError`
 explains why; the parent's available current result remains readable.
+A failed packet publication is remembered in memory and served again, without
+a new capture, until the delegation's status, completion time or current
+attempt changes; then the packet retries once. Overlapping packet reads may
+each attempt once. An explicit attempt-only read still retries at once, and a
+restart forgets the failure.
 Unpublished candidates
 and reservations supply no result identity.
 

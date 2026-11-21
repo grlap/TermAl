@@ -413,6 +413,8 @@ impl StateInner {
         self.delegation_catalog_children.get_mut().expect("catalog child index poisoned").remove(&delegation_id);
         let stamp = self.next_mutation_stamp();
         self.delegation_mutation_stamps.remove(&delegation_id);
+        self.review_packet_retention_failures
+            .retain(|(_, delegation, _), _| *delegation != delegation_id);
         self.removed_delegation_ids.insert(delegation_id, stamp);
     }
 
@@ -567,6 +569,8 @@ impl StateInner {
             engram_end_orphaned_work_source_roots(&mut self.engram_work_source_roots, |named_by| {
                 named_by != session_id
             });
+            self.review_packet_retention_failures
+                .retain(|(parent, _, _), _| *parent != session_id);
             self.removed_session_ids.push(session_id);
         }
     }
