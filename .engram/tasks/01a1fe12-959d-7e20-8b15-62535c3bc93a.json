@@ -1,0 +1,29 @@
+{
+  "id": "01a1fe12-959d-7e20-8b15-62535c3bc93a",
+  "external_ref": null,
+  "title": "Make delegation result delivery consistent across whole-orchestrator Stop and restart",
+  "outcome": "Decide whether whole-orchestrator Stop should pause or dispatch delegation results retained by an otherwise unpaused idle child, then make the live and restored paths follow the same policy.",
+  "acceptance": [
+    "A retained delegation result on an unpaused child follows the chosen whole-orchestrator Stop policy both before and after restart.",
+    "A behavior test exercises an initially unpaused child on live Stop and restored Stop."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "orchestrator",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

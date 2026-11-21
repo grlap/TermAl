@@ -1,0 +1,27 @@
+{
+  "id": "01a1fdf9-2a2a-7610-b2be-001b0084d26d",
+  "external_ref": null,
+  "title": "Integrate combo90 on c1f44ca3: 8d1d 679c9da4, 0383 c5abb972 (byte-identical carries)",
+  "outcome": "One combined candidate on master c1f44ca3 carries the two reviewed, disjoint contributions unchanged. It passes a focused run on its exact input, then one full gate, and lands by fast-forward once each contributing item has its pre-landing evaluation.",
+  "acceptance": [
+    "Integrate combo90 on c1f44ca3: 8d1d 679c9da4, 0383 c5abb972 (byte-identical carries) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "batch-landing",
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Test Runs now opens on Active. History and Needs attention remain available, and opening a specific finished run still shows its details. The exact landed commit passed registered Windows Vitest 11/11 and Combo89's full gate, including TypeScript, and adopts the clean independent review pair for the identical UI contribution. Fresh independent post-landing evaluation 96717b2d155444089329ffe1880a1869 passed all four criteria at cut 262. Verified and archived the native result, complete evaluator output and full Engram verdict at .evidence/0cd1-active-test-runs-13106/c1f44ca3-postlanding-eval. Opus2 notified in mailbox #1656.",
+    "completed_at": "2026-11-21T12:02:24.108250700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

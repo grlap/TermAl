@@ -40,12 +40,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The launcher's source-owner refusal now states the host's reason, escaped and bounded at 512 shown characters, plus the host's snake_case code (at most 64 characters). For the engram_source_owner_unconfigured code, it names the fitting remedy (configure binaryPath, or a separate foreground hostless evidence run) in all three input modes. Every other refusal keeps its existing correction.\nThe host types the two unconfigured-binaryPath refusals with the code engram_source_owner_unconfigured; registration strips it. Admission semantics are unchanged; docs/test.md is updated for the refusal text.\nEvidence: RED-5 on fd1c3cf3 failed exactly the intended tests. Registered runs on the reviewed bcfa882d passed: Node test-7f1ebdd4 (27/0) and Rust test-f2e244ea (17/0). The review pair 0030-PAIR-BCFA882D was clean. It landed in combo89 c1f44ca3, gated by C89-FULL-1 test-bc15218e. The post-landing evaluation passed all 5 criteria.",
+    "completed_at": "2026-11-21T11:59:57.335573200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }
