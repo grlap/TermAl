@@ -1,0 +1,29 @@
+{
+  "id": "01a1fea7-ddec-7293-b256-e23b69d4b326",
+  "external_ref": null,
+  "title": "Cover a rejected delegation promotion fence and explicit Resume",
+  "outcome": "Cover a rejected delegation promotion fence and explicit Resume",
+  "acceptance": [
+    "A deterministic provider-command test makes the promotion persistence acknowledgement fail and verifies that the live result stays queued, idle, paused, and known unsent.",
+    "The test resumes the held result through the normal route and observes exactly one provider delivery."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "review-follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

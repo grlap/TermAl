@@ -1,0 +1,27 @@
+{
+  "id": "01a1fee8-c71a-7b43-a8d4-b55fde7d6587",
+  "external_ref": null,
+  "title": "Integrate combo91 on 63cdb117: 3bdd a052447b, FF2C 09127825 (byte-identical carries)",
+  "outcome": "One combined candidate on master 63cdb117 carries the two reviewed, disjoint contributions unchanged. It passes a focused run on its exact input, then one full gate after Greg's restart, and lands by fast-forward once each contributing item has its pre-landing evaluation.",
+  "acceptance": [
+    "Integrate combo91 on 63cdb117: 3bdd a052447b, FF2C 09127825 (byte-identical carries) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "batch-landing",
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

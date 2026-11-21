@@ -1,0 +1,28 @@
+{
+  "id": "01a1fea7-ddc4-7203-a22b-0709e650d9bf",
+  "external_ref": null,
+  "title": "Let idle Stop reconfirm a pending test-run wait retirement",
+  "outcome": "Let idle Stop reconfirm a pending test-run wait retirement",
+  "acceptance": [
+    "When a first idle Stop is awaiting or has failed to confirm its parent row, a repeated Stop for a session with only that test-run wait can confirm the same pause without a 409 or a duplicate stopped message.",
+    "A behavioral fixture covers the still-pending retirement on the normal Stop route."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

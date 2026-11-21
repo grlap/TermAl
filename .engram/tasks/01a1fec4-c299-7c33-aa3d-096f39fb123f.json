@@ -1,0 +1,31 @@
+{
+  "id": "01a1fec4-c299-7c33-aa3d-096f39fb123f",
+  "external_ref": null,
+  "title": "Publish deferred idle Stop deltas when a repeat confirms the pause",
+  "outcome": "When the background writer accepts an idle Stop but its own-row fence initially rejects confirmation, a successful repeated Stop delivers the deferred test-run wait consumption and stopped-message updates to clients without creating a second message.",
+  "acceptance": [
+    "A repeated successful Stop after an unconfirmed background idle Stop delivers the original consumed-wait and stopped-message updates without a duplicate transcript entry.",
+    "A behavior test drives the background row-confirmation failure and repeat through the Stop route and observes the client updates."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "delegation",
+    "greg-reported",
+    "review-follow-up",
+    "sse",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fcc6-d6bf-78c2-a9f5-2b7200724105",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

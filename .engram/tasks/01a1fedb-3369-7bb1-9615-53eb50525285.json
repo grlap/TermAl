@@ -1,0 +1,31 @@
+{
+  "id": "01a1fedb-3369-7bb1-9615-53eb50525285",
+  "external_ref": null,
+  "title": "Avoid fresh source measurement for an unsent fan-in opening with retained observation facts",
+  "outcome": "When an owned delegation fan-in carrier is held before provider enqueue, distinguish that unsent opening from an actual runtime execution that needs its normal close. Preserve observed command facts and existing source identity without requesting an extra measurement of a proven-unsent carrier.",
+  "acceptance": [
+    "A held, proven-unsent fan-in opening settles with its available facts and no new source capture. Observations from actual executed turns still follow their normal closing contract.",
+    "A behavior test distinguishes the proven-unsent opening from a real runtime observation with recorded facts and verifies preservation without recapture."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "greg-reported",
+    "review-follow-up",
+    "source-identity",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fcc6-d6bf-78c2-a9f5-2b7200724105",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1fedd-c279-7a32-9f34-0f995e6f666e",
+  "external_ref": null,
+  "title": "Resolve unknown-outcome Engram operations after a child restart by reconciling the operation record through the successor store",
+  "outcome": "When TermAl's Engram child dies with an operation's outcome unknown, the successor child (started from the same pinned config) is asked for that specific session, operation and idempotency record. If the record is present, TermAl reconciles its state from it and retires the old operation as SUPERSEDED / OUTCOME UNKNOWN; if it is missing, the operation stays an explicit GAP. The old operation is never re-dispatched. No filesystem or store-file identity is involved; Engram's control_connection_read is not used. Any Engram read this needs is requested as its own Engram item.",
+  "acceptance": [
+    "The consumer contract (the comparison, and startup, resume and pin behaviour) is agreed in writing with Engram's producer owner (session-11334) and recorded on this item before any code change.",
+    "The existing EngramConnectionConfig carries the expected pinned canonical store and project; the process worker correlates the control_connection_read result to the exact serving child, config and connection incarnation, and invalidates it on respawn. There is no new registry, binder, store schema, readiness process or hashing.",
+    "A matched same-store and same-session successor permits only SUPERSEDED or OUTCOME UNKNOWN retirement of the old operation, after reconciling the actual session and grant state; an old bind is never replayed with successor credentials. Unknown, unavailable, malformed, superseded or unequal results stay an explicit gap.",
+    "Tests exercise the real agreed producer wire, or a provenance-preserved actual producer wire, against the real consumer, including the unavailable, unequal and respawn cases, plus a coordinated start and resume smoke on disposable stores. There are no timing tests and no tautological tests.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter"
+  ],
+  "assigned_to": "Termal::Sol-03d4",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

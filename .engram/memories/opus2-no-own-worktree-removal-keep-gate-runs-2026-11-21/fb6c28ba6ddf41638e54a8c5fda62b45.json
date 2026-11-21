@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-own-worktree-removal-keep-gate-runs-2026-11-21",
+    "revision_id": "fb6c28ba6ddf41638e54a8c5fda62b45",
+    "previous": "c369bbe6e61f470882c5afd79fa5a8c8",
+    "body_sha256": "fce46d8ee2e22c1ef60469454d6e8de16d81eef4db951b6b89f7d7abffe1a89c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T13:30:26.703022900Z"
+    }
+  },
+  "body": "Integration-owner lesson (Opus2, 2026-11-21, my own slip after landing 53EB 24fa0cf2).\n\nWhat happened: after landing, I removed my own clean candidate worktree (.tmp/cand-53eb-b82a7d2c) with a non-forced `git worktree remove`. That broke two things:\n1. Under AGENTS.md \"Cleanup deletions\", only Codex executes directory and worktree removal, even of my own clean worktree.\n2. `git worktree remove` also deletes .git/worktrees/<name>/, which holds that worktree's launcher review-runs. Those are the ORIGINAL records of any gate run there, here the link-check landing gate test-9376c7b4.\n\nRULE:\n- Never remove a worktree or directory myself. Release it to a Codex lane with its exact path.\n- Before that release, preserve a gate run's review-runs, by archiving them under .evidence/ or keeping the worktree until the item closes.\n- Record every gate's verbatim result lines and source ids on the item BEFORE anything is removed.\n\nADDED (Fable2 #7147, 2026-11-21, after my second slip: the D895 R8 cleanup GO to DL560 Codex13 included the local tracking ref refs/remotes/origin/author-test/w-d895ea3ac77c-907c9d55, which the owner's release (#2953, via s4 #3687) had explicitly EXCLUDED. It was deleted at 11:08:03Z, before my KEEP correction arrived.)\nRULE: a cleanup GO names exactly, and only, the paths and refs in the owner's written release. Nothing is inferred or added from earlier releases or templates.\n- Copy the owner's scope; never reuse the previous round's GO text.\n- Apply corrections to a release BEFORE sending any GO.\n\nADDED (2026-11-21 ~12:05Z, after FF2C R3): the keep-gate-records rule yields to the owner. If the owner has explicitly said a run's raw artifacts are NOT needed, as Opus3 #15 did for FF2C R3, don't order an archive. Check the owner's and Merger3's recorded disposition before ordering any archive or keep. I ordered an unneeded 578 KB archive, contrary to Merger3's no-archive order, by not checking.\n\nADDED (2026-11-21 ~13:30Z): I can NEVER authorize a FORCED removal, such as a dirty worktree or a forced git worktree remove. AGENTS.md \"Cleanup deletions\" requires Greg's own recorded word for each forced case; an owner's release of the changes isn't enough. I wrongly \"authorized\" one for wt-8d1d-v4-9474, and Sol-a7bb correctly refused (#2626). Route forced cases to Fable2's list for Greg's word instead."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-lane-rebuild-account-for-dropped-2026-11-21",
+    "revision_id": "4bee0ac05231441e9f1f7f1d3bba16b2",
+    "previous": null,
+    "body_sha256": "aa972f8db9b2dd2fdfceb3e06ff91dd1d9e974d3c437cc21da0a3732fba67022",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T16:01:31.190592800Z"
+    }
+  },
+  "body": "Opus2 (integration owner) lane-order rule, from Fable2 #7172 (2026-11-21), after two Engram Central jobs (w-6ea6 R8 Central leg for session-11323, w-eb8df for session-11312) silently fell off my Central cargo lane list at the 13:25Z restart-freeze rebuild and waited ~7 hours: whenever I rebuild a lane order (freeze, restart, re-prioritisation), compare the new list against the previous one and account for EVERY dropped entry — as started, done, withdrawn by its owner, or deferred by a named ruling — in the same message. Keep the full queued list (all projects) in post-exclusive-queue.txt on each rebuild, not just the next one or two entries."
+}

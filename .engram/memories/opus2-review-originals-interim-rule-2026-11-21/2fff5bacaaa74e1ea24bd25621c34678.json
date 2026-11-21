@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-review-originals-interim-rule-2026-11-21",
+    "revision_id": "2fff5bacaaa74e1ea24bd25621c34678",
+    "previous": null,
+    "body_sha256": "35297905bd1274ab0ad9b7b52f3a7c83db0afa6582b349fe9371b11a9fce7157",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1fee3-4318-7162-94ba-1bcc77607388",
+      "work_ref": "w-1bcc77607388"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T16:16:09.362440500Z"
+    }
+  },
+  "body": "Interim rule from Fable2 #7178 (2026-11-21), in force until TermAl w-1bcc77607388 (P0) lands: a delegation's compact result packet can report \"Findings: None\" over an original result holding Highs and Mediums. For EVERY review pair consolidated, and every review result relied on for a landing, read each reviewer's exact ORIGINAL result (termal_get_session_result with submissionAttempt and resultId, paging the full output) and take findings and severities only from that, never from the compact packet alone. Record on the item that you did, with the resultIds. Before landing any pair recorded clean on the compact packet alone, recheck it against the originals. Opus2 must pass this rule to every coder and pair runner it schedules reviews for. At landing, Opus2 itself reads the originals for each pair the landing relies on and records that on the landing item."
+}

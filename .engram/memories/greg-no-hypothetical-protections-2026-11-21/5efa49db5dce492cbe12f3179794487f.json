@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-hypothetical-protections-2026-11-21",
+    "revision_id": "5efa49db5dce492cbe12f3179794487f",
+    "previous": "48271e391aa044f999e39aa225665ac0",
+    "body_sha256": "c40eb5fc074427a20f1c60507d8681b71472251bf3d8ebe9ddcd8b3d66e2dd9d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T16:23:30.378048500Z"
+    }
+  },
+  "body": "Greg's rule (2026-11-21, relayed verbatim by Engram::Fable from Asistant 43498a6e #1760): „takie podejscie do designu ma zostac usunieta / NIE MA HIPOTETYCZNYCH SYTUACJI, NIE DA SIE PRZED TYM ZABEZPIECZYC / ktory model wymysla takie rzeczy”. For TermAl: build no protection against a hypothetical scenario, meaning one with no observed incident and no concrete reproduction, such as a file swapped at the same path, a retargeted junction, a cross-device move, or a race nobody has seen. A review finding whose only trigger is such a scenario is rejected, not fixed. A finding about real, current behaviour, shown in current code or an observed run, is judged on its merits. Trigger case: the Engram w-952b handle-level store-file proof was dropped for option C, where the serving child reports the canonical path it opened and the TermAl w-0f995e6f666e consumer compares that path with its pin. Engram's equivalent memory: rules-greg-no-hypothetical-protections-2026-11-21.\n\nAddendum, Greg 2026-11-21 (Asistant 588693a8 #2313, verbatim): „Musimy stosowac ta regulę. Moge wymienic ile razy stworzylismy kod, który po takich 'upewnieniach' nie działa”. In practice:\n- design and review start from a concrete goal, a real problem and its cost;\n- a reviewer's High label alone never makes a requirement: a finding needs a concrete failure in current code or an observed run;\n- remove unnecessary layers, keep behaviour and fix real failures;\n- no new gate or procedure is added for this rule."
+}

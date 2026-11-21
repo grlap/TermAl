@@ -11,13 +11,13 @@
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "bug",
-  "priority": 2,
+  "priority": 1,
   "labels": [
     "cross-project",
     "delegation-results",
     "review-custody"
   ],
-  "assigned_to": null,
+  "assigned_to": "Termal::Sol-a7bb",
   "deferred_until": null,
   "lifecycle": "open",
   "parent_id": null,

@@ -1,0 +1,30 @@
+{
+  "id": "01a1fef1-2fa5-7231-a181-3c028e644b8a",
+  "external_ref": null,
+  "title": "Add the shared early-design and reviewer guidance (Greg's simple-design rule) to the architecture reviewer lens and the coder skill",
+  "outcome": "Every /review-code reviewer and every coder in TermAl reads the same simple-design guidance Engram adopts (Engram w-f3eefcfe6a2c): goal, observed problem, behaviour and cost are stated before code for a new mechanism; the design check looks for necessity and simpler alternatives; no protection for hypothetical scenarios; a severity label is not evidence; a concrete correctness defect is not dismissed for lack of an incident. No new gate or procedure.",
+  "acceptance": [
+    "The exact text agreed by Kimi, Termal::Fable2 and Engram::Fable (Kimi mailbox 852a55c9 #578) appears verbatim in .claude/reviewers/architecture.md: \"For a new mechanism or a significant behavior change, the item states the goal, the observed problem, the proposed behavior and its cost before code. The existing design reviewer checks necessity, simpler existing alternatives, real host behavior and possible damage to functionality. Do not require protection for hypothetical scenarios; a severity label is not evidence. Do not dismiss a concrete correctness defect merely because no incident has occurred. Small fixes use ordinary review only.\"",
+    "The first sentence of that text appears as the \"before code\" sentence in .agents/skills/coder-test-execution/SKILL.md.",
+    "The change is Markdown-only: the committed-input link check passes on the exact candidate, and the review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "docs",
+    "greg-directed"
+  ],
+  "assigned_to": "Termal::Opus3",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

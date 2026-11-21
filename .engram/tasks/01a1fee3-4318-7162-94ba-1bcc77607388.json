@@ -1,0 +1,31 @@
+{
+  "id": "01a1fee3-4318-7162-94ba-1bcc77607388",
+  "external_ref": null,
+  "title": "Delegation compact result packet reported \"no findings\" while the original result had two Highs and a Medium",
+  "outcome": "A delegation's compact result packet never reports fewer findings, or a lower severity, than the child's original result. Where the compact form cannot represent the original faithfully, it says so explicitly and points to the exact original result, instead of claiming \"no findings\".",
+  "acceptance": [
+    "The cause is diagnosed from the retained original and compact results of delegation-27839f52-f1ee-44fb-90f0-42364fb49a6e and recorded on this item before any code change.",
+    "For every result whose original contains findings, the compact packet reports each finding's severity and count, or explicitly marks itself as incomplete and directs the reader to the exact original result; it never reports \"no findings\" for such a result.",
+    "A deterministic regression test built from a provenance-preserved fixture of this case fails on master and passes with the fix; there are no timing or tautological tests.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "delegation-results",
+    "review-custody"
+  ],
+  "assigned_to": "Termal::Sol-a7bb",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

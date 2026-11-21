@@ -27,12 +27,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "No federation timeout tears down the link any more. A timed-out, unanswered, unreadable or cancelled ordinary request is an UNKNOWN outcome for that request only: its counter is retired with one bounded record naming the fixed operation, and the enrolled pair keeps working. Genuine security failures still fence (MAC/verify failure, over-limit body, unsigned or malformed reply, authority or incarnation mismatch, counter exhaustion), and the replay guarantee holds without teardown. Every timeout and limit value is unchanged (10 s / 2 s / 5 s).\nThe request future is boxed, so its state is on the heap: this fixed a test-thread stack overflow found by combo88's FULL. The pre-existing stack depth is tracked separately as w-d6078c293a75.\nEvidence: registered run test-55b5b08e (105/0) on 679c9da4; review pair 8D1D-PAIR-679C9DA4 clean; landed in combo90 63cdb117, gated by C90-FULL-1 test-8f872791; the post-landing evaluation passed all 3 criteria.",
+    "completed_at": "2026-11-21T13:23:53.460994100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

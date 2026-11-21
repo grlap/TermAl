@@ -5,7 +5,7 @@
   "outcome": "In .agents/skills/coder-test-execution/SKILL.md step 3, immediately after \"otherwise use the transfer the instructions name.\", insert verbatim: \"Send the job through the host's existing remote mailbox to the runner's registered native session on that host; never open a side SSH/SCP remote shell or file copy. The runner returns its terminal result and artifact locators through the same supported route.\" No other text in the skill changes. The companion Engram insertion is w-91bf2fb9c6d0 (Coder session-11334). The two inserted passages must match verbatim; the files keep their own existing text. Source: Greg via Engram::Asistant #386, relayed by Kimi::Consultant in TermAl mailbox 852a55c9 #498. Exact scope and correction: Fable2 #3418–3422 and notes bd014ada28f64841ae892c800aea0211 and 5fbb5ccb47dc44649ddb2f0f44b9b087. Separate from D112. Normal landing requires the independent review pair and exact full gate.",
   "acceptance": [
     "The agreed remote-mailbox and no-side-SSH/SCP wording appears verbatim in step 3 of .agents/skills/coder-test-execution/SKILL.md immediately after the existing transfer sentence. No other text in the skill changes.",
-    "The independent review pair has no outstanding Medium or higher, and the full gate passes on the exact landed input."
+    "The independent review pair has no outstanding Medium or higher, and the repository's required Markdown link check passes on the exact landed input."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,

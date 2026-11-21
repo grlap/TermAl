@@ -23,12 +23,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Bounded the observation persistence tick with resumable keyed pages, off-lock fence and native-job inspection, exact revalidation, one repair batch with deferred compaction, targeted publication, and phase counts. Retired superseded waiters. Four deterministic count, race, and paging witnesses passed on Linux and registered Windows. The clean reviewed contribution landed byte-identically in combo90 on origin/master.",
+    "completed_at": "2026-11-21T13:26:06.045546200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
