@@ -41,6 +41,9 @@ impl AppState {
         // An off-lock callback cannot rewrite a newer row or an established
         // association, including the exact image held by a receipt's fence.
         if current.artifact.is_some()
+            || current.native_completion_refusal.as_ref().is_some_and(|refusal| {
+                refusal.code == TestRunNativeCompletionRefusalCode::ProviderPlacementUnconfirmed
+            })
             || !test_run_artifact_observation_matches_snapshot(current, expected)
         {
             return;
@@ -343,11 +346,22 @@ impl AppState {
             refuse(ArtifactWorktreeUnavailable, &[(WorktreePresent, false)]);
             return;
         }
-        let Some(expected_parent) =
-            EngramHost::run_artifact_directory(FsPath::new(&row.summary.worktree))
-        else {
-            refuse(ArtifactRootUnavailable, &[(ArtifactRootAvailable, false)]);
-            return;
+        let worktree = FsPath::new(&row.summary.worktree);
+        let linked_parent = |identity| {
+            delegation_git_boundary::ProviderLinkedWorktree::artifact_parent(worktree, identity)
+        };
+        let expected_parent = if let Some(identity) = &row.linked_admin_identity {
+            let Ok(parent) = linked_parent(identity) else {
+                refuse(ProviderWorktreeAdminChanged, &[(ProviderWorktreeAdminMatches, false)]);
+                return;
+            };
+            parent
+        } else {
+            let Some(parent) = EngramHost::run_artifact_directory(worktree) else {
+                refuse(ArtifactRootUnavailable, &[(ArtifactRootAvailable, false)]);
+                return;
+            };
+            parent
         };
         let Ok(expected_parent) = fs::canonicalize(expected_parent) else {
             refuse(ArtifactRootUnavailable, &[(ArtifactRootResolved, false)]);
@@ -365,6 +379,14 @@ impl AppState {
             refuse(ArtifactRequestUnavailable, &[(RequestReadable, false)]);
             return;
         };
+        if let Some(identity) = &row.linked_admin_identity
+            && !linked_parent(identity)
+                .and_then(fs::canonicalize)
+                .is_ok_and(|parent| parent == expected_parent)
+        {
+            refuse(ProviderWorktreeAdminChanged, &[(ProviderWorktreeAdminMatches, false)]);
+            return;
+        }
         if disk.run_id != run_id
             || disk.owner.as_deref() != Some(session_id)
             || test_run_path_key(&disk.worktree) != test_run_path_key(&row.summary.worktree)
