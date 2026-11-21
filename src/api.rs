@@ -159,7 +159,10 @@ fn deliver_turn_dispatch_holding(
     if state.host_is_shutting_down() {
         return deliver_turn_dispatch_now(state, dispatch);
     }
-    if matches!(
+    let waits_for_fan_in = state.persist_thread_handle.try_lock()
+        .map_or(true, |handle| handle.is_some())
+        && state.delegation_fan_in_promotion(&dispatch).is_some();
+    if waits_for_fan_in || matches!(
         &dispatch,
         TurnDispatch::PersistentCodex {
             service_tier: Err(_),
@@ -172,21 +175,20 @@ fn deliver_turn_dispatch_holding(
         let generation = dispatch.active_turn_generation();
         let notification = dispatch.mailbox_notification().cloned();
         let federation = dispatch.federation_handoff().cloned();
-        // Completion callbacks run on the shared stdout reader. Waiting there
-        // for model/list would prevent that same reader from routing its reply.
-        // Only unresolved Fast needs a worker; ready tiers retain direct delivery.
+        // Keep the shared stdout reader free to route model/list replies and
+        // handle other sessions while a fan-in waits for the SQLite writer.
         if let Err(err) = std::thread::Builder::new()
-            .name("codex-fast-dispatch".to_owned())
+            .name("prepared-turn-dispatch".to_owned())
             .spawn(move || {
                 let _held = held;
                 match deliver_turn_dispatch_now(&worker_state, dispatch) {
                     TurnDispatchDeliveryOutcome::Held { error: Some(error) } => {
-                        eprintln!("Codex Fast dispatch held> {}", error.message);
+                        eprintln!("prepared turn dispatch held> {}", error.message);
                     }
                     TurnDispatchDeliveryOutcome::Rejected(error) => {
                         // The delivery path records the guarded session error.
                         // Do not escalate a destination failure to the reader.
-                        eprintln!("Codex Fast dispatch> {}", error.message);
+                        eprintln!("prepared turn dispatch> {}", error.message);
                     }
                     TurnDispatchDeliveryOutcome::Delivered
                     | TurnDispatchDeliveryOutcome::Scheduled
@@ -195,7 +197,7 @@ fn deliver_turn_dispatch_holding(
                 }
             })
         {
-            let detail = format!("failed to start Codex Fast discovery worker: {err}");
+            let detail = format!("failed to start prepared turn dispatch worker: {err}");
             let rejected = record_rejected_turn_dispatch_with_federation(
                 state,
                 &session_id,
@@ -418,6 +420,13 @@ fn handoff_prepared_turn_dispatch(
         }
     }
 
+    let fan_in_promotion = state.delegation_fan_in_promotion(&dispatch);
+    let promotion_write_error = fan_in_promotion.as_ref().and_then(|promotion|
+        state.confirm_delegation_fan_in_promotion(&session_id, promotion).err());
+    if state.host_is_shutting_down() {
+        state.hold_unsent_dispatch_for_shutdown(&dispatch);
+        return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
+    }
     state.prepare_ordinary_opening_root_before_handoff(
         &session_id, &runtime_token, active_turn_generation,
     );
@@ -479,14 +488,49 @@ fn handoff_prepared_turn_dispatch(
         };
     }
     let index = inner.find_session_index(&session_id);
-    if index.is_some_and(|index| {
+    if let Some(promotion) = &fan_in_promotion {
+        let Some(index) = index else {
+            return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+        };
+        let record = &inner.sessions[index];
+        // The write ACK proves the captured cut, which may predate Stop,
+        // replacement of the runtime, or a newer owner of the queue.
+        if !record.runtime.matches_runtime_token(&runtime_token)
+            || record.active_turn_generation != active_turn_generation
+            || !promotion.matches(record, active_turn_generation)
+        {
+            return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+        }
+        if !record.runtime_stop_in_progress {
+            if let Some(error) = promotion_write_error {
+                if record.session.status != SessionStatus::Active {
+                    return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+                }
+                state.hold_pre_enqueue_fan_in_locked(&mut inner, index, active_turn_generation);
+                eprintln!("delegation fan-in> held before provider enqueue: {error:#}");
+                return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
+            }
+        }
+    }
+    if let Some(index) = index.filter(|&index| {
         let record = &inner.sessions[index];
         record.engram.observation_delete_requested || session_resource_reset_in_progress(&inner, record)
     }) {
-        drop(inner);
-        drop(relay_link);
-        note_held_before_hand_off(state, &session_id, active_turn_generation, federation_identity.as_ref());
-        return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
+        let record = &inner.sessions[index];
+        let owns_fan_in = record.runtime.matches_runtime_token(&runtime_token)
+            && record.active_turn_generation == active_turn_generation
+            && record.queued_prompts.iter().any(|entry| entry.awaits_fan_in_enqueue(active_turn_generation));
+        // A Stop in progress still owns this generation. Let the existing
+        // callback deferral settle it (or replay it if Stop fails).
+        if !owns_fan_in || !record.runtime_stop_in_progress {
+            if owns_fan_in && record.session.status == SessionStatus::Active {
+                state.hold_pre_enqueue_fan_in_locked(&mut inner, index, active_turn_generation);
+            }
+            drop(inner);
+            drop(relay_link);
+            note_held_before_hand_off(state, &session_id, active_turn_generation, federation_identity.as_ref());
+            return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
+        }
     }
     let source_root_notice_delivery;
     {
@@ -598,7 +642,18 @@ fn handoff_prepared_turn_dispatch(
     };
     drop(host_shutdown);
     if let Some(index) = index {
-        observe_provider_handoff(&mut inner.sessions[index], active_turn_generation, sent.is_ok());
+        let record = &mut inner.sessions[index];
+        observe_provider_handoff(record, active_turn_generation, sent.is_ok());
+        let fan_in_settled = if sent.is_ok() {
+            settle_delegation_fan_in_enqueue(record, active_turn_generation, true)
+        } else {
+            hold_failed_delegation_fan_in(record, active_turn_generation)
+        };
+        if fan_in_settled {
+            if let Err(error) = state.commit_delegation_fan_in_custody_locked(&mut inner, index) {
+                eprintln!("delegation fan-in> failed persisting provider enqueue: {error:#}");
+            }
+        }
     }
     if let Err(error) = sent {
         drop(inner);

@@ -932,7 +932,7 @@ impl AppState {
         };
         let clock = self.engram_budget_clock();
         let (fence, waiter) = PersistFence::new_with_clock(
-            PersistFenceTarget::HumanPromptRow {
+            PersistFenceTarget::SessionRowAtOrAfter {
                 session_id: image.session_id.clone(),
                 minimum: image.minimum.clone(),
             },

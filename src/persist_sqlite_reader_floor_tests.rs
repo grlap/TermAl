@@ -458,6 +458,7 @@ mod ordinary_handoff_reader_floor_tests {
         let session_id = record.session.id.clone();
         let record = inner.session_mut(&session_id).unwrap();
         record.queued_prompts.push_back(QueuedPromptRecord {
+            workflow: None,
             engram_ordinary_handoff: true,
             engram_waiting: false,
             promoted_message_index: None,

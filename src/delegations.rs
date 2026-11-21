@@ -3097,32 +3097,6 @@ fn refresh_delegation_waits_for_delegation_locked(
     })
 }
 
-/// Consumes every pending wait owned by a parent whose active turn was
-/// explicitly stopped. A stopped parent must not be reactivated later when a
-/// child reaches a terminal state; the child result remains available through
-/// the delegation record for an explicit user-driven follow-up.
-fn consume_delegation_waits_for_stopped_parent_locked(
-    inner: &mut StateInner,
-    parent_session_id: &str,
-) -> DelegationWaitRefresh {
-    if inner.delegation_waits.is_empty() {
-        return DelegationWaitRefresh::default();
-    }
-
-    let waits = std::mem::take(&mut inner.delegation_waits);
-    let mut remaining = Vec::new();
-    let mut refresh = DelegationWaitRefresh::default();
-    for wait in waits {
-        if wait.parent_session_id == parent_session_id {
-            refresh.consume_wait(wait, DelegationWaitConsumedReason::ParentSessionStopped);
-        } else {
-            remaining.push(wait);
-        }
-    }
-    inner.delegation_waits = remaining.into();
-    refresh
-}
-
 fn refresh_delegation_waits_matching_locked(
     inner: &mut StateInner,
     should_refresh: impl Fn(&DelegationWaitRecord) -> bool,
@@ -3134,6 +3108,7 @@ fn refresh_delegation_waits_matching_locked(
         return DelegationWaitRefresh::default();
     }
 
+    inner.delegation_wait_transfers.retain(PersistWaitRetirement::pending);
     let waits = std::mem::take(&mut inner.delegation_waits);
     let mut remaining = Vec::new();
     let mut refresh = DelegationWaitRefresh::default();
@@ -3161,6 +3136,15 @@ fn refresh_delegation_waits_matching_locked(
         };
         let queue_result =
             queue_delegation_wait_resume_locked(inner, &wait.parent_session_id, resume_prompt);
+        if queue_result.prompt_queued {
+            let parent_index = inner.find_visible_session_index(&wait.parent_session_id)
+                .expect("queued fan-in parent still present");
+            inner.delegation_wait_transfers.push(PersistWaitRetirement {
+                wait: wait.clone(),
+                parent: PersistSessionWriteStamp::capture(&inner.sessions[parent_index]),
+                committed: Arc::default(),
+            });
+        }
         if queue_result.dispatch_requested {
             refresh
                 .dispatch_parents
@@ -3284,6 +3268,14 @@ fn queue_delegation_wait_resume_locked(
         },
         Vec::new(),
     );
+    record
+        .queued_prompts
+        .back_mut()
+        .expect("fan-in always adds its own queue entry")
+        .workflow = Some(QueuedWorkflow::DelegationFanIn {
+        known_unsent: false,
+        awaiting_enqueue: None,
+    });
     DelegationWaitQueueResult {
         prompt_queued: true,
         dispatch_requested: should_dispatch_now,
@@ -3358,6 +3350,51 @@ fn build_delegation_wait_resume_prompt(
         ));
     }
     prompt
+}
+
+// Recognize only the leading host envelope in older unmarked queue rows.
+fn is_legacy_delegation_wait_resume_prompt(prompt: &str, parent_session_id: &str) -> bool {
+    let is_wait_id = |id: &str| {
+        id.strip_prefix("delegation-wait-")
+            .is_some_and(|suffix| Uuid::parse_str(suffix).is_ok())
+    };
+
+    if prompt
+        .strip_prefix("Delegation wait `")
+        .and_then(|rest| rest.split_once("` ended because one or more delegation records disappeared.\n\nRequested delegations:\n"))
+        .is_some_and(|(id, _)| is_wait_id(id))
+    {
+        return true;
+    }
+
+    // A custom title can include blank lines. Only look for an envelope
+    // within the allowed title boundary, before the delegation result bodies.
+    let title_end = prompt
+        .char_indices()
+        .nth(MAX_DELEGATION_TITLE_CHARS)
+        .map_or(prompt.len(), |(offset, _)| offset);
+    prompt
+        .match_indices("\n\nWait id: `")
+        .take_while(|(offset, _)| *offset <= title_end)
+        .any(|(offset, label)| {
+            let mut lines = prompt[offset + label.len()..].lines();
+            let Some(id) = lines.next().and_then(|line| line.strip_suffix('`')) else {
+                return false;
+            };
+            is_wait_id(id)
+                && matches!(lines.next(), Some("Mode: `all`" | "Mode: `any`"))
+                && matches!(
+                    lines.next(),
+                    Some("Wait outcome: `completed`" | "Wait outcome: `attentionRequired`")
+                )
+                && lines
+                    .next()
+                    .and_then(|line| line.strip_prefix("Parent session: `"))
+                    .and_then(|line| line.strip_suffix('`'))
+                    == Some(parent_session_id)
+                && lines.next() == Some("")
+                && lines.next() == Some("Delegations:")
+        })
 }
 
 fn limit_delegation_wait_resume_prompt(prompt: String) -> String {

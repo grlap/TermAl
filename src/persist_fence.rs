@@ -27,6 +27,25 @@ impl PersistSessionWriteStamp {
     }
 }
 
+// A wait consumed in memory remains in SQLite until a transaction saves
+// the parent row that owns the retirement, or durably removes the parent.
+#[derive(Clone)]
+struct PersistWaitRetirement<W> {
+    wait: W,
+    parent: PersistSessionWriteStamp,
+    committed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl<W> PersistWaitRetirement<W> {
+    fn pending(&self) -> bool {
+        !self.committed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn mark_committed(&self) {
+        self.committed.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// Equality is deliberately about materialized content, not the global
 /// revision or the collector watermark (which can advance past deferred rows).
 #[cfg_attr(not(test), allow(dead_code))]
@@ -43,9 +62,9 @@ enum PersistFenceTarget {
         session_id: String,
         content: Value,
     },
-    /// Human intake/promotion needs a committed own row at or after its cut,
-    /// so an unrelated queue edit cannot invalidate its acknowledgement.
-    HumanPromptRow {
+    /// A committed own row at or after the captured cut. An unrelated queue
+    /// edit cannot invalidate its acknowledgement.
+    SessionRowAtOrAfter {
         session_id: String,
         minimum: PersistSessionWriteStamp,
     },
@@ -143,7 +162,7 @@ impl PersistFenceTarget {
             // Session serialization may isolate an invalid row from a delta.
             // Only read-back on the writer connection proves this content.
             Self::OrdinarySessionRow { .. }
-            | Self::HumanPromptRow { .. }
+            | Self::SessionRowAtOrAfter { .. }
             | Self::EngramObservation { .. }
             | Self::EngramObservationRemoval { .. }
             | Self::EngramSourceObservation { .. }
@@ -240,7 +259,7 @@ impl PersistFenceTarget {
         match self {
             // Runtime-only writer proof; stored bytes or a delta watermark
             // cannot certify the captured incarnation and own-row write.
-            Self::HumanPromptRow { .. } => Ok(false),
+            Self::SessionRowAtOrAfter { .. } => Ok(false),
             Self::Federation(expected) => federation_committed_image_matches(connection, expected),
             Self::FederationBindings(expected) => expected.is_already_durable(connection),
             Self::OrdinarySessionRow {
@@ -1047,7 +1066,7 @@ impl PersistFenceBatch {
             {
                 return false;
             }
-            let proof = if let PersistFenceTarget::HumanPromptRow {
+            let proof = if let PersistFenceTarget::SessionRowAtOrAfter {
                 session_id,
                 minimum,
             } = &fence.target

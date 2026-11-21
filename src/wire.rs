@@ -902,6 +902,9 @@ struct Session {
     /// distinguish "paused, waiting for the user" from "about to start".
     #[serde(default)]
     queue_paused: bool,
+    /// Whether the owning host has a runnable queued delegation result.
+    #[serde(default, skip_serializing_if = "is_false")]
+    has_runnable_delegation_result: bool,
     #[serde(default)]
     provider_capacity_waiting: bool,
     /// True while an actual pending deletion retains observation records.
@@ -970,6 +973,7 @@ impl Session {
             provider_handoffs: self.provider_handoffs.clone(),
             provider_handoff_history: self.provider_handoff_history.clone(),
             queue_paused: self.queue_paused.clone(),
+            has_runnable_delegation_result: self.has_runnable_delegation_result,
             provider_capacity_waiting: self.provider_capacity_waiting.clone(),
             source_tracking_recovery: self.source_tracking_recovery.clone(),
             queue_projection_hash: self.queue_projection_hash.clone(),
@@ -1065,6 +1069,8 @@ struct StateSessionSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     markers: Vec<ConversationMarker>,
     queue_paused: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    has_runnable_delegation_result: bool,
     #[serde(default)]
     provider_capacity_waiting: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -2463,6 +2469,7 @@ enum DelegationWaitConsumedReason {
     /// A watched child is held: the wait ended so its parent can act, and
     /// the child has not completed. A new wait is needed for its result.
     AttentionRequired,
+    /// Legacy wire value from versions that consumed delegation waits on Stop.
     ParentSessionStopped,
     ParentSessionUnavailable,
     ParentSessionRemoved,

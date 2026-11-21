@@ -2618,6 +2618,7 @@ fn a_turn_a_stop_drains_from_the_queue_fences_a_carried_gate_of_its_own_worktree
         record.queued_prompts.push_back(QueuedPromptRecord {
             promoted_message_index: None,
             promotion_disposition_known: true,
+            workflow: None,
             engram_ordinary_handoff: false,
             engram_waiting: false,
             engram_bind: None,

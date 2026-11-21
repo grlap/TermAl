@@ -1045,6 +1045,7 @@ fn localize_remote_session_summary(
         provider_handoffs: Vec::new(),
         provider_handoff_history: None,
         queue_paused: remote_session.queue_paused,
+        has_runnable_delegation_result: remote_session.has_runnable_delegation_result,
         provider_capacity_waiting: remote_session.provider_capacity_waiting,
         source_tracking_recovery: remote_session.source_tracking_recovery,
         queue_projection_hash: remote_session.queue_projection_hash.clone(),

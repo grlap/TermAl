@@ -282,6 +282,7 @@ function sameSessionSummary(previous: Session, next: Session) {
 function sameSessionControlFlags(previous: Session, next: Session) {
   return (
     Boolean(previous.queuePaused) === Boolean(next.queuePaused) &&
+    Boolean(previous.hasRunnableDelegationResult) === Boolean(next.hasRunnableDelegationResult) &&
     Boolean(previous.providerCapacityWaiting) === Boolean(next.providerCapacityWaiting) &&
     Boolean(previous.sourceTrackingRecovery) === Boolean(next.sourceTrackingRecovery)
   );

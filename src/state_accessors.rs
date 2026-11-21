@@ -186,6 +186,7 @@ mod visible_session_hydration_error_tests {
             message_count: 0,
             markers: Vec::new(),
             queue_paused: false,
+            has_runnable_delegation_result: false,
             provider_capacity_waiting: false,
             source_tracking_recovery: false,
             queue_projection_hash: Some("remote-queue-projection".to_owned()),
@@ -543,6 +544,22 @@ mod visible_session_hydration_error_tests {
 }
 
 impl AppState {
+    fn wire_queue_paused(record: &SessionRecord) -> bool {
+        if record.is_local_session() {
+            record.orchestrator_auto_dispatch_blocked
+        } else {
+            record.session.queue_paused
+        }
+    }
+
+    fn wire_has_runnable_delegation_result(record: &SessionRecord) -> bool {
+        if record.is_local_session() {
+            has_runnable_delegation_result(record)
+        } else {
+            record.session.has_runnable_delegation_result
+        }
+    }
+
     fn queue_projection_hash(record: &SessionRecord) -> String {
         #[cfg(test)]
         TEST_BEFORE_QUEUE_PROJECTION_HASH.with(|hook| {
@@ -577,10 +594,8 @@ impl AppState {
         // The record owns remote-proxy identity; the wire field is a derived
         // UI/API projection and embedded session snapshots are not authoritative.
         session.remote_id = record.remote_id.clone();
-        // The explicit-resume latch is record authority; every wire build
-        // derives the projection from it so no code path can publish a
-        // stale `queuePaused`, whichever site last flipped the latch.
-        session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        session.queue_paused = Self::wire_queue_paused(record);
+        session.has_runnable_delegation_result = Self::wire_has_runnable_delegation_result(record);
         session.source_tracking_recovery = if record.is_local_session() {
             record.engram.observation_delete_requested
         } else {
@@ -711,8 +726,8 @@ impl AppState {
             // The paused-queue latch is metadata, not prompt content: the
             // pane needs it from the global snapshot to render the paused
             // card even before targeted detail hydrates the prompt bodies.
-            // Derived from record authority, like the full projection.
-            queue_paused: record.orchestrator_auto_dispatch_blocked,
+            queue_paused: Self::wire_queue_paused(record),
+            has_runnable_delegation_result: Self::wire_has_runnable_delegation_result(record),
             provider_capacity_waiting: session.provider_capacity_waiting,
             source_tracking_recovery: if record.is_local_session() {
                 record.engram.observation_delete_requested
@@ -785,6 +800,10 @@ impl AppState {
         );
         debug_assert_eq!(summary.opencode_mode, full.opencode_mode);
         debug_assert_eq!(summary.queue_paused, full.queue_paused);
+        debug_assert_eq!(
+            summary.has_runnable_delegation_result,
+            full.has_runnable_delegation_result
+        );
         debug_assert_eq!(summary.queue_projection_hash, full.queue_projection_hash);
         debug_assert_eq!(summary.opencode_current_mode, full.opencode_current_mode);
         debug_assert_eq!(summary.opencode_mode_options, full.opencode_mode_options);

@@ -370,22 +370,28 @@ impl AppState {
                         .lock()
                         .expect("deferred handoff mutex poisoned")
                         .take();
-                    if let Some(prepared) = prepared {
-                        let federation = prepared.federation_handoff().cloned();
-                        // Its receipt records what the replayed hand-off
-                        // proved (prompt_delivery.rs).
-                        let outcome = handoff_prepared_turn_dispatch(self, prepared);
-                        self.note_direct_hand_off_outcome_with_federation(
-                            session_id,
-                            active_turn_generation,
-                            &outcome,
-                            federation.as_ref(),
-                        );
-                        outcome
-                            .map(|_| ())
-                            .map_err(|error| anyhow!(error.message))
-                    } else {
-                        Ok(())
+                    match prepared {
+                        // A failed Stop can release a fan-in while the writer
+                        // is backlogged. Use the same off-reader handoff path.
+                        Some(prepared) if self.delegation_fan_in_promotion(&prepared).is_some() => {
+                            deliver_turn_dispatch(self, prepared)
+                                .into_background_result("deferred delegation fan-in")
+                                .map_err(|error| anyhow!(error.message))
+                        }
+                        Some(prepared) => {
+                            let federation = prepared.federation_handoff().cloned();
+                            // Its receipt records what the replayed hand-off
+                            // proved (prompt_delivery.rs).
+                            let outcome = handoff_prepared_turn_dispatch(self, prepared);
+                            self.note_direct_hand_off_outcome_with_federation(
+                                session_id,
+                                active_turn_generation,
+                                &outcome,
+                                federation.as_ref(),
+                            );
+                            outcome.map(|_| ()).map_err(|error| anyhow!(error.message))
+                        }
+                        None => Ok(()),
                     }
                 }
                 DeferredStopCallback::TurnFailed { message, .. } => self
@@ -488,7 +494,6 @@ impl AppState {
             may_dispatch_requeued_mailbox,
             failed_mailbox_notification,
             should_refresh_delegation,
-            _stopped_wait_refresh,
             persist_error,
             effective_shutdown_error,
         ) = {
@@ -594,6 +599,7 @@ impl AppState {
             let dispatch_queued_prompts =
                 stop_options.map_or(true, |options| options.dispatch_queued_prompts_on_success);
             let mut thread_id_to_suppress = None;
+            let fan_in_retained;
             let (
                 has_queued_prompts,
                 mut pending_interaction_updates,
@@ -626,12 +632,17 @@ impl AppState {
                 if !retain_runtime_for_retry {
                     settle_retired_runtime_attempt(record, ending_turn);
                 }
+                fan_in_retained = settle_delegation_fan_in_enqueue(record, ending_turn, false);
                 let auto_dispatch_blocked = record.orchestrator_auto_dispatch_blocked
                     || shutdown_error.is_some()
                     || suppress_automatic_resume;
                 record.set_auto_dispatch_blocked(auto_dispatch_blocked);
                 if suppress_automatic_resume {
-                    clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
+                    clear_queued_prompts_by_source_except_delivery_owner(
+                        record,
+                        QueuedPromptSource::Orchestrator,
+                        None,
+                    );
                 }
                 if suppress_codex_thread_resume {
                     thread_id_to_suppress = record.external_session_id.clone();
@@ -690,15 +701,8 @@ impl AppState {
                 inner.ignore_discovered_codex_thread(Some(thread_id));
             }
 
-            let delegation_waits_before_stop =
-                suppress_automatic_resume.then(|| inner.delegation_waits.clone());
-            let stopped_wait_refresh = if suppress_automatic_resume {
-                consume_delegation_waits_for_stopped_parent_locked(&mut inner, session_id)
-            } else {
-                DelegationWaitRefresh::default()
-            };
-            // Run waits follow the same rule: consumed only as part of the
-            // durable Stop commit, restored if it fails.
+            // Test-run waits are consumed by a durable Stop. Delegation
+            // waits stay registered and fan-in uses the paused queue.
             let test_run_waits_before_stop =
                 suppress_automatic_resume.then(|| inner.test_run_waits.clone());
             let stopped_test_run_waits = if suppress_automatic_resume {
@@ -731,7 +735,7 @@ impl AppState {
                 }
             }
 
-            match self.commit_locked(&mut inner) {
+            match self.commit_turn_with_fan_in_outcome_locked(&mut inner, index, fan_in_retained) {
                 Ok(revision) => (
                     {
                         self.publish_test_run_waits_consumed(
@@ -750,11 +754,6 @@ impl AppState {
                             revision,
                             std::mem::take(&mut pending_interaction_updates),
                         );
-                        self.publish_delegation_wait_consumed_deltas(
-                            &inner,
-                            revision,
-                            &stopped_wait_refresh.consumed_waits,
-                        );
                         Some(revision)
                     },
                     pending_interaction_updates,
@@ -768,14 +767,10 @@ impl AppState {
                         && dispatch_queued_prompts,
                     failed_mailbox_notification,
                     should_write_message,
-                    stopped_wait_refresh,
                     None,
                     shutdown_error.map(str::to_owned),
                 ),
                 Err(error) => {
-                    if let Some(delegation_waits_before_stop) = delegation_waits_before_stop {
-                        inner.delegation_waits = delegation_waits_before_stop.into();
-                    }
                     if let Some(test_run_waits_before_stop) = test_run_waits_before_stop {
                         inner.test_run_waits = test_run_waits_before_stop.into();
                     }
@@ -800,7 +795,6 @@ impl AppState {
                         false,
                         failed_mailbox_notification,
                         should_write_message,
-                        DelegationWaitRefresh::default(),
                         Some(detail),
                         shutdown_error.map(str::to_owned),
                     )
@@ -933,6 +927,7 @@ impl AppState {
             // lock and past a Stop's deferral, so a hand-off a Stop still
             // carries is that Stop's to settle as unsent (prompt_delivery.rs).
             let failed_turn = record.active_turn_generation;
+            let fan_in_retained = hold_failed_delegation_fan_in(record, failed_turn);
             apply_prompt_delivery_outcome(
                 record,
                 failed_turn,
@@ -968,7 +963,7 @@ impl AppState {
             record.session.preview = record.runtime_preview(make_preview(cleaned));
             finish_active_turn_file_change_tracking(record);
             let has_queued_prompts = !record.queued_prompts.is_empty();
-            match self.commit_locked(&mut inner) {
+            match self.commit_turn_with_fan_in_outcome_locked(&mut inner, index, fan_in_retained) {
                 Ok(_) => {}
                 Err(err) => {
                     // Persistence failed but the in-memory state is already
@@ -1338,6 +1333,7 @@ impl AppState {
             let file_change_message_id = (preserve_accepted_turn_state
                 && !inner.sessions[index].active_turn_file_changes.is_empty())
             .then(|| inner.next_message_id());
+            let fan_in_retained;
             let (
                 mut created_messages,
                 mut updated_messages,
@@ -1348,6 +1344,10 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
+                // Provider enqueue and retirement share StateInner. A fan-in
+                // still awaiting this generation never entered the channel.
+                let ending_turn = record.active_turn_generation;
+                fan_in_retained = hold_failed_delegation_fan_in(record, ending_turn);
                 let active_mailbox_notification = record.active_turn_mailbox_notification.take();
                 if active_mailbox_notification.is_some()
                     && !matches!(mode, AtomicTurnFailureMode::RejectedDelivery { .. })
@@ -1427,7 +1427,11 @@ impl AppState {
                 )
             };
 
-            let commit_result = self.commit_persisted_delta_locked(&mut inner);
+            let commit_result = if fan_in_retained {
+                self.persist_delegation_fan_in_custody_locked(&mut inner, index)
+            } else {
+                self.commit_persisted_delta_locked(&mut inner)
+            };
             if commit_result.is_err() {
                 // The dead runtime cannot be restored. Keep memory
                 // authoritative and make the terminal state visible even
@@ -1737,6 +1741,8 @@ impl AppState {
                 &mut inner, index, EngramObservedTurnOutcome::Failed, &registered_check_notices,
             );
             let record = &mut inner.sessions[index];
+            let ending_turn = record.active_turn_generation;
+            let fan_in_retained = hold_failed_delegation_fan_in(record, ending_turn);
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
                 record.set_auto_dispatch_blocked(true);
@@ -1756,7 +1762,7 @@ impl AppState {
             );
             let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
             (
-                self.commit_locked(&mut inner),
+                self.commit_turn_with_fan_in_outcome_locked(&mut inner, index, fan_in_retained),
                 has_queued_prompts,
                 failed_mailbox_notification,
             )
@@ -2226,6 +2232,7 @@ impl AppState {
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
                     .then(|| inner.next_message_id());
+            let fan_in_retained;
             let (
                 has_queued_prompts,
                 mut pending_interaction_updates,
@@ -2243,8 +2250,10 @@ impl AppState {
                     if !preserve_dedicated_reset { record.clear_runtime_reset(); }
                 }
                 let operator_paused = record.engram.operator_paused;
+                let exited_turn = record.active_turn_generation;
+                fan_in_retained = settle_delegation_fan_in_enqueue(record, exited_turn, false);
                 record.set_auto_dispatch_blocked(
-                    retain_cleanup_owner || preserve_automatic_resume_block || exited_mailbox_notification.is_some() || operator_paused,
+                    retain_cleanup_owner || preserve_automatic_resume_block || exited_mailbox_notification.is_some() || operator_paused || fan_in_retained,
                 );
                 record.engram.operator_paused = operator_paused;
                 record.clear_runtime_stop();
@@ -2252,7 +2261,6 @@ impl AppState {
                 // before it acknowledged a receipted prompt, so whether it
                 // received it is unknown (prompt_delivery.rs).
                 discard_deferred_stop_callbacks(record);
-                let exited_turn = record.active_turn_generation;
                 apply_prompt_delivery_outcome(
                     record,
                     exited_turn,
@@ -2312,7 +2320,8 @@ impl AppState {
                     exited_mailbox_notification,
                 )
             };
-            let commit_result = self.commit_locked(&mut inner);
+            let commit_result =
+                self.commit_turn_with_fan_in_outcome_locked(&mut inner, index, fan_in_retained);
             if commit_result.is_err() {
                 let record = inner
                     .session_mut_by_index(index)

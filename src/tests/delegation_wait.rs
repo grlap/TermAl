@@ -7,8 +7,10 @@
 use super::delegation_support::{
     boot_on_delegation_root, finish_delegation_child_with_assistant_text,
     install_delegation_codex_runtime, mark_delegation_as_unstructured_explorer,
-    temp_delegation_state_paths, test_app_state_with_delegation_codex_runtime,
+    structured_review_request, temp_delegation_state_paths,
+    test_app_state_with_delegation_codex_runtime,
     test_app_state_with_drained_delegation_codex_runtime,
+    test_app_state_with_structured_reviewer_runtime,
 };
 use super::*;
 
@@ -1320,48 +1322,48 @@ fn delegation_wait_dispatches_resume_prompt_to_idle_parent_runtime() {
 }
 
 #[test]
-fn stop_session_keeps_queued_work_idle_and_cancels_late_delegation_resume() {
+fn stop_session_holds_delegation_fan_in_until_explicit_resume() {
     let (state, input_rx) =
-        test_app_state_with_delegation_codex_runtime("delegation-wait-parent-stop");
+        test_app_state_with_structured_reviewer_runtime("delegation-wait-parent-stop");
     let parent_session_id = test_session_id(&state, Agent::Codex);
-    let created = state
-        .create_read_only_delegation(
-            &parent_session_id,
-            CreateDelegationRequest {
-                prompt: "Review work that the parent may stop waiting for.".to_owned(),
-                title: Some("Cancelable review".to_owned()),
-                cwd: None,
-                agent: Some(Agent::Codex),
-                model: None,
-                mode: Some(DelegationMode::Reviewer),
-                write_policy: Some(DelegationWritePolicy::ReadOnly),
-            },
-        )
-        .expect("delegation should be created");
-
-    match recv_within_guard(
-        &input_rx,
-        "delegation child prompt should be delivered first",
-    )
-    .expect("delegation child prompt should be delivered first")
-    {
-        CodexRuntimeCommand::Prompt { session_id, .. } => {
-            assert_eq!(session_id, created.delegation.child_session_id);
+    let reviewers = ["Backend review", "Frontend review"].map(|title| {
+        let created = state
+            .create_read_only_delegation(
+                &parent_session_id,
+                CreateDelegationRequest {
+                    prompt: title.to_owned(),
+                    title: Some(title.to_owned()),
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Reviewer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .expect("delegation should be created");
+        match recv_within_guard(&input_rx, "reviewer prompt should be delivered")
+            .expect("reviewer prompt should be delivered")
+        {
+            CodexRuntimeCommand::Prompt { session_id, .. } => {
+                assert_eq!(session_id, created.delegation.child_session_id);
+            }
+            _ => panic!("expected a child review prompt"),
         }
-        _ => panic!("delegation should dispatch the child review prompt first"),
-    }
-
+        created.delegation
+    });
     let wait = state
         .create_delegation_wait(
             &parent_session_id,
             CreateDelegationWaitRequest {
-                delegation_ids: vec![created.delegation.id.clone()],
+                delegation_ids: reviewers
+                    .iter()
+                    .map(|reviewer| reviewer.id.clone())
+                    .collect(),
                 mode: DelegationWaitMode::All,
-                title: Some("Canceled parent fan-in".to_owned()),
+                title: Some("Paused parent fan-in".to_owned()),
             },
         )
         .expect("wait should be scheduled");
-    let mut delta_events = state.subscribe_delta_events();
 
     let runtime = state
         .shared_codex_runtime
@@ -1414,7 +1416,7 @@ fn stop_session_keeps_queued_work_idle_and_cancels_late_delegation_resume() {
                 attachments: Vec::new(),
                 id: "queued-before-stop".to_owned(),
                 timestamp: stamp_now(),
-                text: "Do not run after Stop.".to_owned(),
+                text: "An already queued user request.".to_owned(),
                 expanded_text: None,
                 source: None,
             },
@@ -1449,57 +1451,122 @@ fn stop_session_keeps_queued_work_idle_and_cancels_late_delegation_resume() {
         input_rx.try_recv(),
         Err(mpsc::TryRecvError::Empty)
     ));
-    let mut saw_stopped_wait = false;
-    while let Ok(payload) = delta_events.try_recv() {
-        let event: DeltaEvent =
-            serde_json::from_str(&payload).expect("stop delta should deserialize");
-        if matches!(
-            event,
-            DeltaEvent::DelegationWaitConsumed {
-                wait_id,
-                parent_session_id: delta_parent_session_id,
-                reason: DelegationWaitConsumedReason::ParentSessionStopped,
-                ..
-            } if wait_id == wait.wait.id && delta_parent_session_id == parent_session_id
-        ) {
-            saw_stopped_wait = true;
+
+    assert!(
+        stopped
+            .delegation_waits
+            .iter()
+            .any(|entry| entry.id == wait.wait.id),
+        "Stop should hold the registered delegation wait"
+    );
+
+    let result_summaries = [
+        "Backend result for the parent.",
+        "Frontend result for the parent.",
+    ];
+    for (index, (reviewer, summary)) in reviewers.iter().zip(result_summaries).enumerate() {
+        let current = state
+            .get_delegation(&parent_session_id, &reviewer.id)
+            .expect("review child still exists after Stop");
+        assert_eq!(current.delegation.status, DelegationStatus::Running);
+
+        let mut request = structured_review_request();
+        request.summary = summary.to_owned();
+        state
+            .submit_delegation_review_result(&reviewer.child_session_id, request)
+            .expect("reviewer should submit its original result");
+        finish_delegation_child_with_assistant_text(
+            &state,
+            &reviewer.child_session_id,
+            "Finished the review.",
+        );
+        state
+            .refresh_delegation_for_child_session(&reviewer.child_session_id)
+            .expect("child completion should settle");
+        assert!(matches!(
+            input_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let parent = &inner.sessions[inner.find_session_index(&parent_session_id).unwrap()];
+        assert_eq!(parent.session.status, SessionStatus::Idle);
+        assert!(parent.orchestrator_auto_dispatch_blocked);
+        assert_eq!(parent.queued_prompts[0].source, QueuedPromptSource::User);
+        if index == 0 {
+            assert!(
+                inner
+                    .delegation_waits
+                    .iter()
+                    .any(|entry| entry.id == wait.wait.id)
+            );
+            assert_eq!(parent.queued_prompts.len(), 1);
+        } else {
+            assert!(
+                !inner
+                    .delegation_waits
+                    .iter()
+                    .any(|entry| entry.id == wait.wait.id)
+            );
+            assert_eq!(parent.queued_prompts.len(), 2);
+            let fan_in = &parent.queued_prompts[1].pending_prompt.text;
+            assert!(fan_in.contains(&wait.wait.id));
+            for (reviewer, summary) in reviewers.iter().zip(result_summaries) {
+                assert!(fan_in.contains(&reviewer.id));
+                assert!(fan_in.contains(summary));
+            }
         }
     }
-    assert!(
-        saw_stopped_wait,
-        "Stop should publish why the wait was consumed"
-    );
 
-    finish_delegation_child_with_assistant_text(
-        &state,
-        &created.delegation.child_session_id,
-        "## Result\n\nStatus: completed\n\nSummary:\nLate review result.",
-    );
     state
-        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
-        .expect("late child completion should reconcile without resuming the parent");
-
+        .resume_session_queue(&parent_session_id)
+        .expect("explicit Resume should release the queue");
+    match recv_within_guard(
+        &input_rx,
+        "previously queued user request should start first",
+    )
+    .expect("previously queued user request should start first")
+    {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
+            assert_eq!(session_id, parent_session_id);
+            assert!(command.prompt.contains("An already queued user request."));
+        }
+        _ => panic!("expected the queued user request"),
+    }
+    let parent_token = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let parent = &inner.sessions[inner.find_session_index(&parent_session_id).unwrap()];
+        parent
+            .runtime
+            .runtime_token()
+            .expect("resumed runtime should exist")
+    };
+    state
+        .finish_turn_ok_if_runtime_matches(&parent_session_id, &parent_token)
+        .expect("finishing the queued user request should drain the fan-in");
+    match recv_within_guard(&input_rx, "consolidated fan-in should reach the parent")
+        .expect("consolidated fan-in should reach the parent")
+    {
+        CodexRuntimeCommand::Prompt {
+            session_id,
+            command,
+        } => {
+            assert_eq!(session_id, parent_session_id);
+            assert!(command.prompt.contains(&wait.wait.id));
+            for (reviewer, summary) in reviewers.iter().zip(result_summaries) {
+                assert!(command.prompt.contains(&reviewer.id));
+                assert!(command.prompt.contains(summary));
+            }
+        }
+        _ => panic!("expected one consolidated delegation prompt"),
+    }
     assert!(matches!(
         input_rx.try_recv(),
         Err(mpsc::TryRecvError::Empty)
     ));
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert!(
-        inner
-            .delegation_waits
-            .iter()
-            .all(|wait| wait.parent_session_id != parent_session_id),
-        "Stop must consume waits that could later resume the parent"
-    );
-    let parent = inner
-        .sessions
-        .iter()
-        .find(|record| record.session.id == parent_session_id)
-        .expect("parent should remain present");
-    assert_eq!(parent.session.status, SessionStatus::Idle);
-    assert!(parent.orchestrator_auto_dispatch_blocked);
-    assert_eq!(parent.queued_prompts.len(), 1);
-    assert_eq!(parent.queued_prompts[0].source, QueuedPromptSource::User);
 }
 
 #[test]

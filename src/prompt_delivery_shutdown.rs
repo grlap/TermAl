@@ -1,5 +1,34 @@
 // Returns a carrier still owned by the caller to a dormant queue at host
 // shutdown. Durable unknown effect evidence never becomes replay permission.
+fn settle_shutdown_fan_in(record: &mut SessionRecord, turn: u64) -> bool {
+    if !settle_delegation_fan_in_enqueue(record, turn, false) {
+        return false;
+    }
+    if record.session.status == SessionStatus::Active {
+        record.session.status = SessionStatus::Idle;
+    }
+    record.session.live_activity = None;
+    record.file_change_tracking = None;
+    record.provider_handoff_observations.prepared = None;
+    true
+}
+
+// Final shutdown persistence runs after the watch flag closed enqueue.
+// Enqueue and removal of a successful carrier both hold StateInner, so
+// every carrier still present in this cut is known to be unsent.
+fn settle_pending_shutdown_fan_ins(inner: &mut StateInner) {
+    for index in 0..inner.sessions.len() {
+        let record = &inner.sessions[index];
+        let turn = record.active_turn_generation;
+        if record.is_local_session()
+            && record.queued_prompts.iter().any(|entry| entry.awaits_fan_in_enqueue(turn))
+        {
+            let record = inner.session_mut_by_index(index).expect("shutdown session index");
+            settle_shutdown_fan_in(record, turn);
+        }
+    }
+}
+
 impl AppState {
     fn hold_unsent_dispatch_for_shutdown(&self, dispatch: &TurnDispatch) {
         let identity = dispatch.federation_handoff();
@@ -43,6 +72,13 @@ impl AppState {
             || record.active_turn_generation != turn
             || record.runtime_stop_in_progress
         { return; }
+        if settle_shutdown_fan_in(&mut inner.sessions[index], turn) {
+            if let Err(error) = self.commit_delegation_fan_in_custody_locked(&mut inner, index) {
+                eprintln!("shutdown delegation fan-in retention failed: {error:#}");
+            }
+            return;
+        }
+        let record = &inner.sessions[index];
         let prompt = record.prompt_deliveries.iter().filter(|(prompt, delivery)|
             delivery.disposition == PromptDeliveryDisposition::HandingOff
                 && delivery.turn_generation == Some(turn)

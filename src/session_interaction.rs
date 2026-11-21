@@ -157,9 +157,27 @@ enum QueuedPromptSource {
     Orchestrator,
 }
 
+/// Provenance of host-generated workflow work. Old persisted rows have no
+/// marker, so they may need the legacy fan-in envelope to identify them.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+enum QueuedWorkflow {
+    Transition,
+    DelegationFanIn {
+        // Set only when the live host ruled out a provider enqueue.
+        #[serde(default, skip_serializing_if = "session_flag_is_false")]
+        known_unsent: bool,
+        // Never recover a process-local enqueue decision after restart.
+        #[serde(skip)]
+        awaiting_enqueue: Option<u64>,
+    },
+}
+
 /// Represents a queued prompt record.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct QueuedPromptRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workflow: Option<QueuedWorkflow>,
     // Saved before an ordinary degraded handoff. After a restart this means
     // provider delivery is unknown, never permission to replay the prompt.
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
@@ -186,6 +204,48 @@ struct QueuedPromptRecord {
 }
 
 impl QueuedPromptRecord {
+    fn is_delegation_fan_in(&self, parent_session_id: &str) -> bool {
+        self.source == QueuedPromptSource::Orchestrator
+            && match self.workflow.as_ref() {
+                Some(QueuedWorkflow::DelegationFanIn { .. }) => true,
+                Some(QueuedWorkflow::Transition) => false,
+                None => is_legacy_delegation_wait_resume_prompt(
+                    &self.pending_prompt.text,
+                    parent_session_id,
+                ),
+            }
+    }
+
+    fn fan_in_promotion_is_unsent(&self) -> bool {
+        matches!(
+            self.workflow,
+            Some(QueuedWorkflow::DelegationFanIn {
+                known_unsent: true,
+                awaiting_enqueue: None,
+            })
+        )
+    }
+
+    fn awaits_fan_in_enqueue(&self, turn: u64) -> bool {
+        matches!(
+            self.workflow,
+            Some(QueuedWorkflow::DelegationFanIn {
+                awaiting_enqueue: Some(generation),
+                ..
+            }) if generation == turn
+        )
+    }
+
+    fn fan_in_enqueue_in_progress(&self) -> bool {
+        matches!(
+            self.workflow,
+            Some(QueuedWorkflow::DelegationFanIn {
+                awaiting_enqueue: Some(_),
+                ..
+            })
+        )
+    }
+
     fn projected_interrupted(&self) -> bool {
         self.engram_interrupted
             || self.engram_ordinary_handoff
@@ -197,8 +257,160 @@ impl QueuedPromptRecord {
     fn has_stored_history(&self) -> bool {
         self.engram_bind.is_some() || self.engram_evaluate.is_some()
             || self.engram_waiting || self.engram_interrupted
-            || self.engram_ordinary_handoff || self.promoted_message_index.is_some()
+            || self.engram_ordinary_handoff
+            || (self.promoted_message_index.is_some()
+                && !self.fan_in_promotion_is_unsent() && !self.fan_in_enqueue_in_progress())
             || !self.promotion_disposition_known
+    }
+}
+
+/// Resolve the exact retained fan-in under the same lock that fences provider
+/// enqueue. A Stop that retires a still-owned carrier proves it was not sent.
+fn settle_delegation_fan_in_enqueue(record: &mut SessionRecord, turn: u64, enqueued: bool) -> bool {
+    let Some(position) = record
+        .queued_prompts
+        .iter()
+        .position(|entry| entry.awaits_fan_in_enqueue(turn))
+    else {
+        return false;
+    };
+    if enqueued {
+        record.queued_prompts.remove(position);
+    } else {
+        record.queued_prompts[position].workflow = Some(QueuedWorkflow::DelegationFanIn {
+            known_unsent: true,
+            awaiting_enqueue: None,
+        });
+    }
+    sync_pending_prompts(record);
+    true
+}
+
+// Failure keeps the result available through the plain-session Resume path.
+fn hold_failed_delegation_fan_in(record: &mut SessionRecord, turn: u64) -> bool {
+    let retained = settle_delegation_fan_in_enqueue(record, turn, false);
+    if retained && !record.orchestrator_auto_dispatch_blocked {
+        record.set_auto_dispatch_blocked(true);
+    }
+    retained
+}
+
+impl AppState {
+    fn delegation_fan_in_promotion(&self, dispatch: &TurnDispatch) -> Option<DelegationFanInPromotion> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let record = &inner.sessions[inner.find_session_index(dispatch.session_id())?];
+        if !record.runtime.matches_runtime_token(dispatch.runtime_token())
+            || record.active_turn_generation != dispatch.active_turn_generation()
+        {
+            return None;
+        }
+        let queued = record.queued_prompts.iter()
+            .find(|entry| entry.awaits_fan_in_enqueue(dispatch.active_turn_generation()))?;
+        Some(DelegationFanInPromotion {
+            prompt_id: queued.pending_prompt.id.clone(),
+            message_index: queued.promoted_message_index,
+            minimum: PersistSessionWriteStamp::capture(record),
+        })
+    }
+
+    fn confirm_delegation_fan_in_promotion(
+        &self, session_id: &str, promotion: &DelegationFanInPromotion,
+    ) -> Result<()> {
+        let clock = self.engram_budget_clock();
+        let (fence, waiter) = PersistFence::new_with_clock(
+            PersistFenceTarget::SessionRowAtOrAfter {
+                session_id: session_id.to_owned(),
+                minimum: promotion.minimum.clone(),
+            },
+            clock.now() + Duration::from_secs(20),
+            clock,
+        );
+        if self.persist_tx.send(PersistRequest::Fence(Box::new(fence))).is_ok() {
+            return waiter.wait()
+                .map_err(|error| anyhow!("delegation promotion write was not acknowledged: {error:?}"));
+        }
+
+        // An already closed channel cannot certify this promotion. Require
+        // the SQLite replay fence itself before proceeding.
+        let connection = open_sqlite_state_read_connection(&self.persistence_path)?;
+        let stored: String = connection.query_row(
+            "SELECT value_json FROM sessions WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        let row: PersistedSessionRecord = serde_json::from_str(&stored)?;
+        if row.session.id != session_id || !row.queued_prompts.iter().any(|entry| {
+            entry.pending_prompt.id == promotion.prompt_id
+                && promotion.message_index.is_some()
+                && entry.promoted_message_index == promotion.message_index
+                && matches!(entry.workflow, Some(QueuedWorkflow::DelegationFanIn { known_unsent: false, .. }))
+        }) {
+            bail!("delegation promotion was not saved with its replay fence");
+        }
+        Ok(())
+    }
+
+    fn hold_pre_enqueue_fan_in_locked(&self, inner: &mut StateInner, index: usize, generation: u64) {
+        self.close_pre_enqueue_fan_in_observation(inner, index, generation);
+        let record = &mut inner.sessions[index];
+        hold_failed_delegation_fan_in(record, generation);
+        clear_active_turn_file_change_tracking(record);
+        record.session.status = SessionStatus::Idle;
+        record.session.live_activity = None;
+        record.provider_handoff_observations.prepared = None;
+        if let Err(error) = self.commit_delegation_fan_in_custody_locked(inner, index) {
+            eprintln!("delegation fan-in> held before send, persistence still pending: {error:#}");
+        }
+    }
+
+    // A provider send cannot be rolled back. Retry only the exact row save,
+    // keeping the observed enqueue outcome authoritative in memory.
+    fn persist_delegation_fan_in_custody_locked(
+        &self, inner: &mut StateInner, index: usize,
+    ) -> Result<u64> {
+        let session_id = inner.sessions[index].session.id.clone();
+        inner.stamp_session_at_index(index);
+        match self.commit_persisted_session_delta_locked(inner, &session_id) {
+            Ok(revision) => Ok(revision),
+            Err(error) => {
+                self.persist_session_internal_locked(inner, &session_id)
+                    .with_context(|| format!("could not save delegation result custody after {error:#}"))?;
+                Ok(inner.revision)
+            }
+        }
+    }
+
+    fn commit_delegation_fan_in_custody_locked(
+        &self, inner: &mut StateInner, index: usize,
+    ) -> Result<u64> {
+        let result = self.persist_delegation_fan_in_custody_locked(inner, index);
+        self.publish_state_locked(inner);
+        result
+    }
+
+    fn commit_turn_with_fan_in_outcome_locked(
+        &self, inner: &mut StateInner, index: usize, fan_in_settled: bool,
+    ) -> Result<u64> {
+        if fan_in_settled {
+            return self.commit_delegation_fan_in_custody_locked(inner, index);
+        }
+        self.commit_locked(inner)
+    }
+}
+
+struct DelegationFanInPromotion {
+    prompt_id: String,
+    message_index: Option<usize>,
+    minimum: PersistSessionWriteStamp,
+}
+
+impl DelegationFanInPromotion {
+    fn matches(&self, record: &SessionRecord, generation: u64) -> bool {
+        record.queued_prompts.iter().any(|entry| {
+            entry.pending_prompt.id == self.prompt_id
+                && entry.promoted_message_index == self.message_index
+                && entry.awaits_fan_in_enqueue(generation)
+        })
     }
 }
 
@@ -611,6 +823,8 @@ fn queue_prompt_on_record_with_source(
         && attachments.is_empty();
     let prompt_id = pending_prompt.id.clone();
     record.queued_prompts.push_back(QueuedPromptRecord {
+        workflow: (source == QueuedPromptSource::Orchestrator)
+            .then_some(QueuedWorkflow::Transition),
         engram_ordinary_handoff: false,
         engram_waiting: false,
         promoted_message_index: None,
@@ -757,6 +971,7 @@ fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
 }
 
 /// Clears queued prompts by source.
+#[cfg(test)]
 fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedPromptSource) {
     let original_len = record.queued_prompts.len();
     let removed_head = handing_off_head(record);
@@ -771,26 +986,25 @@ fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedProm
     }
 }
 
-/// Clears queued prompts from `source`, except for the exact promoted head
-/// whose admitted provider handoff is owned by an in-flight public Stop.
+/// Drops unsent workflow prompts on Stop. Keep delegation results and the
+/// exact promoted head whose provider handoff the Stop owns.
 fn clear_queued_prompts_by_source_except_delivery_owner(
     record: &mut SessionRecord,
     source: QueuedPromptSource,
     admission_owner: Option<&QueuedTurnOwner>,
 ) {
-    let preserved_id = admission_owner.filter(|owner| owner.matches(record))
+    let preserved_id = admission_owner
+        .filter(|owner| owner.matches(record))
         .map(|owner| owner.prompt_id.clone());
-    let keep = |_index: usize, queued: &QueuedPromptRecord| {
-        queued.source != source || preserved_id.as_ref() == Some(&queued.pending_prompt.id)
+    let parent_session_id = record.session.id.clone();
+    let keep = |queued: &QueuedPromptRecord| {
+        queued.source != source
+            || preserved_id.as_ref() == Some(&queued.pending_prompt.id)
+            || queued.is_delegation_fan_in(&parent_session_id)
     };
     let original_len = record.queued_prompts.len();
     let removed_head = handing_off_head(record);
-    let mut index = 0usize;
-    record.queued_prompts.retain(|queued| {
-        let retain = keep(index, queued);
-        index = index.saturating_add(1);
-        retain
-    });
+    record.queued_prompts.retain(keep);
     if record.queued_prompts.len() != original_len {
         // A removed head promoted for its hand-off was never sent; a
         // preserved one stays with its Stop (prompt_delivery.rs).
@@ -799,7 +1013,27 @@ fn clear_queued_prompts_by_source_except_delivery_owner(
     }
 }
 
-/// Clears stopped orchestrator queued prompts.
-fn clear_stopped_orchestrator_queued_prompts(record: &mut SessionRecord) {
-    clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
+/// Discard stopped orchestrator transitions while retaining delegation
+/// results whose waits have transferred custody to the queue.
+fn clear_stopped_orchestrator_queued_prompts(inner: &mut StateInner, session_index: usize) -> bool {
+    let record = inner
+        .session_by_index(session_index)
+        .expect("session index should be valid");
+    if !record.queued_prompts.iter().any(|queued| {
+        queued.source == QueuedPromptSource::Orchestrator
+            && !queued.is_delegation_fan_in(&record.session.id)
+    }) {
+        return false;
+    }
+
+    // Take stamped access only when there is a queue edit to persist.
+    let record = inner
+        .session_mut_by_index(session_index)
+        .expect("session index should be valid");
+    clear_queued_prompts_by_source_except_delivery_owner(
+        record,
+        QueuedPromptSource::Orchestrator,
+        None,
+    );
+    true
 }

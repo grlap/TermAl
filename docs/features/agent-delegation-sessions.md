@@ -853,10 +853,10 @@ polling. TermAl persists the wait and exposes it through `/api/state` and SSE so
 the UI can show "waiting for delegations" even after reload.
 
 When the wait is satisfied, TermAl queues a synthesized prompt to the parent
-session and removes the wait from the pending-wait list. If the parent is idle,
-the prompt dispatches immediately. If the parent is still in a turn, the prompt
-waits behind the current turn and resumes the parent through the existing
-queued-prompt path.
+session and removes the wait from the pending-wait list. The prompt can dispatch
+immediately when the parent is idle, the queue is unpaused, and the result is
+next in the queue. A busy parent receives it through the existing queued-prompt
+path. A paused queue holds the result for explicit user action.
 
 This means a caller must choose between synchronous polling and backend resume
 waits. After scheduling a backend resume wait, the parent turn should end; a
@@ -864,15 +864,16 @@ shell or HTTP polling loop in that same turn keeps the queued resume prompt
 behind the active turn and can make the fan-in look stuck even though TermAl has
 already queued the result.
 
-A user Stop of the parent consumes its pending waits with
-`reason: "parentSessionStopped"` and queues no resume prompt. That holds while
-the parent runs a turn and also while it is idle, having ended its turn to
-wait: Stop then interrupts nothing, consumes the waits in one durable commit,
-drops queued workflow continuations, and leaves the parent behind the
-explicit-resume latch until an explicit Resume or a new user prompt. The
-session view offers Stop for an idle parent with a pending wait. Stop of an
-idle session with no pending wait still answers 409. Run waits follow the same
-rule ([Test Runs](./test-runs.md)).
+A user Stop pauses the parent and leaves its delegation waits registered. The
+children continue running. When a wait settles, its consolidated result joins
+the parent's paused queue. Results already in the queue survive Stop too.
+Explicit Resume or a new user prompt lets those results reach the parent.
+The session view offers Stop for an idle parent with a pending wait, even
+though there is no turn to interrupt. Stop also accepts an idle parent with
+a runnable delegation result whose wait has already settled. Without a
+delegation wait, runnable delegation result, test-run wait, or capacity retry,
+an idle Stop answers 409. Stop consumes pending test-run waits
+([Test Runs](./test-runs.md)).
 
 If the parent session is removed or becomes unavailable before a wait can
 resume it, TermAl consumes the parent's pending waits with

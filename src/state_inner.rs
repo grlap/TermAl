@@ -266,6 +266,7 @@ impl StateInner {
                 provider_handoffs: Vec::new(),
                 provider_handoff_history: None,
                 queue_paused: false,
+                has_runnable_delegation_result: false,
                 provider_capacity_waiting: false,
                 source_tracking_recovery: false,
                 queue_projection_hash: None,
@@ -694,6 +695,8 @@ impl StateInner {
     #[cfg_attr(test, allow(dead_code))]
     fn collect_persist_delta_plan(&mut self, watermark: u64) -> PersistDeltaPlan {
         self.retain_hidden_source_observation_sessions();
+        self.delegation_wait_transfers.retain(PersistWaitRetirement::pending);
+        self.stopped_test_run_waits.retain(PersistWaitRetirement::pending);
         let mut changed_sessions = Vec::new();
         let complete = self.delegation_inventory_complete();
         let retry_removed_ids = if complete { std::mem::take(&mut self.removed_session_ids) } else { Vec::new() };

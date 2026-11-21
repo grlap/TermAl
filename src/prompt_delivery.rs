@@ -551,6 +551,9 @@ fn keep_delivery_history_of_removed_row(record: &mut SessionRecord, prompt_id: &
 /// record gives no proof that it was never handed off, so clients see it as
 /// an ambiguous delivery and it is never replayed.
 fn unreceipted_queued_prompt_is_history(queued: &QueuedPromptRecord) -> bool {
+    if queued.fan_in_promotion_is_unsent() || queued.fan_in_enqueue_in_progress() {
+        return false;
+    }
     !queued.promotion_disposition_known
         || queued.engram_ordinary_handoff
         || queued.promoted_message_index.is_some()
@@ -596,21 +599,26 @@ fn sync_prompt_delivery_view(record: &mut SessionRecord) {
     view.sort_by_key(|(sequence, _)| *sequence);
     let mut views = view.into_iter().map(|(_, view)| view).collect::<Vec<_>>();
     for queued in &record.queued_prompts {
-        if !record
+        if record
             .prompt_deliveries
             .contains_key(&queued.pending_prompt.id)
-            && unreceipted_queued_prompt_is_history(queued)
         {
-            // No positive provider effect is inferred from a stored queue
-            // record or a transcript position. Preserve its content as history.
-            views.push(PromptDeliveryView {
-                prompt_id: queued.pending_prompt.id.clone(),
-                disposition: PromptDeliveryDisposition::Ambiguous,
-                attempt: 0,
-                message_id: None,
-                reason: Some(UNRECEIPTED_HISTORY_REASON.to_owned()),
-            });
+            continue;
         }
+        let (disposition, reason) = if queued.fan_in_enqueue_in_progress() {
+            (PromptDeliveryDisposition::HandingOff, "Waiting for provider enqueue.")
+        } else if unreceipted_queued_prompt_is_history(queued) {
+            (PromptDeliveryDisposition::Ambiguous, UNRECEIPTED_HISTORY_REASON)
+        } else {
+            continue;
+        };
+        views.push(PromptDeliveryView {
+            prompt_id: queued.pending_prompt.id.clone(),
+            disposition,
+            attempt: 0,
+            message_id: None,
+            reason: Some(reason.to_owned()),
+        });
     }
     record.session.prompt_deliveries = views;
 }

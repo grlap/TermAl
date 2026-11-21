@@ -55,7 +55,11 @@ import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
-import { SessionActivityStrip } from "./panels/session-activity-cards";
+import {
+  countActionableQueuedPrompts,
+  QueuePausedIndicator,
+  SessionActivityStrip,
+} from "./panels/session-activity-cards";
 import { TestRunSessionMarker } from "./test-runs-context";
 import {
   TestRunWaitFailureNotice,
@@ -524,12 +528,25 @@ export function SessionPaneView({
     Boolean(activeSession) &&
     !isSessionBusy &&
     !isSending &&
+    !activeSession?.queuePaused &&
     activeDelegationWaits.length > 0;
+  const showPausedDelegationWait =
+    activeSession?.queuePaused &&
+    !isSessionBusy &&
+    !activeSession.sourceTrackingRecovery &&
+    !activeSession.providerCapacityWaiting &&
+    !isSending &&
+    !isStopping &&
+    activeDelegationWaits.length > 0 &&
+    countActionableQueuedPrompts(activeSession) === 0;
   const hasPendingTestRunWait = useHasPendingTestRunWait(activeSession?.id);
   // Keep the operator's Stop control while an idle session awaits recovery.
   const canStopWaitingSession =
     activeSession?.status === "idle" &&
-    (activeDelegationWaits.length > 0 || hasPendingTestRunWait || activeSession.providerCapacityWaiting);
+    ((!activeSession.queuePaused &&
+      (activeDelegationWaits.length > 0 || activeSession.hasRunnableDelegationResult)) ||
+      hasPendingTestRunWait ||
+      activeSession.providerCapacityWaiting);
   // Busy state is independent of which transcript messages are resident.
   const showWaitingIndicator =
     isSessionTabActive &&
@@ -1970,16 +1987,28 @@ export function SessionPaneView({
           </MessageSourceSessionNavigationContext.Provider>
         )}
         {isSessionTabActive && pane.viewMode === "session" ? (
-          <TranscriptActivitySlot
-            session={activeSession}
-            isSending={isSending}
-            isStopping={isStopping}
-            delegationWaitPrompt={
-              showDelegationWaitIndicator
-                ? delegationWaitIndicatorPrompt(activeDelegationWaits)
-                : null
-            }
-          />
+          <>
+            {showPausedDelegationWait && activeSession ? (
+              <QueuePausedIndicator
+                kind="delegation-wait"
+                onResume={
+                  onResumeSessionQueue
+                    ? () => onResumeSessionQueue(activeSession.id)
+                    : undefined
+                }
+              />
+            ) : null}
+            <TranscriptActivitySlot
+              session={activeSession}
+              isSending={isSending}
+              isStopping={isStopping}
+              delegationWaitPrompt={
+                showDelegationWaitIndicator
+                  ? delegationWaitIndicatorPrompt(activeDelegationWaits)
+                  : null
+              }
+            />
+          </>
         ) : null}
       </section>
       {isSessionTabActive && pane.viewMode === "session" && activeSession ? (

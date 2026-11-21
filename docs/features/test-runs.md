@@ -1445,17 +1445,16 @@ unpublished executor is never described as proven gone.
   run waits. Runs and cards stay, and nothing reactivates on its own. An
   archived session gets no new card and no wait resume.
   - A Stop consumes them as part of its durable commit (reason
-    `sessionStopped`) and restores them if that commit fails, as for
-    delegation waits.
+    `sessionStopped`) and restores them if that commit fails.
   - A session that ended its turn to wait is idle. Stop there has no turn
     to interrupt, but it is still the brake on the resume: it consumes the
-    session's run waits (`sessionStopped`) and delegation waits
-    (`parentSessionStopped`) in one durable commit, sets the
-    explicit-resume latch, drops queued workflow continuations, keeps user
-    and mailbox prompts queued behind the latch, and records "Turn stopped
-    by user." A failed commit restores all of it. An idle session with no
-    pending wait still answers 409. An explicit Resume or a new user prompt
-    lifts the latch. The session view offers Stop in this state.
+    session's run waits (`sessionStopped`) and pauses delegation waits and
+    queued delegation results. It drops unsent ordinary workflow prompts,
+    keeps user and mailbox prompts queued, and records "Turn stopped by
+    user." A repeated Stop of the already-paused delegation work adds no
+    message. An idle session with no pending wait or queued delegation
+    result still answers 409. Explicit Resume or a new user prompt lifts
+    the pause.
   - A session that became an archived Codex thread (`sessionUnavailable`) or
     was removed (`sessionRemoved`) has its waits consumed by the next
     refresh, within one rescan. A thread archived and unarchived again

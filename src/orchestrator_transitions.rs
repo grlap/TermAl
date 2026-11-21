@@ -415,11 +415,7 @@ fn mark_deadlocked_orchestrator_instances(
             let Some(session_index) = inner.find_session_index(&session_id) else {
                 continue;
             };
-            clear_stopped_orchestrator_queued_prompts(
-                inner
-                    .session_mut_by_index(session_index)
-                    .expect("session index should be valid"),
-            );
+            clear_stopped_orchestrator_queued_prompts(inner, session_index);
         }
 
         for session_id in deadlocked_session_ids {

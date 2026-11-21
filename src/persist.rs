@@ -1552,7 +1552,7 @@ fn persist_state_parts_via_connection(
     write_guard: SqliteStateWriterGuard<'_>,
     adopt_locked_source: bool,
 ) -> Result<(u64, Vec<PersistSessionRejection>)> {
-    let metadata_units = project_metadata_units(metadata)?;
+    let mut metadata_units = project_metadata_units(metadata)?;
     let mut rejected_sessions = Vec::new();
     let serialized_sessions =
         serialize_persisted_sessions_with_isolation(sessions, &mut rejected_sessions);
@@ -1571,14 +1571,6 @@ fn persist_state_parts_via_connection(
         )
     })?;
     write_federation_host_generation(&tx, metadata)?;
-    let committed_metadata = write_metadata_units(
-        &tx,
-        metadata_units,
-        None,
-        &serialized_sessions,
-        Some(&metadata.metadata_capture),
-        true,
-    )?;
     if replace_sessions {
         // Retain every session from the snapshot, including any session whose
         // current in-memory value failed validation. Such a session is skipped
@@ -1625,10 +1617,28 @@ fn persist_state_parts_via_connection(
             )
         })?;
     }
+    let committed_waits = stage_parent_bound_wait_retirements(
+        metadata,
+        &mut metadata_units,
+        sessions,
+        |id| !rejected_sessions.iter().any(|row| row.session_id == id),
+        |id| replace_sessions
+            && !quarantined_session_ids.contains(id)
+            && !sessions.iter().any(|row| row.session.id == id),
+    )?;
+    let committed_metadata = write_metadata_units(
+        &tx,
+        metadata_units,
+        None,
+        &serialized_sessions,
+        Some(&metadata.metadata_capture),
+        true,
+    )?;
     validate_sqlite_checkpoint_write_cut(&tx, &committed_metadata, &serialized_sessions)
         .context("refusing incoherent checkpoint persistence cut")?;
     tx.commit()
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
+    committed_waits.mark_committed();
     metadata
         .metadata_capture
         .committed(committed_metadata.generation);
@@ -1965,7 +1975,7 @@ fn persist_delta_via_cache_inner(
         Ok((metadata_units, serialized_sessions, serialized_delegations))
     })();
     timings.serialize = serialize_started.elapsed();
-    let (metadata_units, serialized_sessions, serialized_delegations) = serialized?;
+    let (mut metadata_units, serialized_sessions, serialized_delegations) = serialized?;
     persist_observe_payload("", &serialized_sessions, &serialized_delegations);
     let mut persisted_session_ids = Vec::new();
     // Opening covers a reopen after an invalidated cache (schema setup and
@@ -2033,6 +2043,21 @@ fn persist_delta_via_cache_inner(
                 return Err(PersistTranscriptPredecessorChanged.into());
             }
             write_federation_host_generation(&tx, &delta.metadata)?;
+            persisted_session_ids = write_persist_delta_statements(
+                &tx,
+                path,
+                delta,
+                &serialized_sessions,
+                serialized_delegations,
+                &mut rejected_sessions,
+            )?;
+            let committed_waits = stage_parent_bound_wait_retirements(
+                &delta.metadata,
+                &mut metadata_units,
+                &delta.changed_sessions,
+                |id| persisted_session_ids.iter().any(|written| written == id),
+                |id| delta.removed_session_ids.iter().any(|removed| removed == id),
+            )?;
             let committed_metadata = write_metadata_units(
                 &tx,
                 metadata_units,
@@ -2047,20 +2072,12 @@ fn persist_delta_via_cache_inner(
                         .is_some_and(|rows| !rows.is_empty())
                     || !delta.removed_delegation_ids.is_empty(),
             )?;
-            persisted_session_ids = write_persist_delta_statements(
-                &tx,
-                path,
-                delta,
-                &serialized_sessions,
-                serialized_delegations,
-                &mut rejected_sessions,
-            )?;
             validate_sqlite_checkpoint_write_cut(&tx, &committed_metadata, &serialized_sessions)
                 .context("refusing incoherent checkpoint persistence cut")?;
-            Ok((tx, committed_metadata))
+            Ok((tx, committed_metadata, committed_waits))
         });
     timings.statements = statements_started.elapsed();
-    let (tx, committed_metadata) = written?;
+    let (tx, committed_metadata, committed_waits) = written?;
     persist_observe_phase("commit");
     let commit_started = std::time::Instant::now();
     // Anchor the body snapshot while this transaction still owns SQLite's
@@ -2073,6 +2090,7 @@ fn persist_delta_via_cache_inner(
         .with_context(|| format!("failed to commit persisted state to `{}`", path.display()));
     timings.commit = commit_started.elapsed();
     committed?;
+    committed_waits.mark_committed();
     #[cfg(test)]
     if let Some(hook) = PERSIST_MESSAGE_COMMIT_HOOK.with(|slot| slot.take()) {
         hook();
@@ -2146,6 +2164,84 @@ fn persist_delta_via_cache_inner(
         );
     }
     Ok(persisted_session_ids)
+}
+
+// Keep each transferred wait in the durable wait list if its parent row was
+// deferred or rejected. Retire it in the same transaction that saves the
+// exact parent cut or a successor. Other rows and metadata can still progress.
+fn stage_parent_bound_wait_retirements<'a>(
+    metadata: &'a PersistedState,
+    units: &mut PersistMetadataUnits,
+    sessions: &[PersistedSessionRecord],
+    parent_written: impl Fn(&str) -> bool,
+    parent_removed: impl Fn(&str) -> bool,
+) -> Result<StagedWaitRetirements<'a>> {
+    let parent_saved = |id: &str, minimum: &PersistSessionWriteStamp| {
+        parent_removed(id)
+            || (parent_written(id)
+                && sessions.iter().any(|row| {
+                    row.session.id == id
+                        && row.source_stamp.as_ref().is_some_and(|stamp| stamp.covers(minimum))
+                }))
+    };
+    let delegations = stage_wait_retirements(
+        units,
+        "delegationWaits",
+        &metadata.delegation_wait_transfers,
+        metadata.delegation_waits.as_slice(),
+        |wait| &wait.parent_session_id,
+        &parent_saved,
+    )?;
+    let test_runs = stage_wait_retirements(
+        units,
+        "testRunWaits",
+        &metadata.stopped_test_run_waits,
+        metadata.test_run_waits.as_slice(),
+        |wait| &wait.session_id,
+        &parent_saved,
+    )?;
+    Ok(StagedWaitRetirements { delegations, test_runs })
+}
+
+struct StagedWaitRetirements<'a> {
+    delegations: Vec<&'a PersistWaitRetirement<DelegationWaitRecord>>,
+    test_runs: Vec<&'a PersistWaitRetirement<TestRunWaitRecord>>,
+}
+
+impl StagedWaitRetirements<'_> {
+    fn mark_committed(self) {
+        for retirement in self.delegations {
+            retirement.mark_committed();
+        }
+        for retirement in self.test_runs {
+            retirement.mark_committed();
+        }
+    }
+}
+
+fn stage_wait_retirements<'a, W: Serialize>(
+    units: &mut PersistMetadataUnits,
+    field: &str,
+    retirements: &'a [PersistWaitRetirement<W>],
+    active: &[W],
+    session_id: impl Fn(&W) -> &str,
+    parent_saved: impl Fn(&str, &PersistSessionWriteStamp) -> bool,
+) -> Result<Vec<&'a PersistWaitRetirement<W>>> {
+    let mut committed = Vec::new();
+    let mut retained = Vec::new();
+    for retirement in retirements.iter().filter(|retirement| retirement.pending()) {
+        if parent_saved(session_id(&retirement.wait), &retirement.parent) {
+            committed.push(retirement);
+        } else {
+            retained.push(&retirement.wait);
+        }
+    }
+    if !retained.is_empty() {
+        retained.extend(active);
+        units.retain(|(name, _), _| name != field);
+        units.extend(metadata_value_to_units(json!({ (field): retained }))?);
+    }
+    Ok(committed)
 }
 
 /// The statements of one delta write, inside its open transaction.

@@ -907,20 +907,7 @@ impl StateInner {
             let Some(session_index) = self.find_session_index(&session_id) else {
                 continue;
             };
-            // Check before stamped access: unchanged stopped children must
-            // not replay their durable transcript tails on the first tick.
-            if !self.sessions[session_index]
-                .queued_prompts
-                .iter()
-                .any(|queued| queued.source == QueuedPromptSource::Orchestrator)
-            {
-                continue;
-            }
-            // Actual queue clears still need a fresh stamp so both boot and
-            // delete-session callers persist the change through their delta.
-            if let Some(record) = self.session_mut_by_index(session_index) {
-                clear_stopped_orchestrator_queued_prompts(record);
-            }
+            clear_stopped_orchestrator_queued_prompts(self, session_index);
         }
     }
 }

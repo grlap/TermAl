@@ -195,6 +195,26 @@ fn observe_runtime_unadmitted_captured_end(
 }
 
 impl AppState {
+    // A prepared prompt with no observed execution never reached the provider.
+    // Retire that empty opening without scheduling a source observation.
+    fn close_pre_enqueue_fan_in_observation(
+        &self, inner: &mut StateInner, index: usize, generation: u64,
+    ) {
+        let record = &inner.sessions[index];
+        let Some(trace) = record.engram.unadmitted_active_turn.as_ref() else { return; };
+        if trace.generation == generation && trace.commands.is_empty()
+            && record.provider_handoff_observations.prepared.as_ref().is_some_and(|prepared|
+                prepared.turn_generation == generation && prepared.prompt_id == trace.notice_message_id)
+        {
+            inner.sessions[index].engram.unadmitted_active_turn = None;
+            settle_engram_named_predecessor_locked(inner, index, Some("the turn was held before provider enqueue"));
+        } else {
+            self.queue_runtime_observation_close_with_notices_locked(
+                inner, index, EngramObservedTurnOutcome::Cancelled, &[],
+            );
+        }
+    }
+
     // Provider handoff uses only the opening captured at turn start. Remote
     // confirmation belongs to the observation owner, never a runtime reader.
     fn prepare_ordinary_opening_root_before_handoff(

@@ -20,6 +20,8 @@ import {
 import { SessionComposer } from "./AgentSessionPanel.composer";
 import { MessageSlot, PanelEmptyState } from "./session-message-leaves";
 import {
+  countActionableQueuedPrompts,
+  isHistoricalPromptDelivery,
   PendingPromptCard,
   QueuePausedIndicator,
 } from "./session-activity-cards";
@@ -1245,11 +1247,8 @@ const SessionConversationPage = memo(
     // Queue state is ordinary backend state. Historical Engram flags do not
     // choose recovery controls or override canonical delivery receipts.
     const deliveries = new Map((session.promptDeliveries ?? []).map(delivery => [delivery.promptId, delivery]));
-    const deliveryIsHistorical = (promptId: string) => {
-      const disposition = deliveries.get(promptId)?.disposition;
-      return disposition === "ambiguous" || disposition === "accepted" || disposition === "handingOff";
-    };
-    const actionableQueuedCount = hasNewerHistory ? 0 : pendingPrompts.filter(prompt => !deliveryIsHistorical(prompt.id)).length;
+    const deliveryIsHistorical = (promptId: string) => isHistoricalPromptDelivery(deliveries.get(promptId));
+    const actionableQueuedCount = countActionableQueuedPrompts(session, deliveries);
     const queuePaused = !session.sourceTrackingRecovery && !isTurnActive
       && Boolean(session.queuePaused) && actionableQueuedCount > 0;
     const pausedQueueCard = queuePaused ? (
@@ -1312,7 +1311,7 @@ const SessionConversationPage = memo(
           {pendingPromptCards}
         </div>
       ) : null;
-    const queuedTail = pendingPromptQueue || sourceTrackingRecoveryCard ? (
+    const queuedTail = pendingPromptQueue || pausedQueueCard || sourceTrackingRecoveryCard ? (
       <div className="conversation-queued-tail">
         {pendingPromptQueue}
         {pausedQueueCard}

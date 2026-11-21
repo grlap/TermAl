@@ -2180,7 +2180,7 @@ fn human_prompt_intake_deadline_parks_until_explicit_resume_delivers_once() {
         if let PersistRequest::Fence(fence) = phase_sync::receive(&persisted, phase) {
             assert!(matches!(
                 &fence.target,
-                PersistFenceTarget::HumanPromptRow { session_id, .. } if session_id == &turn.session
+                PersistFenceTarget::SessionRowAtOrAfter { session_id, .. } if session_id == &turn.session
             ));
             break fence;
         }
@@ -2198,7 +2198,7 @@ fn human_prompt_intake_deadline_parks_until_explicit_resume_delivers_once() {
         })
     };
     let intake_fence = receive_row_fence("initial Human row acknowledgement");
-    let PersistFenceTarget::HumanPromptRow {
+    let PersistFenceTarget::SessionRowAtOrAfter {
         minimum: intake_stamp,
         ..
     } = &intake_fence.target
@@ -2238,7 +2238,7 @@ fn human_prompt_intake_deadline_parks_until_explicit_resume_delivers_once() {
         std::thread::spawn(move || state.resume_session_queue(&session).unwrap())
     };
     let promotion = receive_row_fence("explicit Resume promotion acknowledgement");
-    let PersistFenceTarget::HumanPromptRow { minimum, .. } = &promotion.target else {
+    let PersistFenceTarget::SessionRowAtOrAfter { minimum, .. } = &promotion.target else {
         unreachable!("expected the promotion Human row fence");
     };
     assert!(minimum.covers(&intake_stamp) && minimum.mutation_stamp > intake_stamp.mutation_stamp);
@@ -2303,7 +2303,7 @@ fn human_prompt_failed_or_deadline_promotion_ack_cannot_strand_or_replace_a_succ
             {
                 assert!(matches!(
                     &fence.target,
-                    PersistFenceTarget::HumanPromptRow { .. }
+                    PersistFenceTarget::SessionRowAtOrAfter { .. }
                 ));
                 break fence;
             }

@@ -43,6 +43,7 @@ pub(super) fn queued(id: &str) -> QueuedPromptRecord {
         pending_prompt: prompt(id),
         attachments: Vec::new(),
         source: QueuedPromptSource::User,
+        workflow: None,
         engram_ordinary_handoff: false,
         promoted_message_index: None,
         promotion_disposition_known: true,

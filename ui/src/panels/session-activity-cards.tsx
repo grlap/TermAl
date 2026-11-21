@@ -20,7 +20,7 @@ import {
 import { MailboxMessageLink } from "../mailbox-message-link";
 import { renderPlainTextWithSoftBreaks } from "../plain-text-wrapping";
 import type { SearchHighlightTone } from "../search-highlight";
-import type { PendingPrompt, Session } from "../types";
+import type { PendingPrompt, PromptDeliveryView, Session } from "../types";
 import {
   resolveSessionActivity,
   type SessionActivityOptions,
@@ -66,25 +66,49 @@ export function SessionActivityStrip(options: SessionActivityOptions) {
   );
 }
 
-// A paused queue is actionable transcript content, not transient activity.
-// Keep Resume beside the queued prompts until the backend releases its latch.
-// The text describes the ordinary explicit pause and its stored preview.
-export function QueuePausedIndicator({
-  agent,
-  preview,
-  queuedCount,
-  onResume,
-}: {
-  agent: Session["agent"];
-  preview: string;
-  queuedCount: number;
+export function isHistoricalPromptDelivery(delivery: PromptDeliveryView | undefined) {
+  return delivery?.disposition === "ambiguous" ||
+    delivery?.disposition === "accepted" ||
+    delivery?.disposition === "handingOff";
+}
+
+export function countActionableQueuedPrompts(
+  session: Pick<Session, "hasNewerHistory" | "pendingPrompts" | "promptDeliveries">,
+  knownDeliveries?: ReadonlyMap<string, PromptDeliveryView>,
+) {
+  if (session.hasNewerHistory || !session.pendingPrompts?.length) {
+    return 0;
+  }
+  const deliveries = knownDeliveries ??
+    new Map(session.promptDeliveries?.map(delivery => [delivery.promptId, delivery]));
+  return session.pendingPrompts.filter(prompt =>
+    !isHistoricalPromptDelivery(deliveries.get(prompt.id)),
+  ).length;
+}
+
+// Keep Resume visible until the backend releases the pause, including when
+// a stopped delegation wait has not queued a prompt yet.
+type QueuePausedIndicatorProps = {
   onResume?: () => void;
-}) {
-  const { heading, detail, waiting } = queuePausedCardText(
-    resolveQueuePauseCause(preview),
-    agent,
-    queuedCount,
-  );
+} & (
+  | {
+      kind?: "queue";
+      agent: Session["agent"];
+      preview: string;
+      queuedCount: number;
+    }
+  | { kind: "delegation-wait" }
+);
+
+export function QueuePausedIndicator(props: QueuePausedIndicatorProps) {
+  const isDelegationWait = props.kind === "delegation-wait";
+  const { heading, detail, waiting } = isDelegationWait
+    ? { heading: "Delegation wait paused", detail: null, waiting: null }
+    : queuePausedCardText(
+        resolveQueuePauseCause(props.preview),
+        props.agent,
+        props.queuedCount,
+      );
 
   return (
     <article
@@ -94,19 +118,23 @@ export function QueuePausedIndicator({
     >
       <div className="activity-pause-glyph" aria-hidden="true" />
       <div className="activity-card-copy">
-        <div className="activity-card-heading">
-          <div className="card-label">Queue paused</div>
-        </div>
+        {isDelegationWait ? null : (
+          <div className="activity-card-heading">
+            <div className="card-label">Queue paused</div>
+          </div>
+        )}
         <h3>{heading}</h3>
         {detail ? <p>{detail}</p> : null}
-        <p>{waiting}</p>
+        {waiting ? <p>{waiting}</p> : null}
       </div>
-      {onResume ? (
+      {props.onResume ? (
         <button
           className="queue-resume-button"
           type="button"
-          onClick={onResume}
-          aria-label="Resume queued prompts"
+          onClick={props.onResume}
+          aria-label={
+            isDelegationWait ? "Resume delegation wait" : "Resume queued prompts"
+          }
         >
           Resume
         </button>

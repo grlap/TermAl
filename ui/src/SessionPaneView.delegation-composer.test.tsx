@@ -43,6 +43,7 @@ import type {
 const spawnDelegationCommandMock = vi.hoisted(() => vi.fn());
 const resolveAgentCommandMock = vi.hoisted(() => vi.fn());
 const fetchFileMock = vi.hoisted(() => vi.fn());
+const conversationPanel = vi.hoisted(() => ({ useActual: false }));
 
 vi.mock("./api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api")>();
@@ -67,10 +68,14 @@ vi.mock("./delegation-commands", async (importOriginal) => {
 vi.mock("./panels/AgentSessionPanel", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("./panels/AgentSessionPanel")>();
+  const ActualAgentSessionPanel = actual.AgentSessionPanel;
 
   return {
     ...actual,
-    AgentSessionPanel: () => <div data-testid="agent-session-panel" />,
+    AgentSessionPanel: (props: ComponentProps<typeof ActualAgentSessionPanel>) =>
+      conversationPanel.useActual
+        ? <ActualAgentSessionPanel {...props} />
+        : <div data-testid="agent-session-panel" />,
   };
 });
 
@@ -305,6 +310,7 @@ function renderSessionPaneView({
     onMcpElicitationSubmit: vi.fn(),
     onCodexAppRequestSubmit: vi.fn(),
     onStopSession: vi.fn(),
+    onResumeSessionQueue: vi.fn(),
     onKillSession: vi.fn(),
     onRenameSessionRequest: vi.fn(),
     onScrollToBottomRequestHandled: vi.fn(),
@@ -327,9 +333,17 @@ function renderSessionPaneView({
   };
 
   const openTestRuns = vi.fn();
-  const view = (runs: TestRunSummary[]) => (
+  const view = (
+    runs: TestRunSummary[],
+    sessionLookup = props.sessionLookup,
+    currentDelegationWaits = props.delegationWaits,
+  ) => (
     <TestRunsProvider snapshotReady runs={runs} waits={testRunWaits} open={openTestRuns}>
-      <SessionPaneView {...props} />
+      <SessionPaneView
+        {...props}
+        sessionLookup={sessionLookup}
+        delegationWaits={currentDelegationWaits}
+      />
     </TestRunsProvider>
   );
   const rendered = render(view(testRuns));
@@ -338,8 +352,26 @@ function renderSessionPaneView({
     onComposerError,
     onDraftCommit,
     onStopSession: props.onStopSession,
+    onResumeSessionQueue: props.onResumeSessionQueue,
     openTestRuns,
     rerenderRuns: (runs: TestRunSummary[]) => rendered.rerender(view(runs)),
+    rerenderSession: (
+      nextSession: Session,
+      currentDelegationWaits = props.delegationWaits,
+    ) => {
+      act(() => {
+        syncComposerSessionsStore({
+          sessions: [nextSession],
+          draftsBySessionId: { [nextSession.id]: draft },
+          draftAttachmentsBySessionId: {},
+        });
+        rendered.rerender(view(
+          testRuns,
+          new Map([[nextSession.id, nextSession]]),
+          currentDelegationWaits,
+        ));
+      });
+    },
     textarea: expectComposer
       ? (screen.getByLabelText(`Message ${session.name}`) as HTMLTextAreaElement)
       : null,
@@ -369,6 +401,7 @@ describe("SessionPaneView composer delegation click-through", () => {
   let animationFrameSpies: Array<{ mockRestore: () => void }> = [];
 
   beforeEach(() => {
+    conversationPanel.useActual = false;
     spawnDelegationCommandMock.mockReset();
     resolveAgentCommandMock.mockReset();
     fetchFileMock.mockReset().mockResolvedValue({
@@ -759,6 +792,49 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(onStopSession).toHaveBeenCalledWith("session-parent");
   });
 
+  it("keeps Stop available when the final wait becomes an idle queued result", async () => {
+    const session = makeSession({ id: "session-parent", status: "idle" });
+    const { onStopSession, rerenderSession } = renderSessionPaneView({
+      session,
+      draft: "",
+      delegationWaits: [{
+        id: "wait-1",
+        parentSessionId: session.id,
+        delegationIds: ["delegation-1"],
+        mode: "all",
+        createdAt: "2026-10-09T01:00:00Z",
+        title: "Review fan-in",
+      }],
+    });
+    await settleAsyncUi();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+
+    const settled = {
+      ...session,
+      hasRunnableDelegationResult: true,
+      pendingPrompts: [{
+        id: "fan-in-prompt",
+        timestamp: "2026-10-09T01:01:00Z",
+        text: "Settled review result",
+      }],
+    };
+    rerenderSession(settled, []);
+    await settleAsyncUi();
+    expect(screen.queryByText(/Waiting for all of 1 delegated session/)).not.toBeInTheDocument();
+    const stop = screen.getByRole("button", { name: "Stop" });
+    expect(stop).toBeEnabled();
+    fireEvent.click(stop);
+    expect(onStopSession).toHaveBeenCalledExactlyOnceWith(session.id);
+
+    rerenderSession({ ...settled, queuePaused: true }, []);
+    await settleAsyncUi();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+
+    rerenderSession({ ...settled, hasRunnableDelegationResult: false }, []);
+    await settleAsyncUi();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+  });
+
   it("offers Stop while an idle root waits for provider capacity", async () => {
     const session = makeSession({
       id: "capacity-root",
@@ -774,6 +850,124 @@ describe("SessionPaneView composer delegation click-through", () => {
     expect(stop).toBeEnabled();
     act(() => { stop.click(); });
     expect(onStopSession).toHaveBeenCalledWith("capacity-root");
+  });
+
+  it.each([
+    {
+      name: "resumes a stopped delegation wait before a result queues",
+      paused: {},
+    },
+    {
+      name: "resumes a stopped delegation wait with only delivery history",
+      paused: {
+        pendingPrompts: [{ id: "prior", text: "Earlier prompt", timestamp: "10:00" }],
+        promptDeliveries: [{ promptId: "prior", disposition: "ambiguous", attempt: 1 }],
+      },
+    },
+    {
+      name: "resumes a stopped delegation wait after recovery into Error",
+      paused: { status: "error" },
+    },
+  ] satisfies Array<{ name: string; paused: Partial<Session> }>)("$name", async ({ paused }) => {
+    const session = makeSession({ id: "session-parent", status: "idle" });
+    const {
+      onStopSession,
+      onResumeSessionQueue,
+      rerenderSession,
+    } = renderSessionPaneView({
+      session,
+      draft: "",
+      delegationWaits: [
+        {
+          id: "wait-1",
+          parentSessionId: "session-parent",
+          delegationIds: ["delegation-1"],
+          mode: "all",
+          createdAt: "2026-10-09T01:00:00Z",
+          title: "Paused review",
+        },
+      ],
+    });
+    await settleAsyncUi();
+
+    expect(
+      screen.queryByRole("button", { name: "Resume delegation wait" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(onStopSession).toHaveBeenCalledWith("session-parent");
+
+    const pausedSession = { ...session, ...paused, queuePaused: true };
+    rerenderSession(pausedSession);
+    await settleAsyncUi();
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for all of 1 delegated session/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Delegation wait paused" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume delegation wait" }));
+    expect(onResumeSessionQueue).toHaveBeenCalledExactlyOnceWith("session-parent");
+
+    rerenderSession({ ...pausedSession, queuePaused: false });
+    await settleAsyncUi();
+    expect(
+      screen.queryByRole("button", { name: "Resume delegation wait" }),
+    ).not.toBeInTheDocument();
+    if (pausedSession.status === "error") {
+      expect(screen.getAllByText("Codex encountered an error")).not.toHaveLength(0);
+      expect(screen.queryByText(/Waiting for all of 1 delegated session/)).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+      expect(screen.getAllByText(/Waiting for all of 1 delegated session/)).not.toHaveLength(0);
+    }
+  });
+
+  it.each([
+    { scenario: "without another wait", anotherWait: false },
+    { scenario: "with another wait", anotherWait: true },
+  ])("resumes a held fan-in shown in the transcript $scenario", async ({ anotherWait }) => {
+    conversationPanel.useActual = true;
+    const result = {
+      id: "fan-in-prompt",
+      timestamp: "2026-10-09T01:00:00Z",
+      text: [
+        "First review fan-in",
+        "",
+        "Wait id: `wait-1`",
+        "",
+        "Delegations:",
+        "- First review",
+        "",
+        "Results:",
+        "First review completed.",
+      ].join("\n"),
+    };
+    const session = makeSession({
+      id: "session-parent",
+      preview: "Turn stopped by user.",
+      queuePaused: true,
+      messages: [{ ...result, type: "text", author: "you" }],
+      pendingPrompts: [result],
+    });
+    const { onResumeSessionQueue } = renderSessionPaneView({
+      session,
+      draft: "",
+      delegationWaits: anotherWait
+        ? [{
+            id: "wait-2",
+            parentSessionId: session.id,
+            delegationIds: ["delegation-2"],
+            mode: "all",
+            createdAt: "2026-10-09T01:01:00Z",
+            title: "Second review",
+          }]
+        : [],
+    });
+    await settleAsyncUi();
+
+    expect(screen.getAllByText("First review fan-in")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Resume delegation wait" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
+    expect(onResumeSessionQueue).toHaveBeenCalledExactlyOnceWith(session.id);
   });
 
   it("offers Stop for an Idle session with a pending test-run wait and stops it", async () => {

@@ -83,6 +83,10 @@ struct PersistedState {
     delegation_inventory: DelegationInventoryState,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegation_waits: PersistTracked<Vec<DelegationWaitRecord>>,
+    #[serde(skip)]
+    delegation_wait_transfers: Vec<PersistWaitRetirement<DelegationWaitRecord>>,
+    #[serde(skip)]
+    stopped_test_run_waits: Vec<PersistWaitRetirement<TestRunWaitRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     test_run_cards_epoch: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -183,7 +187,7 @@ impl PersistedState {
     fn capture_metadata(inner: &StateInner, changed_only: bool) -> Self {
         // Snapshot the predecessor and the small stamp map together, then let
         // the writer publish while payload clones run under StateInner.
-        let (metadata_capture, watermarks) = {
+        let (metadata_capture, mut watermarks) = {
             let watermarks = inner
                 .metadata_watermarks
                 .lock()
@@ -197,6 +201,22 @@ impl PersistedState {
                 },
             )
         };
+        let delegation_wait_transfers = inner.delegation_wait_transfers.iter()
+            .filter(|transfer| transfer.pending()).cloned().collect::<Vec<_>>();
+        if !delegation_wait_transfers.is_empty() {
+            // The writer may have preserved extra waits from a partial cut.
+            // Give the final parent write the full desired wait collection.
+            watermarks.remove("delegationWaits");
+        }
+        let stopped_test_run_waits = inner
+            .stopped_test_run_waits
+            .iter()
+            .filter(|retirement| retirement.pending())
+            .cloned()
+            .collect::<Vec<_>>();
+        if !stopped_test_run_waits.is_empty() {
+            watermarks.remove("testRunWaits");
+        }
         let mut selected = PersistMetadataWatermarks::new();
         let mut omitted = BTreeSet::new();
         macro_rules! collection {
@@ -275,6 +295,8 @@ impl PersistedState {
             delegations: Vec::new(),
             delegation_inventory: inner.delegation_inventory.clone(),
             delegation_waits: collection!("delegationWaits", &inner.delegation_waits,),
+            delegation_wait_transfers,
+            stopped_test_run_waits,
             test_run_cards_epoch: clone_persist_metadata_field(
                 "testRunCardsEpoch",
                 &inner.test_run_cards_epoch,
@@ -371,6 +393,8 @@ impl PersistedState {
             delegations: Vec::new(),
             delegation_inventory: self.delegation_inventory.clone(),
             delegation_waits: self.delegation_waits.snapshot_clone(),
+            delegation_wait_transfers: self.delegation_wait_transfers.clone(),
+            stopped_test_run_waits: self.stopped_test_run_waits.clone(),
             test_run_cards_epoch: self.test_run_cards_epoch.clone(),
             test_run_cards: self.test_run_cards.snapshot_clone(),
             test_run_registrations: self.test_run_registrations.snapshot_clone(),
@@ -643,6 +667,8 @@ impl PersistedState {
             test_run_waits: self.test_run_waits.into(),
             remote_test_run_facts: self.remote_test_run_facts.into(),
             delegation_waits: self.delegation_waits.into(),
+            delegation_wait_transfers: Vec::new(),
+            stopped_test_run_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),
             delegation_catalog_children: Mutex::new(delegation_catalog_children),
             removed_delegation_ids: BTreeMap::new(),
@@ -994,6 +1020,8 @@ impl PersistedSessionRecord {
         if record.is_local_session() {
             session.pending_prompts.clear();
         }
+        // Rebuild this projection from the local queue or the remote owner.
+        session.has_runnable_delegation_result = false;
         session.live_activity = None;
         session.session_mutation_stamp = None;
 

@@ -1137,6 +1137,7 @@ impl AppState {
                 record.queued_prompts.insert(
                     insert_at,
                     QueuedPromptRecord {
+                        workflow: None,
                         engram_ordinary_handoff: false,
                         engram_waiting: false,
                         promoted_message_index: None,

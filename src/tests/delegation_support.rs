@@ -131,6 +131,17 @@ pub(super) fn test_app_state_with_delegation_codex_runtime(
     (state, input_rx)
 }
 
+pub(super) fn test_app_state_with_structured_reviewer_runtime(
+    runtime_id: &str,
+) -> (AppState, mpsc::Receiver<CodexRuntimeCommand>) {
+    let (mut state, input_rx) = test_app_state_with_delegation_codex_runtime(runtime_id);
+    let coordination_path = resolve_coordination_persistence_path(state.persistence_path.as_ref());
+    state.mailbox_store = Arc::new(
+        MailboxStore::open(&coordination_path).expect("review result mailbox store should open"),
+    );
+    (state, input_rx)
+}
+
 pub(super) fn test_app_state_with_drained_delegation_codex_runtime(runtime_id: &str) -> AppState {
     let (state, input_rx) = test_app_state_with_delegation_codex_runtime(runtime_id);
     std::thread::spawn(move || while input_rx.recv().is_ok() {});

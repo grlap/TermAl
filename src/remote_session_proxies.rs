@@ -123,6 +123,13 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
+        // Peer session IDs are local and mailbox provenance is internal.
+        // This operator route cannot present either to the owning host.
+        if !explicit_human_request(&request) {
+            return Err(ApiError::bad_request(
+                "automated prompts are not supported by remote session proxies",
+            ));
+        }
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
             self.remote_registry.request_state_with_lease(
                 &target.remote,

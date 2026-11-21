@@ -761,13 +761,15 @@ impl AppState {
         let pending = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else { return; };
-            inner.sessions[index].engram.declared_run_turn = None;
             let record = &inner.sessions[index];
             if !matches!(runtime, RuntimeToken::Codex(_) | RuntimeToken::Claude(_))
                 || !record.runtime.matches_runtime_token(runtime)
                 || record.active_turn_generation != generation
                 || record.runtime_stop_in_progress
+                || record.session.status != SessionStatus::Active
             { return; }
+            inner.sessions[index].engram.declared_run_turn = None;
+            let record = &inner.sessions[index];
             let Some(store) = record.session.project_id.as_deref()
                 .and_then(|id| inner.projects.iter().find(|project| project.id == id))
                 .filter(|project| project.remote_id == LOCAL_REMOTE_ID)

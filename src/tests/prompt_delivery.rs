@@ -3058,6 +3058,7 @@ fn a_failed_codex_thread_setup_rejects_its_parked_receipted_prompt() {
             let record = inner.session_mut_by_index(index).unwrap();
             let delivery = record.prompt_deliveries.get_mut(&prompt_id).unwrap();
             delivery.entry = Some(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -3147,6 +3148,7 @@ fn a_codex_thread_setup_whose_request_was_never_written_rejects_its_parked_recei
         let index = inner.find_session_index(&session_id).unwrap();
         let record = inner.session_mut_by_index(index).unwrap();
         record.prompt_deliveries.get_mut(&prompt_id).unwrap().entry = Some(QueuedPromptRecord {
+            workflow: None,
             engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,

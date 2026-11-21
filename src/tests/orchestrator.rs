@@ -359,6 +359,7 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
         inner.sessions[planner_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -691,6 +692,7 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
         inner.sessions[builder_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -1239,6 +1241,7 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
         inner.sessions[builder_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -1402,6 +1405,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
         inner.sessions[reviewer_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -1634,6 +1638,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -1807,6 +1812,7 @@ fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_f
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -1830,6 +1836,7 @@ fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_f
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -2022,6 +2029,7 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
         inner.sessions[builder_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -2810,6 +2818,7 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
         inner.sessions[builder_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -2878,11 +2887,10 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
 // Pins load_state recovery when every recorded active child stopped
 // before shutdown: the instance flips to Stopped, completed_at is set,
 // pending transitions targeting stopped children are dropped, and the
-// idle peer's queued orchestrator prompt is cleared.
-// Guards against reboot resurrecting transitions into children that
-// were already stopped or leaving phantom queued work on idle peers.
-#[test]
-fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
+// idle peer's queued orchestrator prompt is cleared. A stopped child
+// retains its completed delegation result for explicit Resume.
+#[tokio::test]
+async fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-recovery-complete-{}",
         Uuid::new_v4()
@@ -2899,7 +2907,7 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     let persistence_path = state_root.join("termal.sqlite");
     let orchestrator_templates_path = state_root.join("orchestrators.json");
 
-    let state = AppState::new_with_paths(
+    let mut state = AppState::new_with_paths(
         normalized_root.clone(),
         persistence_path.clone(),
         orchestrator_templates_path.clone(),
@@ -2936,6 +2944,8 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
         .expect("reviewer session should be mapped")
         .session_id
         .clone();
+    let wait_id = format!("delegation-wait-{}", Uuid::new_v4());
+    let fan_in;
 
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -2968,6 +2978,7 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
         inner.sessions[reviewer_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                workflow: None,
                 engram_ordinary_handoff: false,
                 engram_waiting: false,
                 promoted_message_index: None,
@@ -2989,12 +3000,44 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
                 },
             });
         sync_pending_prompts(&mut inner.sessions[reviewer_index]);
+        inner.stamp_session_at_index(reviewer_index);
+        let builder_index = inner
+            .find_session_index(&builder_session_id)
+            .expect("builder session should exist");
+        let builder = inner.session_mut_by_index(builder_index).unwrap();
+        builder.set_auto_dispatch_blocked(true);
+        queue_orchestrator_prompt_on_record(
+            builder,
+            PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
+                attachments: Vec::new(),
+                id: "queued-completed-stop-builder-transition".to_owned(),
+                timestamp: stamp_now(),
+                text: "queued builder transition should be discarded".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+        inner.delegation_waits.push(DelegationWaitRecord {
+            id: wait_id.clone(),
+            parent_session_id: builder_session_id.clone(),
+            delegation_ids: vec![format!("delegation-for-{wait_id}")],
+            mode: DelegationWaitMode::All,
+            created_at: stamp_now(),
+            title: None,
+        });
+        let refresh = refresh_delegation_waits_locked(&mut inner);
+        assert!(refresh.dispatch_parents.is_empty());
+        assert!(inner.delegation_waits.is_empty());
+        let queued = inner.sessions[builder_index].queued_prompts.back().unwrap();
+        assert!(queued.is_delegation_fan_in(&builder_session_id));
+        fan_in = queued.pending_prompt.clone();
         state
-            .persist_internal_locked(&inner)
+            .commit_locked(&mut inner)
             .expect("completed stop recovery state should persist");
     }
-
-    drop(state);
 
     let recovered = load_state(&persistence_path)
         .expect("recovered state should load")
@@ -3024,6 +3067,47 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
         .expect("persisted reviewer session should exist after restart");
     assert!(recovered_reviewer.queued_prompts.is_empty());
     assert!(recovered_reviewer.session.pending_prompts.is_empty());
+    assert!(recovered.delegation_waits.is_empty());
+    let recovered_builder = recovered
+        .sessions
+        .iter()
+        .find(|record| record.session.id == builder_session_id)
+        .expect("persisted builder session should exist after restart");
+    assert!(recovered_builder.orchestrator_auto_dispatch_blocked);
+    assert_eq!(recovered_builder.queued_prompts.len(), 1);
+    let queued = &recovered_builder.queued_prompts[0];
+    assert!(queued.is_delegation_fan_in(&builder_session_id));
+    assert_eq!(queued.pending_prompt.id, fan_in.id);
+    assert_eq!(queued.pending_prompt.text, fan_in.text);
+
+    state.inner = Arc::new(StateMutex::new(recovered));
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("completed-stop-recovery");
+    install_single_wire_codex_fixture(&state, Some(runtime));
+    state.dispatch_orphaned_workflow_prompts();
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    state.resume_session_queue(&builder_session_id).unwrap();
+    assert!(matches!(
+        recv_within_guard(&input_rx, "Resume should deliver the recovered delegation result"),
+        Ok(CodexRuntimeCommand::Prompt { command, .. }) if command.prompt.contains(&wait_id)
+    ));
+    {
+        let inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&builder_session_id).unwrap();
+        assert!(inner.sessions[index].queued_prompts.is_empty());
+    }
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    let saved = load_state(&persistence_path).unwrap().unwrap();
+    let index = saved.find_session_index(&builder_session_id).unwrap();
+    assert!(saved.sessions[index].queued_prompts.is_empty());
+
+    drop(state);
     let _ = fs::remove_file(persistence_path);
     let _ = fs::remove_file(orchestrator_templates_path);
     remove_test_directory(state_root);

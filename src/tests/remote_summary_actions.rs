@@ -40,6 +40,18 @@ fn action_server(
     (port, requests, server)
 }
 
+fn proxy_session_id(state: &AppState) -> String {
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    inner
+        .sessions
+        .iter()
+        .find(|record| record.remote_session_id.as_deref() == Some("remote-session-1"))
+        .expect("proxy session should exist")
+        .session
+        .id
+        .clone()
+}
+
 fn message_action(fields: Value, should_apply: bool) {
     let (state, remote, snapshot) = fixture();
     let mut initial = sample_remote_orchestrator_state(
@@ -54,17 +66,7 @@ fn message_action(fields: Value, should_apply: bool) {
     state
         .apply_remote_state_snapshot(&remote.id, initial.into_state_response())
         .expect("initial snapshot should apply");
-    let local_id = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        inner
-            .sessions
-            .iter()
-            .find(|record| record.remote_session_id.as_deref() == Some("remote-session-1"))
-            .expect("proxy session should exist")
-            .session
-            .id
-            .clone()
-    };
+    let local_id = proxy_session_id(&state);
     let response = payload(&snapshot, "state", &fields);
     let (port, requests, server) =
         action_server(response, "POST /api/sessions/remote-session-1/messages ");
@@ -148,6 +150,146 @@ fn remote_message_action_refuses_unknown_field_beside_retired_fields() {
     let mut fields = retired_fields().pop().unwrap();
     fields["futureSummaryField"] = json!(true);
     message_action(fields, false);
+}
+
+#[test]
+fn remote_stop_and_resume_project_the_owners_queue_pause() {
+    let (state, remote, mut initial) = fixture();
+    let target = initial
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("remote parent summary");
+    target.message_count = 0;
+    target.has_runnable_delegation_result = true;
+    let mut stopped = initial.clone();
+    stopped.revision += 1;
+    let target = stopped
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("stopped parent summary");
+    target.queue_paused = true;
+    let mut resumed = initial.clone();
+    resumed.revision = stopped.revision + 1;
+    let target = resumed
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == "remote-session-1")
+        .expect("resumed parent summary");
+    target.has_runnable_delegation_result = false;
+    state
+        .apply_remote_state_snapshot(&remote.id, initial)
+        .expect("initial snapshot should apply");
+    let local_id = proxy_session_id(&state);
+    let assert_queue = |snapshot: StateResponse, paused, runnable| {
+        let summary = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == local_id)
+            .expect("proxy summary");
+        assert_eq!(summary.queue_paused, paused);
+        assert_eq!(summary.has_runnable_delegation_result, runnable);
+        let detail = state
+            .get_session(&local_id)
+            .expect("cached proxy detail")
+            .session;
+        assert_eq!(detail.queue_paused, paused);
+        assert_eq!(detail.has_runnable_delegation_result, runnable);
+    };
+    assert_queue(state.summary_snapshot(), false, true);
+
+    let (port, _, server) = action_server(
+        serde_json::to_value(stopped).expect("Stop response"),
+        "POST /api/sessions/remote-session-1/stop ",
+    );
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let stop = state.request_stop_session(&local_id);
+    join_test_server(server);
+    assert_queue(stop.expect("Stop should succeed"), true, true);
+    assert_queue(state.summary_snapshot(), true, true);
+
+    let (port, _, server) = action_server(
+        serde_json::to_value(resumed).expect("Resume response"),
+        "POST /api/sessions/remote-session-1/queue/resume ",
+    );
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let resume = state.resume_session_queue(&local_id);
+    join_test_server(server);
+    assert_queue(resume.expect("Resume should succeed"), false, false);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn remote_operator_route_does_not_forward_automated_prompts() {
+    let (state, remote, mut snapshot) = fixture();
+    state
+        .apply_remote_state_snapshot(&remote.id, snapshot.clone())
+        .expect("initial snapshot should apply");
+    let local_id = proxy_session_id(&state);
+    snapshot.revision += 1;
+    let (port, requests, server) = action_server(
+        serde_json::to_value(snapshot).expect("send response"),
+        "POST /api/sessions/remote-session-1/messages ",
+    );
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let send = |text: &str, source_session_id, source_mailbox| {
+        dispatch_turn_and_snapshot(
+            &state,
+            &local_id,
+            SendMessageRequest {
+                text: text.to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id,
+                source_mailbox,
+            },
+        )
+    };
+    for (source_session_id, source_mailbox) in [
+        (Some("peer-session".to_owned()), None),
+        (
+            None,
+            Some(MailboxMessageSource {
+                mailbox_id: "mailbox-1".to_owned(),
+                message_id: "message-1".to_owned(),
+                sequence: 1,
+                unread_count: 1,
+            }),
+        ),
+    ] {
+        let Err(error) = send("Automated prompt", source_session_id, source_mailbox) else {
+            panic!("automated prompt must be refused at the proxy");
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(requests.lock().expect("requests mutex poisoned").is_empty());
+    }
+    assert!(send("Operator prompt", None, None).is_ok());
+    join_test_server(server);
+    let requests = requests.lock().expect("requests mutex poisoned");
+    assert_eq!(
+        requests.len(),
+        2,
+        "only the health probe and operator action"
+    );
+    let forwarded: Value = serde_json::from_str(&requests[1].1).expect("forwarded prompt");
+    assert_eq!(forwarded["text"], "Operator prompt");
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 #[test]

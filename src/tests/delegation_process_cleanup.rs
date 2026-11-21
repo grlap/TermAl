@@ -3068,6 +3068,7 @@ fn dedicated_reset_off_lock_case(change_context: bool) {
         record.runtime_reset_required = true;
         record.set_auto_dispatch_blocked(true);
         record.queued_prompts.push_back(QueuedPromptRecord {
+            workflow: None,
             engram_ordinary_handoff: false,
             engram_waiting: false,
             promoted_message_index: None,

@@ -1953,6 +1953,8 @@ struct StateInner {
     quarantined_persisted_delegation_ids: BTreeSet<String>,
     /// Pending parent resumes waiting on one or more child delegation results.
     delegation_waits: PersistTracked<Vec<DelegationWaitRecord>>,
+    delegation_wait_transfers: Vec<PersistWaitRetirement<DelegationWaitRecord>>,
+    stopped_test_run_waits: Vec<PersistWaitRetirement<TestRunWaitRecord>>,
     /// Runtime-only mutation stamps for delegation rows. The background persist
     /// worker compares these with its watermark to upsert only delegation rows
     /// that changed since the last successful write.
@@ -2075,6 +2077,8 @@ impl StateInner {
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_inventory: DelegationInventoryState::Ready,
             delegation_waits: PersistTracked::default(),
+            delegation_wait_transfers: Vec::new(),
+            stopped_test_run_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),
             delegation_catalog_children: Mutex::new(FederationCatalogChildren::default()),
             removed_delegation_ids: BTreeMap::new(),

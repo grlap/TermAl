@@ -23,6 +23,38 @@ struct NativeFixture {
 }
 
 #[test]
+fn stale_handoff_keeps_the_successor_native_opening() {
+    let native = NativeFixture::new("native-late-handoff", false);
+    native.prepare();
+    let state = &native.fixture.state;
+    let opening = || {
+        let inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&native.session).unwrap();
+        inner.sessions[index].engram.declared_run_turn.clone()
+    };
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner
+            .session_mut(&native.session)
+            .unwrap()
+            .active_turn_generation = 2;
+    }
+    state.prepare_declared_run_before_handoff(&native.session, &native.token, 2);
+    let successor = opening().expect("successor opening prepared");
+    assert_eq!(successor.generation, 2);
+    assert!(successor.snapshot.is_some());
+
+    // A promotion's writer ACK can resume the old carrier after the
+    // successor is already active on the same persistent runtime.
+    state.prepare_declared_run_before_handoff(&native.session, &native.token, 1);
+
+    let retained = opening().expect("stale carrier must leave the opening intact");
+    assert_eq!(retained.generation, successor.generation);
+    assert!(Arc::ptr_eq(&retained.timings, &successor.timings));
+    assert!(retained.snapshot.is_some());
+}
+
+#[test]
 fn native_opening_keeps_its_local_binding_without_reading_held_claims() {
     for claude in [false, true] {
         let native = NativeFixture::new("native-local-opening", claude);

@@ -346,6 +346,12 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
+        if record.queued_prompts.iter().any(|entry| {
+            entry.pending_prompt.id == prompt_id
+                && entry.awaits_fan_in_enqueue(record.active_turn_generation)
+        }) {
+            return Err(ApiError::conflict("delegation result is being delivered"));
+        }
         let original_len = record.queued_prompts.len();
         let removed_head = handing_off_head(record);
         // A delivery history row keeps its receipt, gaining a durable one if
@@ -870,7 +876,10 @@ impl AppState {
                     .runtime_token
                     .as_ref()
                     .is_some_and(|token| record.runtime.matches_runtime_token(token))
-                && (claim.receipt_owner.as_ref().is_some_and(|owner| owner.matches(record))
+                && (record.queued_prompts.iter().any(|entry| {
+                        entry.awaits_fan_in_enqueue(claim.active_turn_generation)
+                    })
+                    || claim.receipt_owner.as_ref().is_some_and(|owner| owner.matches(record))
                     || claim.delivery_owner.as_ref().is_some_and(|owner| {
                         owner.matches(record)
                             && handing_off_head(record).is_some_and(|(prompt_id, generation)| {
@@ -935,9 +944,9 @@ impl AppState {
     ///   prompt is auto-dispatched once the stop completes. The default is
     ///   `false`.
     /// - `pause_automatic_resumes_on_success`: if `true` (the default),
-    ///   explicit Stop pauses automatic mailbox/workflow wakes and consumes
-    ///   outstanding delegation waits until a new user prompt explicitly
-    ///   resumes the session. Internal orchestrator cleanup sets this to
+    ///   explicit Stop pauses automatic wakes. Delegation waits keep their
+    ///   registration and deliver results after the session is explicitly
+    ///   resumed. Internal orchestrator cleanup sets this to
     ///   `false` so aborted cleanup can preserve its durable work queue.
     /// - `orchestrator_stop_instance_id`: if `Some`, tags the stop as part
     ///   of that orchestrator instance's cleanup wave so transition
@@ -1200,13 +1209,18 @@ impl AppState {
             if !owns_stop {
                 return Ok(self.snapshot_from_inner(&inner));
             }
-            if delivery_owner
+            let retirement = delivery_owner
                 .as_ref()
-                .is_some_and(|owner| owner.matches(record))
-            {
-                let owner = delivery_owner.as_ref().expect("matched delivery owner");
-                let position = record.queued_prompts.iter().position(|queued| queued.pending_prompt.id == owner.prompt_id)
-                    .expect("owned prompt exists");
+                .filter(|owner| owner.matches(record))
+                .and_then(|owner| {
+                    record.queued_prompts.iter().position(|queued| {
+                        // Keep an unsent fan-in for the atomic Stop finalizer,
+                        // which returns it to the queue with its original id.
+                        queued.pending_prompt.id == owner.prompt_id
+                            && !queued.awaits_fan_in_enqueue(owner.active_turn_generation)
+                    })
+                });
+            if let Some(position) = retirement {
                 let removed = record.queued_prompts.remove(position).expect("owned prompt exists");
                 let removed_delivery = record.prompt_deliveries.get(&removed.pending_prompt.id)
                     .and_then(|delivery| delivery.turn_generation)
@@ -1286,16 +1300,18 @@ impl AppState {
                 // runtime never acknowledged, in this write (prompt_delivery.rs).
                 discard_deferred_stop_callbacks(record);
                 settle_retired_runtime_attempt(record, ending_turn);
+                settle_delegation_fan_in_enqueue(record, ending_turn, false);
                 if suppress_automatic_resume {
                     record.set_auto_dispatch_blocked(true);
                     // The operator's pause, marked where the latch is set.
                     record.engram.operator_paused = true;
-                    // A wait may already have completed and queued its fan-in
-                    // before Stop acquired the state lock. Drop all automatic
-                    // workflow continuations here; user and mailbox prompts
-                    // remain durable but paused behind the explicit-resume
-                    // latch.
-                    clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
+                    // Delegation fan-in stays paused with user and mailbox
+                    // prompts even if the last child finished before Stop.
+                    clear_queued_prompts_by_source_except_delivery_owner(
+                        record,
+                        QueuedPromptSource::Orchestrator,
+                        None,
+                    );
                 }
                 let pending_interaction_indices =
                     cancel_pending_interaction_messages(&mut record.session.messages);
@@ -1349,20 +1365,8 @@ impl AppState {
                 inner.ignore_discovered_codex_thread(Some(thread_id));
             }
 
-            // Stop itself remains authoritative in memory if persistence
-            // fails because the interrupted runtime cannot be resurrected.
-            // Delegation waits are different: consuming them is only valid as
-            // part of the durable Stop commit, so retain their exact ordering
-            // for the commit-error rollback below.
-            let delegation_waits_before_stop =
-                suppress_automatic_resume.then(|| inner.delegation_waits.clone());
-            let stopped_wait_refresh = if suppress_automatic_resume {
-                consume_delegation_waits_for_stopped_parent_locked(&mut inner, session_id)
-            } else {
-                DelegationWaitRefresh::default()
-            };
-            // Run waits follow the same rule: consumed only as part of the
-            // durable Stop commit, restored if it fails.
+            // Test-run waits are consumed by a durable Stop. Delegation
+            // waits stay registered and fan-in uses the paused queue.
             let test_run_waits_before_stop =
                 suppress_automatic_resume.then(|| inner.test_run_waits.clone());
             let stopped_test_run_waits = if suppress_automatic_resume {
@@ -1403,23 +1407,21 @@ impl AppState {
                         api_error
                     });
                 match &result {
-                    Ok(Some(_)) => {
+                    Ok(Some(started)) => {
                         // This caller publishes the successor in the complete
                         // stop batch below, not via StartedTurn.message_delta.
                         // Discard its unpublished reservation while still under
                         // the mutex, then allocate the batch in publish order.
-                        inner.sessions[index].body_sequence = post_stop_record
+                        let post_stop = post_stop_record
                             .as_ref()
-                            .expect("stop snapshot exists")
-                            .body_sequence
-                            .clone();
-                        let successor_message_index = inner.sessions[index]
-                            .session
-                            .messages
-                            .len()
-                            .checked_sub(1)
-                            .expect("started queued turn should append one message");
-                        created_message_indices.push(successor_message_index);
+                            .expect("stop snapshot exists");
+                        let record = &mut inner.sessions[index];
+                        record.body_sequence = post_stop.body_sequence.clone();
+                        let first_new_index =
+                            global_message_index(post_stop, post_stop.session.messages.len());
+                        if started.message_delta.message_index >= first_new_index {
+                            created_message_indices.push(record.session.messages.len() - 1);
+                        }
                     }
                     Ok(None) => {
                         receipted_successor =
@@ -1471,23 +1473,14 @@ impl AppState {
                             revision,
                             std::mem::take(&mut pending_interaction_updates),
                         );
-                        self.publish_delegation_wait_consumed_deltas(
-                            &inner,
-                            revision,
-                            &stopped_wait_refresh.consumed_waits,
-                        );
                         queued_turn_result
                     },
                     pending_interaction_updates,
                     created_messages,
-                    stopped_wait_refresh,
                     stopped_mailbox_notification,
                     revision,
                 )),
                 Err(err) => {
-                    if let Some(delegation_waits_before_stop) = delegation_waits_before_stop {
-                        inner.delegation_waits = delegation_waits_before_stop.into();
-                    }
                     if let Some(test_run_waits_before_stop) = test_run_waits_before_stop {
                         inner.test_run_waits = test_run_waits_before_stop.into();
                     }
@@ -1536,7 +1529,6 @@ impl AppState {
             queued_turn_result,
             _pending_interaction_updates,
             _created_messages,
-            _stopped_wait_refresh,
             stopped_mailbox_notification,
             _revision,
         ) = match transition {

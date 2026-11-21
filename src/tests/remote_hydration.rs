@@ -2508,6 +2508,7 @@ fn remote_session_create_forwards_configured_default_model() {
         provider_handoffs: Vec::new(),
         provider_handoff_history: None,
         queue_paused: false,
+        has_runnable_delegation_result: false,
         provider_capacity_waiting: false,
         source_tracking_recovery: false,
         queue_projection_hash: None,

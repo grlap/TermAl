@@ -518,7 +518,7 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | POST | `/api/sessions/{id}/handoffs/{handoff_id}/accept` | The owner `{id}` of the current offer accepts it by `offerGeneration`; returns the record with its `acceptFence`. A superseded generation, another owner or a non-offered handoff is `409`. |
 | POST | `/api/sessions/{id}/handoffs/{handoff_id}/complete` | The accepted owner `{id}` completes the handoff with its `fence` and an `evidence` object; a retry with the same evidence returns the same record, anything else is `409`. |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
-| POST | `/api/sessions/{id}/stop` | Persist `Stopping` and return immediately; interrupt/checkpoint completes in background. For an idle session with a pending delegation or test-run wait, consume those waits and set the explicit-resume latch, returning the `Idle` snapshot; `409` for an idle session with no pending wait |
+| POST | `/api/sessions/{id}/stop` | Persist `Stopping` and return immediately; interrupt/checkpoint completes in background. For idle sessions, Stop pauses pending delegation work, consumes pending test-run waits, or clears a provider-capacity retry, then returns the paused `Idle` snapshot. A repeated Stop can confirm a pending pause. Idle sessions without any of this work return `409`. |
 | POST | `/api/sessions/{id}/kill` | Kill and remove session |
 | POST | `/api/sessions/{id}/approvals/{message_id}` | Submit approval decision |
 | POST | `/api/sessions/{id}/user-input/{message_id}` | Submit structured user-input answers (Codex `request_user_input`, Claude `AskUserQuestion`), or `declined: true` to skip a declinable Claude card — decline semantics in the Claude protocol notes below |
@@ -1568,10 +1568,11 @@ Stop (POST /api/sessions/{id}/stop)
   → Success: reject pending approvals and set Status = Idle
   → Failure: set Status = Error and append a transcript notice
   → A restart from persisted Stopping uses interrupted-session recovery
-  → Idle with a pending delegation or test-run wait: no runtime to interrupt;
-    in one commit consume the waits, set the explicit-resume latch, drop
-    queued workflow continuations, record "Turn stopped by user." and return
-    the Idle snapshot (Idle with no pending wait answers 409)
+  → Idle with a pending wait or queued delegation result: no runtime to
+    interrupt. Preserve delegation waits and results, consume test-run waits,
+    drop unsent ordinary workflow prompts, and return the paused Idle snapshot.
+    Repeating Stop on already paused delegation work or a test-run wait whose
+    retirement is still pending adds no transcript entry.
 
 Kill (POST /api/sessions/{id}/kill)
   → Kill runtime, remove session from list entirely
@@ -1579,7 +1580,13 @@ Kill (POST /api/sessions/{id}/kill)
 
 ### Prompt Queueing
 
-When a session is busy (Active, Approval, or Stopping), new messages are queued in a `VecDeque`. The frontend shows these as `PendingPrompt` entries below the composer. Users can cancel individual queued prompts. After each turn completes, `dispatch_next_queued_turn()` pops the next prompt and starts it automatically. Explicit Stop leaves queued work paused behind an explicit-resume latch: orchestrator continuations are dropped, user and mailbox prompts stay durable but nothing starts until the user sends a new prompt or resumes the queue. The latch is projected onto the session wire as `queuePaused` (always serialized), so the UI renders a "Queue paused" card with a Resume action instead of guessing that a turn is about to start; `POST /api/sessions/{id}/queue/resume` promotes the queue head with the latch still armed — only the promotion path clears the latch when the turn actually starts, and a failed promotion (runtime spawn or the promotion's persist commit) rolls the record back to its pre-promotion state, so the session stays paused with the head intact and a later Resume retries; an empty paused queue is released directly (proxied for remote sessions). A delivery rejection after promotion is a different outcome: the turn terminalizes as failed through the ordinary rejected-dispatch path and does not re-arm the latch.
+When a session is busy (Active, Approval, or Stopping), new messages are queued in a `VecDeque`. The frontend shows these as `PendingPrompt` entries below the composer. Users can cancel individual queued prompts. After each turn completes, `dispatch_next_queued_turn()` promotes the next prompt and starts it automatically. Explicit Stop leaves queued work paused behind an explicit-resume latch. Orchestrator continuations are dropped, while user, peer, mailbox and delegation fan-in prompts stay durable until the user sends a new prompt or resumes the queue.
+
+The latch is projected as `queuePaused` (always serialized). The UI renders a "Queue paused" card with a Resume action for queued work. `POST /api/sessions/{id}/queue/resume` promotes a queue head with the latch still armed. Promotion clears the latch when the turn actually starts. A failed start leaves the queue head intact and a later Resume retries. An empty paused queue is released directly (proxied for remote sessions). Ordinary delivery rejection terminalizes the turn through the rejected-dispatch path.
+
+The durable delegation wait remains recoverable until SQLite saves the parent queue change that takes custody of its result. TermAl confirms the promoted parent row with the writer before provider enqueue and rechecks the owner under the state lock. Cancel refuses an in-flight fan-in. If runtime startup or provider handoff fails before enqueue, the same result stays queued behind the retry latch. Resume can retry it without appending another transcript entry for that result. Successful enqueue retires the row.
+
+Graceful shutdown can preserve a promoted result for Resume when it knows enqueue did not happen. An abrupt exit after promotion is saved can leave delivery unknown, even if the process exited before enqueue. On restart, Resume skips that delivery-history row to avoid replaying a result the provider may already have received. The original child results remain available in the delegation records.
 
 ---
 

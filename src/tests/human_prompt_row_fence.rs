@@ -4,7 +4,7 @@ use super::*;
 
 fn row_target(inner: &StateInner, id: &str) -> PersistFenceTarget {
     let record = &inner.sessions[inner.find_session_index(id).unwrap()];
-    PersistFenceTarget::HumanPromptRow {
+    PersistFenceTarget::SessionRowAtOrAfter {
         session_id: id.to_owned(),
         minimum: PersistSessionWriteStamp::capture(record),
     }
@@ -16,7 +16,10 @@ fn accept_human_fence(fixture: &mut FenceFixture) -> PersistFenceWaiter {
             phase_sync::receive(&fixture.rx, "Human own-row fence arrives off StateInner");
         let waiter = match &request {
             PersistRequest::Fence(fence)
-                if matches!(&fence.target, PersistFenceTarget::HumanPromptRow { .. }) =>
+                if matches!(
+                    &fence.target,
+                    PersistFenceTarget::SessionRowAtOrAfter { .. }
+                ) =>
             {
                 Some(PersistFenceWaiter {
                     completion: fence.completion.clone(),
@@ -340,7 +343,7 @@ fn human_row_proof_does_not_cross_a_real_reload_incarnation() {
         !old_incarnation.covers(&minimum),
         "equal or newer numbers cannot cross reload identity"
     );
-    let waiter = fixture.enqueue(PersistFenceTarget::HumanPromptRow {
+    let waiter = fixture.enqueue(PersistFenceTarget::SessionRowAtOrAfter {
         session_id: id.clone(),
         minimum,
     });
@@ -422,7 +425,7 @@ fn human_row_proof_does_not_ack_a_rolled_back_transaction() {
         row_target(&inner, &id)
     };
     let minimum = match &target {
-        PersistFenceTarget::HumanPromptRow { minimum, .. } => minimum.clone(),
+        PersistFenceTarget::SessionRowAtOrAfter { minimum, .. } => minimum.clone(),
         _ => unreachable!(),
     };
     let waiter = fixture.enqueue(target);

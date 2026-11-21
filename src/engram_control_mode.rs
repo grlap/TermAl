@@ -4,6 +4,7 @@
 fn ordinary_queue_entry_is_runnable(record: &SessionRecord, queued: &QueuedPromptRecord) -> bool {
     queued.promotion_disposition_known
         && (queued.promoted_message_index.is_none()
+            || queued.fan_in_promotion_is_unsent()
             || promoted_entry_is_proven_unsent(record, queued)
             // Its explicit Resume owns the new write-ahead attempt even
             // after that attempt changes Pending to HandingOff.

@@ -24,7 +24,7 @@ impl StateProjectionKey {
             } else {
                 record.session.body_seq
             },
-            queue_paused: record.orchestrator_auto_dispatch_blocked,
+            queue_paused: AppState::wire_queue_paused(record),
         }
     }
 }
@@ -134,6 +134,7 @@ impl AppState {
             message_count,
             markers,
             queue_paused,
+            has_runnable_delegation_result,
             provider_capacity_waiting,
             source_tracking_recovery,
             queue_projection_hash,
@@ -205,7 +206,8 @@ impl AppState {
         remote_id == &record.remote_id
             && *session_mutation_stamp == Some(record.mutation_stamp)
             && *message_count == session_message_count(record)
-            && *queue_paused == record.orchestrator_auto_dispatch_blocked
+            && *queue_paused == Self::wire_queue_paused(record)
+            && *has_runnable_delegation_result == Self::wire_has_runnable_delegation_result(record)
             && *source_tracking_recovery
                 == if local {
                     record.engram.observation_delete_requested

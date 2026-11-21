@@ -465,7 +465,10 @@ impl AppState {
         // after this point see `alive == false` and take the synchronous
         // fallback in `commit_delta_locked`.
         let final_persist_result = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if self.host_is_shutting_down() {
+                settle_pending_shutdown_fan_ins(&mut inner);
+            }
             let result = self.persist_synchronous_locked(&inner)
                 .and_then(|outcome| {
                     let rejected = outcome.rejected_sessions;
